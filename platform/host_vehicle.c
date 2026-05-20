@@ -22,12 +22,24 @@ extern void *Heap_Alloc(uint32_t n);
 extern void    *puRam000007d0;            /* player vehicle pointer */
 extern uint32_t uRam0000062c;             /* P1 pad bits */
 
-/* The engine's per-frame "rolling vehicle" tick.  src/gameplay/
- * vehicle_rolling_tick.c.  Internally calls Object_GeneralTick (the
- * integrator) on every frame, plus damaged-state material/audio
- * machinery when obj+6 < 0.  This is the function the engine itself
- * installs at obj+0x64 when the vehicle enters state 12 (rolling). */
-extern int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3);
+/* The bit-exact engine integrator (src/physics/object_integrate.c).
+ * Routes through Object_ApplyAngularVelocity + Object_IntegrateAndOrient
+ * + MatrixNormal -- the PSX physics core.
+ *
+ * ARCHITECTURE NOTE: per notes/unknowns.md "Player vehicle physics
+ * architecture", the engine itself uses a HIERARCHICAL model: chassis
+ * uses LAB_8002e2bc (audio-only tick, no integration), and motion
+ * comes from 4 child WHEEL objects each with their own per-frame
+ * tick + joint linkage via FUN_8001b2fc.  Vehicle_RollingTick
+ * (gap_80030f34) IS in v8core and IS bit-exact, but installing it on
+ * a flat (no-wheels) chassis produces wrong behavior because
+ * Object_GeneralTick's +-0x200 angular nudges are for tumbling
+ * objects, not driving cars.
+ *
+ * Until the wheel tick + joint chain is wired, the host drives the
+ * integrator directly with host-side pad-to-vel mapping. */
+extern void Object_IntegrateAndOrient(uint8_t *obj);
+extern int32_t Vec3_Length(const int32_t *v);
 
 /* The Vehicle struct is allocated in the engine heap (low memory).
  *
@@ -37,50 +49,61 @@ extern int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3);
 static uint8_t *g_vehicle = NULL;
 
 /* Vehicle tick callback.  Receives (self, mode, catchupFlag); the
- * engine calls with mode==0 per frame.  Writes the per-tick input
- * fields the engine consumes, then delegates to Object_GeneralTick. */
+ * host-side dispatcher calls with mode==0 per frame.
+ *
+ * Implementation: host-side pad-to-vel mapping (NOT the engine's per-
+ * frame controller, which lives in the unwired wheel chain).  The
+ * integrator chain it calls IS the engine's bit-exact one:
+ *    Object_IntegrateAndOrient
+ *        -> Object_ApplyAngularVelocity (GTE small-angle)
+ *        -> pos += vel/128  with RTZ rounding
+ *        -> MatrixNormal (per-row q12 renormalisation)
+ *
+ * Per-tick math is bit-exact; the INPUTS to it are host-driven until
+ * the engine's wheel chain is decompiled. */
 static void vehicle_tick(uint8_t *self, int mode, int catchupFlag)
 {
     (void)catchupFlag;
     if (mode != 0) return;
 
-    /* Pad bits -> engine input fields.
-     *
-     * inputMul (+0xa6) = 0x3c: the engine's own constant.  Two
-     * independent initialisers (FUN_80022d54 and FUN_80022e38) write
-     * `*(u16 *)(obj + 0xa6) = 0x3c` -- confirmed via static MIPS
-     * analysis, NOT empirical.  See notes/unknowns.md "Item 4".
-     *
-     * angYPreBake (+0xa4) baseline = 0 (same source).  Set to a
-     * non-zero magnitude only while the steering pad bit is active. */
-    int16_t longThrust = 0;
-    if (uRam0000062c & 0x10000000) longThrust = +0x40;
-    if (uRam0000062c & 0x40000000) longThrust = -0x40;
-    *(int16_t *)(self + 0x20) = longThrust;
+    /* Pad bits -> velocity along the vehicle's current forward axis.
+     * (Forward = matrix col 3 = (R13, R23, R33).)  The matrix sits
+     * at obj+0x10 in packed form: u32[1] = R13|R21, u32[2] = R22|R23,
+     * u32[4] = R33|pad. */
+    uint32_t *m = (uint32_t *)(self + 0x10);
+    int16_t r13 = (int16_t)(m[1] & 0xffff);
+    int16_t r23 = (int16_t)(m[2] & 0xffff);
+    int16_t r33 = (int16_t)(m[4] & 0xffff);
+
+    int32_t accel = 0;
+    if (uRam0000062c & 0x10000000) accel += 0x40000;
+    if (uRam0000062c & 0x40000000) accel -= 0x40000;
+    if (accel) {
+        *(int32_t *)(self + 0x80) += (accel * r13) >> 12;
+        *(int32_t *)(self + 0x84) += (accel * r23) >> 12;
+        *(int32_t *)(self + 0x88) += (accel * r33) >> 12;
+    }
+    /* Linear damping -- 1/32 per tick. */
+    *(int32_t *)(self + 0x80) -= *(int32_t *)(self + 0x80) >> 5;
+    *(int32_t *)(self + 0x84) -= *(int32_t *)(self + 0x84) >> 5;
+    *(int32_t *)(self + 0x88) -= *(int32_t *)(self + 0x88) >> 5;
+
+    /* Yaw from steering. */
+    int32_t yawRate = 0;
+    if (uRam0000062c & 0x80000000) yawRate = -0x4000;
+    if (uRam0000062c & 0x20000000) yawRate = +0x4000;
+    *(int32_t *)(self + 0x90) = 0;
+    *(int32_t *)(self + 0x94) = yawRate;
+    *(int32_t *)(self + 0x98) = 0;
+
+    /* Engine constants from FUN_80022d54 / FUN_80022e38 (object init):
+     * obj+0xa4 baseline = 0, obj+0xa6 = 0x3c.  Set anyway so any future
+     * engine-code path that consumes them sees the right values. */
+    *(int16_t *)(self + 0xa4) = 0;
     *(int16_t *)(self + 0xa6) = 0x3c;
 
-    if (uRam0000062c & 0x80000000) {
-        *(int16_t *)(self + 0x16) = -1;
-        *(int16_t *)(self + 0xa4) = -0x80;
-    } else if (uRam0000062c & 0x20000000) {
-        *(int16_t *)(self + 0x16) = +1;
-        *(int16_t *)(self + 0xa4) = +0x80;
-    } else {
-        *(int16_t *)(self + 0x16) = 0;
-        *(int16_t *)(self + 0xa4) = 0;
-    }
-    *(int16_t *)(self + 0x1a) = 1;
-    /* dragMass = 20480 (0x5000) -- the engine's literal value from
-     * Vehicle_RollingTick's mode-7 spawn path.  This gives a finite
-     * spring/drag term so Object_GeneralTick produces grounded
-     * vehicle behavior (vs pure gravity when dragMass=0). */
-    *(int32_t *)(self + 0xd8) = 0x5000;
-
-    /* Delegate to the engine's "rolling vehicle" tick.  Mode 0 = per-
-     * frame; arg2 = catchupFlag.  Internally this calls
-     * Object_GeneralTick which calls Object_IntegrateAndOrient (the
-     * GTE-driven integrator -- bit-exact). */
-    Vehicle_RollingTick((uint32_t *)self, 0, catchupFlag, 0);
+    /* The bit-exact integrator. */
+    Object_IntegrateAndOrient(self);
 }
 
 void Host_VehicleInit(void)
@@ -117,9 +140,11 @@ void Host_VehicleInit(void)
     int32_t spawn_z = 0x3a00000;
     int32_t ground_y = Terrain_HeightAt((uint32_t)spawn_x, (uint32_t)spawn_z);
     *(int32_t *)(g_vehicle + 0x24) = spawn_x;
-    /* PSX +Y is DOWN (confirmed by Projectile_GravityTick: gravity adds
-     * positive vy; "obj.y > terrain_y" = below ground).  To spawn ABOVE
-     * the ground we SUBTRACT from terrain_y, not add. */
+    /* Spawn a few units above ground.  PSX convention is +Y-down
+     * (Projectile_GravityTick: gravity adds positive vy; obj.y >
+     * terrain_y = below ground), so "above" means SMALLER Y.  The host
+     * pad-to-vel driver doesn't apply gravity, so the spawn height
+     * stays put until pad input. */
     *(int32_t *)(g_vehicle + 0x28) = ground_y - 0x40000;
     *(int32_t *)(g_vehicle + 0x2c) = spawn_z;
 

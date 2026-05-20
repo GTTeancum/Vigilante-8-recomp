@@ -248,3 +248,66 @@ into obj+0x64 (the host shim's pad->vel mapping), call FUN_8002e630
 to construct a real Vehicle that gets LAB_8002e2bc as its tick.  The
 constructor expects a vehicle TEMPLATE (param_3) which comes from
 the loaded Vehicles.exp XOBF data (`DAT_800737a0[char_idx]`).
+
+## Player vehicle physics architecture — REVISED 2026-05-20
+
+After tracing Vehicle_RollingTick + Object_GeneralTick + the
+constructor's wheel-allocation loop, the architecture turns out to be
+**hierarchical**, not flat:
+
+### The chassis tick does NOT integrate
+
+`LAB_8002e2bc` (Vehicle_Tick) is the chassis's per-frame callback.
+Its normal-state path runs ONLY audio counters; it never calls
+`Object_GeneralTick`.  Damaged-state path calls heavy phys helpers
+(`FUN_8002efe0`, `FUN_8002d494`) but those are damage-effect specific.
+
+`gap_80030f34` (Vehicle_RollingTick) DOES call `Object_GeneralTick`
+in both paths -- but `Object_GeneralTick` is *not* the player-vehicle
+integrator.  Its `+-0x200` per-frame angular nudges (keyed off
+`+0x1a` / `+0x16` sign flags) are characteristic of TUMBLING objects
+(rolling debris, spinning projectiles), not driving cars.
+
+### The chassis position comes from the 4 wheels
+
+`FUN_8002e630` (Vehicle_Construct) allocates 4 wheels at obj+0xfc..
++0x108.  Each wheel is a separately-allocated 0x9c-byte object with
+its OWN per-frame tick callback (set somewhere else; the chassis's
+constructor doesn't write the wheel callback addresses explicitly --
+they come from the bank template).
+
+`FUN_8001b2fc(chassis, joint, wheel)` is the joint linker.  It
+copies joint pose data from a "joint descriptor" into the wheel
+struct at +0x40..+0x50, then calls:
+
+  - `FUN_8001d708(wheel)`: copies spawn pos (+0x48..+0x50) to current
+    pos (+0x24..+0x2c) and sets up the wheel's rotation matrix.
+  - `FUN_8001d4f0(chassis, wheel)`: registers the wheel in the
+    chassis's child list at chassis+0x38.
+
+Per-frame, each wheel's own callback advances the wheel's position
+along its joint axes.  The chassis position then follows from the
+4 wheel positions (via an inverse-kinematics or centre-of-mass
+computation we haven't traced yet -- candidate: `FUN_8002efe0`).
+
+### Implication for the host
+
+Wiring `Vehicle_RollingTick` as the chassis's tick (as I did) does
+NOT reproduce the driving simulation -- it just causes the chassis
+to tumble via `Object_GeneralTick`.
+
+To get PSX-exact vehicle physics, the host needs to:
+  1. Construct 4 wheel sub-objects (the constructor's wheel-allocation
+     loop already gives the per-wheel struct layout).
+  2. Install each wheel's per-frame tick callback (one of the
+     78 still-uncleaned ticks discovered by the lui+addiu+sw 0x64
+     scan in item 4).
+  3. Joint-link the wheels via `FUN_8001b2fc`.
+  4. Let the wheels' integration drive the chassis position.
+
+The chassis tick (`LAB_8002e2bc`) then remains audio-only -- which
+matches its decompiled body exactly.
+
+This is several sessions of work; the next concrete step is to
+identify WHICH of the 78 gap callbacks is the wheel tick (likely
+distinguished by which template-spawn pattern creates it).
