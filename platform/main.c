@@ -133,7 +133,14 @@ int main(int argc, char **argv)
     printf("v8: Heap_Init(%p, 0x%x)\n", Host_HeapBase(), Host_HeapSize());
     Heap_Init((V8HeapBlock *)Host_HeapBase(), Host_HeapSize());
 
-    if (!opts.want_headless) Platform_Init(640, 480, "v8 -- phase 2");
+    if (!opts.want_headless) Platform_Init(640, 480, "v8 -- engine vehicle");
+
+    /* Allocate the player Vehicle in the engine heap and set
+     * puRam000007d0. After this the engine's Physics_Step (in
+     * physics_shim.c) can advance real vehicle state via the cleaned
+     * Object_IntegrateAndOrient. */
+    extern void Host_VehicleInit(void);
+    Host_VehicleInit();
 
     printf("v8: entering V8_MainLoop\n");
     fflush(stdout);

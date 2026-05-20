@@ -60,12 +60,8 @@ void  SetRotMatrix  (const MATRIX *m)                                       { (v
 void  SetTransMatrix(const MATRIX *m)                                       { (void)m; }
 void  ApplyMatrix   (const MATRIX *m, const SVECTOR *v0, VECTOR *v1)        { (void)m; (void)v0; if (v1) memset(v1, 0, sizeof(*v1)); }
 void  ApplyMatrixLV (const MATRIX *m, const VECTOR *v0, VECTOR *v1)         { (void)m; (void)v0; if (v1) memset(v1, 0, sizeof(*v1)); }
-void  MatrixNormal  (const MATRIX *m, MATRIX *m_out)                        { (void)m; if (m_out) memset(m_out, 0, sizeof(*m_out)); }
+/* MatrixNormal, rsin, rcos, ratan2 now live in libgte_soft.c. */
 void  VectorNormalSS(const VECTOR *v0, VECTOR *v1)                          { (void)v0; if (v1) memset(v1, 0, sizeof(*v1)); }
-
-int   rsin(int a)                                                           { (void)a; return 0; }
-int   rcos(int a)                                                           { (void)a; return 0x1000; }
-int   ratan2(int y, int x)                                                  { (void)y; (void)x; return 0; }
 
 /* ---- libapi ---- */
 void  ResetGraph    (int mode)                                              { (void)mode; }

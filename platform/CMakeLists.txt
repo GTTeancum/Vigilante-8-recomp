@@ -25,14 +25,12 @@ add_library(v8platform STATIC
     shell_aliases.c
     heap_shim.c
     sched_shim.c
-    vehicle_stub.c
     pad_shim.c
     screenshot.c
     renderer.c
-    projectile_shim.c
-    ai_opponent.c
-    destructibles.c
     audio_shim.c
+    host_vehicle.c
+    physics_shim.c
 )
 target_include_directories(v8platform PUBLIC
     ${CMAKE_SOURCE_DIR}/include

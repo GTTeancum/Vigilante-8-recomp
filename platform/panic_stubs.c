@@ -20,7 +20,7 @@ static int v8_panic_warn(const char *name) {
     return 0;
 }
 
-/* 135 unresolved symbols */
+/* 137 unresolved symbols */
 
 int  Audio_BankSelect(void) { return v8_panic_warn("Audio_BankSelect"); }
 int  Audio_ClearAll(void) { return v8_panic_warn("Audio_ClearAll"); }
@@ -90,9 +90,6 @@ uint32_t PTR_s_Chassey_Blue_800567ec;
 int  Pad_Close(void) { return v8_panic_warn("Pad_Close"); }
 int  PauseMenu_Run(void) { return v8_panic_warn("PauseMenu_Run"); }
 int  Pause_Poll(void) { return v8_panic_warn("Pause_Poll"); }
-int  Physics_FlushVoxels(void) { return v8_panic_warn("Physics_FlushVoxels"); }
-int  Physics_PostStep(void) { return v8_panic_warn("Physics_PostStep"); }
-int  Physics_Step(void) { return v8_panic_warn("Physics_Step"); }
 int  Render_SetTexpageMode(void) { return v8_panic_warn("Render_SetTexpageMode"); }
 int  ResultScreen_Free(void) { return v8_panic_warn("ResultScreen_Free"); }
 int  ResultScreen_Tick(void) { return v8_panic_warn("ResultScreen_Tick"); }
@@ -105,6 +102,7 @@ int  Splash_AlignNext(void) { return v8_panic_warn("Splash_AlignNext"); }
 int  Stream_CdCallback(void) { return v8_panic_warn("Stream_CdCallback"); }
 uint32_t UNK_8006567a;
 int  Vehicle_Free(void) { return v8_panic_warn("Vehicle_Free"); }
+uint8_t bRam00000015;
 uint8_t bRam0000061c;
 uint8_t bRam000008f8;
 int8_t cRam00000015;
@@ -136,12 +134,16 @@ int32_t iRam000008e8;
 int32_t iRam000008ec;
 int32_t iRamffffacb0;
 void *piRam00000684;
+void *puRam000007d0;
+void *puRam000007d4;
 uint32_t uRam0000000c;
 uint32_t uRam00000014;
 uint32_t uRam00000015;
 uint32_t uRam000005ac;
 uint32_t uRam000005f8;
 uint32_t uRam00000620;
+uint32_t uRam0000062c;
+uint32_t uRam00000630;
 uint32_t uRam00000674;
 uint32_t uRam00000678;
 uint32_t uRam00000684;
@@ -156,5 +158,5 @@ uint32_t uRam000007dc;
 uint32_t uRam000008df;
 uint32_t uRam000008f0;
 uint32_t uRam000008f4;
-/* funcs: 59  data: 76  skipped: 0 */
+/* funcs: 56  data: 81  skipped: 0 */
 uint32_t uRam000008f8;

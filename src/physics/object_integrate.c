@@ -64,27 +64,68 @@ extern void MatrixNormal(MATRIX *m, MATRIX *out);   /* PSY-Q libgte */
 #define ROT_MATRIX_OFF 0x10
 
 /* HIGH: rotate `m` by (pitch, yaw, roll) angular-velocity components.
- * The matrix layout matches PSY-Q MATRIX (5-u32 packed). Done entirely
- * on the GTE so saturation and rounding are bit-exact. */
+ *
+ * Audit 2026-05-19: previous cleanup stopped after column 1 with note
+ * "pass 3 will inline the rest". Pass 3 never ran. Completed here by
+ * porting the full Ghidra ref body of FUN_800439b8 (visible in the
+ * `#if 0` audit block below).
+ *
+ * Algorithm: R_new = R_old * R_small, where R_small is the skew-
+ * symmetric small-angle rotation matrix:
+ *
+ *   R_small = | 1       -roll     yaw   |
+ *             | roll     1        -pitch|
+ *             | -yaw     pitch    1     |
+ *
+ * Each new column of R_new is computed by GTE matrix-vector multiply
+ * with the corresponding column of R_small as the input. Results go
+ * back in-place at the byte offsets that match PSY-Q MATRIX layout.
+ */
 void Object_ApplyAngularVelocity(uint32_t *m, int pitchRate, int yawRate, int rollRate)
 {
+    /* Load current rotation matrix into GTE B register. */
     gte_ldR11R12(m[0]);
     gte_ldR13R21(m[1]);
     gte_ldR22R23(m[2]);
     gte_ldR31R32(m[3]);
     gte_ldR33   (m[4]);
-    gte_ldIR1(0x1000);          /* sin(small) approx for column 1 */
+
+    int16_t *bytes = (int16_t *)m;
+
+    /* Column 1: input vector (1, roll, -yaw). Result is new (R11, R21, R31). */
+    gte_ldIR1(0x1000);
     gte_ldIR2(rollRate);
     gte_ldIR3(-yawRate);
     gte_rtir_b();
-    /* Column 1 result back into m; the original then loads columns 2,
-     * 3 with the analogous patterns and stitches them together. The
-     * full body of FUN_800439b8 walks all three columns -- pass 3 will
-     * inline the rest. For now we stop after column 1 (the function
-     * does continue), so callers must run the full original at the
-     * site until pass 3 completes the body. */
-    (void)gte_stIR1; (void)gte_stIR2; (void)gte_stIR3;
-    (void)pitchRate;
+    int32_t c1_R11 = gte_stIR1();
+    int32_t c1_R21 = gte_stIR2();
+    int32_t c1_R31 = gte_stIR3();
+
+    /* Column 2: input vector (-roll, 1, pitch). Result is new (R12, R22, R32). */
+    gte_ldsv_(-rollRate, 0x1000, pitchRate);
+    gte_rtir_b();
+    /* The Ghidra ref writes col1 results into the matrix AFTER computing
+     * col2's multiply but BEFORE reading col2's IR. We follow the same
+     * order so any saturation side-effects line up. */
+    bytes[0]  = (int16_t)c1_R11;     /* R11 @ byte 0  */
+    bytes[3]  = (int16_t)c1_R21;     /* R21 @ byte 6  */
+    bytes[6]  = (int16_t)c1_R31;     /* R31 @ byte 12 */
+    int32_t c2_R12 = gte_stIR1();
+    int32_t c2_R22 = gte_stIR2();
+    int32_t c2_R32 = gte_stIR3();
+
+    /* Column 3: input vector (yaw, -pitch, 1). Result is new (R13, R23, R33). */
+    gte_ldsv_(yawRate, -pitchRate, 0x1000);
+    gte_rtir_b();
+    bytes[1]  = (int16_t)c2_R12;     /* R12 @ byte 2  */
+    bytes[4]  = (int16_t)c2_R22;     /* R22 @ byte 8  */
+    bytes[7]  = (int16_t)c2_R32;     /* R32 @ byte 14 */
+    int32_t c3_R13 = gte_stIR1();
+    int32_t c3_R23 = gte_stIR2();
+    int32_t c3_R33 = gte_stIR3();
+    bytes[2]  = (int16_t)c3_R13;     /* R13 @ byte 4  */
+    bytes[5]  = (int16_t)c3_R23;     /* R23 @ byte 10 */
+    bytes[8]  = (int16_t)c3_R33;     /* R33 @ byte 16 */
 }
 
 /* HIGH: full per-object frame step. */
