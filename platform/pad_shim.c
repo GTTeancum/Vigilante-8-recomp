@@ -117,7 +117,10 @@ void Pad_Tick(void)
     Projectile_Tick((pad & 0x08000000) != 0);
     extern void AI_Tick(void);
     extern int  AI_Hp(void);
+    extern void Destructibles_Tick(void);
+    extern int  Destructibles_BrokenCount(void);
     AI_Tick();
+    Destructibles_Tick();
     Platform_FrameTick();      /* render + present + event pump */
 
     if (g_v8_frame_limit > 0 && g_v8_frame_count >= g_v8_frame_limit) {
@@ -129,6 +132,7 @@ void Pad_Tick(void)
         fprintf(stderr, "v8: AI hp = %d\n", AI_Hp());
         extern float g_ai_x, g_ai_z;
         fprintf(stderr, "v8: AI pos = (%.2f, %.2f)\n", g_ai_x, g_ai_z);
+        fprintf(stderr, "v8: destructibles broken = %d\n", Destructibles_BrokenCount());
         fflush(stderr);
         exit(0);
     }

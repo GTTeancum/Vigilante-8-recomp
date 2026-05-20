@@ -22,6 +22,7 @@
 
 static GLuint g_prog       = 0;
 static GLint  g_loc_mvp    = -1;
+static GLint  g_loc_tint   = -1;
 static GLuint g_terr_vao   = 0, g_terr_vbo = 0, g_terr_ibo = 0;
 static int    g_terr_idxCount = 0;
 static GLuint g_box_vao    = 0, g_box_vbo = 0, g_box_ibo = 0;
@@ -43,8 +44,9 @@ static const char *VS_SRC =
 static const char *FS_SRC =
     "#version 330 core\n"
     "in vec3 vCol;\n"
+    "uniform vec3 uTint;\n"    /* (1,1,1) = passthrough */
     "out vec4 oCol;\n"
-    "void main(){ oCol = vec4(vCol, 1.0); }\n";
+    "void main(){ oCol = vec4(vCol * uTint, 1.0); }\n";
 
 static GLuint compile(GLenum kind, const char *src) {
     GLuint s = glCreateShader(kind);
@@ -178,7 +180,8 @@ static void init_once(void) {
         char log[1024]; glGetProgramInfoLog(g_prog, sizeof log, NULL, log);
         fprintf(stderr, "v8: program link failed: %s\n", log);
     }
-    g_loc_mvp = glGetUniformLocation(g_prog, "uMVP");
+    g_loc_mvp  = glGetUniformLocation(g_prog, "uMVP");
+    g_loc_tint = glGetUniformLocation(g_prog, "uTint");
     glDeleteShader(vs); glDeleteShader(fs);
 
     build_terrain_mesh();
@@ -280,6 +283,9 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
     float VP[16];
     make_chase_camera(VP, w, h);
 
+    /* No-tint default. */
+    glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
+
     /* Terrain at world origin -- identity model. MVP = VP * I = VP. */
     glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, VP);
     glBindVertexArray(g_terr_vao);
@@ -309,16 +315,36 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
         glDrawElements(GL_TRIANGLES, g_box_idxCount, GL_UNSIGNED_INT, 0);
     }
 
-    /* AI opponent vehicle, if alive. */
+    /* AI opponent vehicle, if alive (tinted blue to distinguish from player). */
     extern int AI_GetActive(float *out_xyz);
     extern int AI_Yaw(float *out_yaw);
     float ai_p[3]; float ai_yaw;
     if (AI_GetActive(ai_p) && AI_Yaw(&ai_yaw)) {
+        glUniform3f(g_loc_tint, 0.3f, 0.5f, 1.5f);   /* shift toward blue */
         make_model_yt(M, ai_yaw, ai_p[0], ai_p[1], ai_p[2]);
         mat4_mul(VP, M, MVP);
         glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
         glDrawElements(GL_TRIANGLES, g_box_idxCount, GL_UNSIGNED_INT, 0);
     }
+
+    /* Destructibles: each colored differently via uTint. */
+    extern int Destructibles_GetActive(float *out_xyzrgb, int max);
+    float props[32 * 6];
+    int nprop = Destructibles_GetActive(props, 32);
+    for (int i = 0; i < nprop; i++) {
+        glUniform3f(g_loc_tint,
+                    props[i*6 + 3], props[i*6 + 4], props[i*6 + 5]);
+        float P[16] = {
+            0.7f, 0, 0, 0,
+            0, 0.7f, 0, 0,
+            0, 0, 0.7f, 0,
+            props[i*6+0], props[i*6+1], props[i*6+2], 1
+        };
+        mat4_mul(VP, P, MVP);
+        glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        glDrawElements(GL_TRIANGLES, g_box_idxCount, GL_UNSIGNED_INT, 0);
+    }
+    glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);   /* reset */
 }
 
 #else  /* no SDL/GL */

@@ -31,6 +31,7 @@ add_library(v8platform STATIC
     renderer.c
     projectile_shim.c
     ai_opponent.c
+    destructibles.c
 )
 target_include_directories(v8platform PUBLIC
     ${CMAKE_SOURCE_DIR}/include
