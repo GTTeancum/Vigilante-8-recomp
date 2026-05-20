@@ -1,0 +1,310 @@
+/* vehicle_construct.c -- Vehicle struct constructor + spawn dispatcher.
+ *
+ * Source: SLUS_005.10
+ *   FUN_8002e630  Vehicle_Construct   (1124 B)
+ *   FUN_8002a350  Vehicle_Dispatch    (mode 7 = spawn -> Construct)
+ *
+ * This is the ENGINE'S OWN player/AI vehicle initialiser.  The host
+ * vehicle shim in platform/host_vehicle.c bypasses this and allocates
+ * a 0x200-byte zero-filled buffer; using the constructor instead
+ * gives bit-exact Vehicle state at spawn.
+ *
+ * The constructor:
+ *   1. Allocates 0x124 bytes via the object pool (FUN_8001ac44 =
+ *      Object_Pool_AllocFromBank).  Vehicle struct size is fixed at
+ *      0x124 = 292 bytes.
+ *   2. Initialises basic flags and template-derived fields.
+ *   3. Sets the per-tick callback to LAB_8002e2bc (the 0x374-byte
+ *      player physics tick that lives in a Ghidra gap region).
+ *   4. Computes `dragMass = -*(int*)(obj+0x4c)` -- the +0x4c slot is
+ *      template-copied by the pool allocator.
+ *   5. Walks the obj's child list (+0x38) and registers each child
+ *      with bonus 'kind < 4' into puVar6[index + 0x3b] slots
+ *      (+0xec..+0xf8 = 4 generic "subobject" pointers).
+ *   6. Allocates and initialises 4 WHEEL sub-objects (one per
+ *      uVar10 in [0, 4)).  Each wheel is a separately-pool-allocated
+ *      0x9c-byte object whose pointer is stored at
+ *      puVar6[uVar10 + 0x3f] = obj + (0xfc + uVar10*4).
+ *      Each wheel gets:
+ *         +0x80 i32 chassisLink       (from main bank entry +0x24)
+ *         +0x84 i32 inertia_q12       (= -bank_inertia)
+ *         +0x88 u32 invInertiaScale   (= 0x1000000 / (-inertia / 0x1000))
+ *         +0x8c u32 randSeed          (from FUN_80017160 -- RNG)
+ *         +0x44/0x48 unaligned packed (matches MIPS bit-twiddle pattern)
+ *      and is linked to the chassis via FUN_8001b2fc.
+ *   7. Allocates a 0x80-byte "extra" object via FUN_8001d470,
+ *      stored at obj+0xf8 (puVar6[0x3e]).
+ *   8. Memsets vel/angvel (+0x90..+0x9b, 12 bytes) and a 28-byte
+ *      block at obj+0xa4..+0xbf to zero.
+ *   9. Writes per-character stats from the template:
+ *         +0x16  health-low (template+0x1c)
+ *         +0xa2  stat[+0x1a]
+ *         +0xa8  stat[+0x18]
+ *         +0xaa  signed stat[+0x1e]
+ *         +0xb4  signed stat[+0x1f]
+ *         +0xb2  always 1 (a "valid vehicle" sentinel)
+ *
+ * Field offsets and values below are byte-for-byte against the MIPS
+ * disassembly at analysis/SLUS_005.10/mips/8002e630.s -- no empirical
+ * fitting.
+ *
+ * HIGH confidence on structure + offsets; the bit-packing in steps 6
+ * and 9 uses MIPS-style unaligned stores (`-1 << shift | value >> ...`)
+ * which we preserve literally below.
+ *
+ * NOT WIRED to the host runtime yet: this function expects (1) a
+ * fully-initialised object pool at `param_1` (the bank, normally
+ * DAT_800737d4), and (2) a vehicle TEMPLATE at param_3 (normally
+ * DAT_800737a0[char_idx] from Vehicles.exp).  Both are populated by
+ * engine code we haven't traced into the host yet.
+ */
+#include <stdint.h>
+
+extern void *FUN_8001ac44(int *bank, uint16_t kind, uint32_t size, uint32_t flags);
+extern int   FUN_8001affc(int *bank, uint16_t kind, uint16_t key);
+extern void  FUN_8001b2fc(uint32_t *chassis, int wheelTemplate, uint32_t *wheel);
+extern void  FUN_8001d4f0(uint32_t *chassis, uint32_t extra);
+extern void *FUN_8001d470(uint32_t size);
+extern void  FUN_8001d708(uint32_t *obj);
+extern int   FUN_8001b270(uint32_t *obj);
+extern char  FUN_8003fc94(uint32_t childObj);
+extern uint32_t FUN_80017160(void);          /* RNG */
+extern void *FUN_80044efc(void *dst, int val, uint32_t n);   /* memset */
+
+/* The tick callback installed into every constructed Vehicle.  Body
+ * lives at SLUS:0x8002e2bc in a Ghidra gap region (analysis/.../mips/
+ * 8002e2bc.s).  Cleaned C decomp pending. */
+extern void LAB_8002e2bc(void);
+
+extern uint32_t uRam00000604;
+extern int *    DAT_800737d4;       /* global object pool/bank */
+
+/* HIGH: construct a Vehicle (player or AI car) from a template.
+ *
+ *   bank      -- normally DAT_800737d4 (the global pool)
+ *   kind      -- u16 kind id (selects template within bank)
+ *   template  -- vehicle stats data (normally
+ *                DAT_800737a0[char_idx] from Vehicles.exp).
+ *                  +0x0c (u8)  : per-wheel-presence bitmask (4 bits used)
+ *                  +0x0d (u8)  : template stat (-> obj +0xd0 controlFlags)
+ *                  +0x0e (u8)  : team / variant flags (-> obj +0xac)
+ *                  +0x0f (u8)  : another stat (-> obj +0xb4)
+ *                  +0x10 (u32) : template-data ptr (-> obj +0xdc)
+ *                  +0x14 (u32) : unaligned block for obj+0x9f..+0x9c
+ *                  +0x18 (u16) : -> obj +0xa0
+ *                  +0x1a (u16) : stat (-> obj +0xa2)
+ *                  +0x1c (u16) : health (-> obj +0x0c)
+ *                  +0x1e (i8)  : signed stat (-> obj +0xaa)
+ *                  +0x1f (i8)  : signed stat (-> obj +0xb4)
+ *                  +0x00/02/04/06 (per-wheel kinds, 4 x u16)
+ */
+uint32_t *Vehicle_Construct(int *bank, uint16_t kind, int template_p)
+{
+    uint32_t *obj = (uint32_t *)FUN_8001ac44(
+        bank, kind, 0x124,
+        (uint32_t)(bank[1] != 0) << 3);
+
+    /* Basic flags + template-copied scalars. */
+    *(uint16_t *)((uint8_t *)obj + 6) = 0;
+    *(uint8_t  *)(obj + 1) = 2;                  /* obj+4 = obj kind tag */
+    obj[0]  |= 0x6000u;                          /* flags */
+    *(uint16_t *)(obj + 3) = *(uint16_t *)(template_p + 0x1c);   /* obj+0xc = health */
+    *(uint16_t *)(obj + 0x35) = 0x400;           /* obj+0xd4 = 0x400 */
+    *(uint8_t  *)(obj + 0x34) = *(uint8_t  *)(template_p + 0xd); /* obj+0xd0 controlFlags */
+    obj[0x37] = *(uint32_t *)(template_p + 0x10);                /* obj+0xdc = template ptr */
+
+    if (bank[1] != 0) obj[0] |= 4u;
+
+    /* Install the tick callback.  +0x64 = obj[0x19]. */
+    obj[0x19] = (uint32_t)(uintptr_t)&LAB_8002e2bc;
+
+    /* dragMass (+0xd8) = -*(int*)(obj + 0x4c).  +0x4c is template-
+     * copied by the pool allocator above (one of the first words
+     * the bank entry copies into the new object). */
+    obj[0x36] = (uint32_t)(-(int32_t)obj[0x13]);
+
+    /* Zero out 12 i32 slots from +0xec down to +0xc0 (matches MIPS
+     * `do { puVar7[0x3b] = 0; puVar7--; } while (-1 < iVar12)` with
+     * counter 0xb..-1 inclusive = 13 iterations). */
+    for (int i = 0; i <= 0xb; i++) {
+        obj[0xb + i + 0x3b] = 0;
+    }
+    /* The MIPS does an EXTRA store at iVar12 == -1 (the final iter):
+     * puVar7[0x3b] with puVar7 = obj + 0xb - 1 = obj + 0xa,
+     * so obj[0x45] = obj+0x114 also gets zeroed. */
+    obj[0x45] = 0;
+
+    /* Walk child list at obj+0x38 (puVar6[0xe]).  Each child whose
+     * +6 kind-tag is < 4 gets registered into the per-kind slot at
+     * obj[+0xec + kind*4]. */
+    for (uint32_t child = obj[0xe]; child != 0;
+         child = *(uint32_t *)(child + 0x34)) {
+        if (*(uint16_t *)(child + 6) < 4) {
+            char inc = FUN_8003fc94(child);
+            *(int8_t  *)(child + 8) = inc + 1;
+            *(uint16_t *)(child + 0xc) = *(uint16_t *)(template_p + 0x1c);
+            obj[*(int16_t *)(child + 6) + 0x3b] = child;
+        }
+    }
+
+    /* Per-wheel sub-allocation (4 wheels). */
+    uint32_t rng_last = 0;
+    for (uint32_t w = 0; w < 4; w++) {
+        uint32_t wheel_kind = 9;
+        if ((uRam00000604 & 1) == 0) {
+            wheel_kind = (uint32_t)*(uint16_t *)(template_p + ((int)w >> 1) * 2);
+        }
+        uint32_t *wheel = (uint32_t *)FUN_8001ac44(DAT_800737d4, (uint16_t)wheel_kind, 0x9c, 0);
+        *(uint8_t  *)(wheel + 1) = 8;
+
+        int *gbank = DAT_800737d4;
+        int  joint = FUN_8001affc(bank, kind, (uint16_t)(w - 0x8000));
+        FUN_8001b2fc(obj, joint, wheel);
+        obj[w + 0x3f] = (uint32_t)(uintptr_t)wheel;
+
+        uint32_t chassisLink;
+        if (*(uint16_t *)(joint + 0x1a) == 0xffff) {
+            chassisLink = 0;
+        } else {
+            chassisLink = *(uint32_t *)(*bank + (uint32_t)*(uint16_t *)(joint + 0x1a) * 0x1c + 0x24);
+        }
+        wheel[0x20] = chassisLink;                       /* wheel +0x80 */
+        wheel[0x22] = wheel[0x13];                       /* wheel +0x88 */
+        wheel[0x21] = wheel[0x13];                       /* wheel +0x84 */
+
+        /* Per-wheel kind id at template+(w/2)*2 +4/+8 */
+        int tp = template_p + ((int)w >> 1) * 2;
+        *(uint16_t *)(wheel + 0x23) = *(uint16_t *)(tp + 4);
+        *(uint16_t *)((uint8_t *)wheel + 0x8e) = *(uint16_t *)(tp + 8);
+
+        int iVar8  = *(int32_t *)(*gbank + wheel_kind * 0x1c + 0x24);
+        int iVar12 = iVar8 * -0x6486;
+        wheel[0x24] = (uint32_t)(-iVar8);
+        if (iVar12 < 0) iVar12 += 0xfff;
+        wheel[0x25] = 0x1000000 / (iVar12 >> 12);
+
+        uint16_t rng16 = (uint16_t)FUN_80017160();
+        rng_last = (uint32_t)rng16;
+
+        /* Unaligned stores at wheel+0x43 and wheel+0x40 -- the MIPS
+         * uses bit-shifts to splice across word boundaries. */
+        {
+            uint32_t  off = ((uintptr_t)wheel + 0x43) & 3;
+            uint32_t *p   = (uint32_t *)((uintptr_t)wheel + 0x43 - off);
+            uint32_t  mask = (uint32_t)0xffffffffu << (off + 1) * 8;
+            *p = (*p & mask) | (rng_last >> (3 - off) * 8);
+        }
+        {
+            uint32_t  off = ((uintptr_t)(wheel + 0x10)) & 3;
+            uint32_t *p   = (uint32_t *)((uintptr_t)(wheel + 0x10) - off);
+            uint32_t  mask = (uint32_t)0xffffffffu >> (4 - off) * 8;
+            *p = (*p & mask) | (rng_last << off * 8);
+        }
+        *(int16_t *)(wheel + 0x11) = (int16_t)((w & 1) << 0xb);
+
+        uint32_t flags = w << 0x13;
+        if ((int)w < 2) flags |= 0x20000;
+        wheel[0] |= ((uint32_t)*(uint8_t *)(template_p + 0xc) >> (w & 0x1f) & 1u) << 0x10
+                  | flags;
+        FUN_8001d708(wheel);
+    }
+
+    /* The "extra" 0x80-byte sub-object stored at obj+0xf8 (puVar6[0x3e]). */
+    uint32_t extra = (uint32_t)(uintptr_t)FUN_8001d470(0x80);
+    obj[0x3e] = extra;
+    int extraJoint = FUN_8001affc(bank, kind, 0x8100);
+    if (extraJoint == 0) {
+        *(uint32_t *)(extra + 0x4c) = 0xffffaaabu;
+        FUN_8001d708((uint32_t *)(uintptr_t)extra);
+        FUN_8001d4f0(obj, extra);
+    } else {
+        FUN_8001b2fc(obj, extraJoint, (uint32_t *)(uintptr_t)extra);
+    }
+
+    /* Template-block copy at template+0x14..0x17 (4 bytes) and +0x17
+     * (1 byte), spliced across word boundaries into obj+0x9c..+0x9f.
+     * MIPS uses the same bit-twiddle pattern as the wheel loop. */
+    {
+        uint32_t offA = (template_p + 0x17u) & 3;
+        uint32_t offB = (template_p + 0x14u) & 3;
+        uint32_t lhs = (*(uint32_t *)((template_p + 0x17u) - offA) << (3 - offA) * 8
+                      | rng_last & 0xffffffffu >> (offA + 1) * 8);
+        uint32_t spliced = (lhs & 0xffffffffu << (4 - offB) * 8)
+                         | *(uint32_t *)((template_p + 0x14u) - offB) >> offB * 8;
+        uint16_t ts18 = *(uint16_t *)(template_p + 0x18);
+
+        uint32_t off1 = ((uintptr_t)obj + 0x9f) & 3;
+        uint32_t *p1  = (uint32_t *)((uintptr_t)obj + 0x9f - off1);
+        *p1 = (*p1 & (uint32_t)0xffffffffu << (off1 + 1) * 8) | (spliced >> (3 - off1) * 8);
+
+        uint32_t off2 = ((uintptr_t)(obj + 0x27)) & 3;
+        uint32_t *p2  = (uint32_t *)((uintptr_t)(obj + 0x27) - off2);
+        *p2 = (*p2 & (uint32_t)0xffffffffu >> (4 - off2) * 8) | (spliced << off2 * 8);
+
+        *(uint16_t *)(obj + 0x28) = ts18;
+        *(uint16_t *)((uint8_t *)obj + 0xa2) = *(uint16_t *)(template_p + 0x1a);
+    }
+
+    /* Zero angular velocity + linear velocity (12 bytes at obj+0x90),
+     * then mirror into obj+0x80 (vel).  MIPS does `memset(obj+0x90, 0, 12)`
+     * then copies obj+0x90..+0x98 to obj+0x80..+0x88. */
+    FUN_80044efc(obj + 0x24, 0, 0xc);
+    obj[0x20] = obj[0x24];
+    obj[0x21] = obj[0x25];
+    obj[0x22] = obj[0x26];
+    obj[0x1e] = 0;       /* obj +0x78 */
+    obj[0x1d] = 0;       /* obj +0x74 */
+
+    /* 28-byte zero block at obj+0xa4. */
+    FUN_80044efc(obj + 0x29, 0, 0x1c);
+
+    /* Final per-character stat copies. */
+    *(uint8_t  *)((uint8_t *)obj + 0xb2) = 1;
+    *(uint16_t *)(obj + 0x2b) = (uint16_t)*(uint8_t *)(template_p + 0xe);
+    *(int16_t  *)(obj + 0x2a) = (int16_t)*(int8_t  *)(template_p + 0x1e);
+    *(int16_t  *)((uint8_t *)obj + 0xaa) = (int16_t)*(int8_t *)(template_p + 0x1f);
+    *(uint8_t  *)(obj + 0x2d) = *(uint8_t *)(template_p + 0xf);
+
+    /* Finalise: register the object in some global table.  The return
+     * goes into obj+0x7c (puVar6[0x1f]). */
+    obj[0x1f] = (uint32_t)FUN_8001b270(obj);
+
+    return obj;
+}
+
+/* HIGH: vehicle lifecycle dispatcher.  Modes:
+ *    1 = init  (set up obj flags + read player vehicle global)
+ *    7 = spawn (call Vehicle_Construct)
+ * Source: FUN_8002a350 in analysis/. */
+extern uint32_t uRam000007d0;
+extern void     FUN_8002cce8(uint32_t *obj, uint8_t arg);
+
+uint32_t Vehicle_Dispatch(uint32_t *obj, int mode, uint16_t kind, int template_p)
+{
+    if (mode == 1) {
+        uint32_t saved13 = obj[0x13];
+        obj[0]    |= 0x88u;
+        obj[0x19]  = (uint32_t)(uintptr_t)&LAB_8002e2bc;
+        obj[0x13]  = saved13 - 0x8000;
+        obj[10]    = saved13 - 0x8000;
+        FUN_8002cce8(obj, (uint8_t)(*(uint8_t *)((uint8_t *)obj + 3) | 1u));
+        uint32_t pv = uRam000007d0;
+        obj[0] = (uint32_t)(uint16_t)obj[0];
+        obj[0x39] = pv;     /* obj +0xe4 stores the player Vehicle ptr */
+        return 0;
+    }
+    if (mode == 7) {
+        return (uint32_t)(uintptr_t)Vehicle_Construct((int *)(intptr_t)obj, kind, template_p);
+    }
+    return 0;
+}
+
+/* Legacy FUN_ aliases for direct callers. */
+uint32_t *FUN_8002e630(int *bank, uint16_t kind, int template_p)
+{
+    return Vehicle_Construct(bank, kind, template_p);
+}
+uint32_t FUN_8002a350(uint32_t *obj, int mode, uint16_t kind, int template_p)
+{
+    return Vehicle_Dispatch(obj, mode, kind, template_p);
+}
