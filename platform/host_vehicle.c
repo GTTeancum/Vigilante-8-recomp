@@ -43,15 +43,21 @@ static void vehicle_tick(uint8_t *self, int mode, int catchupFlag)
     (void)catchupFlag;
     if (mode != 0) return;
 
-    /* Long-axis thrust (forward/back) -> +0x20, scaled by +0xa6. */
+    /* Pad bits -> engine input fields.
+     *
+     * inputMul (+0xa6) = 0x3c: the engine's own constant.  Two
+     * independent initialisers (FUN_80022d54 and FUN_80022e38) write
+     * `*(u16 *)(obj + 0xa6) = 0x3c` -- confirmed via static MIPS
+     * analysis, NOT empirical.  See notes/unknowns.md "Item 4".
+     *
+     * angYPreBake (+0xa4) baseline = 0 (same source).  Set to a
+     * non-zero magnitude only while the steering pad bit is active. */
     int16_t longThrust = 0;
     if (uRam0000062c & 0x10000000) longThrust = +0x40;
     if (uRam0000062c & 0x40000000) longThrust = -0x40;
     *(int16_t *)(self + 0x20) = longThrust;
-    *(int16_t *)(self + 0xa6) = 0x800;
+    *(int16_t *)(self + 0xa6) = 0x3c;
 
-    /* Steering: +0x16 sign-flag drives the per-tick ang_z nudge,
-     * +0xa4 << 6 becomes the pre-baked ang_y. */
     if (uRam0000062c & 0x80000000) {
         *(int16_t *)(self + 0x16) = -1;
         *(int16_t *)(self + 0xa4) = -0x80;
@@ -62,8 +68,14 @@ static void vehicle_tick(uint8_t *self, int mode, int catchupFlag)
         *(int16_t *)(self + 0x16) = 0;
         *(int16_t *)(self + 0xa4) = 0;
     }
-    *(int16_t *)(self + 0x1a) = 1;    /* zero pitch trim */
-    *(int32_t *)(self + 0xd8) = 0;    /* drag-mass coefficient */
+    *(int16_t *)(self + 0x1a) = 1;
+    /* dragMass (+0xd8): the engine computes this as -*(int*)(obj+0x4c)
+     * in FUN_8002e630 (vehicle constructor), where +0x4c is a value
+     * template-copied by the pool allocator from per-character data.
+     * Without that template chain wired up, +0x4c is 0 here.
+     * Leaving dragMass = 0 means Object_GeneralTick's spring/drag
+     * term degenerates to pure gravity. */
+    *(int32_t *)(self + 0xd8) = 0;
 
     Object_GeneralTick((uint32_t *)self);
 }

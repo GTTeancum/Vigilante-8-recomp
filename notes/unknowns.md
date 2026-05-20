@@ -178,3 +178,73 @@ specific tick.  Until the player tick is identified, the host shim's
 pad-input -> engine-input-field mapping (vehicle struct offsets
 +0x14/0x16/0x1a/0x20/0xa4/0xa6/0xd8) remains a best-effort interpretation
 of fields the player-tick would normally populate.
+
+## Item 4: Player-vehicle tick callback — RESOLVED 2026-05-20
+
+**Outcome: located.** The player vehicle's per-tick callback is at
+`LAB_8002e2bc` (a Ghidra-gap function the auto-analyser did NOT
+identify).  Size: 0x374 bytes (221 MIPS instructions).
+
+**How it was found (zero empirical assumptions):**
+
+Traced via the Vehicle CONSTRUCTOR.  `FUN_8002e630` (1124 B) is the
+allocator/initialiser for the Vehicle struct.  At
+`analysis/SLUS_005.10/decomp/8002e630.c` line 34:
+
+```c
+puVar6[0x19] = (uint)&LAB_8002e2bc;
+```
+
+`puVar6[0x19]` is byte offset `0x19 * 4 = 0x64`, the tick-callback
+slot.  So every Vehicle allocated through this constructor has
+`LAB_8002e2bc` installed as its per-frame physics callback -- this IS
+the player vehicle tick.
+
+**Cross-references confirming the chain:**
+
+- `FUN_8002a350` is the mode dispatcher for player-vehicle lifecycle
+  events.  Mode 7 calls `FUN_8002e630` to allocate; mode 1 reads
+  `uRam000007d0` (the player Vehicle global) and stores it at
+  `obj[0x39]` = byte +0xe4 (the "currentTarget" slot).
+- `FUN_8002e630` allocs 0x124 bytes via `FUN_8001ac44` (Object_Pool_
+  AllocFromBank) -- so the **Vehicle struct size is exactly 0x124 (292
+  bytes)**, not 0x200 as the host shim's `Heap_Alloc(0x200)` assumed.
+- The constructor also sets:
+    - `obj[0x36] = -obj[0x13]`  (i.e. `dragMass = -*(int*)(obj+0x4c)`),
+      where +0x4c is template-copied by the pool allocator.
+    - `*(u16*)(obj + 0xa2) = template[0x1a]`  -- a per-character stat.
+    - 4 wheels initialised by an inner loop (offset 0x9c each), with
+      `puVar7[0x24] = -iVar8` and `puVar7[0x25] = 0x1000000 / -...` --
+      this is the **per-wheel inverse-inertia computation**.
+
+**Independent confirmation of two engine-constant initialisers (items 5):**
+
+`FUN_80022d54` (228 B, object init) and `FUN_80022e38` (88 B, object
+reset) BOTH write:
+   `*(u16*)(obj + 0xa4) = 0`        // angYPreBake = 0
+   `*(u16*)(obj + 0xa6) = 0x3c`     // inputMul = 60
+
+This is the engine's ACTUAL value for `inputMul` (60), not a guess.
+
+**Artifact extracted:**
+
+`analysis/SLUS_005.10/mips/8002e2bc.s` -- 221 raw MIPS instructions
+of the player tick.  Ghidra's auto-analyser missed this function
+because it's in a gap region; static MIPS disassembly is provided for
+future cleanup passes (or for a Ghidra-script that registers the
+function start and re-runs the decompiler).
+
+**Status of "drive around with PSX physics":**
+
+The player tick callback's address is now KNOWN.  Decompiling its
+221-instruction body to clean C is the next concrete step -- it
+needs careful work because the function calls several sub-routines
+that are themselves in Ghidra gaps (JAL targets at 0x8002e324,
+0x8002e3b8, 0x8002e428, 0x8002e434, etc.), each of which would need
+to be identified and either decompiled or treated as a leaf.
+
+The host wiring change required: instead of writing `vehicle_tick`
+into obj+0x64 (the host shim's pad->vel mapping), call FUN_8002e630
+to construct a real Vehicle that gets LAB_8002e2bc as its tick.  The
+constructor expects a vehicle TEMPLATE (param_3) which comes from
+the loaded Vehicles.exp XOBF data (`DAT_800737a0[char_idx]`).
