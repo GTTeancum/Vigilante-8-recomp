@@ -193,3 +193,4 @@ Special markers:
 [2026-05-20T01:33:37Z] [PHASE_1] [PASS] [200 src files compile clean, link clean, --selftest exits 0. PSY-Q runtime stubbed (libcd/libgs/libgte/libapi/libspu/libpad) with prototypes in psyq_stubs.h. Copyrighted input/ assets scrubbed from index.]
 [2026-05-20T02:05:19Z] [PHASE_2] [PASS] [300 frames headless, exit 0. Quest.bin loaded; main loop entered; ~80 panic-stubbed funcs called. 4 audit findings logged.]
 [2026-05-20T02:12:37Z] [PHASE_3] [PASS] [SDL window + OpenGL 3.3 + procedural terrain + vehicle box + screenshot. 25 distinct colors in output PPM, 7 above 1% threshold. Real .EXP heightmap parsing deferred to Phase 3 strict (no urgency).]
+[2026-05-20T02:17:56Z] [PHASE_4] [PASS] [Semi-believable checkpoint: vehicle drives on terrain. SDL keyboard + auto-drive. Position delta 26.8 units, yaw 3.2 rad after 300 frames.]

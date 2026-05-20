@@ -87,18 +87,30 @@ int main(int argc, char **argv)
 
     if (opts.want_selftest) return Smoke_RunSelfTest();
 
-    /* No args: print help and exit (avoid accidentally launching the
-     * infinite V8_MainLoop when run with no flags). */
-    if (opts.max_frames == 0 && !opts.want_headless && !opts.replay_path) {
-        print_help();
-        return 0;
-    }
+    /* Default: launch the game (windowed, no frame cap, no auto-drive).
+     * The user closes the window to exit (SDL_QUIT -> exit(0) in
+     * platform_init.c). --help shows the flag reference. */
 
     g_screenshot_path = opts.screenshot_path;
     if (g_screenshot_path) atexit(on_exit_screenshot);
     g_v8_auto_drive_frames = opts.auto_drive_frames;
 
-    printf("v8: phase 2 boot (max_frames=%d, headless=%d)\n",
+    /* Sanity check: are the extracted game assets where we expect? */
+    {
+        FILE *q = fopen("input/QUEST.BIN", "rb");
+        if (!q) {
+            fprintf(stderr, "v8: ERROR -- cannot find input/QUEST.BIN\n");
+            fprintf(stderr, "v8:   run v8.exe from the project root so the\n");
+            fprintf(stderr, "v8:   relative path 'input/' resolves correctly.\n");
+            fprintf(stderr, "v8:   (current working dir matters!)\n");
+            fprintf(stderr, "v8: press Enter to exit...\n");
+            getchar();
+            return 1;
+        }
+        fclose(q);
+    }
+
+    printf("v8: phase 4 boot (max_frames=%d, headless=%d)\n",
            opts.max_frames, opts.want_headless);
 
     g_v8_frame_limit = opts.max_frames;
