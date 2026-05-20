@@ -40,7 +40,10 @@ uint32_t SB_SecurityDoor(int self, uint32_t mode, int *arg)
         if (mode == 1) goto reinit_chain;
         want = 1;
     }
-    if (mode == 3 || mode == 8 || (mode != 8 && (mode == 3 ? 1 : want = 1, 1))) {
+    /* The original dispatch tried to fold "set want=1 if mode==8" into
+     * the conditional via a comma-ternary; rewritten as a clear if. */
+    if (mode == 8) want = 1;
+    if (mode == 3 || mode == 8) {
         uint32_t *trig = (uint32_t *)(uintptr_t)arg[3];
         uint8_t   tk   = (uint8_t)trig[1];
         int8_t    impK = *(char *)(*arg + 4);

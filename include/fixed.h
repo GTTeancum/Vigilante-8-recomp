@@ -23,6 +23,16 @@ typedef int16_t short_q12_t; /* 4.12 signed intermediate */
 #define ANGLE_180     2048
 #define ANGLE_90      1024
 
+/* Portable alignment / packing attributes.
+ * GCC/Clang use __attribute__; MSVC uses __declspec or #pragma pack. */
+#if defined(_MSC_VER)
+#  define V8_ALIGN(n)   __declspec(align(n))
+#  define V8_PACKED
+#else
+#  define V8_ALIGN(n)   __attribute__((aligned(n)))
+#  define V8_PACKED     __attribute__((packed))
+#endif
+
 /* 16.16 * 16.16 -> 16.16 with truncation toward zero (PSY-Q-style). */
 static inline fixed16_t fmul16(fixed16_t a, fixed16_t b) {
     return (fixed16_t)(((int64_t)a * (int64_t)b) >> 16);

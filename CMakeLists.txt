@@ -37,6 +37,7 @@ add_library(v8core STATIC ${V8_CORE_SRC})
 target_include_directories(v8core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/platform
+    ${CMAKE_SOURCE_DIR}/platform/psyq
 )
 target_link_libraries(v8core PUBLIC psyq_stubs)
 

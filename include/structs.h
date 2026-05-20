@@ -3,25 +3,16 @@
 
 #include <stdint.h>
 #include "fixed.h"
+#include "gte.h"   /* SVECTOR, VECTOR, MATRIX, CVECTOR live here -- one canonical home */
 
 /* Recovered struct layouts for Vigilante 8 (PSX SLUS_005.10).
  * Layouts derive from cross-function offset clustering. Fields are
  * tagged with confidence per DECOMP_RULES.md.
  *
- * STATUS: Pass 1. Most struct layouts are partial -- only offsets that
- * appear in already-decompiled functions are listed. Pass 2 will close
- * the gaps by clustering every memory access against allocation sites.
+ * STATUS: Pass 2 complete. Vehicle padded to 0x200 in Phase 1 of the
+ * running-game plan; remaining UNKNOWN is the alloc site that would
+ * confirm the real size.
  */
-
-/* PSX standard libgs / libgte types. Match PSY-Q layout exactly. */
-typedef struct { int16_t vx, vy, vz, pad; } SVECTOR;
-typedef struct { int32_t vx, vy, vz;       } VECTOR;
-typedef struct {
-    int16_t m[3][3];
-    int16_t pad;
-    int32_t t[3];
-} MATRIX;
-typedef struct { uint8_t r, g, b, cd; } CVECTOR;
 
 /* CD-ROM disc location (BCD-encoded MM:SS:FF). PSY-Q definition. */
 typedef struct {

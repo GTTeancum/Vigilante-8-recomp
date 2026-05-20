@@ -29,6 +29,7 @@
  * cross-check against the actual sector layout dumped from disc.
  */
 #include <stdint.h>
+#include "fixed.h"
 
 extern void  CdInit(void);
 extern void *V8_CdReadSectors(void *buf, int sector, int mode);
@@ -47,7 +48,7 @@ void Boot_Init(void)
     CdInit();
 
     /* Read the PVD sector into a 2 KiB stack buffer. */
-    uint8_t sector[0x800] __attribute__((aligned(4)));
+    V8_ALIGN(4) uint8_t sector[0x800];
     V8_CdReadSectors(sector, PVD_SECTOR, 1);
 
     /* Cache the first 32 bytes (the volume signature: "CD001" + version

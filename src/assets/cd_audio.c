@@ -18,16 +18,10 @@
  */
 #include <stdint.h>
 #include "structs.h"
+#include "psyq_stubs.h"   /* canonical PSY-Q prototypes */
 
 extern int  CdDiskReady(int mode);
 extern int  CdGetDiskType(void);
-extern void CdControl  (unsigned char com, unsigned char *param, unsigned char *result);
-extern void CdControlB (unsigned char com, unsigned char *param, unsigned char *result);
-extern void CdControlF (unsigned char com, unsigned char *param);
-extern void CdIntToPos (int sector, CdlLOC *pos);
-extern int  CdPosToInt (const CdlLOC *pos);
-extern int  CdRead2    (int mode);
-extern void CdReadyCallback(void (*cb)(int, unsigned char *));
 
 extern void *Iso_OpenPath_NoArg(void);     /* FUN_800157d4 -- arg latched globally */
 extern void  Audio_RefreshKeyState(void);  /* FUN_80043a74 */

@@ -27,7 +27,7 @@
  */
 #include <stdint.h>
 
-typedef struct { int16_t m[3][3]; int32_t t[3]; } MATRIX;
+#include "structs.h"   /* MATRIX comes from here via gte.h */
 
 extern uint32_t Terrain_HeightAt(int32_t x, int32_t z);                    /* FUN_80025400 */
 extern int      Object_FindObstacleAt(int chain, uint32_t terrainY,

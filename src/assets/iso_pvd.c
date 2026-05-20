@@ -15,13 +15,14 @@
  * prefix) which Iso_VerifyOriginalDisc compares against the boot copy.
  */
 #include <stdint.h>
+#include "fixed.h"
 
 extern void *V8_CdReadSectors(void *buf, int sector, int mode);
 extern void *V8_MemCopy      (void *dst, const void *src, int n);
 
 void *Iso_ReadPVD(void *dst)
 {
-    uint8_t sector[0x800] __attribute__((aligned(4)));
+    V8_ALIGN(4) uint8_t sector[0x800];
     V8_CdReadSectors(sector, 0x10, 1);
     V8_MemCopy(dst, sector + 8, 32);   /* PVD header starts at +8 */
     return dst;

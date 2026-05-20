@@ -39,6 +39,10 @@ extern int32_t **piRam00000774;    /* dead list tail */
 extern uint8_t  DAT_80065a70[];    /* sentinel for dead list */
 extern uint8_t  DAT_80065a74[];    /* sentinel for retired list */
 
+/* Forward declarations -- definitions below. */
+void Damage_RouteByTree(void *obj);
+void Object_RetireToDeadList(int *node);
+
 /* HIGH: trivial dispatcher. */
 void Damage_Apply(void *obj)
 {
@@ -51,7 +55,6 @@ void Damage_Apply(void *obj)
 
 /* HIGH: try removing the object from the level-wide list; if it
  * wasn't there, fall back to the terrain kd-tree's containing chunk. */
-extern void Object_RetireToDeadList(int *node);
 void Damage_RouteByTree(void *obj)
 {
     if (ObjectList_RemoveTraverse(DAT_80065a18, obj) == 0) {
