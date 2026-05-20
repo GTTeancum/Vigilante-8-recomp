@@ -44,24 +44,14 @@ void  DrawSync      (int mode)                                              { (v
 void  ClearImage    (const RECT *r, uint8_t r8, uint8_t g8, uint8_t b8)     { (void)r; (void)r8; (void)g8; (void)b8; }
 void  MargePrim     (void *a, void *b)                                      { (void)a; (void)b; }
 
-/* ---- libgte ---- */
-void  InitGeom      (void)                                                  { }
-void  SetGeomOffset (int ofx, int ofy)                                      { (void)ofx; (void)ofy; }
-void  SetGeomScreen (int h)                                                 { (void)h; }
-long  RotMatrix     (const SVECTOR *r, MATRIX *m)                           { (void)r; (void)m; return 0; }
-long  TransMatrix   (const MATRIX *m, const VECTOR *v)                      { (void)m; (void)v; return 0; }
-long  ScaleMatrix   (MATRIX *m, const VECTOR *v)                            { (void)m; (void)v; return 0; }
-long  CompMatrix    (const MATRIX *m0, const MATRIX *m1, MATRIX *m2)        { (void)m0; (void)m1; (void)m2; return 0; }
-long  CompMatrixLV  (const MATRIX *m0, const MATRIX *m1, MATRIX *m2)        { (void)m0; (void)m1; (void)m2; return 0; }
-void  MulMatrix     (const MATRIX *m0, MATRIX *m1)                          { (void)m0; (void)m1; }
-void  MulMatrix0    (const MATRIX *m0, const MATRIX *m1, MATRIX *m2)        { (void)m0; (void)m1; (void)m2; }
-void  ReadRotMatrix (MATRIX *m)                                             { (void)m; }
-void  SetRotMatrix  (const MATRIX *m)                                       { (void)m; }
-void  SetTransMatrix(const MATRIX *m)                                       { (void)m; }
-void  ApplyMatrix   (const MATRIX *m, const SVECTOR *v0, VECTOR *v1)        { (void)m; (void)v0; if (v1) memset(v1, 0, sizeof(*v1)); }
-void  ApplyMatrixLV (const MATRIX *m, const VECTOR *v0, VECTOR *v1)         { (void)m; (void)v0; if (v1) memset(v1, 0, sizeof(*v1)); }
-/* MatrixNormal, rsin, rcos, ratan2 now live in libgte_soft.c. */
-void  VectorNormalSS(const VECTOR *v0, VECTOR *v1)                          { (void)v0; if (v1) memset(v1, 0, sizeof(*v1)); }
+/* ---- libgte: all real implementations live in libgte.c.
+ * Symbols formerly stubbed here:
+ *   InitGeom, SetGeomOffset, SetGeomScreen, RotMatrix, TransMatrix,
+ *   ScaleMatrix, CompMatrix, CompMatrixLV, MulMatrix, MulMatrix0,
+ *   ReadRotMatrix, SetRotMatrix, SetTransMatrix, ApplyMatrix,
+ *   ApplyMatrixLV, MatrixNormal, VectorNormalSS, rsin, rcos, ratan2.
+ * GTE primitive ops (gte_ldR11R12, gte_rtir_b, gte_stIR1, ...) also
+ * live in libgte.c. */
 
 /* ---- libapi ---- */
 void  ResetGraph    (int mode)                                              { (void)mode; }
