@@ -23,6 +23,7 @@ extern int64_t  Vec3_Dot64(const int32_t *a, const int32_t *b);
 extern int      ratan2(int y, int x);
 extern int      rsin(int a);
 extern int      rcos(int a);
+extern long     SquareRoot0(long n);
 
 int Smoke_RunSelfTest(void)
 {
@@ -139,7 +140,31 @@ int Smoke_RunSelfTest(void)
         if (fails == prev) printf("selftest: ratan2 ok (worst %d LSB across 4096 angles)\n", worst);
     }
 
-    /* Test 4: Vehicle struct sizeof. Phase 1 will assert size==0x200;
+    /* Test 4: SquareRoot0 -- PSY-Q BIOS integer sqrt, floor(sqrt(n)).
+     * Spot-check perfect squares and a few off-by-one boundaries. */
+    {
+        int prev = fails;
+        struct { long n; long want; } cases[] = {
+            {0, 0}, {1, 1}, {2, 1}, {3, 1}, {4, 2},
+            {8, 2}, {9, 3}, {15, 3}, {16, 4},
+            {99, 9}, {100, 10}, {101, 10},
+            {0xffffff, 4095},       /* sqrt(0xffffff) = 4095.998... -> 4095 */
+            {0x1000000, 0x1000},
+            {0x40000000, 0x8000},
+            {0x7fffffff, 46340},
+        };
+        for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+            long got = SquareRoot0(cases[i].n);
+            if (got != cases[i].want) {
+                fprintf(stderr, "selftest: SquareRoot0(%ld) = %ld, expected %ld\n",
+                        cases[i].n, got, cases[i].want);
+                fails++;
+            }
+        }
+        if (fails == prev) printf("selftest: SquareRoot0 ok\n");
+    }
+
+    /* Test 5: Vehicle struct sizeof. Phase 1 will assert size==0x200;
      * Phase 0 just confirms the type is reachable. */
     /* Will be wired when include/structs.h Vehicle layout is finalized. */
 
