@@ -33,6 +33,15 @@ file(GLOB_RECURSE V8_CORE_SRC
 )
 # skipped/ contains stub seam docs that are NOT compiled into the binary.
 
+# Files whose bodies are shadowed by platform/ implementations
+# (structurally PSX-32-bit; replaced by host-portable versions).
+list(REMOVE_ITEM V8_CORE_SRC
+    "${CMAKE_SOURCE_DIR}/src/assets/heap.c"
+    "${CMAKE_SOURCE_DIR}/src/assets/heap_retry.c"
+    "${CMAKE_SOURCE_DIR}/src/assets/heap_retry2.c"
+    "${CMAKE_SOURCE_DIR}/src/assets/heap_calloc.c"
+)
+
 add_library(v8core STATIC ${V8_CORE_SRC})
 target_include_directories(v8core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
@@ -47,6 +56,12 @@ add_subdirectory(platform)
 # ----- the executable -----
 add_executable(v8 platform/main.c)
 target_link_libraries(v8 PRIVATE v8core v8platform)
+
+if(MSVC)
+    # MSVC moved sprintf et al. into legacy_stdio_definitions.lib post-VS2015;
+    # decompiled code declares them as bare externs, so link against it.
+    target_link_libraries(v8 PRIVATE legacy_stdio_definitions)
+endif()
 
 if(WIN32)
     set_target_properties(v8 PROPERTIES WIN32_EXECUTABLE FALSE)  # console for logs

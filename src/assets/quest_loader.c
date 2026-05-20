@@ -46,12 +46,17 @@
 
 extern void *Asset_LoadFile(const char *path);   /* FUN_80015f80 */
 
+/* Same storage cell, two names. Other files (main_loop.c) read this
+ * via iRam00000608; quest_loader.c set it via g_questTable. Audit
+ * 2026-05-19: collapsed to a single global to avoid divergence. */
 uint32_t *g_questTable;     /* @ piRam00000608 */
+uintptr_t iRam00000608;     /* aliased; written together below */
 
 void Quest_Load(void)
 {
     uint32_t *q = (uint32_t *)Asset_LoadFile("Quest.bin");
-    g_questTable = q;
+    g_questTable    = q;
+    iRam00000608    = (uintptr_t)q;
     if (q == 0) return;
 
     uint32_t nCharacters = q[0];

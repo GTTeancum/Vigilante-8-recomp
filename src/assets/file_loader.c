@@ -1,18 +1,19 @@
-/* file_loader.c -- top-level file loader: locate by name, read into heap.
+/* file_loader.c -- low-level "read previously-opened file" loader.
  *
- * Source: SLUS_005.10
- *   FUN_80015948  -- Asset_LoadFile(no-arg form; uses last-opened name)
- *   FUN_800116f4  -- Heap_AllocOrRetry  (malloc + OOM recovery)
+ * Source: SLUS_005.10  FUN_80015948.
  *
- * The descriptor returned by Asset_OpenFile (FUN_800157d4 -- not yet
- * decomp'd, lives in src/assets/auto/) carries the on-disc start sector
- * at +0xc and the byte length at +0x10. Asset_LoadFile rounds the byte
- * length up to a multiple of 0x800 (the PSX CD sector size), allocates
- * a buffer of that size, reads the whole file in one CdRead call, then
- * realloc-shrinks the buffer to the true length to free the read pad.
+ * AUDIT NOTE (2026-05-19): originally cleaned with name 'Asset_LoadFile'
+ * which collided with FUN_80015f80 (the path-taking version called by
+ * Quest_Load). Renamed here to Asset_LoadFromOpened so each address
+ * has a unique name. The path-taking version is now in
+ * platform/host_asset.c (Asset_LoadFile(const char *path) -> fopen).
  *
- * HIGH confidence: clean two-step pattern (alloc + read + trim) matches
- * standard PSY-Q sample code.
+ * This function reads the descriptor returned by Asset_OpenFile
+ * (FUN_800157d4) which carries the on-disc start sector at +0xc and
+ * the byte length at +0x10. Rounds size up to a multiple of 0x800
+ * (PSX sector), allocates, reads, trims.
+ *
+ * HIGH confidence: clean two-step pattern (alloc + read + trim).
  */
 #include <stdint.h>
 #include "structs.h"
@@ -22,7 +23,7 @@ extern void *Heap_AllocOrRetry(uint32_t n);               /* FUN_800116f4 */
 extern void *Heap_Realloc(void *p, uint32_t n);
 extern void *V8_CdReadSectors(void *buf, int sector, int mode);
 
-void *Asset_LoadFile(void)
+void *Asset_LoadFromOpened(void)
 {
     /* Descriptor: { ..., u32 startSector @+0xc, u32 fileSize @+0x10, ... }. */
     uint8_t *desc = (uint8_t *)Asset_OpenFile();

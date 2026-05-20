@@ -18,6 +18,15 @@ target_include_directories(psyq_stubs PUBLIC
 add_library(v8platform STATIC
     platform_init.c
     smoke_harness.c
+    host_heap.c
+    host_asset.c
+    panic_stubs.c
+    shell_stub.c
+    shell_aliases.c
+    heap_shim.c
+    sched_shim.c
+    vehicle_stub.c
+    pad_shim.c
 )
 target_include_directories(v8platform PUBLIC
     ${CMAKE_SOURCE_DIR}/include

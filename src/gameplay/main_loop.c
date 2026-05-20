@@ -70,8 +70,8 @@ extern int  strcpy(char *d, const char *s);
 extern void     Sched_BeginFrame(void);                 /* FUN_80011834 */
 extern void     Shell_PreEnter(void);                   /* FUN_800128d4 */
 extern void     Audio_ResetVoices(uint32_t mask);       /* FUN_800251fc */
-extern int      Overlay_Open(const char *path);         /* FUN_80011adc */
-extern void     Overlay_Close(int handle);              /* FUN_80045088 */
+extern uintptr_t Overlay_Open(const char *path);        /* FUN_80011adc -- returns ptr-as-int on PSX */
+extern void      Overlay_Close(uintptr_t handle);       /* FUN_80045088 */
 extern void     Audio_StreamReset(void);                /* FUN_80029dec */
 extern void     Audio_BankSelect(uint32_t mask);        /* FUN_800227a4 */
 extern uint32_t Sound_LoadSND(const char *path);        /* FUN_80044360 */
@@ -173,8 +173,12 @@ void V8_MainLoop(void)
         Audio_ResetVoices(0x40);
 
         if (firstShellEntry == 0) {
-            int h = Overlay_Open("Shell\\Shell.dll");
-            char *path = (char *)(*(uint32_t (**)(void))(h + 4))();
+            uintptr_t h = Overlay_Open("Shell\\Shell.dll");
+            /* PSX overlay handle layout: ptr-to-fn at +4 (32-bit PSX
+             * sizes). On host this requires the loader's handle layout
+             * to keep a function pointer at byte offset 4 -- see
+             * platform/shell_stub.c which uses #pragma pack(4). */
+            char *path = (char *)(*(char *(**)(void))(h + 4))();
             strcpy(shellPath, path ? path : "");
             Overlay_Close(h);
             if (shellPath[0] == '\0') return;
