@@ -115,6 +115,9 @@ void Pad_Tick(void)
 
     integrate_vehicle(pad);
     Projectile_Tick((pad & 0x08000000) != 0);
+    extern void AI_Tick(void);
+    extern int  AI_Hp(void);
+    AI_Tick();
     Platform_FrameTick();      /* render + present + event pump */
 
     if (g_v8_frame_limit > 0 && g_v8_frame_count >= g_v8_frame_limit) {
@@ -123,6 +126,9 @@ void Pad_Tick(void)
         fprintf(stderr, "v8: vehicle pos = (%.2f, %.2f, %.2f) yaw=%.2f speed=%.2f\n",
                 g_veh_x, g_veh_y, g_veh_z, g_veh_yaw, g_veh_speed);
         fprintf(stderr, "v8: projectiles spawned = %d\n", Projectile_SpawnCount());
+        fprintf(stderr, "v8: AI hp = %d\n", AI_Hp());
+        extern float g_ai_x, g_ai_z;
+        fprintf(stderr, "v8: AI pos = (%.2f, %.2f)\n", g_ai_x, g_ai_z);
         fflush(stderr);
         exit(0);
     }

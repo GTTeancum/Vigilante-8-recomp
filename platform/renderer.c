@@ -308,6 +308,17 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
         glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
         glDrawElements(GL_TRIANGLES, g_box_idxCount, GL_UNSIGNED_INT, 0);
     }
+
+    /* AI opponent vehicle, if alive. */
+    extern int AI_GetActive(float *out_xyz);
+    extern int AI_Yaw(float *out_yaw);
+    float ai_p[3]; float ai_yaw;
+    if (AI_GetActive(ai_p) && AI_Yaw(&ai_yaw)) {
+        make_model_yt(M, ai_yaw, ai_p[0], ai_p[1], ai_p[2]);
+        mat4_mul(VP, M, MVP);
+        glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        glDrawElements(GL_TRIANGLES, g_box_idxCount, GL_UNSIGNED_INT, 0);
+    }
 }
 
 #else  /* no SDL/GL */
