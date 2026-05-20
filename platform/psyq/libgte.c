@@ -309,6 +309,25 @@ int32_t gte_stIR1(void) { return (int16_t)g_data[IR1_]; }
 int32_t gte_stIR2(void) { return (int16_t)g_data[IR2_]; }
 int32_t gte_stIR3(void) { return (int16_t)g_data[IR3_]; }
 
+/* MAC1/2/3 readbacks -- the i32 accumulators behind the IR registers.
+ * Used in long-vector reconstruction paths (e.g. FUN_80043408 splits a
+ * q15.16 vector into hi/lo, runs two MVMVAs, and recombines via these). */
+int32_t gte_stMAC1(void) { return g_data[MAC1]; }
+int32_t gte_stMAC2(void) { return g_data[MAC2]; }
+int32_t gte_stMAC3(void) { return g_data[MAC3]; }
+
+/* Load the packed VX0/VY0 i16 pair (from memory pointed by ptr) plus
+ * VZ0 separately.  These match PSY-Q's gte_ldvxy0/gte_ldvz0 macros. */
+void gte_ldVXY0(const void *ptr) {
+    uint32_t v = *(const uint32_t *)ptr;
+    g_data[V0_XY] = (int32_t)v;
+}
+void gte_ldVZ0(const void *ptr) {
+    /* PSY-Q's macro loads u32 then sign-extends low i16 to i32. */
+    uint32_t v = *(const uint32_t *)ptr;
+    g_data[V0_Z]  = (int32_t)(int16_t)v;
+}
+
 /* Store the long-vector form of IR (i.e. the MAC1/2/3 32-bit accumulator). */
 void gte_stlvnl(VECTOR *out) {
     out->vx = g_data[MAC1];
@@ -353,8 +372,53 @@ long SquareRoot0(long n) {
 void gte_rtir       (void) { mvmva(0, 3, 3, 1, 0); }
 void gte_rtir_b     (void) { mvmva(0, 3, 3, 1, 0); }
 void gte_rtir_sf0_b (void) { mvmva(0, 3, 3, 0, 0); }
+void gte_rtir_sf0   (void) { mvmva(0, 3, 3, 0, 0); }   /* alias: RTIR_SF0 */
 void gte_rtirtr_b   (void) { mvmva(0, 3, 0, 1, 0); }
+void gte_rtirtr     (void) { mvmva(0, 3, 0, 1, 0); }   /* alias: RTIRTR */
 void gte_rtv0_b     (void) { mvmva(0, 0, 0, 1, 0); }
+void gte_rtv0       (void) { mvmva(0, 0, 3, 1, 0); }   /* RTV0: V0 by R, no translation */
+
+/* GTE OP: outer product (cross-product) of two 3-vectors.  Per nocash:
+ *
+ *   MAC1 = (IR3*RT22 - IR2*RT33)
+ *   MAC2 = (IR1*RT33 - IR3*RT11)
+ *   MAC3 = (IR2*RT11 - IR1*RT22)
+ *   IR[1..3] = saturated MAC[1..3] >> (sf*12)
+ *
+ * The "matrix" is interpreted as a diagonal vector D = (RT11, RT22, RT33).
+ * To compute cross(A, B), the caller loads A = (D1, D2, D3) into the
+ * matrix-diagonal slots (via gte_ldR11R12/22R23/33 with the off-diagonals
+ * left at zero) and B into IR1/IR2/IR3, then issues OP.
+ *
+ * lm=0 (signed sat), the only mode the engine uses.
+ */
+static void gte_OP_impl(int sf)
+{
+    int32_t d1 = (int16_t)g_ctl[RT_11_12];   /* RT11 (low half) */
+    int32_t d2 = (int16_t)(g_ctl[RT_22_23]); /* RT22 (low half) */
+    int32_t d3 = (int16_t)g_ctl[RT_33];      /* RT33 (low half) */
+    int32_t a  = g_data[IR1_];
+    int32_t b  = g_data[IR2_];
+    int32_t c  = g_data[IR3_];
+
+    g_ctl[FLAG] = 0;
+    int64_t m1 = (int64_t)c * d2 - (int64_t)b * d3;
+    int64_t m2 = (int64_t)a * d3 - (int64_t)c * d1;
+    int64_t m3 = (int64_t)b * d1 - (int64_t)a * d2;
+    int shift = sf ? 12 : 0;
+    int32_t mac1 = (int32_t)(m1 >> shift);
+    int32_t mac2 = (int32_t)(m2 >> shift);
+    int32_t mac3 = (int32_t)(m3 >> shift);
+    g_data[MAC1] = mac1;
+    g_data[MAC2] = mac2;
+    g_data[MAC3] = mac3;
+    g_data[IR1_] = (mac1 < -0x8000) ? -0x8000 : (mac1 > 0x7fff) ? 0x7fff : mac1;
+    g_data[IR2_] = (mac2 < -0x8000) ? -0x8000 : (mac2 > 0x7fff) ? 0x7fff : mac2;
+    g_data[IR3_] = (mac3 < -0x8000) ? -0x8000 : (mac3 > 0x7fff) ? 0x7fff : mac3;
+}
+void gte_OP(int sf) { gte_OP_impl(sf); }
+void gte_op12(void) { gte_OP_impl(1); }      /* PSY-Q macro alias used in
+                                                FUN_8001787c MIPS dump */
 
 /* ============================================================
  * PSY-Q library functions (built on top of the GTE).  Each matches
@@ -404,6 +468,19 @@ void ApplyMatrix(const MATRIX *m, const SVECTOR *v0, VECTOR *v1) {
     v1->vx = g_data[MAC1];
     v1->vy = g_data[MAC2];
     v1->vz = g_data[MAC3];
+}
+
+/* ApplyMatrixSV: V_out (SVECTOR) = M * V_in (SVECTOR), q12.  Identical
+ * to ApplyMatrix for the GTE math, but the result is stored as i16
+ * (truncating MAC1/2/3 to short) via the IR registers.  PSY-Q symbol
+ * at SLUS:0x8004d2b4. */
+void ApplyMatrixSV(const MATRIX *m, const SVECTOR *v0, SVECTOR *v1) {
+    SetRotMatrix(m);
+    gte_ldv0(v0);
+    mvmva(0, 0, 3, 1, 0);
+    v1->vx = (int16_t)gte_stIR1();
+    v1->vy = (int16_t)gte_stIR2();
+    v1->vz = (int16_t)gte_stIR3();
 }
 
 void ApplyMatrixLV(const MATRIX *m, const VECTOR *v0, VECTOR *v1) {
