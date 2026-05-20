@@ -27,9 +27,12 @@
 extern int      g_v8_frame_count;
 extern int      g_v8_frame_limit;
 extern int      g_v8_auto_drive_frames;   /* Phase 4 synth-input cap */
+extern int      g_v8_auto_fire_period;    /* Phase 5: synth fire every N frames */
 extern uint32_t uRam0000062c;
 extern uint32_t uRam00000630;
 extern void     Platform_FrameTick(void);
+extern void     Projectile_Tick(int fire_held);
+extern int      Projectile_SpawnCount(void);
 
 /* Stub vehicle storage (offsets per Vehicle struct evidence). */
 extern uint8_t *puRam000007d0;   /* points at g_stub_vehicle_p1 */
@@ -62,6 +65,10 @@ static uint32_t read_pad_input(void)
     if (g_v8_auto_drive_frames > 0 && g_v8_frame_count < g_v8_auto_drive_frames) {
         pad |= 0x10000000;            /* accelerate */
         if ((g_v8_frame_count / 30) & 1) pad |= 0x20000000;  /* steer right intermittently */
+    }
+    /* Auto-fire synth: press fire every N frames. */
+    if (g_v8_auto_fire_period > 0 && (g_v8_frame_count % g_v8_auto_fire_period) == 0) {
+        pad |= 0x08000000;
     }
     return pad;
 }
@@ -107,6 +114,7 @@ void Pad_Tick(void)
     }
 
     integrate_vehicle(pad);
+    Projectile_Tick((pad & 0x08000000) != 0);
     Platform_FrameTick();      /* render + present + event pump */
 
     if (g_v8_frame_limit > 0 && g_v8_frame_count >= g_v8_frame_limit) {
@@ -114,6 +122,7 @@ void Pad_Tick(void)
                 g_v8_frame_limit);
         fprintf(stderr, "v8: vehicle pos = (%.2f, %.2f, %.2f) yaw=%.2f speed=%.2f\n",
                 g_veh_x, g_veh_y, g_veh_z, g_veh_yaw, g_veh_speed);
+        fprintf(stderr, "v8: projectiles spawned = %d\n", Projectile_SpawnCount());
         fflush(stderr);
         exit(0);
     }

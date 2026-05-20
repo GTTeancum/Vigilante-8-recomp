@@ -29,6 +29,7 @@ add_library(v8platform STATIC
     pad_shim.c
     screenshot.c
     renderer.c
+    projectile_shim.c
 )
 target_include_directories(v8platform PUBLIC
     ${CMAKE_SOURCE_DIR}/include

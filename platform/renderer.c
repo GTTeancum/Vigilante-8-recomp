@@ -292,6 +292,22 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
     glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
     glBindVertexArray(g_box_vao);
     glDrawElements(GL_TRIANGLES, g_box_idxCount, GL_UNSIGNED_INT, 0);
+
+    /* Projectiles: small scaled cubes at each active position. */
+    extern int Projectile_GetActive(float *out_xyz, int max);
+    float proj[64 * 3];
+    int nproj = Projectile_GetActive(proj, 64);
+    for (int i = 0; i < nproj; i++) {
+        float P[16] = {
+            0.3f, 0, 0, 0,
+            0, 0.3f, 0, 0,
+            0, 0, 0.3f, 0,
+            proj[i*3+0], proj[i*3+1], proj[i*3+2], 1
+        };
+        mat4_mul(VP, P, MVP);
+        glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        glDrawElements(GL_TRIANGLES, g_box_idxCount, GL_UNSIGNED_INT, 0);
+    }
 }
 
 #else  /* no SDL/GL */
