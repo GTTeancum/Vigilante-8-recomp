@@ -49,33 +49,90 @@ typedef enum {
     MATCH_MODE_SPECIAL5 = 5    /* LOW: triggers FUN_8001714c(0xbb40e64d), looks like fixed seed */
 } V8MatchMode;
 
-/* Vehicle struct -- STRUCT_PASS recovered ~16 fields. Total size still
- * unknown (highest seen offset is +0x120). Allocation site not yet
- * located -- pass 2 will close that gap.
+/* Vehicle / movable-object struct.
  *
- * Evidence: cross-function offset clustering through puRam000007d0 (P1)
- * and puRam000007d4 (P2) via call-site argument propagation (the
- * STRUCT_PASS sweep below; see notes/struct_evidence.md).
+ * The engine reuses ONE common base layout for every "movable object"
+ * that participates in physics (vehicles, AI cars, guided projectiles,
+ * physics debris, destructibles).  The base layout is what's documented
+ * below; some object types reinterpret bytes in private windows (e.g.
+ * projectiles use +0x80/82/84 as i16 angvel rather than i32 vel; see
+ * `Projectile_GravityTick` in src/gameplay/object_post_update.c).
  *
- *   +0x00  u32       inputFlags    HIGH  bit 0x2 = button held; 0x1000000 = held-latch; 0x20000000 = flag for late-bind; 0x4000 = "active" flag
- *   +0x0c  i16       statusFlags   HIGH  compared against 0; LSB selects between alt-model frame
- *   +0x0e  i16       statusPad
- *   +0x54  void*     listLink      MED   appears 24-bit-masked (Ghidra OT chain artifact); reused as next-in-pool ptr
- *   +0xb3  u8        damageBits    MED   set after collision; 6 reads
- *   +0xbc  i16       healthMaybe   MED   compared against 0 in collision response
- *   +0xd0  i8        controlFlags  LOW
- *   +0xe0  void*     modelData     HIGH  used by Render_VehicleSetTrans (out-of-scope renderer reads it too)
- *   +0xe4  i32       drawCallback  MED   indexed once per draw frame
- *   +0xec  i32       posX_q1715    HIGH  17.15 packed world coord
- *   +0xf0  i32       posY_q1715    HIGH
- *   +0xf4  i32       posZ_q1715    HIGH
- *   +0xf8  void*     altModelData  HIGH  (puRam000007d0[0x3e])
- *   +0x120 i16       angleMaybe    MED   compared/incremented per tick
+ * Field evidence below comes from a line-by-line MIPS audit of these
+ * cleaned functions:
+ *
+ *   Object_IntegrateAndOrient        src/physics/object_integrate.c
+ *   Object_GeneralTick               src/physics/object_general_tick.c
+ *   Object_ApplyImpulseAndIntegrate  src/physics/object_impulse.c
+ *   Object_OBBSuspension             src/physics/object_obb_suspension.c
+ *   Object_FindObstacleAt            src/physics/obstacle_probe.c
+ *   SAT_ProjectAxis                  src/physics/sat_projection.c
  *
  * Tag legend:
  *   HIGH = field role unambiguous across multiple call sites
  *   MED  = clear *type*, role inferred from a few sites
  *   LOW  = best guess
+ *
+ *   +0x00  u32       inputFlags        HIGH  bit 0x2 = button held; 0x1000000 = held-latch;
+ *                                            0x20000000 = late-bind; 0x4000 = active;
+ *                                            0x800 = "has collidable kd-tree";
+ *                                            0x800000 = "skip prev-pos trail"
+ *   +0x0c  i16       health            HIGH  damaged via Damage_AccumulateOrFire
+ *   +0x0e  i16       maxHealth         HIGH
+ *   +0x10..+0x27     MATRIX            HIGH  3x3 i16 rotation + i16 pad + 3 i32 translation.
+ *                                            t[0..2] OVERLAPS pos at +0x24/+0x28/+0x2c.
+ *   +0x12  i16       reachExtent.x     MED   used by ObstacleChain_Walk visibility test
+ *   +0x18  i16       reachExtent.y     MED
+ *   +0x1e  i16       reachExtent.z     MED
+ *   +0x14  i16       inputLat          HIGH  Object_GeneralTick reads as lateral-input scalar
+ *   +0x16  i16       steerNudgeZ       HIGH  sign-flag for per-tick ang_z +-0x200 nudge
+ *   +0x1a  i16       steerNudgeX       HIGH  sign-flag for per-tick ang_x +-0x200 nudge
+ *   +0x20  i16       inputLong         HIGH  longitudinal-input scalar
+ *   +0x24  i32       posX              HIGH  q15.16 world coord (aliases matrix.t[0])
+ *   +0x28  i32       posY              HIGH  q15.16 (PSX convention: +Y is DOWN)
+ *   +0x2c  i32       posZ              HIGH
+ *   +0x34  void*     listNext          HIGH  next-in-chain pointer for obstacle-tree walker
+ *   +0x38  void*     childListHead     HIGH  head of child-object list
+ *   +0x48  i32       prevPosX          HIGH  smoothed/lerped position trail
+ *   +0x4c  i32       prevPosY          HIGH
+ *   +0x50  i32       prevPosZ          HIGH
+ *   +0x54  void*     listLink          MED   appears 24-bit-masked (Ghidra OT artifact)
+ *   +0x5c  void*     kdtreeRoot        HIGH  collision leaf-stream root; NULL = no obstacles
+ *   +0x64  TickFn    tickCallback      HIGH  per-frame physics dispatch (Physics_Step calls)
+ *   +0x74  void*     obstacleChainA    HIGH  collision: primary obstacle list
+ *   +0x78  void*     obstacleChainB    HIGH  collision: secondary obstacle list
+ *   +0x80  i32       velX              HIGH  q23.8-ish vel; integrator div /128
+ *   +0x84  i32       velY              HIGH
+ *   +0x88  i32       velZ              HIGH
+ *   +0x8c  i32       speedCached       HIGH  Vec3_Length(vel) / 128 -- updated per tick
+ *   +0x90  i32       angVelX           HIGH  q11.20-ish angvel; integrator div /128
+ *   +0x94  i32       angVelY           HIGH
+ *   +0x98  i32       angVelZ           HIGH
+ *   +0x9c  i16       invInertiaX       HIGH  per-axis inverse-inertia for angular impulses
+ *   +0x9e  i16       invInertiaY       HIGH
+ *   +0xa0  i16       invInertiaZ       HIGH
+ *   +0xa4  i16       angYPreBake       HIGH  Object_GeneralTick writes (this << 6) into angVelY
+ *   +0xa6  i16       inputMul          HIGH  multiplier for lat/long input products
+ *   +0xb3  u8        damageBits        MED   set after collision; 6 reads
+ *   +0xba  u8        weight            MED   MatchScore_AppendLine evidence
+ *   +0xbb  u8        skill             MED   same evidence
+ *   +0xbc  i16       healthSecondary   MED   secondary damage check
+ *   +0xd0  i8        controlFlags      LOW
+ *   +0xd8  i32       dragMass          HIGH  drag-Y coefficient (Object_GeneralTick mass-curve)
+ *   +0xe0  void*     modelData         HIGH  used by Render_VehicleSetTrans (renderer reads)
+ *   +0xe4  i32       currentTarget     HIGH  AI's current target (Vehicle_TryAcquireTarget)
+ *   +0xec  i32       posX_alt          HIGH  ALTERNATE posX field (renderer mirror)
+ *   +0xf0  i32       posY_alt          HIGH
+ *   +0xf4  i32       posZ_alt          HIGH
+ *   +0xf8  void*     altModelData      HIGH
+ *   +0x110..+0x118   void* node[3]     HIGH  3 ptr slots for timer/list nodes
+ *   +0x11c i16       timer0            HIGH  Object_GeneralTick decrements while > 0
+ *   +0x11e i16       timer1            HIGH
+ *   +0x120 i16       timer2_snapFlag   HIGH  doubles as snap-vs-lerp flag for prev-pos trail
+ *
+ * Size: at least 0x122 bytes (+0x120 + i16); typical alloc 0x200 in host
+ * shim.  Actual engine alloc size: not yet located (Ghidra-interactive
+ * task, see notes/unknowns.md "Item 4").
  */
 typedef struct Vehicle {
     uint32_t inputFlags;            /* HIGH @0x00 */

@@ -137,3 +137,44 @@ table base.  The earlier "+0x600 phase bias" hypothesis was wrong; the
 `g_v8_sincostbl` directly with the same index math.  No phase bias,
 no OOB.  No-op at runtime (those launchers don't fire during the
 current smoke), but correct from the next time they do.
+
+## Item 4: Player-vehicle tick callback (2026-05-20)
+
+**Status:** STATIC ANALYSIS INSUFFICIENT — needs Ghidra-interactive
+("Find References To" on the symbol).
+
+**What was tried:**
+- Direct lw/sw `0x7d0($zero)` scan of the EXE text: **0 hits**.  The
+  symbol `puRam000007d0` lives at very low RAM (kernel scratch area);
+  the EXE accesses it via the `gp` register + offset rather than
+  $zero-relative.  The PSX EXE header reports `gp = 0`, so the gp
+  value is set up at runtime (likely from `SystemCnf` / by PSY-Q boot),
+  and tracing it from a non-interactive disassembler is impractical.
+- `analysis/SLUS_005.10/xrefs.json` does not have an entry for
+  `0x000007d0` or `0x800007d0` -- Ghidra's auto-xref pass didn't
+  label the location.
+- Scanned MIPS for the alternative pattern `lui rA, 0x80hh; addiu rA,
+  rA, lo; sw rA, 0x64(rB)` (writing a function pointer to obj+0x64,
+  the per-object tick callback slot).  Found **79 distinct call-back
+  registration sites**, with these resolved against the known-
+  functions table:
+
+      1 / 79 : 0x8003eab0  Projectile_GravityTick (cleaned)
+     78 / 79 : addresses inside Ghidra "gap" regions (functions Ghidra
+               did not auto-identify; not in functions.json)
+
+  The 78 unresolved pointers are the tick callbacks for the engine's
+  full roster of dynamic objects (AI vehicles, guided projectiles,
+  per-level destructibles, debris).  Tying a specific one to the
+  PLAYER vehicle requires either:
+    - tracing `puRam000007d0 = <alloc>->tickCallback` via Ghidra UI,
+    - OR finding the player-spawn code which is plausibly in
+      `SHELL.DLL` (out-of-scope per CLAUDE.md).
+
+**Implication for the runtime port:** the `host_vehicle.c` shim
+currently sets its own tick callback that calls `Object_GeneralTick`.
+This is the engine's *universal movable-object* tick, not the player-
+specific tick.  Until the player tick is identified, the host shim's
+pad-input -> engine-input-field mapping (vehicle struct offsets
++0x14/0x16/0x1a/0x20/0xa4/0xa6/0xd8) remains a best-effort interpretation
+of fields the player-tick would normally populate.
