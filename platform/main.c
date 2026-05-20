@@ -94,10 +94,21 @@ int main(int argc, char **argv)
      * The user closes the window to exit (SDL_QUIT -> exit(0) in
      * platform_init.c). --help shows the flag reference. */
 
-    g_screenshot_path = opts.screenshot_path;
+    g_screenshot_path     = opts.screenshot_path;
+    g_audio_capture_path  = opts.audio_capture_path;
     if (g_screenshot_path) atexit(on_exit_screenshot);
     g_v8_auto_drive_frames = opts.auto_drive_frames;
     g_v8_auto_fire_period  = opts.auto_fire_period;
+
+    /* Audio init -- real device when not headless; WAV capture if asked. */
+    extern void Audio_Init(void);
+    extern int  Audio_CaptureStart(const char *path);
+    extern void Audio_CaptureStop(void);
+    if (g_audio_capture_path) {
+        Audio_CaptureStart(g_audio_capture_path);
+        atexit(Audio_CaptureStop);
+    }
+    if (!opts.want_headless) Audio_Init();
 
     /* Sanity check: are the extracted game assets where we expect? */
     {

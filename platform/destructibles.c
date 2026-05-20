@@ -57,6 +57,8 @@ void Destructibles_Tick(void)
             if (d2 < 1.5f * 1.5f) {
                 g_props[i].alive = 0;
                 g_broken_count++;
+                extern void Audio_PlaySfx(int kind);
+                Audio_PlaySfx(3);   /* break/explosion */
                 fprintf(stderr, "v8: destructible %d broken (total=%d)\n",
                         i, g_broken_count);
                 break;

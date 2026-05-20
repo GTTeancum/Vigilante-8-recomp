@@ -58,6 +58,8 @@ void Projectile_Tick(int fire_held)
     /* Edge-detect: fire only on a fresh press (rising edge). */
     if (fire_held && !g_fire_held_last) {
         spawn_projectile();
+        extern void Audio_PlaySfx(int kind);
+        Audio_PlaySfx(1);   /* fire beep */
     }
     g_fire_held_last = fire_held;
 

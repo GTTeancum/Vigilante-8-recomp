@@ -88,10 +88,13 @@ void AI_Tick(void)
         float d2 = pdx*pdx + pdy*pdy + pdz*pdz;
         if (d2 < 1.5f * 1.5f) {
             g_ai_hp--;
+            extern void Audio_PlaySfx(int kind);
+            Audio_PlaySfx(2);   /* hit beep */
             fprintf(stderr, "v8: AI hit! hp=%d\n", g_ai_hp);
             if (g_ai_hp <= 0) {
                 g_ai_alive = 0;
                 g_ai_respawn_in = 60;
+                Audio_PlaySfx(3);   /* explosion beep */
                 fprintf(stderr, "v8: AI down (will respawn in 60 frames)\n");
             }
             break;

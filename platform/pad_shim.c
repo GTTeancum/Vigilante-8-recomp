@@ -121,6 +121,8 @@ void Pad_Tick(void)
     extern int  Destructibles_BrokenCount(void);
     AI_Tick();
     Destructibles_Tick();
+    extern void Audio_PumpHeadless(int frames_per_tick);
+    Audio_PumpHeadless(22050 / 60);   /* one tick's worth */
     Platform_FrameTick();      /* render + present + event pump */
 
     if (g_v8_frame_limit > 0 && g_v8_frame_count >= g_v8_frame_limit) {
