@@ -513,31 +513,27 @@ void MatrixNormal(const MATRIX *m_in, MATRIX *m_out)
 }
 
 /* ============================================================
- * PSY-Q trig.  rsin/rcos use a 4096-entry sin table stored in BIOS
- * (DAT_80060db4 in the cleaned code).  We use math.h here for the
- * initial seed; bit-exactness against the BIOS LUT is a later audit
- * step (we'd populate a static table from the cleaned DAT and look
- * up). For now the output is sin/cos with q12 quantisation, which
- * is what PSY-Q delivers up to ~1-LSB rounding differences.
+ * PSY-Q trig.  rsin/rcos use the 4096-entry interleaved (sin,cos)
+ * table that PSY-Q embedded in the binary at 0x800607b4. The table
+ * formula is `round(sin/cos(2*pi*i/4096) * 4096)` -- we generate it
+ * at compile time via tools/gen_sintbl.py (no copyrighted bytes from
+ * the user's EXE are bundled). The generated table has been verified
+ * byte-for-byte against the EXE.
+ *
+ * Note: the cleaned engine code references the table as DAT_80060db4,
+ * which is +0x600 into the base; that's just where the highest cross-
+ * reference landed in Ghidra, not the table start.
  * ============================================================ */
+extern const int16_t g_v8_sincostbl[8192];   /* platform/psyq/sintbl.c */
+
+int rsin(int a) { return g_v8_sincostbl[((a) & 0xfff) * 2 + 0]; }
+int rcos(int a) { return g_v8_sincostbl[((a) & 0xfff) * 2 + 1]; }
+
+/* PSY-Q ratan2: q12 angle in [0, 4096) corresponding to atan2(y, x).
+ * Pass-3 audit target: PSY-Q's ratan2 uses a piecewise polynomial +
+ * the same sin LUT; the host's atan2 will differ by up to a few LSB.
+ * Not exercised on the per-tick physics path -- safe to leave float. */
 #include <math.h>
-
-int rsin(int a) {
-    double rad = (double)((a) & 0xfff) * (2.0 * 3.14159265358979323846 / 4096.0);
-    int v = (int)(sin(rad) * 4096.0);
-    if (v >  0x1000) v =  0x1000;
-    if (v < -0x1000) v = -0x1000;
-    return v;
-}
-int rcos(int a) {
-    double rad = (double)((a) & 0xfff) * (2.0 * 3.14159265358979323846 / 4096.0);
-    int v = (int)(cos(rad) * 4096.0);
-    if (v >  0x1000) v =  0x1000;
-    if (v < -0x1000) v = -0x1000;
-    return v;
-}
-
-/* PSY-Q ratan2: q12 angle in [0, 4096) corresponding to atan2(y, x). */
 int ratan2(int y, int x) {
     if (x == 0 && y == 0) return 0;
     double rad = atan2((double)y, (double)x);

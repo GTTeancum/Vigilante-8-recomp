@@ -29,6 +29,7 @@ ghidra/
 
 # Smoke-test artifacts
 *.png
+*.ppm
 *.wav
 tools/smoke/captures/
 

@@ -13,7 +13,8 @@
 
 static int v8_panic_warn(const char *name) {
     /* Dedupe by pointer: each stub passes its own string literal,
-     * so identical addresses mean identical call sites. */
+     * so identical addresses mean identical call sites. Cap unique
+     * sites at 256 (boot pulls in ~140 distinct stubs). */
     static const char *seen[256];
     static int n_seen = 0;
     for (int i = 0; i < n_seen; i++) if (seen[i] == name) return 0;

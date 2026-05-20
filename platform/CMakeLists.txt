@@ -32,6 +32,7 @@ add_library(v8platform STATIC
     host_vehicle.c
     physics_shim.c
     host_terrain.c
+    host_sintbl_verify.c
 )
 target_include_directories(v8platform PUBLIC
     ${CMAKE_SOURCE_DIR}/include

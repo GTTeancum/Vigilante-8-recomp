@@ -108,3 +108,25 @@ analysis warranted.
 Ghidra exposes GTE coprocessor instructions as pseudo-functions at
 0x2000xxxx VAs. Stripped from the in-scope queue; declared in
 `include/gte.h`.
+
+## DAT_80060db4 — naming offset, not table base (added 2026-05-20)
+
+PSY-Q's interleaved (sin, cos) LUT lives at **`0x800607b4`** in
+SLUS_005.10 (4096 entries × 2 i16). Ghidra named the highest-referenced
+spot `DAT_80060db4`, which is `+0x600` (entry 384) into the table, not
+the base.
+
+Cleaned files that declare `extern int16_t DAT_80060db4[]` and index
+into it:
+- `src/physics/canynlnd/spawner.c`
+- `src/physics/casnocty/spawner.c`
+- `src/physics/casnocty/manhole_tick.c`
+
+Their access pattern is `DAT_80060db4[aimIdx * 2 + 0]` with
+`aimIdx ∈ [0, 4095]`, which overruns the table by 768 entries when
+treated literally. Audit pending: either retarget those references to
+`&g_v8_sincostbl[768]` (the +0x600-into-base alias) and accept the
+33.75° phase bias is intentional, OR re-read the original MIPS to
+confirm the stride/base. Not on the per-tick vehicle integrator path;
+the bit-exact rsin/rcos path via `g_v8_sincostbl` is independent and
+verified against the EXE byte-for-byte at boot.

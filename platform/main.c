@@ -135,6 +135,11 @@ int main(int argc, char **argv)
 
     if (!opts.want_headless) Platform_Init(640, 480, "v8 -- engine vehicle");
 
+    /* Verify the generated sin/cos LUT matches the user's EXE byte-
+     * for-byte. Diagnoses ROM-revision drift early; quiet success. */
+    extern int Host_VerifySinCosTable(void);
+    Host_VerifySinCosTable();
+
     /* Parse OILFIELD.EXP and populate DAT_800911a0[] so the engine's
      * Terrain_HeightAt works against real game heightmap data. */
     extern int Host_TerrainLoad(const char *exp_path);
