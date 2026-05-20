@@ -20,7 +20,8 @@ void Heap_Init(V8HeapBlock *base, uint32_t size);
 typedef struct {
     int   want_selftest;
     int   want_headless;
-    int   max_frames;     /* 0 = unlimited */
+    int   max_frames;            /* 0 = unlimited */
+    int   auto_drive_frames;     /* 0 = no auto-drive; N = synth forward-input for N frames */
     const char *replay_path;
     const char *screenshot_path;
     const char *audio_capture_path;
@@ -30,6 +31,7 @@ typedef struct {
 /* Frame counter the engine can read & check against the cap. */
 int g_v8_frame_count = 0;
 int g_v8_frame_limit = 0;
+int g_v8_auto_drive_frames = 0;
 
 /* Optional output paths from CLI. exit handlers consume these. */
 const char *g_screenshot_path = NULL;
@@ -62,6 +64,7 @@ static int parse_args(int argc, char **argv, V8Opts *o) {
         else if (!strcmp(a, "--headless"))    o->want_headless = 1;
         else if (!strcmp(a, "--report-heap")) o->report_heap = 1;
         else if (!strcmp(a, "--frames") && i+1 < argc)        o->max_frames = atoi(argv[++i]);
+        else if (!strcmp(a, "--auto-drive") && i+1 < argc)    o->auto_drive_frames = atoi(argv[++i]);
         else if (!strcmp(a, "--replay") && i+1 < argc)        o->replay_path = argv[++i];
         else if (!strcmp(a, "--screenshot") && i+1 < argc)    o->screenshot_path = argv[++i];
         else if (!strcmp(a, "--audio-capture") && i+1 < argc) o->audio_capture_path = argv[++i];
@@ -93,6 +96,7 @@ int main(int argc, char **argv)
 
     g_screenshot_path = opts.screenshot_path;
     if (g_screenshot_path) atexit(on_exit_screenshot);
+    g_v8_auto_drive_frames = opts.auto_drive_frames;
 
     printf("v8: phase 2 boot (max_frames=%d, headless=%d)\n",
            opts.max_frames, opts.want_headless);

@@ -18,28 +18,26 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-extern int g_v8_frame_count;
-extern int g_v8_frame_limit;
 extern uint32_t uRam0000062c;   /* pad bits for player 1 */
 extern uint32_t uRam00000630;   /* pad bits for player 2 */
 
+/* Separate counter: Sched_WaitFrame fires during shell wait loops
+ * BEFORE the inner game-tick loop reaches Pad_Tick. We don't want
+ * to burn the --frames budget here. After 240 wait spins we force
+ * the start bit so the engine continues. */
+static int g_wait_count = 0;
+
 void Sched_WaitFrame(void)
 {
-    g_v8_frame_count++;
-    if (g_v8_frame_limit > 0 && g_v8_frame_count >= g_v8_frame_limit) {
-        /* Force the "Start pressed" bit so any wait-on-start loop
-         * exits, and the "any button" bit so prompts dismiss. */
+    g_wait_count++;
+    if (g_wait_count >= 240) {
+        /* Force the "any button" bits so wait-on-input loops release. */
         uRam0000062c = 0x0000ffff;
         uRam00000630 = 0x0000ffff;
-        if (g_v8_frame_count % 1000 == 0)
-            fprintf(stderr, "v8: frame cap %d reached; forcing pad bits\n",
-                    g_v8_frame_limit);
     }
-    if (g_v8_frame_count > g_v8_frame_limit + 600 && g_v8_frame_limit > 0) {
-        /* Engine refused to exit -- hard cap. */
-        fprintf(stderr, "v8: HARD CAP at %d frames (limit was %d); exit\n",
-                g_v8_frame_count, g_v8_frame_limit);
-        exit(0);
+    if (g_wait_count > 2000) {
+        fprintf(stderr, "v8: WAIT LOOP HANG (%d spins); exiting\n", g_wait_count);
+        exit(2);
     }
 }
 

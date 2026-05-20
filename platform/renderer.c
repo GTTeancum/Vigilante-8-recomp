@@ -189,77 +189,108 @@ static void init_once(void) {
             g_terr_idxCount/3);
 }
 
-/* Build perspective+lookat MVP into out[16] (column-major). */
-static void make_mvp(float *out, int w, int h, float t) {
-    /* Perspective. */
-    float fov = 60.0f * 3.1415926f / 180.0f;
-    float aspect = (float)w / (float)h;
-    float zn = 0.1f, zf = 200.0f;
-    float f = 1.0f / tanf(fov * 0.5f);
-    float P[16] = {
-        f/aspect, 0, 0, 0,
-        0, f, 0, 0,
-        0, 0, (zf+zn)/(zn-zf), -1,
-        0, 0, (2*zf*zn)/(zn-zf), 0
-    };
-    /* LookAt orbit. */
-    float cam_r = 30.0f, cam_y = 18.0f;
-    float ex = cam_r * cosf(t * 0.5f), ez = cam_r * sinf(t * 0.5f);
-    float ey = cam_y;
-    /* compute view = inverse of TRS where R looks from eye to origin */
-    float fx_ = -ex, fy_ = -ey, fz_ = -ez;
-    float fn = sqrtf(fx_*fx_ + fy_*fy_ + fz_*fz_);
-    fx_ /= fn; fy_ /= fn; fz_ /= fn;
-    /* up = (0,1,0); side = fwd x up */
-    float sx = fy_*0 - fz_*1, sy = fz_*0 - fx_*0, sz = fx_*1 - fy_*0;
-    float sn = sqrtf(sx*sx + sy*sy + sz*sz);
-    sx /= sn; sy /= sn; sz /= sn;
-    /* up' = side x fwd */
-    float ux = sy*fz_ - sz*fy_;
-    float uy = sz*fx_ - sx*fz_;
-    float uz = sx*fy_ - sy*fx_;
+/* Vehicle pose from pad_shim.c (read by the chase camera + box draw). */
+extern float g_veh_x, g_veh_y, g_veh_z, g_veh_yaw, g_veh_speed;
 
-    float V[16] = {
-        sx, ux, -fx_, 0,
-        sy, uy, -fy_, 0,
-        sz, uz, -fz_, 0,
-        -(sx*ex + sy*ey + sz*ez),
-        -(ux*ex + uy*ey + uz*ez),
-         (fx_*ex + fy_*ey + fz_*ez),
-        1
-    };
+static void cross3(const float a[3], const float b[3], float out[3]) {
+    out[0] = a[1]*b[2] - a[2]*b[1];
+    out[1] = a[2]*b[0] - a[0]*b[2];
+    out[2] = a[0]*b[1] - a[1]*b[0];
+}
+static float dot3(const float a[3], const float b[3]) {
+    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
+static void norm3(float v[3]) {
+    float l = sqrtf(dot3(v, v));
+    if (l > 1e-6f) { v[0]/=l; v[1]/=l; v[2]/=l; }
+}
 
-    /* MVP = P * V (model=identity). 4x4 mul, column-major. */
+static void mat4_mul(const float A[16], const float B[16], float out[16]) {
     for (int c = 0; c < 4; c++)
     for (int r = 0; r < 4; r++) {
         float s = 0;
-        for (int k = 0; k < 4; k++)
-            s += P[k*4 + r] * V[c*4 + k];
+        for (int k = 0; k < 4; k++) s += A[k*4 + r] * B[c*4 + k];
         out[c*4 + r] = s;
     }
 }
 
+static void make_perspective(float P[16], int w, int h) {
+    float fov = 60.0f * 3.1415926f / 180.0f;
+    float aspect = (float)w / (float)h;
+    float zn = 0.1f, zf = 500.0f;
+    float f = 1.0f / tanf(fov * 0.5f);
+    memset(P, 0, sizeof(float) * 16);
+    P[0]  = f/aspect;
+    P[5]  = f;
+    P[10] = (zf+zn)/(zn-zf);
+    P[11] = -1.0f;
+    P[14] = (2*zf*zn)/(zn-zf);
+}
+
+static void make_lookat(float V[16], const float eye[3], const float ctr[3], const float up[3]) {
+    float fwd[3] = { ctr[0]-eye[0], ctr[1]-eye[1], ctr[2]-eye[2] };
+    norm3(fwd);
+    float side[3]; cross3(fwd, up, side); norm3(side);
+    float u2[3];   cross3(side, fwd, u2);
+
+    V[0] = side[0]; V[4] = side[1]; V[ 8] = side[2]; V[12] = -dot3(side, eye);
+    V[1] = u2[0];   V[5] = u2[1];   V[ 9] = u2[2];   V[13] = -dot3(u2, eye);
+    V[2] = -fwd[0]; V[6] = -fwd[1]; V[10] = -fwd[2]; V[14] =  dot3(fwd, eye);
+    V[3] = 0;       V[7] = 0;       V[11] = 0;       V[15] = 1;
+}
+
+/* Camera VP only (no model). out is column-major. */
+static void make_chase_camera(float out[16], int w, int h) {
+    float chase_back = 10.0f, chase_up = 5.0f;
+    float eye[3] = {
+        g_veh_x - sinf(g_veh_yaw) * chase_back,
+        g_veh_y + chase_up,
+        g_veh_z - cosf(g_veh_yaw) * chase_back
+    };
+    float ctr[3] = { g_veh_x, g_veh_y + 1.0f, g_veh_z };
+    float up[3]  = { 0, 1, 0 };
+
+    float P[16], V[16];
+    make_perspective(P, w, h);
+    make_lookat(V, eye, ctr, up);
+    mat4_mul(P, V, out);
+}
+
+/* Right-multiply with a model matrix (Y-rotation + translation). */
+static void make_model_yt(float M[16], float yaw, float tx, float ty, float tz) {
+    float c = cosf(yaw), s = sinf(yaw);
+    M[0] = c;  M[4] = 0;  M[ 8] = s;  M[12] = tx;
+    M[1] = 0;  M[5] = 1;  M[ 9] = 0;  M[13] = ty;
+    M[2] = -s; M[6] = 0;  M[10] = c;  M[14] = tz;
+    M[3] = 0;  M[7] = 0;  M[11] = 0;  M[15] = 1;
+}
+
 void Renderer_DrawFrame(int w, int h, int frame_idx)
 {
+    (void)frame_idx;
     init_once();
 
     glViewport(0, 0, w, h);
     glClearColor(0.45f, 0.62f, 0.85f, 1.0f);   /* sky */
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
 
     glUseProgram(g_prog);
 
-    float mvp[16];
-    make_mvp(mvp, w, h, (float)frame_idx * 0.016f);
-    glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, mvp);
+    float VP[16];
+    make_chase_camera(VP, w, h);
 
-    /* Terrain. */
+    /* Terrain at world origin -- identity model. MVP = VP * I = VP. */
+    glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, VP);
     glBindVertexArray(g_terr_vao);
     glDrawElements(GL_TRIANGLES, g_terr_idxCount, GL_UNSIGNED_INT, 0);
 
-    /* Vehicle box (centered, sits on ground). */
+    /* Vehicle box at (g_veh_x, y_ground, g_veh_z), rotated by g_veh_yaw. */
+    float M[16], MVP[16];
+    make_model_yt(M, g_veh_yaw, g_veh_x, g_veh_y, g_veh_z);
+    mat4_mul(VP, M, MVP);
+    glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
     glBindVertexArray(g_box_vao);
-    /* For simplicity, draw with model = MVP (cube is at origin, sized 1). */
     glDrawElements(GL_TRIANGLES, g_box_idxCount, GL_UNSIGNED_INT, 0);
 }
 
