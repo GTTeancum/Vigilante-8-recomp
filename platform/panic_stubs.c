@@ -12,11 +12,13 @@
 #include <stddef.h>
 
 static int v8_panic_warn(const char *name) {
-    static int seen_total = 0;
-    if (seen_total < 64) {
-        fprintf(stderr, "v8: PANIC-STUB %s() invoked\n", name);
-        seen_total++;
-    }
+    /* Dedupe by pointer: each stub passes its own string literal,
+     * so identical addresses mean identical call sites. */
+    static const char *seen[256];
+    static int n_seen = 0;
+    for (int i = 0; i < n_seen; i++) if (seen[i] == name) return 0;
+    if (n_seen < (int)(sizeof seen / sizeof seen[0])) seen[n_seen++] = name;
+    fprintf(stderr, "v8: PANIC-STUB %s() invoked\n", name);
     return 0;
 }
 

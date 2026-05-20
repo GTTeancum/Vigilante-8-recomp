@@ -43,14 +43,18 @@ void Physics_Step(uint32_t catchupFlag)
     call_count++;
     tick_one((uint8_t *)puRam000007d0, (int)catchupFlag);
     tick_one((uint8_t *)puRam000007d4, (int)catchupFlag);
-    if (call_count == 60) {
+    if (call_count == 60 || call_count == 120 || call_count == 240 ||
+        call_count == 480 || call_count == 600) {
         uint8_t *v = (uint8_t *)puRam000007d0;
         if (v) {
-            int32_t px = *(int32_t *)(v + 0x24);
-            int32_t py = *(int32_t *)(v + 0x28);
-            int32_t pz = *(int32_t *)(v + 0x2c);
-            fprintf(stderr, "v8: Physics_Step @60 -- vehicle pos = (0x%x, 0x%x, 0x%x)\n",
-                    px, py, pz);
+            int32_t px24 = *(int32_t *)(v + 0x24);
+            int32_t py24 = *(int32_t *)(v + 0x28);
+            int32_t pz24 = *(int32_t *)(v + 0x2c);
+            int32_t pxec = *(int32_t *)(v + 0xec);
+            int32_t pyec = *(int32_t *)(v + 0xf0);
+            int32_t pzec = *(int32_t *)(v + 0xf4);
+            fprintf(stderr, "v8: Physics_Step @%d  +24=(0x%x,0x%x,0x%x)  +ec=(0x%x,0x%x,0x%x)\n",
+                    call_count, px24, py24, pz24, pxec, pyec, pzec);
         }
     }
 }
