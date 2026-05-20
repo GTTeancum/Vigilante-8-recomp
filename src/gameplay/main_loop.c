@@ -195,7 +195,7 @@ void V8_MainLoop(void)
         }
         Audio_BankSelect(mask);
 
-        uRam000005f8 = (uint8_t)Sound_LoadSND("Sounds\\Main.SND");
+        uRam000005f8 = Sound_LoadSND("Sounds\\Main.SND");
         uint32_t fnt = Font_LoadFNT("Misc\\Game.FNT");
         Font_PrepareGlyphs(0);
         Font_SelectBank(1);

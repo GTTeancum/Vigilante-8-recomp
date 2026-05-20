@@ -94,16 +94,35 @@ def main():
     # Don't stub symbols that have hand-written real implementations
     # under platform/ (e.g. shell_stub.c, host_heap.c, etc.).
     real_impls = set()
-    for p in (ROOT / "platform").rglob("*.c"):
-        if p.name == "panic_stubs.c":
-            continue
-        try:
-            text = p.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        # Crude function-definition matcher: `<ret> Name(...)` at col 0.
-        for m in re.finditer(r"^[A-Za-z_][A-Za-z0-9_ \*]*?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", text, re.M):
-            real_impls.add(m.group(1))
+    # Scan BOTH platform/ (host-side impls) and src/ (decompiled engine code).
+    # Without src/, when a cleaned engine function gets a real body, the
+    # generator would also re-emit a panic stub for it and the link
+    # would fail with LNK2005 (multiply defined symbols).
+    # Strip `#if 0 ... #endif` blocks (used in src/ for the Ghidra-ref
+     # audit copy of each cleaned function -- those definitions don't
+     # actually compile and must NOT be treated as real impls).
+    IFZERO_RE = re.compile(r"^#if\s+0\b.*?^#endif.*?$", re.M | re.S)
+    scan_dirs = [(ROOT / "platform"), (ROOT / "src")]
+    for d in scan_dirs:
+        for p in d.rglob("*.c"):
+            if p.name == "panic_stubs.c":
+                continue
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            text = IFZERO_RE.sub("", text)
+            # Match REAL function definitions only: `<ret> Name(args) {`
+            # possibly with the `{` on the next line.  Excludes `extern`
+            # declarations (which end with `;`).
+            for m in re.finditer(
+                r"^(?!extern\b)(?!//)"               # not extern, not comment
+                r"[A-Za-z_][A-Za-z0-9_ \*]*?\s+"     # return type
+                r"([A-Za-z_][A-Za-z0-9_]*)\s*"        # NAME
+                r"\([^;{]*\)\s*\{",                   # (args) { on same or next line
+                text, re.M | re.S,
+            ):
+                real_impls.add(m.group(1))
 
     # Distinguish data symbols (DAT_*, *Ram*, etc.) from function symbols.
     # Data gets a zero-initialized definition; functions get a panic stub.

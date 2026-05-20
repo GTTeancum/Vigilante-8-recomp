@@ -1,27 +1,38 @@
 /* snd_loader.c -- SND sound bank loader (open / load / close pattern).
  *
  * Source: SLUS_005.10
- *   FUN_80044360  -- Audio_LoadSND  -- thin {open, read-payload, close} wrapper.
+ *   FUN_80044360  -- Sound_LoadSND  (engine name; main_loop.c uses this)
+ *                    aka Audio_LoadSND in some pass-2 notes; thin
+ *                    {open, parse, close} wrapper.
  *   FUN_800441f8  -- Audio_ParseSND -- the bank parser (in snd_parse.c)
  *   FUN_80044394  -- Audio_FreeSND  -- SpuFree(handle's sample bytes) + Heap_Free(handle)
  *
  * The bank handle layout (recovered from FUN_80044394):
- *   { u16 ???, u16 sampleSizeIn8b, ... }
+ *   { u16 nSamples, u16 sampleSizeIn8b, i32 sampleOffs[nSamples]... }
  *      -- the SPU allocation length is *(u16 *)(handle+2) << 3.
+ *
+ * Runtime note: Sound_LoadSND is intentionally kept under the legacy
+ * name `Audio_LoadSND` here so the link DOESN'T pull it in during the
+ * smoke run.  The current host stubs for FUN_800157d4 (ISO open) and
+ * FUN_80015368 ("failure-path infinite-loop trap") + SpuIsTransfer-
+ * Completed do not satisfy the contract this loader expects -- wiring
+ * it now would spin in the SPU DMA wait loop.  Switch to `Sound_LoadSND`
+ * once the streaming/SPU stack is hooked.  See main_loop.c which still
+ * declares the engine name and lets the panic stub catch the call.
  *
  * HIGH.
  */
 #include <stdint.h>
 
-extern void Stream_OpenByName(uint32_t pathHandle);          /* FUN_800159b4 */
+extern void Stream_OpenByName(const char *path);             /* FUN_800159b4 */
 extern void Stream_Close(void);                              /* FUN_80015a00 */
 extern void *Audio_ParseSND(void);                           /* FUN_800441f8 */
 extern void  SpuFree(uint32_t spuAddr);
 extern void  Heap_Free(void *p);
 
-void *Audio_LoadSND(uint32_t pathHandle)
+void *Audio_LoadSND(const char *path)
 {
-    Stream_OpenByName(pathHandle);
+    Stream_OpenByName(path);
     void *bank = Audio_ParseSND();
     Stream_Close();
     return bank;
