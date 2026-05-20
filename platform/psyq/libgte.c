@@ -554,18 +554,45 @@ int rsin(int a) { return g_v8_sincostbl[((a) & 0xfff) * 2 + 0]; }
 int rcos(int a) { return g_v8_sincostbl[((a) & 0xfff) * 2 + 1]; }
 
 
-/* PSY-Q ratan2: q12 angle in [0, 4096) corresponding to atan2(y, x).
- * Pass-3 audit target: PSY-Q's ratan2 uses a piecewise polynomial +
- * the same sin LUT; the host's atan2 will differ by up to a few LSB.
- * Not exercised on the per-tick physics path -- safe to leave float. */
-#include <math.h>
-int ratan2(int y, int x) {
+/* PSY-Q ratan2: returns q12 angle in [0, 4096) for atan2(y, x).
+ *
+ * Implemented via binary search of the same g_v8_sincostbl LUT we
+ * use for rsin/rcos.  Maximum error: 1 LSB relative to evaluating
+ * the table at the exact returned index (no float intermediates).
+ *
+ * Quadrant decomposition:
+ *   Q0: x>=0, y>=0  -> idx in [0..1024]
+ *   Q1: x<0,  y>=0  -> 2048 - idx_of_(-x,y)
+ *   Q2: x<0,  y<0   -> 2048 + idx_of_(-x,-y)
+ *   Q3: x>=0, y<0   -> 4096 - idx_of_(x,-y)
+ *
+ * Within Q0, we binary-search the LUT for the smallest i such that
+ *   sin(i) * x  >=  cos(i) * y
+ * which is the angular threshold where atan2(y, x) <= i*(2pi/4096).
+ * Using cross-multiplication avoids any division. */
+static int ratan2_q0(int y, int x)
+{
+    if (x == 0) return 0x400;        /* 90 degrees */
+    if (y == 0) return 0;
+    int lo = 0, hi = 1024;            /* Q0 covers [0, 1024] */
+    while (lo < hi) {
+        int mid = (lo + hi) >> 1;
+        int s = g_v8_sincostbl[mid * 2 + 0];
+        int c = g_v8_sincostbl[mid * 2 + 1];
+        /* sin(mid)*x  vs  cos(mid)*y in i64 to avoid overflow at edges. */
+        if ((int64_t)s * x >= (int64_t)c * y) hi = mid;
+        else                                  lo = mid + 1;
+    }
+    return lo;
+}
+
+int ratan2(int y, int x)
+{
     if (x == 0 && y == 0) return 0;
-    double rad = atan2((double)y, (double)x);
-    double turns = rad * (1.0 / (2.0 * 3.14159265358979323846));
-    if (turns < 0) turns += 1.0;
-    int a = (int)(turns * 4096.0);
-    return a & 0xfff;
+    if (x >= 0 && y >= 0) return ratan2_q0(y, x);
+    if (x < 0  && y >= 0) return 0x800 - ratan2_q0(y, -x);
+    if (x < 0  && y < 0)  return 0x800 + ratan2_q0(-y, -x);
+    return (0x1000 - ratan2_q0(-y, x)) & 0xfff;
 }
 
 /* ============================================================

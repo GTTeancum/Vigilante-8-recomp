@@ -20,6 +20,9 @@ extern uint32_t V8_RandNext(void);
 extern void     V8_SeedRng(uint32_t seed);
 extern int32_t  Vec3_Length(const int32_t *v);
 extern int64_t  Vec3_Dot64(const int32_t *a, const int32_t *b);
+extern int      ratan2(int y, int x);
+extern int      rsin(int a);
+extern int      rcos(int a);
 
 int Smoke_RunSelfTest(void)
 {
@@ -90,7 +93,53 @@ int Smoke_RunSelfTest(void)
         if (fails == prev) printf("selftest: Vec3 math ok (large-magnitude regime exact)\n");
     }
 
-    /* Test 3: Vehicle struct sizeof. Phase 1 will assert size==0x200;
+    /* Test 3: ratan2 round-trip via rsin/rcos.
+     *   For each angle i in [0, 4096), ratan2(sin(i), cos(i)) should
+     *   recover i, modulo the table's 1-LSB rounding. */
+    {
+        int prev = fails;
+        int worst = 0;
+        for (int i = 0; i < 4096; i++) {
+            int s = rsin(i);
+            int c = rcos(i);
+            int r = ratan2(s, c);
+            int d = r - i;
+            if (d >  2048) d -= 4096;
+            if (d < -2048) d += 4096;
+            if (d <  0) d = -d;
+            if (d > worst) worst = d;
+        }
+        if (worst > 1) {
+            fprintf(stderr, "selftest: ratan2 round-trip worst-case %d LSB (expect <= 1)\n", worst);
+            fails++;
+        }
+        if (ratan2(0, 0) != 0) {
+            fprintf(stderr, "selftest: ratan2(0,0) = %d (expect 0)\n", ratan2(0, 0));
+            fails++;
+        }
+        if (ratan2(0, 0x1000) != 0) {
+            fprintf(stderr, "selftest: ratan2(0,+) = %d (expect 0)\n", ratan2(0, 0x1000));
+            fails++;
+        }
+        if (ratan2(0x1000, 0) != 0x400) {
+            fprintf(stderr, "selftest: ratan2(+,0) = %d (expect 0x400 = 90deg)\n",
+                    ratan2(0x1000, 0));
+            fails++;
+        }
+        if (ratan2(0, -0x1000) != 0x800) {
+            fprintf(stderr, "selftest: ratan2(0,-) = %d (expect 0x800 = 180deg)\n",
+                    ratan2(0, -0x1000));
+            fails++;
+        }
+        if (ratan2(-0x1000, 0) != 0xc00) {
+            fprintf(stderr, "selftest: ratan2(-,0) = %d (expect 0xc00 = 270deg)\n",
+                    ratan2(-0x1000, 0));
+            fails++;
+        }
+        if (fails == prev) printf("selftest: ratan2 ok (worst %d LSB across 4096 angles)\n", worst);
+    }
+
+    /* Test 4: Vehicle struct sizeof. Phase 1 will assert size==0x200;
      * Phase 0 just confirms the type is reachable. */
     /* Will be wired when include/structs.h Vehicle layout is finalized. */
 
