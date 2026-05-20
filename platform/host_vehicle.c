@@ -114,11 +114,19 @@ void Host_VehicleInit(void)
     m[3] = 0x00000000;
     m[4] = 0x00001000;     /* R33=0x1000 */
 
-    /* Start at world origin, slightly elevated. Position is i32 in
-     * fixed-point; pick something visible. */
-    *(int32_t *)(g_vehicle + 0x24) = 0;            /* x */
-    *(int32_t *)(g_vehicle + 0x28) = 0;            /* y */
-    *(int32_t *)(g_vehicle + 0x2c) = 0;            /* z */
+    /* Spawn inside OilField's populated tile range (chunks cx=18-19,
+     * cz=13-15). Pick the centre of chunk (18,14), cell (32,32):
+     *   global cell x = 18*64 + 32 = 1184  -> world x = 1184 << 16 = 0x4a00000
+     *   global cell z = 14*64 + 32 =  928  -> world z =  928 << 16 = 0x3a00000
+     * Y starts high; gravity/terrain follow not wired yet, so use the
+     * cleaned Terrain_HeightAt to seed +0x28 a few metres above ground. */
+    extern int32_t Terrain_HeightAt(uint32_t x, uint32_t z);
+    int32_t spawn_x = 0x4a00000;
+    int32_t spawn_z = 0x3a00000;
+    int32_t ground_y = Terrain_HeightAt((uint32_t)spawn_x, (uint32_t)spawn_z);
+    *(int32_t *)(g_vehicle + 0x24) = spawn_x;
+    *(int32_t *)(g_vehicle + 0x28) = ground_y + 0x40000;  /* a couple of metres above ground */
+    *(int32_t *)(g_vehicle + 0x2c) = spawn_z;
 
     /* Health field (used by damage path; not relevant for driving). */
     *(int16_t *)(g_vehicle + 0x0c) = 1000;         /* health */

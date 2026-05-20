@@ -31,6 +31,7 @@ add_library(v8platform STATIC
     audio_shim.c
     host_vehicle.c
     physics_shim.c
+    host_terrain.c
 )
 target_include_directories(v8platform PUBLIC
     ${CMAKE_SOURCE_DIR}/include

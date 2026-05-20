@@ -20,7 +20,7 @@ static int v8_panic_warn(const char *name) {
     return 0;
 }
 
-/* 137 unresolved symbols */
+/* 138 unresolved symbols */
 
 int  Audio_BankSelect(void) { return v8_panic_warn("Audio_BankSelect"); }
 int  Audio_ClearAll(void) { return v8_panic_warn("Audio_ClearAll"); }
@@ -54,6 +54,7 @@ uint32_t DAT_8006eef0;
 uint32_t DAT_8006eff8;
 uint32_t DAT_8006f100;
 uint32_t DAT_8006f208;
+uint32_t DAT_8008f020;
 uint32_t DAT_800a3090;
 int  Demo_RecorderShutdown(void) { return v8_panic_warn("Demo_RecorderShutdown"); }
 int  Demo_ResetState(void) { return v8_panic_warn("Demo_ResetState"); }
@@ -158,5 +159,5 @@ uint32_t uRam000007dc;
 uint32_t uRam000008df;
 uint32_t uRam000008f0;
 uint32_t uRam000008f4;
-/* funcs: 56  data: 81  skipped: 0 */
+/* funcs: 56  data: 82  skipped: 0 */
 uint32_t uRam000008f8;

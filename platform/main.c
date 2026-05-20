@@ -135,6 +135,11 @@ int main(int argc, char **argv)
 
     if (!opts.want_headless) Platform_Init(640, 480, "v8 -- engine vehicle");
 
+    /* Parse OILFIELD.EXP and populate DAT_800911a0[] so the engine's
+     * Terrain_HeightAt works against real game heightmap data. */
+    extern int Host_TerrainLoad(const char *exp_path);
+    Host_TerrainLoad("Terrain\\OilField.EXP");
+
     /* Allocate the player Vehicle in the engine heap and set
      * puRam000007d0. After this the engine's Physics_Step (in
      * physics_shim.c) can advance real vehicle state via the cleaned

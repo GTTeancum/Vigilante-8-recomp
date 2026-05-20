@@ -24,7 +24,15 @@ static GLint  g_loc_mvp    = -1;
 static GLint  g_loc_tint   = -1;
 static GLuint g_box_vao    = 0, g_box_vbo = 0, g_box_ibo = 0;
 static int    g_box_idxCount = 0;
+static GLuint g_terr_vao   = 0, g_terr_vbo = 0, g_terr_ibo = 0;
+static int    g_terr_idxCount = 0;
 static int    g_initialized = 0;
+
+/* Engine terrain table + populated-tile bounds, supplied by host_terrain.c. */
+extern uintptr_t DAT_800911a0[32 * 32];
+extern int       g_terrain_loaded;
+extern uint8_t   g_terrain_tile_x_min, g_terrain_tile_x_max;
+extern uint8_t   g_terrain_tile_z_min, g_terrain_tile_z_max;
 
 static const char *VS_SRC =
     "#version 330 core\n"
@@ -90,6 +98,98 @@ static void build_vehicle_box(void) {
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(float)*6, (void *)(sizeof(float)*3));
 }
 
+/* Convert engine's 17.15 fixed-point world unit -> float metres.
+ * V8 uses 4 (17.15) units per nominal metre based on the heightmap
+ * spacing seen in src/physics/terrain_height.c. */
+static float fixed1715_to_m_s(int32_t v) { return (float)v / (32768.0f * 4.0f); }
+
+/* Build a static triangle mesh of the loaded terrain. The engine's
+ * cleaned terrain_sample says:
+ *   chunk_base = DAT_800911a0[chunk_x*32 + chunk_z]
+ *   h(cell_x,cell_z) = *(u16*)(chunk_base + (cell_x<<7)|(cell_z<<1)) & 0x7ff
+ *   world_x_fixed = (chunk_x*64 + cell_x) << 16
+ *   world_z_fixed = (chunk_z*64 + cell_z) << 16
+ *   world_y_fixed = h * 0x800  (matches Terrain_HeightAt >> 5 scaling) */
+static uint32_t terr_sample(int cx_global, int cz_global) {
+    int chunk_x = (cx_global >> 6) & 0x1f;
+    int chunk_z = (cz_global >> 6) & 0x1f;
+    uintptr_t base = DAT_800911a0[chunk_x * 32 + chunk_z];
+    if (!base) return 0;
+    uint32_t off = ((cx_global & 0x3f) << 7) | ((cz_global & 0x3f) << 1);
+    return (uint32_t)(*(uint16_t *)(base + off)) & 0x7ffu;
+}
+
+static void build_terrain_mesh(void) {
+    if (!g_terrain_loaded) return;
+
+    int tx0 = g_terrain_tile_x_min, tx1 = g_terrain_tile_x_max;
+    int tz0 = g_terrain_tile_z_min, tz1 = g_terrain_tile_z_max;
+    int verts_x = (tx1 - tx0 + 1) * 64 + 1;
+    int verts_z = (tz1 - tz0 + 1) * 64 + 1;
+    int n_verts = verts_x * verts_z;
+    int n_quads = (verts_x - 1) * (verts_z - 1);
+
+    float *vbuf = (float *)malloc(sizeof(float) * 6 * n_verts);
+    uint32_t *ibuf = (uint32_t *)malloc(sizeof(uint32_t) * 6 * n_quads);
+    if (!vbuf || !ibuf) { free(vbuf); free(ibuf); return; }
+
+    for (int gz = 0; gz < verts_z; gz++) {
+        for (int gx = 0; gx < verts_x; gx++) {
+            int cx_global = tx0 * 64 + gx;
+            int cz_global = tz0 * 64 + gz;
+            uint32_t h = terr_sample(cx_global, cz_global);
+
+            int32_t fx = cx_global << 16;
+            int32_t fz = cz_global << 16;
+            int32_t fy = (int32_t)(h << 11);   /* h * 0x800 */
+
+            float *p = vbuf + (gz * verts_x + gx) * 6;
+            p[0] = fixed1715_to_m_s(fx);
+            p[1] = fixed1715_to_m_s(fy);
+            p[2] = fixed1715_to_m_s(fz);
+            /* Colour: stripe by height + grid lines per cell to make
+             * it obvious whether geometry actually loaded. */
+            float t = (float)h / 2047.0f;
+            float grid = ((cx_global & 1) ^ (cz_global & 1)) ? 1.0f : 0.85f;
+            p[3] = (0.25f + 0.45f * t) * grid;
+            p[4] = (0.45f + 0.40f * t) * grid;
+            p[5] = (0.25f + 0.20f * (1.0f - t)) * grid;
+        }
+    }
+
+    uint32_t *ip = ibuf;
+    for (int gz = 0; gz < verts_z - 1; gz++) {
+        for (int gx = 0; gx < verts_x - 1; gx++) {
+            uint32_t a = gz * verts_x + gx;
+            uint32_t b = a + 1;
+            uint32_t c = a + verts_x;
+            uint32_t d = c + 1;
+            *ip++ = a; *ip++ = c; *ip++ = b;
+            *ip++ = b; *ip++ = c; *ip++ = d;
+        }
+    }
+    g_terr_idxCount = 6 * n_quads;
+
+    glGenVertexArrays(1, &g_terr_vao); glBindVertexArray(g_terr_vao);
+    glGenBuffers(1, &g_terr_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, g_terr_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * n_verts, vbuf, GL_STATIC_DRAW);
+    glGenBuffers(1, &g_terr_ibo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_terr_ibo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(uint32_t) * g_terr_idxCount, ibuf, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float)*6, (void *)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(float)*6, (void *)(sizeof(float)*3));
+
+    fprintf(stderr, "v8: terrain mesh built -- tiles [%d..%d]x[%d..%d], "
+            "%d verts, %d tris\n",
+            tx0, tx1, tz0, tz1, n_verts, g_terr_idxCount / 3);
+
+    free(vbuf);
+    free(ibuf);
+}
+
 static void init_once(void) {
     if (g_initialized) return;
     GLuint vs = compile(GL_VERTEX_SHADER, VS_SRC);
@@ -106,6 +206,7 @@ static void init_once(void) {
     g_loc_tint = glGetUniformLocation(g_prog, "uTint");
     glDeleteShader(vs); glDeleteShader(fs);
     build_vehicle_box();
+    build_terrain_mesh();
     g_initialized = 1;
 }
 
@@ -160,10 +261,7 @@ static void make_model_yt(float M[16], float yaw, float tx, float ty, float tz) 
 /* Engine's player Vehicle (NULL until the engine's loader populates it). */
 extern void *puRam000007d0;
 
-/* Convert engine's 17.15 fixed-point world unit -> float metres.
- * V8 uses 4 (17.15) units per nominal metre based on the heightmap
- * spacing seen in src/physics/terrain_height.c. */
-static float fixed1715_to_m(int32_t v) { return (float)v / (32768.0f * 4.0f); }
+static float fixed1715_to_m(int32_t v) { return fixed1715_to_m_s(v); }
 
 void Renderer_DrawFrame(int w, int h, int frame_idx)
 {
@@ -223,15 +321,21 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
     make_lookat(V, eye, ctr, up);
     mat4_mul(P, V, VP);
 
+    /* Draw the terrain (identity model). */
+    if (g_terr_idxCount > 0) {
+        float I[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+        mat4_mul(VP, I, MVP);
+        glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        glBindVertexArray(g_terr_vao);
+        glDrawElements(GL_TRIANGLES, g_terr_idxCount, GL_UNSIGNED_INT, 0);
+    }
+
     /* Draw the vehicle as a cube at engine-supplied pose. */
     make_model_yt(M, yaw_rad, vx, vy, vz);
     mat4_mul(VP, M, MVP);
     glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
     glBindVertexArray(g_box_vao);
     glDrawElements(GL_TRIANGLES, g_box_idxCount, GL_UNSIGNED_INT, 0);
-
-    /* Terrain mesh would go here when the engine's parsed heightmap
-     * is available. For now: empty. */
 }
 
 #else  /* no SDL/GL */
