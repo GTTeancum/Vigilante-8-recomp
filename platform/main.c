@@ -31,6 +31,16 @@ typedef struct {
 int g_v8_frame_count = 0;
 int g_v8_frame_limit = 0;
 
+/* Optional output paths from CLI. exit handlers consume these. */
+const char *g_screenshot_path = NULL;
+const char *g_audio_capture_path = NULL;
+
+int Screenshot_Save(const char *path);
+
+static void on_exit_screenshot(void) {
+    if (g_screenshot_path) Screenshot_Save(g_screenshot_path);
+}
+
 static void print_help(void) {
     puts("v8 -- Vigilante 8 recomp\n"
          "Usage: v8 [flags]\n"
@@ -80,6 +90,9 @@ int main(int argc, char **argv)
         print_help();
         return 0;
     }
+
+    g_screenshot_path = opts.screenshot_path;
+    if (g_screenshot_path) atexit(on_exit_screenshot);
 
     printf("v8: phase 2 boot (max_frames=%d, headless=%d)\n",
            opts.max_frames, opts.want_headless);

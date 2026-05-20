@@ -17,10 +17,13 @@ extern int      g_v8_frame_count;
 extern int      g_v8_frame_limit;
 extern uint32_t uRam0000062c;
 extern uint32_t uRam00000630;
+extern void     Platform_FrameTick(void);    /* pumps SDL events + swaps GL */
 
 void Pad_Tick(void)
 {
     g_v8_frame_count++;
+    Platform_FrameTick();   /* clear, present, event pump (windowed only) */
+
     if (g_v8_frame_limit > 0 && g_v8_frame_count >= g_v8_frame_limit) {
         fprintf(stderr, "v8: frame cap %d reached in game-tick loop; exit\n",
                 g_v8_frame_limit);

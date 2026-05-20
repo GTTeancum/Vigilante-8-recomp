@@ -27,6 +27,8 @@ add_library(v8platform STATIC
     sched_shim.c
     vehicle_stub.c
     pad_shim.c
+    screenshot.c
+    renderer.c
 )
 target_include_directories(v8platform PUBLIC
     ${CMAKE_SOURCE_DIR}/include

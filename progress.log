@@ -191,3 +191,4 @@ Special markers:
 [2026-05-20T00:11:55Z] [DECOMP_PASS_3] [struct_evidence] [Added QuestRecord layout to notes/struct_evidence.md as a HIGH-confidence on-disc struct with full container + consumer wiring documented. Repo is fully resolved for the autonomous loop scope; only Ghidra-interactive items remain.]
 [2026-05-20T00:41:25Z] [PHASE_0] [PASS] [git+ghidra refs+CMake skeleton+third_party vendored. 200 ghidra refs attached, 95 third_party headers. cmake -B build configures cleanly with MSVC. Ready for Phase 1.]
 [2026-05-20T01:33:37Z] [PHASE_1] [PASS] [200 src files compile clean, link clean, --selftest exits 0. PSY-Q runtime stubbed (libcd/libgs/libgte/libapi/libspu/libpad) with prototypes in psyq_stubs.h. Copyrighted input/ assets scrubbed from index.]
+[2026-05-20T02:05:19Z] [PHASE_2] [PASS] [300 frames headless, exit 0. Quest.bin loaded; main loop entered; ~80 panic-stubbed funcs called. 4 audit findings logged.]

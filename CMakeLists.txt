@@ -65,6 +65,16 @@ endif()
 
 if(WIN32)
     set_target_properties(v8 PROPERTIES WIN32_EXECUTABLE FALSE)  # console for logs
+
+    # Copy SDL2.dll next to the executable so it can run.
+    if(SDL2_RUNTIME_DLL)
+        add_custom_command(TARGET v8 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${SDL2_RUNTIME_DLL}"
+                "$<TARGET_FILE_DIR:v8>"
+            COMMENT "Copy SDL2.dll next to v8.exe"
+        )
+    endif()
 endif()
 
 # ----- smoke tests -----
