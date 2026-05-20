@@ -316,6 +316,30 @@ void gte_stlvnl(VECTOR *out) {
     out->vz = g_data[MAC3];
 }
 
+/* LZCS/LZCR: leading bit-count.  Writing to LZCS triggers a count of
+ * leading bits that MATCH the sign bit (= leading zeros for v >= 0,
+ * leading ones for v < 0).  LZCR holds the count, range [0, 32].
+ * Used by FUN_80016a20's variable-shift sqrt of dot(v, v). */
+void gte_ldLZCS(int32_t v) {
+    g_data[LZCS] = v;
+    uint32_t u = (v < 0) ? (~(uint32_t)v) : (uint32_t)v;
+    int n = 0;
+    while (n < 32 && (u & 0x80000000u) == 0) { n++; u <<= 1; }
+    g_data[LZCR] = n;
+}
+int32_t gte_stLZCR(void) { return g_data[LZCR]; }
+
+/* PSY-Q SquareRoot0(n): integer sqrt of a u32, returns floor(sqrt(n))
+ * matching the BIOS routine's published behaviour.  Newton-Raphson
+ * with x0 = n converges in ~5 iterations for any u32 input. */
+long SquareRoot0(long n) {
+    if (n <= 0) return 0;
+    uint64_t x = (uint64_t)n;
+    uint64_t y = (x + 1) >> 1;
+    while (y < x) { x = y; y = (x + (uint64_t)n / x) >> 1; }
+    return (long)x;
+}
+
 /* MVMVA convenience forms.  Per the PSY-Q macro naming:
  *   gte_rtir       = MVMVA mx=R, v=IR, cv=none, sf=1, lm=0
  *   gte_rtir_b     = same, "_b" suffix indicates "no error abort"

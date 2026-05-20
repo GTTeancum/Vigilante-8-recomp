@@ -52,4 +52,13 @@ void   gte_GPL(int sf);
 /* IR / SXY / SZ / RGB register read/write accessors as needed.
  * PSY-Q macros gte_stsxy(), gte_ldxy(), etc., map to these. */
 
+/* LZCS/LZCR: leading-bit count helper (used by sqrt normalisation).
+ * Writing LZCS updates LZCR to the count of leading bits that match
+ * the sign bit. */
+void    gte_ldLZCS(int32_t v);
+int32_t gte_stLZCR(void);
+
+/* PSY-Q BIOS integer sqrt: floor(sqrt(n)) for unsigned n. */
+long SquareRoot0(long n);
+
 #endif /* V8_GTE_H */

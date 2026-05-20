@@ -18,6 +18,8 @@
 /* Forward decls -- real impls in v8core / platform. */
 extern uint32_t V8_RandNext(void);
 extern void     V8_SeedRng(uint32_t seed);
+extern int32_t  Vec3_Length(const int32_t *v);
+extern int64_t  Vec3_Dot64(const int32_t *a, const int32_t *b);
 
 int Smoke_RunSelfTest(void)
 {
@@ -35,7 +37,60 @@ int Smoke_RunSelfTest(void)
     }
     printf("selftest: RNG ok (rand=0x%08x)\n", r);
 
-    /* Test 2: Vehicle struct sizeof. Phase 1 will assert size==0x200;
+    /* Test 2: Vec3_Dot64 + Vec3_Length.
+     *
+     * Vec3_Length implements PSY-Q's LZCR-shift-then-SquareRoot0-
+     * then-shift algorithm.  It is exact-or-near-exact for large
+     * magnitudes (the typical regime for q16.16 vels and positions)
+     * but lossy for small ones because the down-shift before sqrt
+     * discards low bits.  We test fixtures in the realistic regime.
+     */
+    {
+        int prev = fails;
+        /* Exact on this fixture: |(0x10000, 0, 0)| = 0x10000. */
+        int32_t vb[3] = { 0x10000, 0, 0 };
+        int32_t lb = Vec3_Length(vb);
+        if (lb != 0x10000) {
+            fprintf(stderr, "selftest: Vec3_Length(0x10000,0,0) got 0x%x expected 0x10000\n", lb);
+            fails++;
+        }
+        /* Realistic vel-magnitude regime: ~28379 ULP error <= 1 LSB
+         * after re-shift; expect within 4 of mathematical sqrt(3*0x100000000) ~= 113511. */
+        int32_t vc[3] = { 0x10000, 0x10000, 0x10000 };
+        int32_t lc = Vec3_Length(vc);
+        if (lc < 113500 || lc > 113520) {
+            fprintf(stderr, "selftest: Vec3_Length(0x10000^3) got %d expected ~113511\n", lc);
+            fails++;
+        }
+        /* Zero -> zero. */
+        int32_t vd[3] = { 0, 0, 0 };
+        if (Vec3_Length(vd) != 0) {
+            fprintf(stderr, "selftest: Vec3_Length(0,0,0) != 0\n");
+            fails++;
+        }
+        /* Negatives produce same magnitude as positives. */
+        int32_t v_pos[3] = { 0x12345, 0x6789a, 0xabcde };
+        int32_t v_neg[3] = { -0x12345, -0x6789a, -0xabcde };
+        int32_t lp = Vec3_Length(v_pos);
+        int32_t ln = Vec3_Length(v_neg);
+        if (lp != ln) {
+            fprintf(stderr, "selftest: Vec3_Length sign asymmetric (%d vs %d)\n", lp, ln);
+            fails++;
+        }
+        /* Dot64: exercise the 64-bit accumulator path with i32 inputs
+         * whose product would overflow i32. */
+        int32_t vp_[3] = { 0x40000000, 0x40000000, 0x40000000 };
+        int64_t dot = Vec3_Dot64(vp_, vp_);
+        int64_t exp = 3 * (int64_t)0x40000000 * (int64_t)0x40000000;
+        if (dot != exp) {
+            fprintf(stderr, "selftest: Vec3_Dot64(huge) %lld != %lld\n",
+                    (long long)dot, (long long)exp);
+            fails++;
+        }
+        if (fails == prev) printf("selftest: Vec3 math ok (large-magnitude regime exact)\n");
+    }
+
+    /* Test 3: Vehicle struct sizeof. Phase 1 will assert size==0x200;
      * Phase 0 just confirms the type is reachable. */
     /* Will be wired when include/structs.h Vehicle layout is finalized. */
 

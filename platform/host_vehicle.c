@@ -28,6 +28,11 @@ extern uint32_t uRam0000062c;             /* P1 pad bits */
 /* Engine integrator (cleaned, src/physics/object_integrate.c). */
 extern void Object_IntegrateAndOrient(uint8_t *obj);
 
+/* Bit-exact length helper (src/physics/vec_math64.c). Referenced here
+ * so the linker pulls the object into v8core.lib (currently the
+ * only other call site is in unreferenced launcher code). */
+extern int32_t Vec3_Length(const int32_t *v);
+
 /* The Vehicle struct is allocated in the engine heap (low memory).
  *
  * Multi-vehicle support will require a proper pack(4) linked-list at
@@ -139,6 +144,11 @@ void Host_VehicleInit(void)
      * via this pointer directly. */
     puRam000007d0 = g_vehicle;
 
-    fprintf(stderr, "v8: host_vehicle initialized at %p (size 0x200)\n",
-            (void *)g_vehicle);
+    /* Force-pull vec_math64.obj into the link.  The call is intentional:
+     * it lets us log spawn-time speed (0 here, since we don't seed
+     * velocity) and exercises the bit-exact integer-sqrt path early. */
+    int32_t initSpeed = Vec3_Length((const int32_t *)(g_vehicle + 0x80));
+
+    fprintf(stderr, "v8: host_vehicle initialized at %p (size 0x200, initSpeed=%d)\n",
+            (void *)g_vehicle, initSpeed);
 }
