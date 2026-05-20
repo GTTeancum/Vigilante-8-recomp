@@ -195,3 +195,7 @@ Special markers:
 [2026-05-20T02:12:37Z] [PHASE_3] [PASS] [SDL window + OpenGL 3.3 + procedural terrain + vehicle box + screenshot. 25 distinct colors in output PPM, 7 above 1% threshold. Real .EXP heightmap parsing deferred to Phase 3 strict (no urgency).]
 [2026-05-20T02:17:56Z] [PHASE_4] [PASS] [Semi-believable checkpoint: vehicle drives on terrain. SDL keyboard + auto-drive. Position delta 26.8 units, yaw 3.2 rad after 300 frames.]
 [2026-05-20T02:34:43Z] [PHASE_9] [ACCEPTANCE_PASS] [RUNNING GAME DELIVERED. 60s autoplay, 3600 frames, vehicle drove 18.9 units, AI hit 35x, 5 props broken, 360 projectiles, audio -15.9 dBFS, screenshot non-uniform.]
+[2026-05-20T03:50:18Z] [RUNTIME] [phase10/gte] [Real bit-exact PSX GTE (libgte.c) -- nocash MVMVA decoder: sf/lm/mx/v/cv fields, 43-bit overflow flags, IR/MAC sat per FLAG register. Committed 8a023c0.]
+[2026-05-20T03:50:18Z] [RUNTIME] [phase10/terrain] [OilField.EXP ZONE chunks (6x 16KB, 64x64 cells, height+attrib u16 pairs) loaded into engine DAT_800911a0[] via BE ZMAP. Renderer emits 24897-vert mesh from real engine state. Committed 8013b5a.]
+[2026-05-20T03:50:18Z] [RUNTIME] [phase10/hygiene] [panic_stubs warn dedupe (Pause_Poll log 50x->1x); multi-frame physics diagnostic confirms integrator advances steadily (Z=0x209025->0x14ff735 across 540 frames, ~27 m/s). Committed 469a926.]
+[2026-05-20T03:50:18Z] [RUNTIME] [phase10/zmap-audit] [Confirmed OilField.EXP ZMAP intentionally sparse: 6 of 1024 cells populated. Driving off populated band is expected (water/empty). No loader bug.]
