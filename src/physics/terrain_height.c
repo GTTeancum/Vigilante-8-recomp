@@ -50,6 +50,13 @@ static inline uint32_t terrain_sample(uint32_t cx, uint32_t cz)
 {
     uint32_t chunkIdx = (cx >> 6) * CHUNK_GRID_DIM + (cz >> 6);
     uintptr_t chunkBase = DAT_800911a0[chunkIdx];
+    /* On real PSX the engine guarantees a chunk pointer is set up
+     * before this is called (the ZMAP+ZONE loader fills every slot,
+     * and the engine never samples unloaded zones).  On host the ZMAP
+     * legitimately has empty slots (oceans/sky cells) -- the engine's
+     * downstream code reads height 0 for those.  Match that with a
+     * NULL guard rather than dereferencing 0+off. */
+    if (chunkBase == 0) return 0;
     uint32_t  off = ((cx & 0x3f) << 7) | ((cz & 0x3f) << 1);
     return *(uint16_t *)(chunkBase + off) & HEIGHT_MASK;
 }

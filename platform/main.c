@@ -27,6 +27,7 @@ typedef struct {
     const char *screenshot_path;
     const char *audio_capture_path;
     int   report_heap;
+    int   use_psx_physics;       /* 1 = wire Object_GeneralTick into vehicle_tick */
 } V8Opts;
 
 /* Frame counter the engine can read & check against the cap. */
@@ -55,6 +56,7 @@ static void print_help(void) {
          "  --screenshot <path>  dump backbuffer to PNG on exit (phase 3+)\n"
          "  --audio-capture <p>  dump mixer to WAV (phase 8+)\n"
          "  --report-heap        alloc/free balance on exit\n"
+         "  --psx-physics        route the host vehicle through Object_GeneralTick\n"
          "  -h, --help           this message\n");
 }
 
@@ -65,6 +67,7 @@ static int parse_args(int argc, char **argv, V8Opts *o) {
         if      (!strcmp(a, "--selftest"))    o->want_selftest = 1;
         else if (!strcmp(a, "--headless"))    o->want_headless = 1;
         else if (!strcmp(a, "--report-heap")) o->report_heap = 1;
+        else if (!strcmp(a, "--psx-physics")) o->use_psx_physics = 1;
         else if (!strcmp(a, "--frames") && i+1 < argc)        o->max_frames = atoi(argv[++i]);
         else if (!strcmp(a, "--auto-drive") && i+1 < argc)    o->auto_drive_frames = atoi(argv[++i]);
         else if (!strcmp(a, "--auto-fire") && i+1 < argc)     o->auto_fire_period = atoi(argv[++i]);
@@ -99,6 +102,8 @@ int main(int argc, char **argv)
     if (g_screenshot_path) atexit(on_exit_screenshot);
     g_v8_auto_drive_frames = opts.auto_drive_frames;
     g_v8_auto_fire_period  = opts.auto_fire_period;
+    extern int g_v8_use_general_tick;
+    g_v8_use_general_tick  = opts.use_psx_physics;
 
     /* Audio init -- real device when not headless; WAV capture if asked. */
     extern void Audio_Init(void);

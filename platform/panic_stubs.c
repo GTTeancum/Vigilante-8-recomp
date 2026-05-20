@@ -23,7 +23,7 @@ static int v8_panic_warn(const char *name) {
     return 0;
 }
 
-/* 138 unresolved symbols */
+/* 139 unresolved symbols */
 
 int  Audio_BankSelect(void) { return v8_panic_warn("Audio_BankSelect"); }
 int  Audio_ClearAll(void) { return v8_panic_warn("Audio_ClearAll"); }
@@ -90,6 +90,7 @@ int  Level_LoadByName(void) { return v8_panic_warn("Level_LoadByName"); }
 int  Match_End(void) { return v8_panic_warn("Match_End"); }
 int  Match_ResetState(void) { return v8_panic_warn("Match_ResetState"); }
 int  Music_StartShell(void) { return v8_panic_warn("Music_StartShell"); }
+int  Object_FindObstacleAt(void) { return v8_panic_warn("Object_FindObstacleAt"); }
 uint32_t PTR_s_Chassey_Blue_800567ec;
 int  Pad_Close(void) { return v8_panic_warn("Pad_Close"); }
 int  PauseMenu_Run(void) { return v8_panic_warn("PauseMenu_Run"); }
@@ -162,5 +163,5 @@ uint32_t uRam000007dc;
 uint32_t uRam000008df;
 uint32_t uRam000008f0;
 uint32_t uRam000008f4;
-/* funcs: 56  data: 82  skipped: 0 */
+/* funcs: 57  data: 82  skipped: 0 */
 uint32_t uRam000008f8;

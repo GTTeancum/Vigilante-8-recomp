@@ -33,6 +33,12 @@ extern void Object_IntegrateAndOrient(uint8_t *obj);
  * only other call site is in unreferenced launcher code). */
 extern int32_t Vec3_Length(const int32_t *v);
 
+/* Generic engine tick (src/physics/object_general_tick.c).  Opt-in via
+ * --psx-physics so we can A/B against the host shim. */
+extern void Object_GeneralTick(uint32_t *obj);
+
+int g_v8_use_general_tick = 0;
+
 /* The Vehicle struct is allocated in the engine heap (low memory).
  *
  * Multi-vehicle support will require a proper pack(4) linked-list at
@@ -47,6 +53,37 @@ static void vehicle_tick(uint8_t *self, int mode, int catchupFlag)
 {
     (void)catchupFlag;
     if (mode != 0) return;
+
+    /* --- PSX-physics path: write the per-tick input fields the engine's
+     * Object_GeneralTick consumes, then let it run the FULL bit-exact
+     * physics chain (terrain probe + Vec3_Length + spring/drag +
+     * Object_IntegrateAndOrient + post-integrate damping).  Opt-in via
+     * --psx-physics; default keeps the legacy shim below. */
+    if (g_v8_use_general_tick) {
+        /* Long-axis thrust (forward/back) -> +0x20 paired with +0xa6 (input mul). */
+        int16_t longThrust = 0;
+        if (uRam0000062c & 0x10000000) longThrust = +0x40;
+        if (uRam0000062c & 0x40000000) longThrust = -0x40;
+        *(int16_t *)(self + 0x20) = longThrust;
+        *(int16_t *)(self + 0xa6) = 0x800;     /* thrust multiplier */
+
+        /* Steering: +0x16 sign-flag (z-yaw nudge), +0xa4 -> ang_y. */
+        if (uRam0000062c & 0x80000000) {
+            *(int16_t *)(self + 0x16) = -1;    /* < 0 -> +0x200 ang_z each frame */
+            *(int16_t *)(self + 0xa4) = -0x80; /* (-0x80 << 6) = ang_y left */
+        } else if (uRam0000062c & 0x20000000) {
+            *(int16_t *)(self + 0x16) = +1;
+            *(int16_t *)(self + 0xa4) = +0x80;
+        } else {
+            *(int16_t *)(self + 0x16) = 0;
+            *(int16_t *)(self + 0xa4) = 0;
+        }
+        *(int16_t *)(self + 0x1a) = 1;         /* zero pitch trim */
+        *(int32_t *)(self + 0xd8) = 0;         /* no drag mass (else gravity term blows up) */
+
+        Object_GeneralTick((uint32_t *)self);
+        return;
+    }
 
     /* --- Drive shim: pad bits -> Vehicle velocity & ang-velocity --- */
     int32_t pitchRate = 0;
