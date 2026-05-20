@@ -80,24 +80,62 @@ int gap_8002bdd0(uint32_t *self, int mode, int arg2, int arg3)
 }
 
 /* ============================================================
- * Wheel_Tick_Stub  (gap_80031294, 104 B)
- * Smallest variant.  Pure dispatcher with no own physics call --
- * delegates everything to siblings.
- * ============================================================ */
-int Wheel_Tick_Stub(uint32_t *self, int mode, int arg2, int arg3)
+ * Vehicle_StateTransition  (gap_80031294, 26 instr)
+ *
+ * NOT a per-frame tick -- this is the callback SWAPPER.  Called when
+ * a vehicle changes state to remap obj+0x64 (the tick-callback slot)
+ * between LAB_8002e2bc (the audio/dispatch tick) and gap_80030f34
+ * (the "rolling" tick that includes Object_GeneralTick).
+ *
+ * Action:
+ *   1. Clear flag 0x2000000 in obj[0].
+ *   2. If health (u16 at obj+0xc) == 0:
+ *        call FUN_8002bc18(obj)  -- the destroy/cleanup tick.
+ *      Else if obj+0xd0 (state byte) == 12:
+ *        install gap_80030f34 (rolling tick: calls Object_GeneralTick)
+ *      Else:
+ *        install LAB_8002e2bc (audio/state tick: no integration)
+ *
+ * This finally explains the routing: VEHICLES IN STATE 12 ARE THE
+ * ONES THAT RUN PER-FRAME PHYSICS.  Newly-constructed vehicles have
+ * obj+0xd0 = template[+0xd]; for the player Vehicle the template
+ * sets this so they spawn in state 12 directly.  When a vehicle gets
+ * damaged or transitions to a non-physical state, this function
+ * swaps in LAB_8002e2bc (audio-only) and physics stops.
+ *
+ * NOTE on signature: the MIPS reads a0 only (no other args).  This
+ * is a 1-arg function, not a mode-dispatcher.  The caller invokes it
+ * explicitly when a state change is needed; it is not the per-frame
+ * callback itself.
+ *
+ * HIGH confidence: 26 instructions are fully decoded.  The two
+ * `lui v0, 0x8003; addiu v0, +0xf34/-0x1d44` pairs encode the
+ * absolute addresses 0x80030f34 and 0x8002e2bc (verified by
+ * arithmetic).
+ */
+void Vehicle_StateTransition(uint32_t *self)
 {
-    (void)arg2; (void)arg3;
-    /* From MIPS at 0x80031294: tiny mode-dispatcher.  Modes 0/1/2
-     * each forward to a sibling (which one depends on the byte at
-     * obj+0xd0).  Disassembly is short enough to keep verbatim;
-     * promoted to MED until the final naming is settled. */
-    /* TODO: full MIPS port -- the dispatcher's branch targets need
-     * verification (this is a 26-instruction function). */
-    (void)self; (void)mode;
-    return 0;
+    self[0] &= ~0x02000000u;
+    if (*(uint16_t *)((uint8_t *)self + 0xc) == 0) {
+        extern void FUN_8002bc18(uint32_t *obj);
+        FUN_8002bc18(self);
+        return;
+    }
+    extern int Wheel_Tick_Front(uint32_t *self, int mode, int arg2, int arg3);
+    extern int LAB_8002e2bc(uint32_t *self, int mode, int arg2, int arg3);
+    /* `gap_80030f34` is at SLUS:0x80030f34 -- the rolling tick (yet
+     * to be cleaned in full).  Bridged below via a forward declaration. */
+    extern int gap_80030f34(uint32_t *self, int mode, int arg2, int arg3);
+
+    uint8_t state = *(uint8_t *)((uint8_t *)self + 0xd0);
+    if (state == 12) {
+        *(uint32_t *)((uint8_t *)self + 0x64) = (uint32_t)(uintptr_t)&gap_80030f34;
+    } else {
+        *(uint32_t *)((uint8_t *)self + 0x64) = (uint32_t)(uintptr_t)&LAB_8002e2bc;
+    }
 }
 
-int gap_80031294(uint32_t *self, int mode, int arg2, int arg3)
+void gap_80031294(uint32_t *self)
 {
-    return Wheel_Tick_Stub(self, mode, arg2, arg3);
+    Vehicle_StateTransition(self);
 }
