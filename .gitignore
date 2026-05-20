@@ -53,3 +53,4 @@ compile_commands.json
 
 # Drop SDL2 documentation (~5MB) -- libs and headers are tracked.
 third_party/SDL2/docs/
+*.dis.s
