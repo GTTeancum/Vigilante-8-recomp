@@ -1,0 +1,3 @@
+# addr: 0x80055258  name: PADCMD_OBJ_5C4
+80055258:  j 0x800552a0
+8005525c:  _clear v0

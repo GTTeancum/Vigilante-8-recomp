@@ -1,0 +1,65 @@
+# addr: 0x8002169c  name: FUN_8002169c
+8002169c:  lw v0,0x714(gp)
+800216a0:  addiu sp,sp,-0x20
+800216a4:  sw ra,0x1c(sp)
+800216a8:  sw s2,0x18(sp)
+800216ac:  sw s1,0x14(sp)
+800216b0:  sw s0,0x10(sp)
+800216b4:  lw s2,0x0(v0)
+800216b8:  nop
+800216bc:  beq s2,zero,0x80021784
+800216c0:  _nop
+800216c4:  lw s1,0x8(v0)
+800216c8:  nop
+800216cc:  lw v0,0x0(s1)
+800216d0:  nop
+800216d4:  andi v0,v0,0x20
+800216d8:  bne v0,zero,0x80021774
+800216dc:  _move v0,s2
+800216e0:  sw zero,0x78(s1)
+800216e4:  sw zero,0x74(s1)
+800216e8:  lw s0,0x0(s2)
+800216ec:  nop
+800216f0:  beq s0,zero,0x80021750
+800216f4:  _move a1,s2
+800216f8:  lw a1,0x8(a1)
+800216fc:  nop
+80021700:  lw v1,0x0(a1)
+80021704:  nop
+80021708:  andi v0,v1,0x20
+8002170c:  bne v0,zero,0x8002173c
+80021710:  _nop
+80021714:  lw v0,0x0(s1)
+80021718:  nop
+8002171c:  and v0,v1,v0
+80021720:  andi v0,v0,0x200
+80021724:  bne v0,zero,0x8002173c
+80021728:  _nop
+8002172c:  jal 0x8001edb4
+80021730:  _move a0,s1
+80021734:  bne v0,zero,0x80021784
+80021738:  _nop
+8002173c:  move a1,s0
+80021740:  lw s0,0x0(s0)
+80021744:  nop
+80021748:  bne s0,zero,0x800216f8
+8002174c:  _nop
+80021750:  lw v0,0x0(s1)
+80021754:  nop
+80021758:  andi v0,v0,0x100
+8002175c:  bne v0,zero,0x80021774
+80021760:  _move v0,s2
+80021764:  lw a0,0x6fc(gp)
+80021768:  jal 0x80020f14
+8002176c:  _move a1,s1
+80021770:  move v0,s2
+80021774:  lw s2,0x0(s2)
+80021778:  nop
+8002177c:  bne s2,zero,0x800216c4
+80021780:  _nop
+80021784:  lw ra,0x1c(sp)
+80021788:  lw s2,0x18(sp)
+8002178c:  lw s1,0x14(sp)
+80021790:  lw s0,0x10(sp)
+80021794:  jr ra
+80021798:  _addiu sp,sp,0x20

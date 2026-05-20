@@ -1,0 +1,27 @@
+# addr: 0x8001d624  name: FUN_8001d624
+8001d624:  addiu sp,sp,-0x20
+8001d628:  sw s0,0x10(sp)
+8001d62c:  move s0,a0
+8001d630:  sw s1,0x14(sp)
+8001d634:  addiu s1,s0,0x10
+8001d638:  lui v0,0x8007
+8001d63c:  sw s2,0x18(sp)
+8001d640:  addiu s2,v0,-0x9c0
+8001d644:  sw ra,0x1c(sp)
+8001d648:  jal 0x8001d5a0
+8001d64c:  _move a0,s0
+8001d650:  move s0,v0
+8001d654:  beq s0,zero,0x8001d670
+8001d658:  _addiu a0,s0,0x10
+8001d65c:  move a1,s1
+8001d660:  jal 0x8004cf04
+8001d664:  _move a2,s2
+8001d668:  j 0x8001d648
+8001d66c:  _move s1,s2
+8001d670:  lw ra,0x1c(sp)
+8001d674:  lw s2,0x18(sp)
+8001d678:  move v0,s1
+8001d67c:  lw s1,0x14(sp)
+8001d680:  lw s0,0x10(sp)
+8001d684:  jr ra
+8001d688:  _addiu sp,sp,0x20

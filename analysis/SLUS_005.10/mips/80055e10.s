@@ -1,0 +1,24 @@
+# addr: 0x80055e10  name: PADPORTD_OBJ_23C
+80055e10:  lui v0,0x8006
+80055e14:  lw v0,0x52f4(v0)
+80055e18:  lui v1,0x8006
+80055e1c:  lw v1,0x529c(v1)
+80055e20:  lui at,0x8006
+80055e24:  sw zero,0x52a0(at)
+80055e28:  sh zero,0xa(v0)
+80055e2c:  lui v0,0x8006
+80055e30:  lw v0,0x52b0(v0)
+80055e34:  addiu v1,v1,0x1
+80055e38:  lui at,0x8006
+80055e3c:  sw v1,0x529c(at)
+80055e40:  slt v0,v0,v1
+80055e44:  bne v0,zero,0x80055e68
+80055e48:  _li v0,0x1
+80055e4c:  sll a0,v1,0x4
+80055e50:  subu a0,a0,v1
+80055e54:  sll a0,a0,0x4
+80055e58:  jal 0x800544d0
+80055e5c:  _addu a0,a0,s1
+80055e60:  j 0x80055e6c
+80055e64:  _ori a1,zero,0xffff
+80055e68:  ori a1,zero,0xffff

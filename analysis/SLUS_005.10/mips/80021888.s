@@ -1,0 +1,19 @@
+# addr: 0x80021888  name: FUN_80021888
+80021888:  addiu sp,sp,-0x18
+8002188c:  sw s0,0x10(sp)
+80021890:  move s0,a0
+80021894:  lui a0,0x8006
+80021898:  addiu a0,a0,0x5a18
+8002189c:  move a1,s0
+800218a0:  sw ra,0x14(sp)
+800218a4:  jal 0x80020000
+800218a8:  _clear a2
+800218ac:  bne v0,zero,0x800218c0
+800218b0:  _move a1,s0
+800218b4:  lw a0,0x6fc(gp)
+800218b8:  jal 0x8002111c
+800218bc:  _clear a2
+800218c0:  lw ra,0x14(sp)
+800218c4:  lw s0,0x10(sp)
+800218c8:  jr ra
+800218cc:  _addiu sp,sp,0x18

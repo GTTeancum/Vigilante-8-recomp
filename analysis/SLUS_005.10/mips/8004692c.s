@@ -1,0 +1,33 @@
+# addr: 0x8004692c  name: S_SCA_OBJ_98
+8004692c:  beq a1,zero,0x80046958
+80046930:  _andi v0,a2,0x7fff
+80046934:  lh a3,0x4(a0)
+80046938:  lhu v1,0x4(a0)
+8004693c:  slti v0,a3,0x80
+80046940:  beq v0,zero,0x80046954
+80046944:  _li a2,0x7f
+80046948:  bltz a3,0x80046954
+8004694c:  _clear a2
+80046950:  move a2,v1
+80046954:  andi v0,a2,0x7fff
+80046958:  lui v1,0x8006
+8004695c:  lw v1,-0x122c(v1)
+80046960:  or v0,v0,a1
+80046964:  sh v0,0x180(v1)
+80046968:  bne t2,zero,0x80046980
+8004696c:  _andi v0,t1,0x2
+80046970:  beq v0,zero,0x80046a28
+80046974:  _andi v0,t1,0x8
+80046978:  beq v0,zero,0x800469e4
+8004697c:  _nop
+80046980:  lh v1,0xa(a0)
+80046984:  nop
+80046988:  sltiu v0,v1,0x8
+8004698c:  beq v0,zero,0x800469e4
+80046990:  _sll v0,v1,0x2
+80046994:  lui at,0x8001
+80046998:  addu at,at,v0
+8004699c:  lw v0,0xc04(at)
+800469a0:  nop
+800469a4:  jr v0
+800469a8:  _nop

@@ -1,0 +1,15 @@
+[
+  {"address":"0x80100168","name":"FUN_80100168","size":164,"params":0},
+  {"address":"0x8010020c","name":"FUN_8010020c","size":176,"params":0},
+  {"address":"0x801002bc","name":"FUN_801002bc","size":556,"params":0},
+  {"address":"0x801004e8","name":"FUN_801004e8","size":492,"params":0},
+  {"address":"0x801006d4","name":"FUN_801006d4","size":968,"params":0},
+  {"address":"0x80100a9c","name":"FUN_80100a9c","size":308,"params":0},
+  {"address":"0x80100bd0","name":"FUN_80100bd0","size":184,"params":0},
+  {"address":"0x80100c88","name":"FUN_80100c88","size":3592,"params":0},
+  {"address":"0x80101a90","name":"FUN_80101a90","size":296,"params":0},
+  {"address":"0x80101bb8","name":"FUN_80101bb8","size":240,"params":0},
+  {"address":"0x80101ca8","name":"FUN_80101ca8","size":88,"params":0},
+  {"address":"0x80101d00","name":"FUN_80101d00","size":736,"params":0},
+  {"address":"0x80101fe0","name":"FUN_80101fe0","size":312,"params":0}
+]

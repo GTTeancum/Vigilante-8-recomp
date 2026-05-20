@@ -1,0 +1,68 @@
+# addr: 0x800446dc  name: FUN_800446dc
+800446dc:  addiu sp,sp,-0x38
+800446e0:  sw s0,0x30(sp)
+800446e4:  move s0,a0
+800446e8:  lui a0,0x8007
+800446ec:  addiu a0,a0,-0x980
+800446f0:  move a1,s0
+800446f4:  sw ra,0x34(sp)
+800446f8:  jal 0x80043408
+800446fc:  _addiu a2,sp,0x10
+80044700:  lw v0,0x10(gp)
+80044704:  nop
+80044708:  bne v0,zero,0x80044748
+8004470c:  _lui a0,0x8007
+80044710:  lbu v0,0x5a8(gp)
+80044714:  nop
+80044718:  beq v0,zero,0x80044738
+8004471c:  _nop
+80044720:  jal 0x800445b8
+80044724:  _addiu a0,sp,0x10
+80044728:  sll v0,v0,0x10
+8004472c:  sra v1,v0,0x10
+80044730:  j 0x800447d8
+80044734:  _addu v0,v1,v0
+80044738:  jal 0x80044600
+8004473c:  _addiu a0,sp,0x10
+80044740:  j 0x800447d8
+80044744:  _nop
+80044748:  addiu a0,a0,-0x960
+8004474c:  move a1,s0
+80044750:  addiu s0,sp,0x20
+80044754:  jal 0x80043408
+80044758:  _move a2,s0
+8004475c:  lbu v0,0x5a8(gp)
+80044760:  nop
+80044764:  beq v0,zero,0x800447b4
+80044768:  _nop
+8004476c:  jal 0x800445b8
+80044770:  _addiu a0,sp,0x10
+80044774:  move a0,s0
+80044778:  jal 0x800445b8
+8004477c:  _move s0,v0
+80044780:  lh v1,0x8e4(gp)
+80044784:  sll s0,s0,0x10
+80044788:  sra s0,s0,0x10
+8004478c:  sll v0,v0,0x10
+80044790:  sra v0,v0,0x10
+80044794:  addu s0,s0,v0
+80044798:  slt v0,s0,v1
+8004479c:  beq v0,zero,0x800447a8
+800447a0:  _nop
+800447a4:  move v1,s0
+800447a8:  sll v0,v1,0x10
+800447ac:  j 0x800447d8
+800447b0:  _addu v0,v0,v1
+800447b4:  jal 0x800445b8
+800447b8:  _addiu a0,sp,0x10
+800447bc:  move a0,s0
+800447c0:  jal 0x800445b8
+800447c4:  _move s0,v0
+800447c8:  sll s0,s0,0x10
+800447cc:  sll v0,v0,0x10
+800447d0:  sra v0,v0,0x10
+800447d4:  or v0,s0,v0
+800447d8:  lw ra,0x34(sp)
+800447dc:  lw s0,0x30(sp)
+800447e0:  jr ra
+800447e4:  _addiu sp,sp,0x38

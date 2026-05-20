@@ -1,0 +1,42 @@
+# addr: 0x80018080  name: FUN_80018080
+80018080:  lw v0,0x6c4(gp)
+80018084:  addiu sp,sp,-0x20
+80018088:  sw s0,0x18(sp)
+8001808c:  move s0,a0
+80018090:  beq v0,zero,0x800180a0
+80018094:  _sw ra,0x1c(sp)
+80018098:  jal 0x80017e0c
+8001809c:  _nop
+800180a0:  clear a0
+800180a4:  move a1,a0
+800180a8:  li v0,0x400
+800180ac:  sw v0,0x10(sp)
+800180b0:  li v0,0x200
+800180b4:  move a2,a0
+800180b8:  move a3,a0
+800180bc:  jal 0x80017e3c
+800180c0:  _sw v0,0x14(sp)
+800180c4:  move a0,v0
+800180c8:  sw a0,0x6c4(gp)
+800180cc:  jal 0x80017ec4
+800180d0:  _li a1,0x280
+800180d4:  lw v0,0x6c4(gp)
+800180d8:  nop
+800180dc:  lw a0,0x10(v0)
+800180e0:  jal 0x80017f4c
+800180e4:  _li a1,0x1e0
+800180e8:  lw a0,0x6c4(gp)
+800180ec:  nop
+800180f0:  lw v0,0x10(a0)
+800180f4:  nop
+800180f8:  lw v1,0x10(v0)
+800180fc:  li v0,0x1
+80018100:  beq s0,zero,0x80018114
+80018104:  _sw v0,0x8(v1)
+80018108:  lw a0,0x14(a0)
+8001810c:  jal 0x80017f4c
+80018110:  _li a1,0x100
+80018114:  lw ra,0x1c(sp)
+80018118:  lw s0,0x18(sp)
+8001811c:  jr ra
+80018120:  _addiu sp,sp,0x20

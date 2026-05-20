@@ -1,0 +1,35 @@
+# addr: 0x80045c60  name: SPU_OBJ_78C
+80045c60:  lw a0,-0x4(s0)
+80045c64:  lui at,0x8006
+80045c68:  sw a0,-0x11d8(at)
+80045c6c:  lw a0,0x0(s0)
+80045c70:  lui a1,0x8006
+80045c74:  lw a1,-0x1228(a1)
+80045c78:  srl v1,a0,0x6
+80045c7c:  andi v0,a0,0x3f
+80045c80:  sltu v0,zero,v0
+80045c84:  lui a0,0x8006
+80045c88:  lw a0,-0x11d8(a0)
+80045c8c:  addu v1,v1,v0
+80045c90:  lui at,0x8006
+80045c94:  sw v1,-0x11d4(at)
+80045c98:  sw a0,0x0(a1)
+80045c9c:  lui v0,0x8006
+80045ca0:  lw v0,-0x11d4(v0)
+80045ca4:  lui v1,0x8006
+80045ca8:  lw v1,-0x1224(v1)
+80045cac:  sll v0,v0,0x10
+80045cb0:  ori v0,v0,0x10
+80045cb4:  sw v0,0x0(v1)
+80045cb8:  lui v1,0x8006
+80045cbc:  lw v1,-0x11dc(v1)
+80045cc0:  li v0,0x1
+80045cc4:  bne v1,v0,0x80045cd4
+80045cc8:  _ori a2,a2,0x201
+80045ccc:  lui a2,0x100
+80045cd0:  ori a2,a2,0x200
+80045cd4:  lui v0,0x8006
+80045cd8:  lw v0,-0x1220(v0)
+80045cdc:  nop
+80045ce0:  sw a2,0x0(v0)
+80045ce4:  clear v0

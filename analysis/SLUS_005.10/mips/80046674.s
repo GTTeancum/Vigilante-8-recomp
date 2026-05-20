@@ -1,0 +1,26 @@
+# addr: 0x80046674  name: SpuFree
+80046674:  addiu sp,sp,-0x18
+80046678:  lui v1,0x8006
+8004667c:  lw v1,-0x11cc(v1)
+80046680:  clear a2
+80046684:  blez v1,0x800466d8
+80046688:  _sw ra,0x10(sp)
+8004668c:  lui t1,0x4000
+80046690:  lui v0,0x8000
+80046694:  or t0,a0,v0
+80046698:  move a3,v1
+8004669c:  lui a1,0x8006
+800466a0:  lw a1,-0x11c4(a1)
+800466a4:  nop
+800466a8:  lw v1,0x0(a1)
+800466ac:  nop
+800466b0:  and v0,v1,t1
+800466b4:  bne v0,zero,0x800466d8
+800466b8:  _nop
+800466bc:  bne v1,a0,0x800466cc
+800466c0:  _addiu a2,a2,0x1
+800466c4:  j 0x800466d8
+800466c8:  _sw t0,0x0(a1)
+800466cc:  slt v0,a2,a3
+800466d0:  bne v0,zero,0x800466a8
+800466d4:  _addiu a1,a1,0x8

@@ -1,0 +1,41 @@
+# addr: 0x8001884c  name: FUN_8001884c
+8001884c:  addiu sp,sp,-0x20
+80018850:  sw s0,0x10(sp)
+80018854:  move s0,a0
+80018858:  sw ra,0x1c(sp)
+8001885c:  sw s2,0x18(sp)
+80018860:  sw s1,0x14(sp)
+80018864:  lhu v0,0x0(s0)
+80018868:  nop
+8001886c:  beq v0,zero,0x800188d0
+80018870:  _li v0,0x2
+80018874:  lhu v1,0x8(s0)
+80018878:  lhu a3,0x6(s0)
+8001887c:  andi a1,v1,0xf
+80018880:  sll a1,a1,0x6
+80018884:  andi a0,a3,0xff
+80018888:  srl a2,v1,0x7
+8001888c:  subu v0,v0,a2
+80018890:  srav a0,a0,v0
+80018894:  lhu v0,0xa(s0)
+80018898:  addu s2,a1,a0
+8001889c:  andi v1,v1,0x10
+800188a0:  sll v1,v1,0x4
+800188a4:  srl a3,a3,0x8
+800188a8:  beq v0,zero,0x800188b8
+800188ac:  _addu s1,v1,a3
+800188b0:  jal 0x8001859c
+800188b4:  _move a0,v0
+800188b8:  sh zero,0x0(s0)
+800188bc:  move a0,s2
+800188c0:  jal 0x80018530
+800188c4:  _move a1,s1
+800188c8:  j 0x800188d4
+800188cc:  _nop
+800188d0:  li v0,0x1
+800188d4:  lw ra,0x1c(sp)
+800188d8:  lw s2,0x18(sp)
+800188dc:  lw s1,0x14(sp)
+800188e0:  lw s0,0x10(sp)
+800188e4:  jr ra
+800188e8:  _addiu sp,sp,0x20

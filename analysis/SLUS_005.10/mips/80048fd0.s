@@ -1,0 +1,80 @@
+# addr: 0x80048fd0  name: CdControl
+80048fd0:  addiu sp,sp,-0x38
+80048fd4:  sw s1,0x14(sp)
+80048fd8:  move s1,a1
+80048fdc:  sw s2,0x18(sp)
+80048fe0:  move s2,a2
+80048fe4:  sw s4,0x20(sp)
+80048fe8:  move s4,a0
+80048fec:  sw s0,0x10(sp)
+80048ff0:  li s0,0x3
+80048ff4:  sw s3,0x1c(sp)
+80048ff8:  andi s3,s4,0xff
+80048ffc:  lui v1,0x8006
+80049000:  addiu v1,v1,-0xc
+80049004:  sw s5,0x24(sp)
+80049008:  lui s5,0x8006
+8004900c:  lw s5,0x7c(s5)
+80049010:  sll v0,s3,0x2
+80049014:  sw s6,0x28(sp)
+80049018:  addu s6,v0,v1
+8004901c:  sw s7,0x2c(sp)
+80049020:  clear s7
+80049024:  sw s8,0x30(sp)
+80049028:  li s8,-0x1
+8004902c:  sw ra,0x34(sp)
+80049030:  lui at,0x8006
+80049034:  sw zero,0x7c(at)
+80049038:  li t0,0x1
+8004903c:  beq s3,t0,0x8004906c
+80049040:  _nop
+80049044:  lui v0,0x8006
+80049048:  lbu v0,0x8c(v0)
+8004904c:  nop
+80049050:  andi v0,v0,0x10
+80049054:  beq v0,zero,0x8004906c
+80049058:  _li a0,0x1
+8004905c:  clear a1
+80049060:  clear a2
+80049064:  jal 0x8004a058
+80049068:  _clear a3
+8004906c:  beq s1,zero,0x8004909c
+80049070:  _nop
+80049074:  lw v0,0x0(s6)
+80049078:  nop
+8004907c:  beq v0,zero,0x8004909c
+80049080:  _li a0,0x2
+80049084:  move a1,s1
+80049088:  move a2,s2
+8004908c:  jal 0x8004a058
+80049090:  _clear a3
+80049094:  bne v0,zero,0x800490c0
+80049098:  _nop
+8004909c:  lui at,0x8006
+800490a0:  sw s5,0x7c(at)
+800490a4:  andi a0,s4,0xff
+800490a8:  move a1,s1
+800490ac:  move a2,s2
+800490b0:  jal 0x8004a058
+800490b4:  _clear a3
+800490b8:  beq v0,zero,0x800490dc
+800490bc:  _addiu v0,s7,0x1
+800490c0:  addiu s0,s0,-0x1
+800490c4:  bne s0,s8,0x80049030
+800490c8:  _nop
+800490cc:  lui at,0x8006
+800490d0:  sw s5,0x7c(at)
+800490d4:  li s7,-0x1
+800490d8:  addiu v0,s7,0x1
+800490dc:  lw ra,0x34(sp)
+800490e0:  lw s8,0x30(sp)
+800490e4:  lw s7,0x2c(sp)
+800490e8:  lw s6,0x28(sp)
+800490ec:  lw s5,0x24(sp)
+800490f0:  lw s4,0x20(sp)
+800490f4:  lw s3,0x1c(sp)
+800490f8:  lw s2,0x18(sp)
+800490fc:  lw s1,0x14(sp)
+80049100:  lw s0,0x10(sp)
+80049104:  jr ra
+80049108:  _addiu sp,sp,0x38

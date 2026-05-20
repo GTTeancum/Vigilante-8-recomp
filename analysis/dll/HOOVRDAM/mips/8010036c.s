@@ -1,0 +1,23 @@
+# addr: 0x8010036c  name: FUN_8010036c
+8010036c:  addiu sp,sp,-0x18
+80100370:  sw ra,0x10(sp)
+80100374:  li v0,0x1
+80100378:  beq a1,v0,0x801003a8
+8010037c:  _move v1,a0
+80100380:  li v0,0x7
+80100384:  bne a1,v0,0x801003b4
+80100388:  _clear v0
+8010038c:  lui v0,0x8006
+80100390:  lw v0,0x59fc(v0)
+80100394:  li a0,0x80
+80100398:  jal 0x8001d470
+8010039c:  _sw v1,0x58(v0)
+801003a0:  slti a0,zero,0xed
+801003a4:  nop
+801003a8:  jal 0x80045088
+801003ac:  _move a0,v1
+801003b0:  li v0,-0x1
+801003b4:  lw ra,0x10(sp)
+801003b8:  nop
+801003bc:  jr ra
+801003c0:  _addiu sp,sp,0x18

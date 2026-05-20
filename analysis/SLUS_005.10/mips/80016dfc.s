@@ -1,0 +1,27 @@
+# addr: 0x80016dfc  name: FUN_80016dfc
+80016dfc:  addiu sp,sp,-0x20
+80016e00:  sw s1,0x14(sp)
+80016e04:  move s1,a0
+80016e08:  sw s0,0x10(sp)
+80016e0c:  sw ra,0x18(sp)
+80016e10:  jal 0x8004d734
+80016e14:  _move s0,a1
+80016e18:  move a0,s0
+80016e1c:  addiu a1,s1,0x14
+80016e20:  jal 0x80043358
+80016e24:  _addiu a2,s0,0x14
+80016e28:  lw v1,0x14(s0)
+80016e2c:  lw a0,0x18(s0)
+80016e30:  lw a1,0x1c(s0)
+80016e34:  move v0,s0
+80016e38:  subu v1,zero,v1
+80016e3c:  subu a0,zero,a0
+80016e40:  subu a1,zero,a1
+80016e44:  sw v1,0x14(v0)
+80016e48:  sw a0,0x18(v0)
+80016e4c:  sw a1,0x1c(v0)
+80016e50:  lw ra,0x18(sp)
+80016e54:  lw s1,0x14(sp)
+80016e58:  lw s0,0x10(sp)
+80016e5c:  jr ra
+80016e60:  _addiu sp,sp,0x20

@@ -1,0 +1,77 @@
+# addr: 0x8010238c  name: FUN_8010238c
+8010238c:  addiu sp,sp,-0x30
+80102390:  clear a0
+80102394:  sw ra,0x2c(sp)
+80102398:  sw s2,0x28(sp)
+8010239c:  sw s1,0x24(sp)
+801023a0:  jal 0x8004f4e8
+801023a4:  _sw s0,0x20(sp)
+801023a8:  jal 0x80019e7c
+801023ac:  _clear a0
+801023b0:  lui a0,0x8010
+801023b4:  jal 0x80015f80
+801023b8:  _addiu a0,a0,0x588
+801023bc:  move a0,v0
+801023c0:  jal 0x80019034
+801023c4:  _clear a1
+801023c8:  sltiu a0,zero,0x88f
+801023cc:  move s2,v0
+801023d0:  lui s0,0x8011
+801023d4:  jal 0x80017160
+801023d8:  _addiu s0,s0,0x1d6c
+801023dc:  sll v1,v0,0x1
+801023e0:  addu v1,v1,v0
+801023e4:  sll v1,v1,0x2
+801023e8:  subu v1,v1,v0
+801023ec:  srl v1,v1,0xf
+801023f0:  sll v1,v1,0x2
+801023f4:  addu v1,v1,s0
+801023f8:  lw a1,0x0(v1)
+801023fc:  move a0,s2
+80102400:  lui a2,0x8010
+80102404:  addiu a2,a2,0x59c
+80102408:  jal 0x80019a58
+8010240c:  _li a3,0x2
+80102410:  lui a0,0x8010
+80102414:  addiu a0,a0,0x5a4
+80102418:  clear a1
+8010241c:  li a2,0x60
+80102420:  li a3,0x70
+80102424:  move v0,a2
+80102428:  sw v0,0x10(sp)
+8010242c:  move v0,a3
+80102430:  sw v0,0x14(sp)
+80102434:  li v0,0x1c0
+80102438:  sw v0,0x18(sp)
+8010243c:  li v0,0xa0
+80102440:  sltiu a0,zero,0x340d
+80102444:  sw v0,0x1c(sp)
+80102448:  beq v0,zero,0x8010249c
+8010244c:  _nop
+80102450:  jal 0x8004f4e8
+80102454:  _li a0,0x1
+80102458:  lui s0,0x8006
+8010245c:  addiu s1,s0,0x5930
+80102460:  jal 0x800120d4
+80102464:  _nop
+80102468:  lw v0,0x5930(s0)
+8010246c:  lw v1,0x4(s1)
+80102470:  nop
+80102474:  or v0,v0,v1
+80102478:  andi v0,v0,0x840
+8010247c:  bne v0,zero,0x80102494
+80102480:  _nop
+80102484:  sltiu a0,zero,0x3472
+80102488:  nop
+8010248c:  bgez v0,0x80102460
+80102490:  _nop
+80102494:  sltiu a0,zero,0x34b0
+80102498:  nop
+8010249c:  jal 0x800190d8
+801024a0:  _move a0,s2
+801024a4:  lw ra,0x2c(sp)
+801024a8:  lw s2,0x28(sp)
+801024ac:  lw s1,0x24(sp)
+801024b0:  lw s0,0x20(sp)
+801024b4:  jr ra
+801024b8:  _addiu sp,sp,0x30

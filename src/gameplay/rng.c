@@ -1,0 +1,62 @@
+/* rng.c -- Vigilante 8 internal pseudo-random number generator.
+ *
+ * Source: SLUS_005.10
+ *   FUN_8001714c (V8_SeedRng)  -- writes g_rngSeed and zeroes the counter
+ *                                  at @ 0x800568d4 / 0x800568d8.
+ *
+ * Pass 2 must locate the actual rand() consumer (LW from 0x800568d4 with
+ * a multiply-add update). For now we have the seeder only.
+ *
+ * Bit-exact-critical: see PROJECT_SCOPE.md "Random Number Generation".
+ * AI behavior, weapon spread, and quest events depend on the exact
+ * algorithm. We MUST decompile the consumer side in pass 2.
+ *
+ * Known caller: FUN_80015098 (main) sets seed = 0xbb40e64d when
+ * g_matchMode == MATCH_MODE_SPECIAL5. This is a *deterministic* seed --
+ * almost certainly demo / playback mode.
+ */
+#include <stdint.h>
+
+/* HIGH: globals at fixed VA. */
+int32_t g_rngSeed;     /* @ 0x800568d4 */
+int32_t g_rngCounter;  /* @ 0x800568d8 */
+
+/* HIGH: seed the RNG. Always pairs (seed, counter=0). */
+void V8_SeedRng(int32_t seed)
+{
+    g_rngSeed    = seed;
+    g_rngCounter = 0;
+}
+
+/* HIGH (bit-exact-critical): V8_RandNext()  consumer side.
+ *
+ * Source: SLUS_005.10  FUN_80017160.
+ *
+ * Custom xorshift-style PRNG that mutates the two globals seeded by
+ * V8_SeedRng. Algorithm step (translated from MIPS):
+ *
+ *   prevByte  = g_rngCounter
+ *   g_rngCounter = (uint8_t) g_rngSeed             // low byte feeds back
+ *   v         = (g_rngSeed >> 1) | (prevByte << 31)  // rotate-with-carry
+ *               ^ (g_rngSeed << 12)
+ *   g_rngSeed = v ^ (v >> 20)
+ *   return g_rngSeed & 0x7fff                      // 15-bit sample
+ *
+ * Bit-exact: every shift and XOR constant is preserved verbatim.
+ * Any change (e.g. swapping to `rand()`) breaks the AI / weapon-spread
+ * /quest event sequence -- see PROJECT_SCOPE.md "Random Number
+ * Generation".
+ *
+ * Called from many sites: vehicle AI selection, damage roll, particle
+ * effect jitter. The 15-bit return value implies callers either mod
+ * down or treat it as a 0..32767 sample.
+ */
+uint32_t V8_RandNext(void)
+{
+    uint32_t prev = (uint32_t)(uint8_t)g_rngCounter;
+    g_rngCounter = (int32_t)(uint8_t)g_rngSeed;
+    uint32_t v   = ((uint32_t)g_rngSeed >> 1) | (prev << 31);
+    v ^= ((uint32_t)g_rngSeed << 12);
+    g_rngSeed = (int32_t)(v ^ (v >> 20));
+    return (uint32_t)g_rngSeed & 0x7fffu;
+}

@@ -1,0 +1,31 @@
+# addr: 0x801118c4  name: FUN_801118c4
+801118c4:  addiu sp,sp,-0x18
+801118c8:  sw ra,0x14(sp)
+801118cc:  jal 0x80053a24
+801118d0:  _sw s0,0x10(sp)
+801118d4:  li a0,0x1
+801118d8:  lui v1,0x8011
+801118dc:  addiu v1,v1,0x3574
+801118e0:  addiu s0,v1,-0x4
+801118e4:  lui v0,0x8011
+801118e8:  addiu v0,v0,0x1974
+801118ec:  sw v0,0x0(v1)
+801118f0:  lui v0,0x8011
+801118f4:  addiu v0,v0,0x19dc
+801118f8:  sw v0,0x4(v1)
+801118fc:  lui at,0x8011
+80111900:  sw zero,0x3570(at)
+80111904:  lui at,0x8011
+80111908:  sw zero,0x357c(at)
+8011190c:  jal 0x80054c84
+80111910:  _move a1,s0
+80111914:  li a0,0x1
+80111918:  jal 0x80054c74
+8011191c:  _move a1,s0
+80111920:  jal 0x80053a34
+80111924:  _nop
+80111928:  li v0,0x1
+8011192c:  lw ra,0x14(sp)
+80111930:  lw s0,0x10(sp)
+80111934:  jr ra
+80111938:  _addiu sp,sp,0x18

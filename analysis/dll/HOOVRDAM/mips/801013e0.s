@@ -1,0 +1,34 @@
+# addr: 0x801013e0  name: FUN_801013e0
+801013e0:  addiu sp,sp,-0x18
+801013e4:  sw s0,0x10(sp)
+801013e8:  move s0,a0
+801013ec:  li v0,0x3
+801013f0:  beq a1,v0,0x8010140c
+801013f4:  _sw ra,0x14(sp)
+801013f8:  li v0,0x8
+801013fc:  beq a1,v0,0x80101420
+80101400:  _clear v0
+80101404:  slti a0,zero,0x515
+80101408:  nop
+8010140c:  move a0,s0
+80101410:  jal 0x8002239c
+80101414:  _move a1,a2
+80101418:  slti a0,zero,0x50b
+8010141c:  nop
+80101420:  move a0,s0
+80101424:  jal 0x80022320
+80101428:  _move a1,a2
+8010142c:  beq v0,zero,0x80101454
+80101430:  _clear v0
+80101434:  lh a0,0x6(s0)
+80101438:  jal 0x8001fd9c
+8010143c:  _addiu a0,a0,0x3e8
+80101440:  beq v0,zero,0x80101450
+80101444:  _addiu a0,v0,0xc
+80101448:  jal 0x80024718
+8010144c:  _clear a1
+80101450:  li v0,-0x1
+80101454:  lw ra,0x14(sp)
+80101458:  lw s0,0x10(sp)
+8010145c:  jr ra
+80101460:  _addiu sp,sp,0x18

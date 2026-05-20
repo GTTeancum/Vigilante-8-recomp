@@ -1,0 +1,34 @@
+# addr: 0x8001f51c  name: FUN_8001f51c
+8001f51c:  addiu sp,sp,-0x30
+8001f520:  sw s0,0x18(sp)
+8001f524:  move s0,a0
+8001f528:  sw ra,0x28(sp)
+8001f52c:  sw s3,0x24(sp)
+8001f530:  sw s2,0x20(sp)
+8001f534:  sw s1,0x1c(sp)
+8001f538:  lw v0,0x0(s0)
+8001f53c:  move s2,a1
+8001f540:  move s3,a2
+8001f544:  andi v0,v0,0x800
+8001f548:  beq v0,zero,0x8001f56c
+8001f54c:  _move s1,a3
+8001f550:  sw s1,0x10(sp)
+8001f554:  addiu a1,s0,0x10
+8001f558:  move a2,s2
+8001f55c:  jal 0x8001f3ac
+8001f560:  _move a3,s3
+8001f564:  bne v0,zero,0x8001f584
+8001f568:  _nop
+8001f56c:  sw s1,0x10(sp)
+8001f570:  lw a0,0x5c(s0)
+8001f574:  addiu a1,s0,0x10
+8001f578:  move a2,s2
+8001f57c:  jal 0x8001ef74
+8001f580:  _move a3,s3
+8001f584:  lw ra,0x28(sp)
+8001f588:  lw s3,0x24(sp)
+8001f58c:  lw s2,0x20(sp)
+8001f590:  lw s1,0x1c(sp)
+8001f594:  lw s0,0x18(sp)
+8001f598:  jr ra
+8001f59c:  _addiu sp,sp,0x30

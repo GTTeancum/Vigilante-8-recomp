@@ -1,0 +1,88 @@
+/* overlay_loader.c -- Vigilante 8 .DLL overlay relocator.
+ *
+ * Source: SLUS_005.10 FUN_80011adc.
+ *
+ * V8 ships its level / shell code as relocatable PSY-Q overlay files
+ * (".DLL", confusingly named -- nothing to do with Windows). This
+ * function consumes a freshly-loaded image and rewrites its absolute
+ * references to point into the buffer where it was loaded.
+ *
+ * Image layout produced by the loader (`Asset_LoadDLLImage` = FUN_80015948):
+ *
+ *     u32   imageSize           // length of relocatable image in bytes
+ *     u32...payload             // code + data
+ *     u32   reloc[]             // table starts at (base + imageSize)
+ *     u32   0xffffffff          // sentinel
+ *
+ * Each reloc entry is one u32 where the low 2 bits select the fixup kind
+ * and the rest is the offset within the image to patch:
+ *
+ *   tag 0: 32-bit absolute       *(u32 *)(base + off) += base
+ *   tag 1: 16-bit HI16 (LUI imm) followed by a separate 32-bit operand
+ *          whose value gives the symbol offset; the high 16 bits of
+ *          (base + sym + 0x8000) get written to *(u16 *)(base + off).
+ *          (The +0x8000 is the standard MIPS HI16 carry-correction.)
+ *   tag 2: 16-bit absolute       *(u16 *)(base + off) += (u16)base
+ *   tag 3: 26-bit J/JAL branch   *(u32 *)(base + off) += (base << 4) >> 6
+ *
+ * After all relocs are processed, the trailing reloc table is freed by
+ * realloc-shrinking the image to its original payload size (which is
+ * stored in the very first u32 of the image).
+ *
+ * Bit-exact: the reloc walk order is preserved as in the binary
+ * (linear from low offset to high). Tag 1's "consume the next u32 as
+ * the symbol offset" pattern is unusual; preserve it verbatim.
+ */
+#include <stdint.h>
+#include <stdlib.h>
+
+extern void *Asset_LoadDLLImage(void);   /* FUN_80015948 -- the read-into-heap step that produces the still-relocatable DLL image; in src/assets/asset_load_ordie.c. */
+extern void *Heap_Realloc(void *p, uint32_t n);
+
+#define RELOC_END  0xffffffffu
+
+void *Overlay_LoadAndRelocate(void)
+{
+    uint32_t *image = (uint32_t *)Asset_LoadDLLImage();
+    if (image == NULL) return NULL;
+
+    uint32_t  imageSize  = image[0];
+    uint32_t *reloc      = (uint32_t *)((uint8_t *)image + imageSize);
+    uintptr_t base       = (uintptr_t)image;
+
+    uint32_t  entry = *reloc;
+    while (entry != RELOC_END) {
+        uint32_t *next   = reloc + 1;
+        uint32_t  tag    = entry & 3u;
+        uint32_t *target = (uint32_t *)((uint8_t *)image + (entry & 0xfffffffcu));
+
+        switch (tag) {
+        case 0: {       /* 32-bit absolute add */
+            *target = *target + (uint32_t)base;
+            break;
+        }
+        case 1: {       /* 16-bit HI16 with separate sym-offset operand */
+            uint32_t sym = *next;
+            next         = reloc + 2;
+            uint32_t v   = (uint32_t)((base + sym + 0x8000u) >> 16);
+            *(uint16_t *)target = (uint16_t)v;
+            break;
+        }
+        case 2: {       /* 16-bit absolute add (low half) */
+            *(uint16_t *)target = (uint16_t)((uint16_t)*(uint16_t *)target + (uint16_t)base);
+            break;
+        }
+        case 3: {       /* 26-bit J/JAL branch fixup */
+            uint32_t v = *target + ((uint32_t)(base << 4) >> 6);
+            *target    = v;
+            break;
+        }
+        }
+
+        reloc = next;
+        entry = *reloc;
+    }
+
+    /* Free the trailing reloc table by shrinking. */
+    return Heap_Realloc(image, image[0]);
+}

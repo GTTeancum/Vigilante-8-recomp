@@ -1,0 +1,25 @@
+# addr: 0x80051060  name: SYS_OBJ_1E5C
+80051060:  addiu sp,sp,-0x28
+80051064:  sw s1,0x14(sp)
+80051068:  move s1,a0
+8005106c:  sw s2,0x18(sp)
+80051070:  move s2,a1
+80051074:  sw ra,0x24(sp)
+80051078:  sw s4,0x20(sp)
+8005107c:  sw s3,0x1c(sp)
+80051080:  jal 0x80051b90
+80051084:  _sw s0,0x10(sp)
+80051088:  lh a1,0x4(s1)
+8005108c:  lhu v1,0x4(s1)
+80051090:  bltz a1,0x800510bc
+80051094:  _move a0,v1
+80051098:  lui v0,0x8006
+8005109c:  lh v0,0x5028(v0)
+800510a0:  lui v1,0x8006
+800510a4:  lhu v1,0x5028(v1)
+800510a8:  slt v0,v0,a1
+800510ac:  beq v0,zero,0x800510c0
+800510b0:  _nop
+800510b4:  j 0x800510c0
+800510b8:  _move a0,v1
+800510bc:  clear a0

@@ -1,0 +1,27 @@
+# addr: 0x801021d4  name: FUN_801021d4
+801021d4:  addiu sp,sp,-0x18
+801021d8:  sw ra,0x14(sp)
+801021dc:  jal 0x800120d4
+801021e0:  _sw s0,0x10(sp)
+801021e4:  lui s0,0x8006
+801021e8:  lh v0,0x5c28(s0)
+801021ec:  nop
+801021f0:  slti v0,v0,0x2
+801021f4:  beq v0,zero,0x8010222c
+801021f8:  _lui a0,0x8010
+801021fc:  addiu a0,a0,0x428
+80102200:  clear a1
+80102204:  li a2,0x1c0
+80102208:  sltiu a0,zero,0x75b
+8010220c:  li a3,0xf0
+80102210:  jal 0x800120d4
+80102214:  _nop
+80102218:  lh v0,0x5c28(s0)
+8010221c:  nop
+80102220:  slti v0,v0,0x2
+80102224:  bne v0,zero,0x80102210
+80102228:  _nop
+8010222c:  lw ra,0x14(sp)
+80102230:  lw s0,0x10(sp)
+80102234:  jr ra
+80102238:  _addiu sp,sp,0x18

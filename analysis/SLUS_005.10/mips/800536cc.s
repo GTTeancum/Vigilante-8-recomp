@@ -1,0 +1,36 @@
+# addr: 0x800536cc  name: SPRINTF_OBJ_6C8
+800536cc:  lw v0,0x220(sp)
+800536d0:  lw v1,0x210(sp)
+800536d4:  lw s1,0x0(v0)
+800536d8:  addiu v0,v0,0x4
+800536dc:  sw v0,0x220(sp)
+800536e0:  srl v0,v1,0x2
+800536e4:  andi v0,v0,0x1
+800536e8:  beq v0,zero,0x8005371c
+800536ec:  _srl v0,v1,0x4
+800536f0:  lbu s0,0x0(s1)
+800536f4:  andi v0,v0,0x1
+800536f8:  beq v0,zero,0x800537a4
+800536fc:  _addiu s1,s1,0x1
+80053700:  lw v1,0x218(sp)
+80053704:  nop
+80053708:  slt v0,v1,s0
+8005370c:  beq v0,zero,0x800537a4
+80053710:  _nop
+80053714:  j 0x800537a4
+80053718:  _move s0,v1
+8005371c:  andi v0,v0,0x1
+80053720:  bne v0,zero,0x80053738
+80053724:  _move a0,s1
+80053728:  jal 0x80052544
+8005372c:  _move a0,s1
+80053730:  j 0x800537a4
+80053734:  _move s0,v0
+80053738:  lw a2,0x218(sp)
+8005373c:  jal 0x80052d54
+80053740:  _clear a1
+80053744:  bne v0,zero,0x800537a4
+80053748:  _subu s0,v0,s1
+8005374c:  lw s0,0x218(sp)
+80053750:  j 0x800537a4
+80053754:  _nop

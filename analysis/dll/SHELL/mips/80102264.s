@@ -1,0 +1,53 @@
+# addr: 0x80102264  name: FUN_80102264
+80102264:  addiu sp,sp,-0x28
+80102268:  lui a0,0x8010
+8010226c:  addiu a0,a0,0x444
+80102270:  sw ra,0x24(sp)
+80102274:  jal 0x800159b4
+80102278:  _sw s0,0x20(sp)
+8010227c:  addiu a0,sp,0x10
+80102280:  jal 0x800225d4
+80102284:  _addiu a1,sp,0x18
+80102288:  lw v0,0x14(sp)
+8010228c:  nop
+80102290:  beq v0,zero,0x8010231c
+80102294:  _sw v0,0x18(sp)
+80102298:  lui v0,0x8007
+8010229c:  addiu s0,v0,0x37a0
+801022a0:  addiu a0,sp,0x10
+801022a4:  jal 0x800225d4
+801022a8:  _addiu a1,sp,0x18
+801022ac:  beq v0,zero,0x801022c4
+801022b0:  _lui a1,0x584f
+801022b4:  jal 0x80045088
+801022b8:  _move a0,v0
+801022bc:  slti a0,zero,0x8c3
+801022c0:  nop
+801022c4:  lw a0,0x10(sp)
+801022c8:  ori a1,a1,0x4246
+801022cc:  srl v1,a0,0x18
+801022d0:  srl v0,a0,0x8
+801022d4:  andi v0,v0,0xff00
+801022d8:  or v1,v1,v0
+801022dc:  andi v0,a0,0xff00
+801022e0:  sll v0,v0,0x8
+801022e4:  or v1,v1,v0
+801022e8:  sll a0,a0,0x18
+801022ec:  or v1,v1,a0
+801022f0:  bne v1,a1,0x8010230c
+801022f4:  _nop
+801022f8:  lw a0,0x14(sp)
+801022fc:  jal 0x8002263c
+80102300:  _clear a1
+80102304:  sw v0,0x0(s0)
+80102308:  addiu s0,s0,0x4
+8010230c:  lw v0,0x18(sp)
+80102310:  nop
+80102314:  bne v0,zero,0x801022a4
+80102318:  _addiu a0,sp,0x10
+8010231c:  jal 0x80015a00
+80102320:  _nop
+80102324:  lw ra,0x24(sp)
+80102328:  lw s0,0x20(sp)
+8010232c:  jr ra
+80102330:  _addiu sp,sp,0x28

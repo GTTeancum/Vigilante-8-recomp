@@ -1,0 +1,22 @@
+# addr: 0x8004483c  name: FUN_8004483c
+8004483c:  addiu sp,sp,-0x20
+80044840:  sw s0,0x10(sp)
+80044844:  move s0,a0
+80044848:  sw s1,0x14(sp)
+8004484c:  move s1,a1
+80044850:  sw s2,0x18(sp)
+80044854:  move s2,a2
+80044858:  sw ra,0x1c(sp)
+8004485c:  jal 0x800446dc
+80044860:  _move a0,a3
+80044864:  move a0,s0
+80044868:  move a1,s1
+8004486c:  move a2,s2
+80044870:  jal 0x80044484
+80044874:  _move a3,v0
+80044878:  lw ra,0x1c(sp)
+8004487c:  lw s2,0x18(sp)
+80044880:  lw s1,0x14(sp)
+80044884:  lw s0,0x10(sp)
+80044888:  jr ra
+8004488c:  _addiu sp,sp,0x20

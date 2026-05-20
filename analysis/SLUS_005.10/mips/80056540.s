@@ -1,0 +1,4 @@
+# addr: 0x80056540  name: PADSEQD_OBJ_30C
+80056540:  addiu v0,v0,0x1
+80056544:  j 0x8005658c
+80056548:  _sb v0,0x46(s0)

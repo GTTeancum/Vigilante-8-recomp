@@ -1,0 +1,54 @@
+# addr: 0x800454d4  name: _spu_init
+800454d4:  addiu sp,sp,-0x20
+800454d8:  sw s0,0x10(sp)
+800454dc:  move s0,a0
+800454e0:  lui a0,0x8006
+800454e4:  lw a0,-0x121c(a0)
+800454e8:  sw ra,0x18(sp)
+800454ec:  sw s1,0x14(sp)
+800454f0:  lw v0,0x0(a0)
+800454f4:  lui v1,0xb
+800454f8:  or v0,v0,v1
+800454fc:  sw v0,0x0(a0)
+80045500:  lui v0,0x8006
+80045504:  lw v0,-0x122c(v0)
+80045508:  lui at,0x8006
+8004550c:  sw zero,-0x1210(at)
+80045510:  lui at,0x8006
+80045514:  sw zero,-0x120c(at)
+80045518:  lui at,0x8006
+8004551c:  sh zero,-0x1214(at)
+80045520:  sh zero,0x180(v0)
+80045524:  sh zero,0x182(v0)
+80045528:  jal 0x80045fac
+8004552c:  _sh zero,0x1aa(v0)
+80045530:  lui v0,0x8006
+80045534:  lw v0,-0x122c(v0)
+80045538:  nop
+8004553c:  sh zero,0x180(v0)
+80045540:  sh zero,0x182(v0)
+80045544:  lhu v0,0x1ae(v0)
+80045548:  nop
+8004554c:  andi v0,v0,0x7ff
+80045550:  beq v0,zero,0x800455a4
+80045554:  _clear v1
+80045558:  addiu v1,v1,0x1
+8004555c:  sltiu v0,v1,0xf01
+80045560:  bne v0,zero,0x80045584
+80045564:  _nop
+80045568:  lui a0,0x8001
+8004556c:  addiu a0,a0,0xb94
+80045570:  lui a1,0x8001
+80045574:  jal 0x80052604
+80045578:  _addiu a1,a1,0xba4
+8004557c:  j 0x800455a8
+80045580:  _clear a0
+80045584:  lui v0,0x8006
+80045588:  lw v0,-0x122c(v0)
+8004558c:  nop
+80045590:  lhu v0,0x1ae(v0)
+80045594:  nop
+80045598:  andi v0,v0,0x7ff
+8004559c:  bne v0,zero,0x8004555c
+800455a0:  _addiu v1,v1,0x1
+800455a4:  clear a0

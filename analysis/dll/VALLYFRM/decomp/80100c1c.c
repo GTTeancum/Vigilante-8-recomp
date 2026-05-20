@@ -1,0 +1,103 @@
+// addr: 0x80100c1c  name: FUN_80100c1c
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+undefined4 FUN_80100c1c(uint *param_1,undefined4 param_2,int *param_3)
+
+{
+  undefined2 uVar1;
+  char cVar2;
+  undefined1 uVar3;
+  undefined4 uVar4;
+  uint uVar5;
+  int iVar6;
+  uint *puVar8;
+  undefined2 *puVar9;
+  int *piVar10;
+  int *piVar11;
+  int *piVar7;
+  
+  switch(param_2) {
+  case 1:
+switchD_80100c5c_caseD_1:
+    FUN_800207f8/*0x800207f8*/(param_1);
+    FUN_800207c4/*0x800207c4*/(param_1[0xe]);
+    *(undefined2 *)(param_1[0xe] + 0xc) = 0xe;
+    iVar6 = FUN_8003fbc8/*0x8003fbc8*/(param_1);
+    param_1[0x1e] = *(int *)param_1[0x16] + iVar6 * 0x1c + 0x1c;
+    uVar5 = Terrain_HeightAt/*0x80025400*/(param_1[0x12],param_1[0x14]);
+    param_1[0x13] = uVar5;
+    return 0;
+  case 2:
+    goto switchD_80100c5c_caseD_2;
+  case 3:
+    cVar2 = '\a';
+    if (param_3[3] == param_1[0xe]) {
+      iVar6 = FUN_8002239c/*0x8002239c*/(param_3[3],param_3);
+      if (iVar6 == 0) {
+        return 0;
+      }
+      *(undefined1 *)(param_1 + 2) = 0x1e;
+      *(undefined2 *)((int)param_1 + 0x46) = _DAT_800659d0;
+      FUN_800207c4/*0x800207c4*/(param_1);
+      FUN_80020890/*0x80020890*/(param_1,0x78);
+      cVar2 = '\0';
+    }
+    if (*(char *)(*param_3 + 4) != cVar2) {
+      return 0;
+    }
+    param_3 = (int *)(uint)*(ushort *)(*param_3 + 0xc);
+    break;
+  default:
+    return 0;
+  case 5:
+    goto switchD_80100c5c_caseD_5;
+  case 8:
+    break;
+  }
+  puVar9 = (undefined2 *)param_1[0x1e];
+  uVar1 = *puVar9;
+  if ((*param_1 & 4) != 0) {
+    *puVar9 = 0;
+  }
+  FUN_80022320/*0x80022320*/(param_1,param_3);
+  *puVar9 = uVar1;
+switchD_80100c5c_caseD_2:
+  piVar10 = (int *)*_DAT_80065a18;
+  piVar7 = _DAT_80065a18;
+  if (piVar10 == (int *)0x0) {
+LAB_80100d78:
+    FUN_80020890/*0x80020890*/(param_1,0xf);
+    uVar3 = 0;
+  }
+  else {
+    do {
+      iVar6 = piVar7[2];
+      if (((*(char *)(iVar6 + 4) == '\x02') && (*(short *)(iVar6 + 0xc) != 0)) &&
+         (iVar6 = FUN_80016aac/*0x80016aac*/(iVar6 + 0x24,param_1 + 0x12), piVar11 = piVar10, iVar6 < 0x4b000))
+      break;
+      piVar11 = (int *)*piVar10;
+      piVar7 = piVar10;
+      piVar10 = piVar11;
+    } while (piVar11 != (int *)0x0);
+    uVar3 = 1;
+    if (piVar11 == (int *)0x0) goto LAB_80100d78;
+  }
+  *(undefined1 *)(param_1 + 2) = uVar3;
+switchD_80100c5c_caseD_5:
+  uVar5 = param_1[2];
+  *(char *)(param_1 + 2) = (char)uVar5 + -1;
+  puVar8 = param_1;
+  if ((char)uVar5 == '\x01') {
+    puVar9 = (undefined2 *)param_1[0x1e];
+    uVar1 = *puVar9;
+    *puVar9 = 0;
+    FUN_8003fc50/*0x8003fc50*/(param_1);
+    puVar8 = (uint *)0x1;
+    *puVar9 = uVar1;
+  }
+  uVar4 = FUN_8004410c/*0x8004410c*/(puVar8);
+  FUN_8004483c/*0x8004483c*/(uVar4,*(undefined4 *)(param_1[0x16] + 8),2,param_1 + 9);
+  goto switchD_80100c5c_caseD_1;
+}
+

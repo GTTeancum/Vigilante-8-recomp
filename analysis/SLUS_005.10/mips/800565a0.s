@@ -1,0 +1,52 @@
+# addr: 0x800565a0  name: _dirFailAuto
+800565a0:  addiu sp,sp,-0x18
+800565a4:  sw s0,0x10(sp)
+800565a8:  move s0,a0
+800565ac:  sw ra,0x14(sp)
+800565b0:  lw v0,0x4c(s0)
+800565b4:  lbu v1,0x46(s0)
+800565b8:  addiu v0,v0,0x1
+800565bc:  beq v1,zero,0x80056638
+800565c0:  _sw v0,0x4c(s0)
+800565c4:  li v0,0x1
+800565c8:  bne v1,v0,0x800565f8
+800565cc:  _nop
+800565d0:  lbu v1,0x4a(s0)
+800565d4:  nop
+800565d8:  sltiu v0,v1,0x2
+800565dc:  bne v0,zero,0x8005660c
+800565e0:  _addiu v0,v1,0x1
+800565e4:  li v0,0x2
+800565e8:  sb v0,0x49(s0)
+800565ec:  li v0,0xff
+800565f0:  j 0x8005666c
+800565f4:  _sb v0,0x46(s0)
+800565f8:  lbu v1,0x4a(s0)
+800565fc:  nop
+80056600:  sltiu v0,v1,0x4
+80056604:  beq v0,zero,0x80056614
+80056608:  _addiu v0,v1,0x1
+8005660c:  j 0x8005666c
+80056610:  _sb v0,0x4a(s0)
+80056614:  lbu v0,0x49(s0)
+80056618:  nop
+8005661c:  beq v0,zero,0x80056638
+80056620:  _nop
+80056624:  lui v0,0x8006
+80056628:  lw v0,0x5260(v0)
+8005662c:  nop
+80056630:  jalr v0
+80056634:  _move a0,s0
+80056638:  lw v0,0x3c(s0)
+8005663c:  nop
+80056640:  lbu v1,0x0(v0)
+80056644:  li v0,0xf3
+80056648:  beq v1,v0,0x8005666c
+8005664c:  _li v1,0xff
+80056650:  lw v0,0x30(s0)
+80056654:  nop
+80056658:  sb v1,0x0(v0)
+8005665c:  lw v0,0x30(s0)
+80056660:  nop
+80056664:  sb zero,0x1(v0)
+80056668:  sb zero,0xe8(s0)

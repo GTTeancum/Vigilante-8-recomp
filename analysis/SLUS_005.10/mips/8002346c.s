@@ -1,0 +1,310 @@
+# addr: 0x8002346c  name: FUN_8002346c
+8002346c:  addiu sp,sp,-0x30
+80023470:  sw s1,0x1c(sp)
+80023474:  move s1,a0
+80023478:  sw ra,0x28(sp)
+8002347c:  sw s3,0x24(sp)
+80023480:  sw s2,0x20(sp)
+80023484:  sw s0,0x18(sp)
+80023488:  lbu v1,0x9(s1)
+8002348c:  lw v0,0xc(gp)
+80023490:  nop
+80023494:  subu v0,v0,v1
+80023498:  andi v0,v0,0x7f
+8002349c:  bne v0,zero,0x80023614
+800234a0:  _addiu s3,s1,0xa4
+800234a4:  lh v0,0xc0(s1)
+800234a8:  nop
+800234ac:  blez v0,0x800234c8
+800234b0:  _lui v1,0x20
+800234b4:  lw v0,0x0(s1)
+800234b8:  nop
+800234bc:  and v0,v0,v1
+800234c0:  beq v0,zero,0x80023618
+800234c4:  _li v0,0x1
+800234c8:  lh a1,0xe8(s1)
+800234cc:  nop
+800234d0:  beq a1,zero,0x800234f4
+800234d4:  _clear s0
+800234d8:  lui a0,0x8006
+800234dc:  addiu a0,a0,0x5a18
+800234e0:  jal 0x8001ffd4
+800234e4:  _nop
+800234e8:  move s0,v0
+800234ec:  bne s0,zero,0x800235f8
+800234f0:  _nop
+800234f4:  lw v0,0xec(s1)
+800234f8:  lw v1,0xf0(s1)
+800234fc:  lw a0,0xf4(s1)
+80023500:  lhu v0,0xc(v0)
+80023504:  lhu v1,0xc(v1)
+80023508:  lhu a0,0xc(a0)
+8002350c:  lhu a1,0xc(s1)
+80023510:  addu v0,v0,v1
+80023514:  addu v0,v0,a0
+80023518:  slt v0,v0,a1
+8002351c:  beq v0,zero,0x80023554
+80023520:  _lui a1,0x10
+80023524:  lui a0,0x8006
+80023528:  addiu a0,a0,0x5a18
+8002352c:  addiu s2,s1,0x24
+80023530:  jal 0x80023394
+80023534:  _move a2,s2
+80023538:  move s0,v0
+8002353c:  bne s0,zero,0x800235a0
+80023540:  _lui a1,0x40
+80023544:  lui a0,0x8006
+80023548:  addiu a0,a0,0x5a18
+8002354c:  j 0x80023570
+80023550:  _move a2,s2
+80023554:  lw v0,0x114(s1)
+80023558:  nop
+8002355c:  bne v0,zero,0x8002357c
+80023560:  _lui a1,0x7f00
+80023564:  lui a0,0x8006
+80023568:  addiu a0,a0,0x5a18
+8002356c:  addiu a2,s1,0x24
+80023570:  jal 0x80023394
+80023574:  _nop
+80023578:  move s0,v0
+8002357c:  bne s0,zero,0x800235a0
+80023580:  _lui a1,0x7f78
+80023584:  lui a0,0x8006
+80023588:  addiu a0,a0,0x5a18
+8002358c:  jal 0x80023394
+80023590:  _addiu a2,s1,0x24
+80023594:  move s0,v0
+80023598:  beq s0,zero,0x800235ac
+8002359c:  _nop
+800235a0:  lhu v0,0x6(s0)
+800235a4:  j 0x800235e8
+800235a8:  _sh v0,0xe8(s1)
+800235ac:  jal 0x80017160
+800235b0:  _nop
+800235b4:  lui a0,0x8006
+800235b8:  addiu a0,a0,0x5a50
+800235bc:  lui a1,0x7f78
+800235c0:  jal 0x80020120
+800235c4:  _move s0,v0
+800235c8:  mult s0,v0
+800235cc:  lui a0,0x8006
+800235d0:  addiu a0,a0,0x5a50
+800235d4:  lui a1,0x7f78
+800235d8:  mflo t0
+800235dc:  jal 0x80020190
+800235e0:  _sra a2,t0,0xf
+800235e4:  move s0,v0
+800235e8:  bne s0,zero,0x800235f8
+800235ec:  _lui a0,0x8006
+800235f0:  jal 0x80015368
+800235f4:  _addiu a0,a0,0x56b0
+800235f8:  sw zero,0x10(sp)
+800235fc:  addiu a0,s1,0xc0
+80023600:  addiu a1,s1,0x24
+80023604:  addiu a2,s0,0x48
+80023608:  lui a3,0x2
+8002360c:  jal 0x80042ef0
+80023610:  _ori a3,a3,0x2740
+80023614:  li v0,0x1
+80023618:  sb v0,0xe(s3)
+8002361c:  lw v0,0x8c(s1)
+80023620:  move a0,s1
+80023624:  addiu a1,s1,0xc0
+80023628:  lui a2,0x1
+8002362c:  sll v0,v0,0x5
+80023630:  jal 0x80042f98
+80023634:  _addu a2,v0,a2
+80023638:  li v1,-0x2aa
+8002363c:  sll v0,v0,0x10
+80023640:  sra a2,v0,0x10
+80023644:  slt v0,v1,a2
+80023648:  beq v0,zero,0x80023654
+8002364c:  _li a1,0x2aa
+80023650:  move v1,a2
+80023654:  slt v0,v1,a1
+80023658:  beq v0,zero,0x80023664
+8002365c:  _nop
+80023660:  move a1,v1
+80023664:  lh v1,0x6(s3)
+80023668:  sh a1,0x0(s3)
+8002366c:  lw v0,0x8c(s1)
+80023670:  nop
+80023674:  mult v0,v1
+80023678:  sll v0,a1,0x10
+8002367c:  lh a1,0x4(s3)
+80023680:  mflo a0
+80023684:  bgez a0,0x80023690
+80023688:  _sra a3,v0,0x10
+8002368c:  addiu a0,a0,0xfff
+80023690:  sra v0,a0,0xc
+80023694:  addu v0,a1,v0
+80023698:  blez v0,0x800236a4
+8002369c:  _clear v1
+800236a0:  move v1,v0
+800236a4:  mult a3,v1
+800236a8:  mflo v1
+800236ac:  bgez v1,0x800236b8
+800236b0:  _nop
+800236b4:  addiu v1,v1,0xf
+800236b8:  lw v0,0x94(s1)
+800236bc:  sra v1,v1,0x4
+800236c0:  addu v0,v0,v1
+800236c4:  sw v0,0x94(s1)
+800236c8:  bgez a2,0x800236d4
+800236cc:  _move v0,a2
+800236d0:  subu v0,zero,v0
+800236d4:  slti v0,v0,0x156
+800236d8:  bne v0,zero,0x8002371c
+800236dc:  _nop
+800236e0:  lw v0,0x8c(s1)
+800236e4:  nop
+800236e8:  slti v0,v0,0xbec
+800236ec:  bne v0,zero,0x8002371c
+800236f0:  _nop
+800236f4:  lh v0,0xa6(s1)
+800236f8:  nop
+800236fc:  bgez v0,0x80023708
+80023700:  _clear a0
+80023704:  move a0,v0
+80023708:  lhu v0,0x8(s3)
+8002370c:  addiu a0,a0,-0x1
+80023710:  subu v1,zero,v0
+80023714:  j 0x80023778
+80023718:  _slt v0,v1,a0
+8002371c:  lw v0,0x8c(s1)
+80023720:  nop
+80023724:  slti v0,v0,0x1ad3
+80023728:  bne v0,zero,0x80023758
+8002372c:  _nop
+80023730:  lhu v0,0x8(s3)
+80023734:  lh v1,0x2(s3)
+80023738:  subu a0,zero,v0
+8002373c:  addiu v1,v1,-0x1
+80023740:  slt v0,a0,v1
+80023744:  beq v0,zero,0x80023750
+80023748:  _nop
+8002374c:  move a0,v1
+80023750:  j 0x80023788
+80023754:  _sh a0,0x2(s3)
+80023758:  lh v1,0x2(s3)
+8002375c:  nop
+80023760:  blez v1,0x8002376c
+80023764:  _clear v0
+80023768:  move v0,v1
+8002376c:  lhu v1,0x8(s3)
+80023770:  addiu a0,v0,0x1
+80023774:  slt v0,a0,v1
+80023778:  beq v0,zero,0x80023784
+8002377c:  _nop
+80023780:  move v1,a0
+80023784:  sh v1,0x2(s3)
+80023788:  lbu v0,0xf(s3)
+8002378c:  nop
+80023790:  sll v0,v0,0x2
+80023794:  addu v0,s1,v0
+80023798:  lw s0,0x110(v0)
+8002379c:  lw s2,0x10c(s1)
+800237a0:  beq s0,zero,0x80023908
+800237a4:  _nop
+800237a8:  lh v0,0x6(s0)
+800237ac:  nop
+800237b0:  bne v0,zero,0x80023908
+800237b4:  _nop
+800237b8:  jal 0x80022e90
+800237bc:  _move a0,s1
+800237c0:  bne v0,zero,0x80023908
+800237c4:  _lui a1,0x12
+800237c8:  lw a0,0xe4(s1)
+800237cc:  lw v0,0x24(s1)
+800237d0:  lw v1,0x24(a0)
+800237d4:  ori a1,a1,0xbfff
+800237d8:  subu v0,v0,v1
+800237dc:  bgez v0,0x800237e8
+800237e0:  _nop
+800237e4:  subu v0,zero,v0
+800237e8:  slt v0,a1,v0
+800237ec:  bne v0,zero,0x80023908
+800237f0:  _nop
+800237f4:  lw v0,0x28(s1)
+800237f8:  lw v1,0x28(a0)
+800237fc:  nop
+80023800:  subu v0,v0,v1
+80023804:  bgez v0,0x80023810
+80023808:  _nop
+8002380c:  subu v0,zero,v0
+80023810:  slt v0,a1,v0
+80023814:  bne v0,zero,0x80023908
+80023818:  _nop
+8002381c:  lw v0,0x2c(s1)
+80023820:  lw v1,0x2c(a0)
+80023824:  nop
+80023828:  subu v0,v0,v1
+8002382c:  bgez v0,0x80023838
+80023830:  _nop
+80023834:  subu v0,zero,v0
+80023838:  slt v0,a1,v0
+8002383c:  bne v0,zero,0x80023908
+80023840:  _nop
+80023844:  lw v0,0x64(s0)
+80023848:  nop
+8002384c:  beq v0,zero,0x80023868
+80023850:  _move a0,s0
+80023854:  li a1,0xc
+80023858:  jalr v0
+8002385c:  _move a2,s1
+80023860:  j 0x8002386c
+80023864:  _move s0,v0
+80023868:  clear s0
+8002386c:  move a0,s1
+80023870:  jal 0x8002ce68
+80023874:  _move a1,s0
+80023878:  beq s0,zero,0x80023894
+8002387c:  _move a0,s1
+80023880:  jal 0x80017160
+80023884:  _nop
+80023888:  andi v0,v0,0x7
+8002388c:  bne v0,zero,0x8002389c
+80023890:  _move a0,s1
+80023894:  jal 0x8002cf90
+80023898:  _li a1,0x1
+8002389c:  lb v0,0x8(s2)
+800238a0:  nop
+800238a4:  bne v0,zero,0x800238e4
+800238a8:  _nop
+800238ac:  bne s0,zero,0x800238ec
+800238b0:  _nop
+800238b4:  lw v0,0x64(s2)
+800238b8:  nop
+800238bc:  beq v0,zero,0x800238d8
+800238c0:  _move a0,s2
+800238c4:  li a1,0xc
+800238c8:  jalr v0
+800238cc:  _move a2,s1
+800238d0:  j 0x800238dc
+800238d4:  _nop
+800238d8:  clear v0
+800238dc:  beq v0,zero,0x800238f0
+800238e0:  _li a1,0x4
+800238e4:  j 0x800238f0
+800238e8:  _li a1,0xb
+800238ec:  li a1,0x4
+800238f0:  lw v0,0x64(s2)
+800238f4:  nop
+800238f8:  beq v0,zero,0x80023924
+800238fc:  _move a0,s2
+80023900:  j 0x8002391c
+80023904:  _nop
+80023908:  lw v0,0x64(s2)
+8002390c:  nop
+80023910:  beq v0,zero,0x80023924
+80023914:  _move a0,s2
+80023918:  li a1,0x4
+8002391c:  jalr v0
+80023920:  _move a2,s1
+80023924:  lw ra,0x28(sp)
+80023928:  lw s3,0x24(sp)
+8002392c:  lw s2,0x20(sp)
+80023930:  lw s1,0x1c(sp)
+80023934:  lw s0,0x18(sp)
+80023938:  jr ra
+8002393c:  _addiu sp,sp,0x30

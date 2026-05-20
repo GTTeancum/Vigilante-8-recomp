@@ -1,0 +1,56 @@
+# addr: 0x80044600  name: FUN_80044600
+80044600:  addiu sp,sp,-0x18
+80044604:  sw s0,0x10(sp)
+80044608:  sw ra,0x14(sp)
+8004460c:  jal 0x80016a20
+80044610:  _move s0,a0
+80044614:  lh v1,0x8e4(gp)
+80044618:  move a1,v0
+8004461c:  lui v0,0x20
+80044620:  addu v0,a1,v0
+80044624:  bgez v0,0x80044630
+80044628:  _sll v1,v1,0x9
+8004462c:  addiu v0,v0,0xfff
+80044630:  sra v0,v0,0xc
+80044634:  div v1,v0
+80044638:  mflo a2
+8004463c:  gte_ldLZCS a1
+80044640:  nop
+80044644:  nop
+80044648:  gte_stLZCR v0
+8004464c:  li a0,0xc
+80044650:  addiu v1,v0,-0x1
+80044654:  slt v0,v1,a0
+80044658:  beq v0,zero,0x80044664
+8004465c:  _nop
+80044660:  move a0,v1
+80044664:  beq a1,zero,0x8004468c
+80044668:  _li v0,0xc
+8004466c:  lw v1,0x0(s0)
+80044670:  subu v0,v0,a0
+80044674:  srav v0,a1,v0
+80044678:  sllv v1,v1,a0
+8004467c:  div v1,v0
+80044680:  mflo v1
+80044684:  j 0x80044694
+80044688:  _li v0,0x1000
+8004468c:  clear v1
+80044690:  li v0,0x1000
+80044694:  subu v0,v0,v1
+80044698:  mult v0,a2
+8004469c:  mflo a0
+800446a0:  bgez a0,0x800446ac
+800446a4:  _addiu v0,v1,0x1000
+800446a8:  addiu a0,a0,0x1fff
+800446ac:  mult v0,a2
+800446b0:  mflo v0
+800446b4:  bgez v0,0x800446c0
+800446b8:  _sra v1,a0,0xd
+800446bc:  addiu v0,v0,0x1fff
+800446c0:  lw ra,0x14(sp)
+800446c4:  lw s0,0x10(sp)
+800446c8:  sra v0,v0,0xd
+800446cc:  sll v0,v0,0x10
+800446d0:  or v0,v1,v0
+800446d4:  jr ra
+800446d8:  _addiu sp,sp,0x18

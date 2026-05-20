@@ -1,0 +1,19 @@
+# addr: 0x8002d44c  name: FUN_8002d44c
+8002d44c:  addiu sp,sp,-0x18
+8002d450:  sw s0,0x10(sp)
+8002d454:  sw ra,0x14(sp)
+8002d458:  jal 0x8004410c
+8002d45c:  _move s0,a0
+8002d460:  lw v1,0x58(s0)
+8002d464:  lbu a0,0xd0(s0)
+8002d468:  lw a1,0x8(v1)
+8002d46c:  lui v1,0x8006
+8002d470:  addiu v1,v1,-0x138c
+8002d474:  addu a0,a0,v1
+8002d478:  lbu a2,0x0(a0)
+8002d47c:  jal 0x8004445c
+8002d480:  _move a0,v0
+8002d484:  lw ra,0x14(sp)
+8002d488:  lw s0,0x10(sp)
+8002d48c:  jr ra
+8002d490:  _addiu sp,sp,0x18

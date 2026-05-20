@@ -1,0 +1,19 @@
+# addr: 0x80053ffc  name: PadSetMainMode
+80053ffc:  lui v0,0x8006
+80054000:  lw v0,0x5270(v0)
+80054004:  addiu sp,sp,-0x20
+80054008:  sw s0,0x10(sp)
+8005400c:  move s0,a1
+80054010:  sw s1,0x14(sp)
+80054014:  sw ra,0x18(sp)
+80054018:  jalr v0
+8005401c:  _move s1,a2
+80054020:  move a0,v0
+80054024:  andi a1,s0,0xff
+80054028:  jal 0x800553f4
+8005402c:  _andi a2,s1,0xff
+80054030:  lw ra,0x18(sp)
+80054034:  lw s1,0x14(sp)
+80054038:  lw s0,0x10(sp)
+8005403c:  jr ra
+80054040:  _addiu sp,sp,0x20

@@ -1,0 +1,13 @@
+80100078	WildWest
+801000cc	Shack_1
+801000d4	TBridge_1
+801000e0	M1_warehouse_1
+801000f0	bonfire_1
+801000fc	Gallow_1
+80100108	hotel_1
+80100110	M1depot_1
+8010011c	M1train_engine_1
+8010015c	M1train_coalcar_1
+80100198	M1train_flatbed_1
+801001d8	dustDevil
+80100204	tumbleweed_1

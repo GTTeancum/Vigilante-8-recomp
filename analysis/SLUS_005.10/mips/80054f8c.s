@@ -1,0 +1,39 @@
+# addr: 0x80054f8c  name: PADCMD_OBJ_2F8
+80054f8c:  addiu sp,sp,-0x18
+80054f90:  sw ra,0x10(sp)
+80054f94:  lbu v1,0x46(a0)
+80054f98:  li v0,0x3
+80054f9c:  beq v1,v0,0x80054fe4
+80054fa0:  _slti v0,v1,0x4
+80054fa4:  beq v0,zero,0x80054fbc
+80054fa8:  _li v0,0x2
+80054fac:  beq v1,v0,0x80054fd0
+80054fb0:  _nop
+80054fb4:  j 0x80055024
+80054fb8:  _nop
+80054fbc:  li v0,0x4
+80054fc0:  beq v1,v0,0x80054ff8
+80054fc4:  _nop
+80054fc8:  j 0x80055024
+80054fcc:  _nop
+80054fd0:  lbu a1,0x47(a0)
+80054fd4:  jal 0x80055574
+80054fd8:  _nop
+80054fdc:  j 0x80055024
+80054fe0:  _nop
+80054fe4:  lbu a1,0x47(a0)
+80054fe8:  jal 0x80055594
+80054fec:  _nop
+80054ff0:  j 0x80055024
+80054ff4:  _nop
+80054ff8:  lbu v0,0x48(a0)
+80054ffc:  nop
+80055000:  bne v0,zero,0x8005501c
+80055004:  _nop
+80055008:  lbu a1,0x47(a0)
+8005500c:  jal 0x800555b4
+80055010:  _nop
+80055014:  j 0x80055024
+80055018:  _nop
+8005501c:  jal 0x800555d4
+80055020:  _nop

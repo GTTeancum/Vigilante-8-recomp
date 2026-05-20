@@ -1,0 +1,22 @@
+# addr: 0x80021924  name: FUN_80021924
+80021924:  addiu sp,sp,-0x20
+80021928:  sw s0,0x10(sp)
+8002192c:  move s0,a0
+80021930:  sw s1,0x14(sp)
+80021934:  move s1,a1
+80021938:  lui a0,0x8006
+8002193c:  addiu a0,a0,0x5a18
+80021940:  move a1,s0
+80021944:  sw ra,0x18(sp)
+80021948:  jal 0x8002002c
+8002194c:  _move a2,s1
+80021950:  bne v0,zero,0x80021964
+80021954:  _move a1,s0
+80021958:  lw a0,0x6fc(gp)
+8002195c:  jal 0x800211a4
+80021960:  _move a2,s1
+80021964:  lw ra,0x18(sp)
+80021968:  lw s1,0x14(sp)
+8002196c:  lw s0,0x10(sp)
+80021970:  jr ra
+80021974:  _addiu sp,sp,0x20

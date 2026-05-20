@@ -1,0 +1,63 @@
+# addr: 0x8010d1c8  name: FUN_8010d1c8
+8010d1c8:  addiu sp,sp,-0x28
+8010d1cc:  lui v0,0x8011
+8010d1d0:  sw s1,0x1c(sp)
+8010d1d4:  addiu s1,v0,0x33c0
+8010d1d8:  sw ra,0x20(sp)
+8010d1dc:  sw s0,0x18(sp)
+8010d1e0:  lw v1,0x38(s1)
+8010d1e4:  li v0,0x1
+8010d1e8:  sw zero,0x44(s1)
+8010d1ec:  subu v0,v0,v1
+8010d1f0:  sw v0,0x38(s1)
+8010d1f4:  sll v0,v0,0x3
+8010d1f8:  addu v0,v0,s1
+8010d1fc:  lhu v1,0x28(v0)
+8010d200:  nop
+8010d204:  sh v1,0x3c(s1)
+8010d208:  lhu v1,0x2a(v0)
+8010d20c:  lw v0,0x18(s1)
+8010d210:  lw a1,0x4c(s1)
+8010d214:  sll v0,v0,0x2
+8010d218:  addu v0,v0,s1
+8010d21c:  sh v1,0x3e(s1)
+8010d220:  lw a0,0x8(v0)
+8010d224:  sltiu a0,zero,0x38ad
+8010d228:  lui s0,0x80
+8010d22c:  lh v1,0x42(s1)
+8010d230:  lh a0,0x40(s1)
+8010d234:  li v0,-0x10
+8010d238:  addiu v1,v1,0xf
+8010d23c:  and v1,v1,v0
+8010d240:  mult a0,v1
+8010d244:  lw v0,0x24(s1)
+8010d248:  nop
+8010d24c:  sll v0,v0,0x2
+8010d250:  addu v0,v0,s1
+8010d254:  lw a0,0x1c(v0)
+8010d258:  mflo a2
+8010d25c:  sltiu a0,zero,0x38cc
+8010d260:  sra a1,a2,0x1
+8010d264:  sltiu a0,zero,0x3595
+8010d268:  move a0,s1
+8010d26c:  blez v0,0x8010d2ac
+8010d270:  _li v0,-0x1
+8010d274:  lw v0,0x44(s1)
+8010d278:  nop
+8010d27c:  bne v0,zero,0x8010d2a8
+8010d280:  _lui v0,0x8011
+8010d284:  move a0,s1
+8010d288:  addiu s0,s0,-0x1
+8010d28c:  beq s0,zero,0x8010d2a8
+8010d290:  _lui v0,0x8011
+8010d294:  lw v0,0x44(a0)
+8010d298:  nop
+8010d29c:  beq v0,zero,0x8010d28c
+8010d2a0:  _addiu s0,s0,-0x1
+8010d2a4:  lui v0,0x8011
+8010d2a8:  lw v0,0x33f8(v0)
+8010d2ac:  lw ra,0x20(sp)
+8010d2b0:  lw s1,0x1c(sp)
+8010d2b4:  lw s0,0x18(sp)
+8010d2b8:  jr ra
+8010d2bc:  _addiu sp,sp,0x28

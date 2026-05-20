@@ -1,0 +1,198 @@
+80010070	Insert Original CD
+800100e8	Rating:\t%i%%\t%s\n
+80010103	YOU WIN!\n
+80010114	UNLOCKED:\t%s\n
+80010143	YOU LOSE!\n
+80010157	 to continue...
+8001016f	YOU WIN!\n
+800101b7	PLAYER %c WINS!\n
+80010207	PLAYER TEAM WINS!\n
+80010223	PLAYER TEAM LOSES!\n
+80010291	 to quit
+8001029c	Loading Demo Level
+800102bf	 to start...
+800102cc	Sounds\Victory.xa
+800102e0	Sounds\Defeat.xa
+8001030c	Read Address Error (%08x)
+80010328	Write Address Error (%08x)
+80010344	Instruction Bus Error
+8001035c	Illegal Instruction
+80010370	CoProcessor Unusable
+80010388	Unknown Exception
+800104c8	%s approaching...
+8001051c	%s wrecked\nTotal it!
+80010564	Nowhere to put weapon
+800105a8	PU_WeaponUpgrade
+80010b94	SPU:T/O [%s]\n
+80010ba4	wait (reset)
+80010bb4	wait (wrdy H -> L)
+80010bc8	wait (dmaf clear/W)
+80010d64	VSync: timeout\n
+80010d74	$Id: intr.c,v 1.76 1997/02/12 12:45:05 makoto Exp $
+80010da8	unexpected interrupt(%04x)\n
+80010dc4	intr timeout(%04x:%04x)\n
+80010de4	DMA bus error: code=%08x\n
+80010e00	MADR[%d]=%08x\n
+80010e14	track=%d,%d\n
+80010e24	CdGetToc2: %02x:%02x:00\n
+80010e40	CdGetToc2: error\n
+80010e54	CdInit: Init failed\n
+80010e84	CdlReadS
+80010e90	CdlSeekP
+80010e9c	CdlSeekL
+80010ea8	CdlGetTD
+80010eb4	CdlGetTN
+80010ec0	CdlGetlocP
+80010ecc	CdlGetlocL
+80010edc	CdlSetmode
+80010ee8	CdlSetfilter
+80010ef8	CdlDemute
+80010f04	CdlMute
+80010f0c	CdlReset
+80010f18	CdlPause
+80010f24	CdlStop
+80010f2c	CdlStandby
+80010f38	CdlReadN
+80010f44	CdlBackward
+80010f50	CdlForward
+80010f5c	CdlPlay
+80010f64	CdlSetloc
+80010f70	CdlNop
+80010f78	CdlSync
+80010f80	DiskError
+80010f8c	DataEnd
+80010f94	Acknowledge
+80010fa0	Complete
+80010fac	DataReady
+80010fb8	NoIntr
+80010fc0	CD timeout: 
+80010fd0	%s:(%s) Sync=%s, Ready=%s\n
+80010fec	DiskError: 
+80010ff8	com=%s,code=(%02x:%02x)\n
+80011014	CDROM: unknown intr
+80011028	(%d)\n
+80011048	CD_sync
+80011050	CD_ready
+8001105c	%s...\n
+80011064	%s: no param\n
+80011074	CD_cw
+8001107c	$Id: bios.c,v 1.86 1997/03/28 07:42:42 makoto Exp $
+800110b0	CD_init:
+800110bc	addr=%08x\n
+800110c8	CD_datasync
+800110d4	CdRead: sector error\n
+800110ec	CdRead: Shell open...\n
+80011104	CdRead: retry...\n
+80011124	Command Error: 
+80011134	CD001
+80011144	DMA STATUS ERROR %x\n
+80011164	$Id: sys.c,v 1.140 1998/01/12 07:52:27 noda Exp $
+80011198	ResetGraph:jtb=%08x,env=%08x\n
+800111b8	ResetGraph(%d)...\n
+800111cc	SetGraphDebug:level:%d,type:%d reverse:%d\n
+800111f8	SetGrapQue(%d)...\n
+8001120c	DrawSyncCallback(%08x)...\n
+80011228	SetDispMask(%d)...\n
+8001123c	DrawSync(%d)...\n
+80011250	%s:bad RECT
+8001125c	(%d,%d)-(%d,%d)\n
+80011274	ClearImage
+80011280	ClearImage2
+8001128c	LoadImage
+80011298	StoreImage
+800112a4	MoveImage
+800112b0	ClearOTag(%08x,%d)...\n
+800112c8	ClearOTagR(%08x,%d)...\n
+800112e0	DrawOTag(%08x)...\n
+800112f4	PutDrawEnv(%08x)...\n
+8001130c	DrawOTagEnv(%08x,&08x)...\n
+80011328	PutDispEnv(%08x)...\n
+80011340	GPU timeout:que=%d,stat=%08x,chcr=%08x,madr=%08x\n
+80011374	LoadImage2
+80011384	0123456789abcdef
+80011398	(null)
+800113a0	0123456789ABCDEF
+800115a4	0123456789ABCDEF
+800115b8	0123456789abcdef
+80011685	NULL>
+8005686c	REPLACE CONTROLLER x
+8005ee94	Library Programs (c) 1993-1997 Sony Computer Entertainment Inc., All Rights Reserved.
+80065338	Secret Base
+80065348	Sand Factory
+80065358	Luxo Saucer
+80065364	"Y" the Alien
+80065374	Manta
+8006537c	Sid Burn
+80065388	School Bus
+8006539c	Stag Pickup
+800653a8	Beezwax
+800653b0	Leprechaun
+800653bc	Boogie
+800653c4	Palamino
+800653d0	Houston 3
+800653dc	Glenn
+800653ec	Moth Truck
+800653f8	Convoy
+8006540c	Jefferson
+80065418	John Torque
+80065424	Strider
+8006542c	Sheila
+80065434	Clydesdale
+80065440	Slick Clyde
+8006544c	Rattler
+80065454	Chassey Blue
+80065474	Quest.bin
+80065480	PAUSED
+8006549c	CD Track
+800654b0	Split
+800654c0	Horiz
+800654d0	Resume
+800654d8	CD COVER OPEN
+800654e8	READING INDEX
+800654f8	NO CD
+80065500	ARE YOU SURE?
+80065530	CHECKING CD
+8006553c	Coyote
+80065544	Most Wanted
+80065550	Major Con
+80065564	Minor Felon
+80065570	Delinquent
+8006557c	Vigilante
+80065588	Urban Legend
+800655a0	Good Samaritan
+800655b0	Greenhorn
+800655bc	Civilian
+800655d4	Shell\Shell.dll
+800655e4	Sounds\Main.SND
+800655f4	Misc\Game.FNT
+8006560c	DEMO MODE
+80065624	Misc\Kong.fnt
+80065634	Data Bus Error
+80065644	Overflow
+80065650	%08x: %08x
+80065668	Out of VRAM
+80065684	Common.exp
+80065690	Shell\Load.dll
+800656a0	SunLensFlare
+800656b0	Nowhere to run!
+800656c4	HUD\HUD.TBL
+800656d0	HUD\Font.FNT
+800656e0	HUD\Arms.exp
+800656f8	PLAYER 2
+80065704	PLAYER 1
+8006571c	%s destroyed!
+8006572c	%s TOTALED!
+80065738	%i x WHAMMY!
+80065760	saucer_1
+800657e8	PU_RadarJammer
+800657f8	PU_Shield
+80065804	PU_Health
+80065810	I_RocktL
+8006581c	I_MisslL
+80065828	I_Cannon
+80065834	I_Mortar
+80065840	I_MineDr
+8006584c	I_Special
+80065858	I_Surprise
+80065888	6789:
+800658bc	Out of SPU RAM

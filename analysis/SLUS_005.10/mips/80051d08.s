@@ -1,0 +1,39 @@
+# addr: 0x80051d08  name: SYS_OBJ_2B04
+80051d08:  lui v1,0x1000
+80051d0c:  lui v0,0x8006
+80051d10:  lw v0,0x512c(v0)
+80051d14:  ori v1,v1,0x7
+80051d18:  sw v1,0x0(v0)
+80051d1c:  lui a1,0x8006
+80051d20:  lw a1,0x5128(a1)
+80051d24:  lui v1,0xff
+80051d28:  lw v0,0x0(a1)
+80051d2c:  ori v1,v1,0xffff
+80051d30:  and v0,v0,v1
+80051d34:  li v1,0x2
+80051d38:  beq v0,v1,0x80051d78
+80051d3c:  _lui v1,0xe100
+80051d40:  lui v0,0x8006
+80051d44:  lw v0,0x512c(v0)
+80051d48:  nop
+80051d4c:  lw v0,0x0(v0)
+80051d50:  ori v1,v1,0x1000
+80051d54:  andi v0,v0,0x3fff
+80051d58:  or v0,v0,v1
+80051d5c:  sw v0,0x0(a1)
+80051d60:  lui v1,0x8006
+80051d64:  lw v1,0x5128(v1)
+80051d68:  clear v0
+80051d6c:  lw v1,0x0(v1)
+80051d70:  j 0x80051da0
+80051d74:  _nop
+80051d78:  andi v0,a0,0x8
+80051d7c:  beq v0,zero,0x80051d9c
+80051d80:  _lui a0,0x900
+80051d84:  ori a0,a0,0x1
+80051d88:  lui v1,0x8006
+80051d8c:  lw v1,0x512c(v1)
+80051d90:  li v0,0x2
+80051d94:  j 0x80051da0
+80051d98:  _sw a0,0x0(v1)
+80051d9c:  li v0,0x1

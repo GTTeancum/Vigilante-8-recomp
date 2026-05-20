@@ -1,0 +1,9 @@
+80100060	ScrtBase
+8010006c	radar_1
+801000a0	fence_left
+801000ac	fence_right
+801000b8	turret_1
+80100104	MSilo
+80100114	aurora_1
+80100170	catwalk_1
+8010017c	protoSaucer

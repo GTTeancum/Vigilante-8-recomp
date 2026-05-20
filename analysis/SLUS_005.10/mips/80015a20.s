@@ -1,0 +1,96 @@
+# addr: 0x80015a20  name: FUN_80015a20
+80015a20:  lw v0,0x6ac(gp)
+80015a24:  addiu sp,sp,-0x20
+80015a28:  sw s2,0x18(sp)
+80015a2c:  move s2,a0
+80015a30:  sw s1,0x14(sp)
+80015a34:  move s1,a1
+80015a38:  sw ra,0x1c(sp)
+80015a3c:  andi v1,v0,0x7ff
+80015a40:  beq v1,zero,0x80015b40
+80015a44:  _sw s0,0x10(sp)
+80015a48:  subu v0,zero,v0
+80015a4c:  andi s0,v0,0x7ff
+80015a50:  slt v0,s1,s0
+80015a54:  beq v0,zero,0x80015a60
+80015a58:  _nop
+80015a5c:  move s0,s1
+80015a60:  lw a1,0x69c(gp)
+80015a64:  move a0,s2
+80015a68:  move a2,s0
+80015a6c:  jal 0x80044c44
+80015a70:  _addu a1,a1,v1
+80015a74:  lw v0,0x6ac(gp)
+80015a78:  addu s2,s2,s0
+80015a7c:  subu s1,s1,s0
+80015a80:  j 0x80015b3c
+80015a84:  _addu v0,v0,s0
+80015a88:  jal 0x800156d4
+80015a8c:  _nop
+80015a90:  move v1,v0
+80015a94:  or v0,v1,s2
+80015a98:  andi v0,v0,0x3
+80015a9c:  beq v0,zero,0x80015afc
+80015aa0:  _move a0,s2
+80015aa4:  addiu v0,v1,0x800
+80015aa8:  lwl a3,0x3(v1)
+80015aac:  lwr a3,0x0(v1)
+80015ab0:  lwl t0,0x7(v1)
+80015ab4:  lwr t0,0x4(v1)
+80015ab8:  lwl t1,0xb(v1)
+80015abc:  lwr t1,0x8(v1)
+80015ac0:  lwl t2,0xf(v1)
+80015ac4:  lwr t2,0xc(v1)
+80015ac8:  swl a3,0x3(a0)
+80015acc:  swr a3,0x0(a0)
+80015ad0:  swl t0,0x7(a0)
+80015ad4:  swr t0,0x4(a0)
+80015ad8:  swl t1,0xb(a0)
+80015adc:  swr t1,0x8(a0)
+80015ae0:  swl t2,0xf(a0)
+80015ae4:  swr t2,0xc(a0)
+80015ae8:  addiu v1,v1,0x10
+80015aec:  bne v1,v0,0x80015aa8
+80015af0:  _addiu a0,a0,0x10
+80015af4:  j 0x80015b2c
+80015af8:  _nop
+80015afc:  addiu v0,v1,0x800
+80015b00:  lw a3,0x0(v1)
+80015b04:  lw t0,0x4(v1)
+80015b08:  lw t1,0x8(v1)
+80015b0c:  lw t2,0xc(v1)
+80015b10:  sw a3,0x0(a0)
+80015b14:  sw t0,0x4(a0)
+80015b18:  sw t1,0x8(a0)
+80015b1c:  sw t2,0xc(a0)
+80015b20:  addiu v1,v1,0x10
+80015b24:  bne v1,v0,0x80015b00
+80015b28:  _addiu a0,a0,0x10
+80015b2c:  lw v0,0x6ac(gp)
+80015b30:  addiu s2,s2,0x800
+80015b34:  addiu s1,s1,-0x800
+80015b38:  addiu v0,v0,0x800
+80015b3c:  sw v0,0x6ac(gp)
+80015b40:  slti v0,s1,0x800
+80015b44:  beq v0,zero,0x80015a88
+80015b48:  _nop
+80015b4c:  beq s1,zero,0x80015b80
+80015b50:  _nop
+80015b54:  jal 0x800156d4
+80015b58:  _nop
+80015b5c:  move a0,s2
+80015b60:  move a1,v0
+80015b64:  sw a1,0x69c(gp)
+80015b68:  jal 0x80044c44
+80015b6c:  _move a2,s1
+80015b70:  lw v0,0x6ac(gp)
+80015b74:  nop
+80015b78:  addu v0,v0,s1
+80015b7c:  sw v0,0x6ac(gp)
+80015b80:  lw ra,0x1c(sp)
+80015b84:  lw s2,0x18(sp)
+80015b88:  lw s1,0x14(sp)
+80015b8c:  lw s0,0x10(sp)
+80015b90:  li v0,0x1
+80015b94:  jr ra
+80015b98:  _addiu sp,sp,0x20

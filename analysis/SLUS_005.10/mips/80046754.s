@@ -1,0 +1,20 @@
+# addr: 0x80046754  name: SpuSetTransferStartAddr
+80046754:  addiu sp,sp,-0x18
+80046758:  move a1,a0
+8004675c:  lui v0,0x7
+80046760:  ori v0,v0,0xefe8
+80046764:  addiu v1,a1,-0x1010
+80046768:  sltu v0,v0,v1
+8004676c:  bne v0,zero,0x8004679c
+80046770:  _sw ra,0x10(sp)
+80046774:  jal 0x80045e24
+80046778:  _li a0,-0x1
+8004677c:  lui at,0x8006
+80046780:  sh v0,-0x1214(at)
+80046784:  lui v1,0x8006
+80046788:  lhu v1,-0x1214(v1)
+8004678c:  lui v0,0x8006
+80046790:  lw v0,-0x1204(v0)
+80046794:  j 0x800467a0
+80046798:  _sllv v0,v1,v0
+8004679c:  clear v0

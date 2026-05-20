@@ -1,0 +1,24 @@
+# addr: 0x80052484  name: strcmp
+80052484:  beq a0,zero,0x80052494
+80052488:  _nop
+8005248c:  bne a1,zero,0x800524bc
+80052490:  _nop
+80052494:  beq a0,a1,0x800524e0
+80052498:  _clear v0
+8005249c:  beq a0,zero,0x800524e0
+800524a0:  _li v0,-0x1
+800524a4:  j 0x800524e0
+800524a8:  _li v0,0x1
+800524ac:  j 0x800524e0
+800524b0:  _clear v0
+800524b4:  beq a2,zero,0x800524ac
+800524b8:  _addiu a0,a0,0x1
+800524bc:  lb v1,0x0(a1)
+800524c0:  lb v0,0x0(a0)
+800524c4:  lbu a2,0x0(a0)
+800524c8:  beq v0,v1,0x800524b4
+800524cc:  _addiu a1,a1,0x1
+800524d0:  lb v1,0x0(a0)
+800524d4:  lb v0,-0x1(a1)
+800524d8:  nop
+800524dc:  subu v0,v1,v0

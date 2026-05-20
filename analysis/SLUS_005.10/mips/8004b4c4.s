@@ -1,0 +1,20 @@
+# addr: 0x8004b4c4  name: CdRead2
+8004b4c4:  addiu sp,sp,-0x20
+8004b4c8:  sw s0,0x18(sp)
+8004b4cc:  move s0,a0
+8004b4d0:  li a0,0xe
+8004b4d4:  addiu a1,sp,0x10
+8004b4d8:  clear a2
+8004b4dc:  sw ra,0x1c(sp)
+8004b4e0:  jal 0x80048fd0
+8004b4e4:  _sb s0,0x10(sp)
+8004b4e8:  andi v0,s0,0x100
+8004b4ec:  beq v0,zero,0x8004b528
+8004b4f0:  _andi v0,s0,0x20
+8004b4f4:  beq v0,zero,0x8004b508
+8004b4f8:  _li v0,0x1
+8004b4fc:  lui at,0x800a
+8004b500:  j 0x8004b510
+8004b504:  _sw zero,0x3270(at)
+8004b508:  lui at,0x800a
+8004b50c:  sw v0,0x3270(at)

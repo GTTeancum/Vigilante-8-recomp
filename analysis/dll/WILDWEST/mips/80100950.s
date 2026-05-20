@@ -1,0 +1,23 @@
+# addr: 0x80100950  name: FUN_80100950
+80100950:  addiu sp,sp,-0x18
+80100954:  beq a1,zero,0x80100970
+80100958:  _sw ra,0x10(sp)
+8010095c:  li v0,0x5
+80100960:  beq a1,v0,0x80100984
+80100964:  _clear v0
+80100968:  slti a0,zero,0x266
+8010096c:  nop
+80100970:  lw v0,0x28(a0)
+80100974:  nop
+80100978:  addiu v0,v0,-0x5f5
+8010097c:  slti a0,zero,0x265
+80100980:  sw v0,0x28(a0)
+80100984:  jal 0x800205f8
+80100988:  _nop
+8010098c:  slti a0,zero,0x266
+80100990:  li v0,-0x1
+80100994:  clear v0
+80100998:  lw ra,0x10(sp)
+8010099c:  nop
+801009a0:  jr ra
+801009a4:  _addiu sp,sp,0x18

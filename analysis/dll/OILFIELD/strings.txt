@@ -1,0 +1,6 @@
+80100040	OilField
+8010004c	rig_1
+80100084	pipe_end_1
+8010009c	OilPump_1
+801000c8	sphere_1
+801000d4	pipe_gateGATE_1

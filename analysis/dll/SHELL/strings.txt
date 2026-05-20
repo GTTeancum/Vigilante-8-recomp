@@ -1,0 +1,232 @@
+80100008	Terrain\SkiResrt.exp
+80100020	Colorado
+8010002c	Ski Resort
+80100038	Terrain\CanynLnd.exp
+80100050	Canyonlands
+8010005c	Terrain\CasnoCty.exp
+80100074	Casino City
+80100080	Terrain\VallyFrm.exp
+80100098	California
+801000a4	Valley Farms
+801000b4	Terrain\HoovrDam.exp
+801000cc	Arizona/Nevada
+801000dc	Hoover Dam
+801000e8	Terrain\WildWest.exp
+80100100	Ghost Town
+8010010c	Terrain\AirGrave.exp
+80100124	Arizona
+8010012c	Aircraft Graveyard
+80100140	Terrain\OilField.exp
+80100158	New Mexico
+80100164	Oil Fields
+80100170	Terrain\SandFact.exp
+80100190	Sand Factory
+801001a0	Terrain\ScrtBase.exp
+801001b8	Nevada
+801001c0	Secret Base
+801001cc	'64 Luxo Saucer
+801001dc	"Y" the Alien
+801001ec	'69 Manta
+801001f8	Video\Sid.str
+80100208	Sid Burn
+80100214	'66 School Bus
+80100224	Video\Molo.str
+8010023c	'70 Stag Pickup
+8010024c	Video\Beezwax.str
+80100260	Beezwax
+80100268	'76 Leprechaun
+80100278	Video\Boogie.str
+8010028c	Boogie
+80100294	'75 Palamino
+801002a4	Video\Houston3.str
+801002b8	Houston 3
+801002c4	'73 Glenn 4x4
+801002d4	Video\Loki.str
+801002ec	'72 Moth Truck
+801002fc	Video\Convoy.str
+80100310	Convoy
+80100318	'70 Van
+80100320	Video\Dave.str
+80100338	'69 Jefferson
+80100348	Video\Torque.str
+8010035c	John Torque
+80100368	'74 Strider
+80100374	Video\Sheila.str
+80100388	Sheila
+80100390	'70 Clydesdale
+801003a0	Video\Clyde.str
+801003b0	Slick Clyde
+801003bc	'67 Rattler
+801003c8	Video\Chassey.str
+801003dc	Chassey Blue
+80100403	CANCEL
+80100414	Option unavailable
+80100428	REPLACE CONTROLLER
+80100444	Shell\Vehicles.exp
+80100458	"You can taste the difference!"
+80100478	"Better products for happier living!"
+801004a0	"For the modern family!"
+801004bc	"NEW & IMPROVED"
+801004d0	"It's just what the Doctor ordered!"
+801004f8	"Now, with new Terrain-o-rama!"
+80100518	"Quality made entertainment"
+80100538	"Others may be new, but none so truly modern!"
+80100568	In LuxoColor
+80100578	Deluxe
+80100588	Shell\Slogan.fnt
+801005a4	Video\Luxoflux.str
+801005b8	Shell\Legal.bs
+801005c8	PRESS START
+801005d4	COOPERATIVE
+801005e0	VERSUS
+801005e8	ARCADE
+801005f0	QUEST
+801005f8	OPTIONS
+80100600	2 PLAYER
+8010060c	1 PLAYER
+80100631	select
+80100639	accept
+80100647	replay
+80100651	select
+80100659	accept
+80100661	replay
+80100684	Shell\Locatns.BIN
+80100698	Shell\Map.bsd
+801006a8	SELECT LOCATION
+801006b9	select
+801006c1	accept
+801006f4	QUEST ROUTE
+80100701	select
+80100709	accept
+80100717	main menu
+8010072c	Objective met: Yes
+80100740	Objective met: No
+80100754	Not completed
+80100775	select
+8010077d	accept
+8010078b	main menu
+801007b0	Shell\CharSel1.tbl
+801007c4	CHOOSE PLAYER
+801007d5	select
+801007dd	accept
+801007eb	main menu
+80100828	CHOOSE ENEMIES
+80100858	Shell\CharSel2.tbl
+8010086c	CHOOSE
+80100874	PLAYERS
+8010088c	CHOOSE PLAYERS
+8010089c	Player 1
+801008a8	Player 2
+801008dc	Credits
+801008e4	Screen
+801008ec	Audio
+801008f4	Controller 2
+80100904	Controller 1
+80100914	Difficulty
+80100920	Memory Card
+8010092c	Game Status
+8010093c	Quest Completed
+8010094c	Finished/Objectives missed
+80100968	Quest in progress
+8010097c	Unlocked
+80100988	GAME STATUS
+801009dd	select
+801009e5	movie
+801009ec	passcode
+801009fd	select
+80100a05	accept
+80100a0d	cancel
+80100a14	Premium High Octane
+80100a28	Super Unleaded
+80100a38	Unleaded
+80100a4c	DIFFICULTY SETTING
+80100a60	ANALOG CONTROLLER
+80100abc	ANALOG JOYSTICK
+80100b08	STEERING WHEEL
+80100b50	CONTROLLER
+80100b5c	UNSUPPORTED CONTROLLER
+80100b7c	UNPLUGGED
+80100b90	Left Pedal
+80100b9c	Right Pedal
+80100ba8	Wheel
+80100bf0	Right
+80100bfc	Dual shock
+80100c10	Select
+80100c40	(DUAL SHOCK)
+80100c50	START when done
+80100c61	 calibrate
+80100c84	Sound Effects
+80100c94	Music
+80100ca4	AUDIO SETTINGS
+80100cd0	stereo
+80100cec	SCREEN ADJUSTMENT
+80100d05	 to move screen
+80100d1c	BASLUS-00510
+80100d2c	Vigilante 8, game #%i
+80100d44	BASLUS-00510-%i
+80100d54	Passcode:\n%s
+80100d64	Delete
+80100d88	(READING)
+80100d94	 (UNFORMATTED)
+80100da4	 (NOT INSERTED)
+80100db4	 (CHECKING)
+80100dc0	MEMORY CARD SLOT %c
+80100dd4	empty
+80100ddc	used block
+80100de8	There is no Memory card in\nMemory card slot %i
+80100e18	This is not a\nVigilante 8 saved game!
+80100e40	Game loaded
+80100e4c	The memory card\nis unformatted.\nFormat it now?
+80100e7c	Memory card full\nInsert a new Memory Card\nor delete 1 block
+80100eb8	You must select a\nfree block to save\nthe game to!
+80100eec	Do you want to\noverwrite this\ngame?
+80100f10	Now Saving
+80100f1c	Are you sure?
+80100f2c	Now Deleting
+80100f3c	You cannot delete\nthis block!
+80100f5c	There is no file\nin this block!
+80100f7c	CREDITS
+80100f84	Video\Credits.str
+80100f98	Shell\Options.BIN
+80100fac	Shell\Options.ANM
+80100fc0	Shell\OptTable.tbl
+80101000	VIDEO\ACTLOGO.STR
+80101014	VIDEO\INTRO.STR
+80101024	Shell\Resource.tbl
+80101038	Shell\Cursor.bin
+8010104c	Shell\Sounds.SND
+80101060	Video\Demo%c.str
+80101094	MDEC_rest:bad option(%d)\n
+801010b0	MDEC_in_sync
+801010c0	MDEC_out_sync
+801010d0	%s timeout:\n
+801010e4	Access Denied. : event multiple open\n
+8010118c	Access Denied. : file already open.\n
+801011b4	into open\n
+801011c0	exit open\n
+801011cc	Access Denied. : file not open.\n
+801011f0	Access Denied. : invalid data size align\n
+8010121c	Access Denied. : invalid offset value align\n
+8010124c	Access Denied. : system busy\n
+80101274	libmcrd: event overflow\n
+80111b70	locked
+80111b78	Waiting for other player
+80111b94	Classified
+80111fc4	Machine Gun
+80111fd8	Next Weapon
+80111fe4	Prev Weapon
+80111ff0	Target Select
+80112000	Rear View
+8011200c	View Select
+80112018	Accelerate
+80112024	Brake/Reverse
+80112034	Hand Brake
+80112040	Steer Left
+8011204c	Steer Right
+80112058	Brake
+80112060	Forward
+80112068	Reverse
+80112070	Steer
+80112078	Accel/Brake
+80112084	Camera Orbit
+80112094	Camera Dolly

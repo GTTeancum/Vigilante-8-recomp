@@ -1,0 +1,61 @@
+# addr: 0x8001aaa8  name: FUN_8001aaa8
+8001aaa8:  addiu sp,sp,-0x20
+8001aaac:  sw s2,0x18(sp)
+8001aab0:  move s2,a0
+8001aab4:  sw s1,0x14(sp)
+8001aab8:  move s1,a1
+8001aabc:  move a0,a2
+8001aac0:  li a1,0x1
+8001aac4:  sw ra,0x1c(sp)
+8001aac8:  jal 0x8001178c
+8001aacc:  _sw s0,0x10(sp)
+8001aad0:  lh v1,0x0(s1)
+8001aad4:  move s0,v0
+8001aad8:  lhu v0,0x0(s1)
+8001aadc:  bltz v1,0x8001aaf0
+8001aae0:  _clear a0
+8001aae4:  andi v0,v0,0x800
+8001aae8:  sltu v0,zero,v0
+8001aaec:  sll a0,v0,0x4
+8001aaf0:  sw a0,0x0(s0)
+8001aaf4:  lwl a3,0x13(s1)
+8001aaf8:  lwr a3,0x10(s1)
+8001aafc:  lh t0,0x14(s1)
+8001ab00:  swl a3,0x43(s0)
+8001ab04:  swr a3,0x40(s0)
+8001ab08:  sh t0,0x44(s0)
+8001ab0c:  lw a3,0x4(s1)
+8001ab10:  lw t0,0x8(s1)
+8001ab14:  lw t1,0xc(s1)
+8001ab18:  sw a3,0x48(s0)
+8001ab1c:  sw t0,0x4c(s0)
+8001ab20:  sw t1,0x50(s0)
+8001ab24:  sw s2,0x58(s0)
+8001ab28:  lh v0,0x0(s1)
+8001ab2c:  lhu a1,0x0(s1)
+8001ab30:  bltz v0,0x8001ab44
+8001ab34:  _move a0,s2
+8001ab38:  jal 0x8001b49c
+8001ab3c:  _andi a1,a1,0x7ff
+8001ab40:  sw v0,0x30(s0)
+8001ab44:  lh a1,0x2(s1)
+8001ab48:  nop
+8001ab4c:  bltz a1,0x8001ab74
+8001ab50:  _nop
+8001ab54:  lw v0,0x0(s2)
+8001ab58:  nop
+8001ab5c:  lw v1,0xc(v0)
+8001ab60:  sll v0,a1,0x2
+8001ab64:  addu v0,v0,v1
+8001ab68:  lw v0,0x0(v0)
+8001ab6c:  nop
+8001ab70:  sw v0,0x5c(s0)
+8001ab74:  jal 0x8001d708
+8001ab78:  _move a0,s0
+8001ab7c:  lw ra,0x1c(sp)
+8001ab80:  lw s2,0x18(sp)
+8001ab84:  lw s1,0x14(sp)
+8001ab88:  move v0,s0
+8001ab8c:  lw s0,0x10(sp)
+8001ab90:  jr ra
+8001ab94:  _addiu sp,sp,0x20

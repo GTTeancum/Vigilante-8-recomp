@@ -1,0 +1,360 @@
+INFO  Using log config file: jar:file:/C:/Programming/GitHub/Vigilante%208%20recomp/ghidra/ghidra_install/Ghidra/Framework/Generic/lib/Generic.jar!/generic.log4j.xml (LoggingInitialization)  
+INFO  Using log file: C:\Users\smmel\AppData\Roaming\ghidra\ghidra_12.0.4_PUBLIC\application.log (LoggingInitialization)  
+INFO  Loading user preferences: C:\Users\smmel\AppData\Roaming\ghidra\ghidra_12.0.4_PUBLIC\preferences (Preferences)  
+INFO  Loading previous preferences: C:\Users\smmel\AppData\Roaming\ghidra\ghidra_11.3.2_PUBLIC\preferences (Preferences)  
+INFO  Searching for classes... (ClassSearcher)  
+INFO  Ignoring class 'ghidra.app.plugin.core.analysis.MipsPreAnalyzer' from 'C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Extensions\ghidra_psx_ldr\lib\ghidra_psx_ldr.jar'. Already found at 'C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\MIPS\lib\MIPS.jar'. (ClassSearcher)  
+INFO  Class search complete (1211 ms) (ClassSearcher)  
+INFO  Initializing SSL Context (DefaultSSLContextInitializer)  
+INFO  Initializing Random Number Generator... (SecureRandomFactory)  
+INFO  Random Number Generator initialization complete: SHA1PRNG (SecureRandomFactory)  
+INFO  Trust manager disabled, cacerts have not been set (DefaultTrustManagerFactory)  
+INFO  Starting cache cleanup: C:\Users\smmel\AppData\Local\ghidra\fscache2 (FileCacheMaintenanceDaemon)  
+INFO  Finished cache cleanup, estimated storage used: 0 (FileCacheMaintenanceDaemon)  
+INFO  Headless startup complete (13205 ms) (AnalyzeHeadless)  
+INFO  Class searcher loaded 92 extension points (43 false positives) (ClassSearcher)  
+INFO  HEADLESS Script Paths:
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\BSim\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\Decompiler\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\PyGhidra\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\SwiftDemangler\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\Base\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\8051\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Debug\Debugger-rmi-trace\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\JVM\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\MicrosoftCodeAnalyzer\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\DATA\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\DecompilerDependent\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Extensions\ghidra_psx_ldr\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\BytePatterns\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\Jython\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\GnuDemangler\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\PIC\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\WildcardAssembler\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\PDB\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\VersionTracking\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\FileFormats\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\Atmel\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Debug\Debugger\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\SystemEmulation\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\FunctionID\ghidra_scripts (HeadlessAnalyzer)  
+INFO  HEADLESS: execution starts (HeadlessAnalyzer)  
+INFO  Opening existing project: C:\Programming\GitHub\Vigilante 8 recomp\ghidra\projects\v8 (HeadlessAnalyzer)  
+INFO  Opening project: C:\Programming\GitHub\Vigilante 8 recomp\ghidra\projects\v8 (HeadlessProject)  
+INFO  REPORT: Processing input files:  (HeadlessAnalyzer)  
+INFO       project: C:\Programming\GitHub\Vigilante 8 recomp\ghidra\projects\v8 (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/AIRGRAVE.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/AIRGRAVE.bin (HeadlessAnalyzer)  
+INFO  Packed database cache: C:\Users\smmel\AppData\Local\ghidra\packed-db-cache (PackedDatabaseCache)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  -----------------------------------------------------
+    ASCII Strings                              0.551 secs
+    Apply Data Archives                        1.237 secs
+    Call-Fixup Installer                       0.001 secs
+    Create Address Tables                      0.010 secs
+    Create Address Tables - One Time           0.001 secs
+    Create Function                            0.132 secs
+    Data Reference                             0.003 secs
+    Decompiler Switch Analysis                 0.767 secs
+    Demangler GNU                              0.000 secs
+    Disassemble                                0.158 secs
+    Disassemble Entry Points                   0.002 secs
+    Embedded Media                             0.013 secs
+    External Entry References                  0.001 secs
+    Function ID                                0.332 secs
+    Function Start Search                      0.087 secs
+    MIPS Constant Reference Analyzer           0.130 secs
+    MIPS Symbol                                0.003 secs
+    MIPS UnAlligned Instruction Fix            0.003 secs
+    Non-Returning Functions - Discovered       0.006 secs
+    Reference                                  0.022 secs
+    Shared Return Calls                        0.004 secs
+    Stack                                      0.084 secs
+    Subroutine References                      0.014 secs
+-----------------------------------------------------
+     Total Time   3 secs
+-----------------------------------------------------
+ (AutoAnalysisManager)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/AIRGRAVE.bin (HeadlessAnalyzer)  
+INFO  /AIRGRAVE.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /AIRGRAVE.bin (v8:/AIRGRAVE.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/CANYNLND.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/CANYNLND.bin (HeadlessAnalyzer)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/CANYNLND.bin (HeadlessAnalyzer)  
+INFO  /CANYNLND.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /CANYNLND.bin (v8:/CANYNLND.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/CASNOCTY.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/CASNOCTY.bin (HeadlessAnalyzer)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/CASNOCTY.bin (HeadlessAnalyzer)  
+INFO  /CASNOCTY.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /CASNOCTY.bin (v8:/CASNOCTY.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/HOOVRDAM.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/HOOVRDAM.bin (HeadlessAnalyzer)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/HOOVRDAM.bin (HeadlessAnalyzer)  
+INFO  /HOOVRDAM.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /HOOVRDAM.bin (v8:/HOOVRDAM.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/LOAD.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/LOAD.bin (HeadlessAnalyzer)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  -----------------------------------------------------
+    ASCII Strings                              0.004 secs
+    Apply Data Archives                        0.093 secs
+    Call-Fixup Installer                       0.002 secs
+    Create Address Tables                      0.007 secs
+    Create Address Tables - One Time           0.001 secs
+    Create Function                            0.030 secs
+    Data Reference                             0.001 secs
+    Decompiler Switch Analysis                 0.489 secs
+    Demangler GNU                              0.000 secs
+    Disassemble                                0.134 secs
+    Disassemble Entry Points                   0.000 secs
+    Embedded Media                             0.002 secs
+    External Entry References                  0.000 secs
+    Function ID                                0.001 secs
+    Function Start Search                      0.050 secs
+    Function Start Search delayed - One Time   0.001 secs
+    MIPS Constant Reference Analyzer           0.262 secs
+    MIPS Symbol                                0.001 secs
+    MIPS UnAlligned Instruction Fix            0.015 secs
+    Non-Returning Functions - Discovered       0.007 secs
+    Reference                                  0.011 secs
+    Shared Return Calls                        0.003 secs
+    Stack                                      0.330 secs
+    Subroutine References                      0.010 secs
+    Subroutine References - One Time           0.000 secs
+-----------------------------------------------------
+     Total Time   1 secs
+-----------------------------------------------------
+ (AutoAnalysisManager)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/LOAD.bin (HeadlessAnalyzer)  
+INFO  /LOAD.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /LOAD.bin (v8:/LOAD.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/OILFIELD.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/OILFIELD.bin (HeadlessAnalyzer)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/OILFIELD.bin (HeadlessAnalyzer)  
+INFO  /OILFIELD.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /OILFIELD.bin (v8:/OILFIELD.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SANDFACT.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SANDFACT.bin (HeadlessAnalyzer)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SANDFACT.bin (HeadlessAnalyzer)  
+INFO  /SANDFACT.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /SANDFACT.bin (v8:/SANDFACT.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SCRTBASE.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SCRTBASE.bin (HeadlessAnalyzer)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  -----------------------------------------------------
+    ASCII Strings                              0.002 secs
+    Apply Data Archives                        0.128 secs
+    Call-Fixup Installer                       0.000 secs
+    Create Address Tables                      0.003 secs
+    Create Address Tables - One Time           0.000 secs
+    Create Function                            0.009 secs
+    Data Reference                             0.002 secs
+    Decompiler Switch Analysis                 1.225 secs
+    Demangler GNU                              0.000 secs
+    Disassemble                                0.023 secs
+    Disassemble Entry Points                   0.000 secs
+    Embedded Media                             0.002 secs
+    External Entry References                  0.000 secs
+    Function ID                                0.000 secs
+    Function Start Search                      0.041 secs
+    MIPS Constant Reference Analyzer           0.056 secs
+    MIPS Symbol                                0.000 secs
+    MIPS UnAlligned Instruction Fix            0.003 secs
+    Non-Returning Functions - Discovered       0.002 secs
+    Reference                                  0.009 secs
+    Shared Return Calls                        0.002 secs
+    Stack                                      0.067 secs
+    Subroutine References                      0.002 secs
+-----------------------------------------------------
+     Total Time   1 secs
+-----------------------------------------------------
+ (AutoAnalysisManager)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SCRTBASE.bin (HeadlessAnalyzer)  
+INFO  /SCRTBASE.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /SCRTBASE.bin (v8:/SCRTBASE.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SHELL.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SHELL.bin (HeadlessAnalyzer)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  -----------------------------------------------------
+    ASCII Strings                              0.017 secs
+    Apply Data Archives                        0.339 secs
+    Call-Fixup Installer                       0.000 secs
+    Create Address Tables                      0.075 secs
+    Create Address Tables - One Time           0.155 secs
+    Create Function                            0.050 secs
+    Data Reference                             0.044 secs
+    Decompiler Switch Analysis                 0.963 secs
+    Demangler GNU                              0.002 secs
+    Disassemble                                0.242 secs
+    Disassemble Entry Points                   0.000 secs
+    Embedded Media                             0.002 secs
+    External Entry References                  0.000 secs
+    Function ID                                0.000 secs
+    Function Start Search                      0.049 secs
+    MIPS Constant Reference Analyzer           0.733 secs
+    MIPS Symbol                                0.000 secs
+    MIPS UnAlligned Instruction Fix            0.021 secs
+    Non-Returning Functions - Discovered       0.015 secs
+    Reference                                  0.207 secs
+    Shared Return Calls                        0.011 secs
+    Stack                                      0.805 secs
+    Subroutine References                      0.023 secs
+-----------------------------------------------------
+     Total Time   3 secs
+-----------------------------------------------------
+ (AutoAnalysisManager)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SHELL.bin (HeadlessAnalyzer)  
+INFO  /SHELL.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /SHELL.bin (v8:/SHELL.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SKIRESRT.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SKIRESRT.bin (HeadlessAnalyzer)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  -----------------------------------------------------
+    ASCII Strings                              0.001 secs
+    Apply Data Archives                        0.131 secs
+    Call-Fixup Installer                       0.000 secs
+    Create Address Tables                      0.004 secs
+    Create Address Tables - One Time           0.000 secs
+    Create Function                            0.008 secs
+    Data Reference                             0.003 secs
+    Decompiler Switch Analysis                 1.092 secs
+    Demangler GNU                              0.000 secs
+    Disassemble                                0.020 secs
+    Disassemble Entry Points                   0.000 secs
+    Embedded Media                             0.003 secs
+    External Entry References                  0.000 secs
+    Function ID                                0.000 secs
+    Function Start Search                      0.051 secs
+    MIPS Constant Reference Analyzer           0.041 secs
+    MIPS Symbol                                0.000 secs
+    MIPS UnAlligned Instruction Fix            0.000 secs
+    Non-Returning Functions - Discovered       0.003 secs
+    Reference                                  0.004 secs
+    Shared Return Calls                        0.002 secs
+    Stack                                      0.048 secs
+    Subroutine References                      0.002 secs
+-----------------------------------------------------
+     Total Time   1 secs
+-----------------------------------------------------
+ (AutoAnalysisManager)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/SKIRESRT.bin (HeadlessAnalyzer)  
+INFO  /SKIRESRT.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /SKIRESRT.bin (v8:/SKIRESRT.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/VALLYFRM.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/VALLYFRM.bin (HeadlessAnalyzer)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/VALLYFRM.bin (HeadlessAnalyzer)  
+INFO  /VALLYFRM.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /VALLYFRM.bin (v8:/VALLYFRM.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  
+INFO  IMPORTING: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/WILDWEST.bin (HeadlessAnalyzer)  
+INFO  Successfully applied "-loader-baseAddr" to "Base Address" (old: "null", new: "0x80100000") (ProgramLoader)  
+INFO  Using Loader: Raw Binary (ProgramLoader)  
+INFO  Using Language/Compiler: MIPS:LE:32:default:default (ProgramLoader)  
+INFO  Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Users\smmel\bin, C:\Program Files\Git\mingw64\bin, C:\Program Files\Git\usr\local\bin, C:\Program Files\Git\usr\bin, C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin, C:\Program Files\Smart Projects\IsoBuster, C:\XDK\Xbox\Bin, C:\WINDOWS\System32\Wbem, C:\WINDOWS\System32\WindowsPowerShell\v1.0, C:\WINDOWS\System32\OpenSSH, C:\Program Files\010 Editor, C:\Program Files\Git\cmd, C:\Program Files\CMake\bin, C:\Program Files (x86)\Microsoft SQL Server\90\Tools\binn, C:\Program Files (x86)\Common Files\Softimage, C:\Program Files\Common Files\Softimage, C:\Program Files\dotnet, C:\Program Files\GitHub CLI, C:\Users\smmel\AppData\Local\Programs\Python\Python312\Scripts, C:\Users\smmel\AppData\Local\Programs\Python\Python312, C:\Users\smmel\AppData\Local\Programs\Python\Launcher, C:\Users\smmel\AppData\Local\Microsoft\WindowsApps, C:\Users\smmel\AppData\Local\Programs\Ollama, C:\Users\smmel\AppData\Local\GitHubDesktop\bin, C:\Program Files\Git\usr\bin\vendor_perl, C:\Program Files\Git\usr\bin\core_perl, C:\Users\smmel\AppData\Roaming\Claude\local-agent-mode-sessions\skills-plugin\971549c2-943c-4111-92b5-f1925f806682\a91ca04f-c7ba-4a86-956e-e663f7e6da6a\bin] (ProgramLoader)  
+INFO  IMPORTING: Loaded 0 additional files (HeadlessAnalyzer)  
+INFO  ANALYZING all memory and code: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/WILDWEST.bin (HeadlessAnalyzer)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  -----------------------------------------------------
+    ASCII Strings                              0.000 secs
+    Apply Data Archives                        0.087 secs
+    Call-Fixup Installer                       0.000 secs
+    Create Address Tables                      0.004 secs
+    Create Address Tables - One Time           0.001 secs
+    Create Function                            0.010 secs
+    Data Reference                             0.001 secs
+    Decompiler Switch Analysis                 1.412 secs
+    Demangler GNU                              0.000 secs
+    Disassemble                                0.007 secs
+    Disassemble Entry Points                   0.000 secs
+    Embedded Media                             0.001 secs
+    External Entry References                  0.000 secs
+    Function ID                                0.000 secs
+    Function Start Search                      0.040 secs
+    MIPS Constant Reference Analyzer           0.033 secs
+    MIPS Symbol                                0.000 secs
+    MIPS UnAlligned Instruction Fix            0.000 secs
+    Non-Returning Functions - Discovered       0.001 secs
+    Reference                                  0.006 secs
+    Shared Return Calls                        0.002 secs
+    Stack                                      0.037 secs
+    Subroutine References                      0.003 secs
+-----------------------------------------------------
+     Total Time   1 secs
+-----------------------------------------------------
+ (AutoAnalysisManager)  
+INFO  REPORT: Analysis succeeded for file: file:///C:/Programming/GitHub/Vigilante 8 recomp/analysis/dll_pre/WILDWEST.bin (HeadlessAnalyzer)  
+INFO  /WILDWEST.bin: file created (smmel) (LocalFileSystem)  
+INFO  REPORT: Save succeeded for: /WILDWEST.bin (v8:/WILDWEST.bin) (HeadlessAnalyzer)  
+INFO  REPORT: Import succeeded (HeadlessAnalyzer)  

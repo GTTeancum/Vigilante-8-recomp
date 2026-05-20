@@ -1,0 +1,94 @@
+# addr: 0x800157d4  name: FUN_800157d4
+800157d4:  addiu sp,sp,-0x38
+800157d8:  sw s1,0x24(sp)
+800157dc:  move s1,a0
+800157e0:  sw ra,0x34(sp)
+800157e4:  sw s4,0x30(sp)
+800157e8:  sw s3,0x2c(sp)
+800157ec:  sw s2,0x28(sp)
+800157f0:  sw s0,0x20(sp)
+800157f4:  lbu v1,0x0(s1)
+800157f8:  li v0,0x5c
+800157fc:  lw s3,0x6b4(gp)
+80015800:  bne v1,v0,0x8001580c
+80015804:  _nop
+80015808:  addiu s1,s1,0x1
+8001580c:  beq s3,zero,0x80015924
+80015810:  _li s4,0x5c
+80015814:  addiu s2,sp,0x10
+80015818:  clear s0
+8001581c:  lbu v0,0x0(s1)
+80015820:  nop
+80015824:  andi v1,v0,0xff
+80015828:  sltiu v0,v1,0x61
+8001582c:  bne v0,zero,0x80015838
+80015830:  _addiu s1,s1,0x1
+80015834:  addiu v1,v1,-0x20
+80015838:  move a0,v1
+8001583c:  andi v0,a0,0xff
+80015840:  beq v0,zero,0x80015864
+80015844:  _nop
+80015848:  beq v0,s4,0x80015864
+8001584c:  _addu v0,s2,s0
+80015850:  sb v1,0x0(v0)
+80015854:  addiu s0,s0,0x1
+80015858:  slti v0,s0,0xc
+8001585c:  bne v0,zero,0x8001581c
+80015860:  _nop
+80015864:  slti v0,s0,0xc
+80015868:  beq v0,zero,0x80015890
+8001586c:  _andi v0,a0,0xff
+80015870:  li v1,0x20
+80015874:  addu v0,s2,s0
+80015878:  sb v1,0x0(v0)
+8001587c:  addiu s0,s0,0x1
+80015880:  slti v0,s0,0xc
+80015884:  bne v0,zero,0x80015878
+80015888:  _addu v0,s2,s0
+8001588c:  andi v0,a0,0xff
+80015890:  bne v0,s4,0x800158c8
+80015894:  _nop
+80015898:  lw s3,0x8(s3)
+8001589c:  nop
+800158a0:  beq s3,zero,0x80015924
+800158a4:  _move a0,s3
+800158a8:  addiu a1,sp,0x10
+800158ac:  jal 0x80052384
+800158b0:  _li a2,0x8
+800158b4:  beq v0,zero,0x8001591c
+800158b8:  _nop
+800158bc:  lw s3,0xc(s3)
+800158c0:  j 0x8001589c
+800158c4:  _nop
+800158c8:  lw v0,0x10(s3)
+800158cc:  nop
+800158d0:  blez v0,0x80015924
+800158d4:  _clear s0
+800158d8:  li s2,0x14
+800158dc:  addu s1,s3,s2
+800158e0:  move a0,s1
+800158e4:  addiu a1,sp,0x10
+800158e8:  jal 0x80052384
+800158ec:  _li a2,0xc
+800158f0:  bne v0,zero,0x80015900
+800158f4:  _addiu s0,s0,0x1
+800158f8:  j 0x80015928
+800158fc:  _move v0,s1
+80015900:  lw v0,0x10(s3)
+80015904:  nop
+80015908:  slt v0,s0,v0
+8001590c:  bne v0,zero,0x800158dc
+80015910:  _addiu s2,s2,0x14
+80015914:  j 0x80015928
+80015918:  _clear v0
+8001591c:  bne s3,zero,0x8001581c
+80015920:  _clear s0
+80015924:  clear v0
+80015928:  lw ra,0x34(sp)
+8001592c:  lw s4,0x30(sp)
+80015930:  lw s3,0x2c(sp)
+80015934:  lw s2,0x28(sp)
+80015938:  lw s1,0x24(sp)
+8001593c:  lw s0,0x20(sp)
+80015940:  jr ra
+80015944:  _addiu sp,sp,0x38

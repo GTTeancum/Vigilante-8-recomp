@@ -1,0 +1,37 @@
+# addr: 0x80015644  name: FUN_80015644
+80015644:  addiu sp,sp,-0x20
+80015648:  andi a0,a0,0xff
+8001564c:  li v0,0x1
+80015650:  bne a0,v0,0x800156c4
+80015654:  _sw ra,0x18(sp)
+80015658:  lw v1,0x6a8(gp)
+8001565c:  lw v0,0x6a4(gp)
+80015660:  nop
+80015664:  beq v1,v0,0x80015690
+80015668:  _nop
+8001566c:  lw a0,0x6b0(gp)
+80015670:  jal 0x80049430
+80015674:  _addiu a1,sp,0x10
+80015678:  li a0,0x6
+8001567c:  addiu a1,sp,0x10
+80015680:  jal 0x80048fd0
+80015684:  _clear a2
+80015688:  j 0x800156c4
+8001568c:  _nop
+80015690:  lw a0,0x6a8(gp)
+80015694:  jal 0x800493ac
+80015698:  _li a1,0x200
+8001569c:  lw v1,0x6a0(gp)
+800156a0:  lw v0,0x6a8(gp)
+800156a4:  nop
+800156a8:  bne v0,v1,0x800156b4
+800156ac:  _nop
+800156b0:  addiu v1,v1,0x800
+800156b4:  lw v0,0x6b0(gp)
+800156b8:  sw v1,0x6a8(gp)
+800156bc:  addiu v0,v0,0x1
+800156c0:  sw v0,0x6b0(gp)
+800156c4:  lw ra,0x18(sp)
+800156c8:  nop
+800156cc:  jr ra
+800156d0:  _addiu sp,sp,0x20

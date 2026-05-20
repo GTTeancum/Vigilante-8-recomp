@@ -1,0 +1,22 @@
+# addr: 0x800460a4  name: SpuMalloc
+800460a4:  lui v0,0x8006
+800460a8:  lw v0,-0x1294(v0)
+800460ac:  addiu sp,sp,-0x28
+800460b0:  sw s1,0x14(sp)
+800460b4:  move s1,a0
+800460b8:  sw s0,0x10(sp)
+800460bc:  clear s0
+800460c0:  sw s2,0x18(sp)
+800460c4:  li s2,-0x1
+800460c8:  sw ra,0x20(sp)
+800460cc:  bne v0,zero,0x800460dc
+800460d0:  _sw s3,0x1c(sp)
+800460d4:  j 0x800460f8
+800460d8:  _clear s3
+800460dc:  lui v0,0x1
+800460e0:  lui v1,0x8006
+800460e4:  lw v1,-0x1290(v1)
+800460e8:  lui a0,0x8006
+800460ec:  lw a0,-0x1204(a0)
+800460f0:  subu v0,v0,v1
+800460f4:  sllv s3,v0,a0

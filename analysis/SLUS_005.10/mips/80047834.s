@@ -1,0 +1,25 @@
+# addr: 0x80047834  name: __udivmoddi4
+80047834:  addiu sp,sp,-0x8
+80047838:  move t1,a2
+8004783c:  move a2,a3
+80047840:  move t3,a0
+80047844:  lw t9,0x18(sp)
+80047848:  sw s1,0x4(sp)
+8004784c:  bne a2,zero,0x80047bf8
+80047850:  _sw s0,0x0(sp)
+80047854:  sltu v0,a1,t1
+80047858:  beq v0,zero,0x800479a4
+8004785c:  _ori v0,zero,0xffff
+80047860:  sltu v0,v0,t1
+80047864:  bne v0,zero,0x8004787c
+80047868:  _move a0,t1
+8004786c:  sltiu v0,t1,0x100
+80047870:  xori v0,v0,0x1
+80047874:  j 0x80047894
+80047878:  _sll v1,v0,0x3
+8004787c:  lui v0,0xff
+80047880:  ori v0,v0,0xffff
+80047884:  sltu v0,v0,t1
+80047888:  bne v0,zero,0x80047894
+8004788c:  _ori v1,zero,0x18
+80047890:  ori v1,zero,0x10

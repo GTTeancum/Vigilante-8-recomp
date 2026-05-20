@@ -1,0 +1,24 @@
+# addr: 0x8004f378  name: SetGraphDebug
+8004f378:  addiu sp,sp,-0x18
+8004f37c:  lui v1,0x8006
+8004f380:  addiu v1,v1,0x5026
+8004f384:  sw ra,0x14(sp)
+8004f388:  sw s0,0x10(sp)
+8004f38c:  lbu s0,0x0(v1)
+8004f390:  sb a0,0x0(v1)
+8004f394:  andi a0,a0,0xff
+8004f398:  beq a0,zero,0x8004f3c4
+8004f39c:  _move v0,s0
+8004f3a0:  lui v0,0x8006
+8004f3a4:  lw v0,0x5020(v0)
+8004f3a8:  lbu a1,0x0(v1)
+8004f3ac:  lbu a2,-0x2(v1)
+8004f3b0:  lbu a3,0x1(v1)
+8004f3b4:  lui a0,0x8001
+8004f3b8:  jalr v0
+8004f3bc:  _addiu a0,a0,0x11cc
+8004f3c0:  move v0,s0
+8004f3c4:  lw ra,0x14(sp)
+8004f3c8:  lw s0,0x10(sp)
+8004f3cc:  jr ra
+8004f3d0:  _addiu sp,sp,0x18

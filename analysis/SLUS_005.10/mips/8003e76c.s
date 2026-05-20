@@ -1,0 +1,19 @@
+# addr: 0x8003e76c  name: FUN_8003e76c
+8003e76c:  addiu sp,sp,-0x18
+8003e770:  sw s0,0x10(sp)
+8003e774:  move s0,a0
+8003e778:  lui v0,0x8007
+8003e77c:  lw a0,0x37d4(v0)
+8003e780:  sw ra,0x14(sp)
+8003e784:  jal 0x8001bda0
+8003e788:  _li a1,0xe
+8003e78c:  lhu v1,0x0(v0)
+8003e790:  move a0,s0
+8003e794:  move a1,v0
+8003e798:  ori v1,v1,0x8
+8003e79c:  jal 0x8003e598
+8003e7a0:  _sh v1,0x0(a1)
+8003e7a4:  lw ra,0x14(sp)
+8003e7a8:  lw s0,0x10(sp)
+8003e7ac:  jr ra
+8003e7b0:  _addiu sp,sp,0x18

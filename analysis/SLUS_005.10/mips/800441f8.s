@@ -1,0 +1,91 @@
+# addr: 0x800441f8  name: FUN_800441f8
+800441f8:  addiu sp,sp,-0x430
+800441fc:  addiu a0,sp,0x10
+80044200:  li a1,0x4
+80044204:  sw ra,0x42c(sp)
+80044208:  sw s4,0x428(sp)
+8004420c:  sw s3,0x424(sp)
+80044210:  sw s2,0x420(sp)
+80044214:  sw s1,0x41c(sp)
+80044218:  jal 0x80015a20
+8004421c:  _sw s0,0x418(sp)
+80044220:  lhu a0,0x12(sp)
+80044224:  li v0,-0x40
+80044228:  sll a0,a0,0x3
+8004422c:  addiu a0,a0,0x3f
+80044230:  jal 0x800460a4
+80044234:  _and a0,a0,v0
+80044238:  move s2,v0
+8004423c:  bne s2,zero,0x80044250
+80044240:  _nop
+80044244:  lui a0,0x8006
+80044248:  jal 0x80015368
+8004424c:  _addiu a0,a0,0x58bc
+80044250:  lh a0,0x10(sp)
+80044254:  nop
+80044258:  sll a0,a0,0x2
+8004425c:  jal 0x800116f4
+80044260:  _addiu a0,a0,0x4
+80044264:  move s4,v0
+80044268:  srl v0,s2,0x3
+8004426c:  sh v0,0x2(s4)
+80044270:  lhu v0,0x10(sp)
+80044274:  nop
+80044278:  sh v0,0x0(s4)
+8004427c:  lh a1,0x10(sp)
+80044280:  addiu a0,s4,0x4
+80044284:  jal 0x80015a20
+80044288:  _sll a1,a1,0x2
+8004428c:  lh v0,0x10(sp)
+80044290:  nop
+80044294:  blez v0,0x800442c8
+80044298:  _clear s0
+8004429c:  move a0,s4
+800442a0:  lhu v0,0x4(a0)
+800442a4:  lhu v1,0x2(s4)
+800442a8:  nop
+800442ac:  addu v0,v0,v1
+800442b0:  sh v0,0x4(a0)
+800442b4:  lh v0,0x10(sp)
+800442b8:  addiu s0,s0,0x1
+800442bc:  slt v0,s0,v0
+800442c0:  bne v0,zero,0x800442a0
+800442c4:  _addiu a0,a0,0x4
+800442c8:  jal 0x800467b4
+800442cc:  _clear a0
+800442d0:  jal 0x80046754
+800442d4:  _move a0,s2
+800442d8:  lhu v0,0x12(sp)
+800442dc:  nop
+800442e0:  sll s0,v0,0x3
+800442e4:  beq s0,zero,0x8004433c
+800442e8:  _addiu s3,sp,0x18
+800442ec:  li a1,0x400
+800442f0:  slt v0,s0,a1
+800442f4:  beq v0,zero,0x80044300
+800442f8:  _nop
+800442fc:  move a1,s0
+80044300:  move a0,s3
+80044304:  jal 0x80015a20
+80044308:  _move s1,a1
+8004430c:  jal 0x80046754
+80044310:  _move a0,s2
+80044314:  move a0,s3
+80044318:  jal 0x800466f4
+8004431c:  _move a1,s1
+80044320:  jal 0x800467e4
+80044324:  _clear a0
+80044328:  beq v0,zero,0x80044320
+8004432c:  _nop
+80044330:  subu s0,s0,s1
+80044334:  bne s0,zero,0x800442ec
+80044338:  _addu s2,s2,s1
+8004433c:  lw ra,0x42c(sp)
+80044340:  move v0,s4
+80044344:  lw s4,0x428(sp)
+80044348:  lw s3,0x424(sp)
+8004434c:  lw s2,0x420(sp)
+80044350:  lw s1,0x41c(sp)
+80044354:  lw s0,0x418(sp)
+80044358:  jr ra
+8004435c:  _addiu sp,sp,0x430

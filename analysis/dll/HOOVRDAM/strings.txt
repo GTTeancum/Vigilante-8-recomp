@@ -1,0 +1,12 @@
+80100078	SplashS_R
+8010008c	HoovrDam
+801000f0	parking_meter_1
+80100100	ArchTransf
+8010010c	transformer_1
+8010011c	tranformer_casing_1
+80100130	PowePlant_L
+8010013c	PowePlant_R
+8010015c	Dam_Lever
+80100168	PipeOut_1
+80100174	barracade_lg_1
+80100184	Catwalk_1

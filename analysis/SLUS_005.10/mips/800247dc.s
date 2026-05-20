@@ -1,0 +1,44 @@
+# addr: 0x800247dc  name: FUN_800247dc
+800247dc:  lw a2,0x7ec(gp)
+800247e0:  nop
+800247e4:  beq a2,zero,0x800247f8
+800247e8:  _move t1,a2
+800247ec:  lw v0,0x0(a2)
+800247f0:  nop
+800247f4:  sw v0,0x7ec(gp)
+800247f8:  beq t1,zero,0x80024880
+800247fc:  _li t4,0xb
+80024800:  sll t3,a0,0x15
+80024804:  sll t2,a1,0x15
+80024808:  lw t0,0x6ec(gp)
+8002480c:  addiu t4,t4,-0x1
+80024810:  bgez t2,0x8002481c
+80024814:  _srl a3,t3,0x1f
+80024818:  ori a3,a3,0x2
+8002481c:  sll v0,a3,0x1
+80024820:  addu v0,t0,v0
+80024824:  lhu v0,0x2(v0)
+80024828:  nop
+8002482c:  andi a2,v0,0xffff
+80024830:  beq a2,zero,0x8002485c
+80024834:  _nop
+80024838:  andi v0,v0,0x8000
+8002483c:  bne v0,zero,0x8002485c
+80024840:  _sll t3,t3,0x1
+80024844:  sll t2,t2,0x1
+80024848:  sll v0,a2,0x2
+8002484c:  addu v0,v0,a2
+80024850:  sll v0,v0,0x1
+80024854:  j 0x8002480c
+80024858:  _addu t0,t0,v0
+8002485c:  li v0,-0x1
+80024860:  sllv v0,v0,t4
+80024864:  and v1,a0,v0
+80024868:  and v0,a1,v0
+8002486c:  sw t0,0x8(t1)
+80024870:  sb a3,0x10(t1)
+80024874:  sb t4,0x11(t1)
+80024878:  sh v1,0xc(t1)
+8002487c:  sh v0,0xe(t1)
+80024880:  jr ra
+80024884:  _move v0,t1

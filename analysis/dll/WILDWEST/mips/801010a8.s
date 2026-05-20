@@ -1,0 +1,126 @@
+# addr: 0x801010a8  name: FUN_801010a8
+801010a8:  addiu sp,sp,-0x20
+801010ac:  sw s1,0x14(sp)
+801010b0:  move s1,a0
+801010b4:  sltiu v0,a1,0xa
+801010b8:  sw ra,0x1c(sp)
+801010bc:  sw s2,0x18(sp)
+801010c0:  beq v0,zero,0x80101280
+801010c4:  _sw s0,0x10(sp)
+801010c8:  lui v0,0x8010
+801010cc:  addiu v0,v0,0x1b0
+801010d0:  sll v1,a1,0x2
+801010d4:  addu v1,v1,v0
+801010d8:  lw v0,0x0(v1)
+801010dc:  nop
+801010e0:  jr v0
+801010e4:  _nop
+801010e8:  lw v0,0x30(s1)
+801010ec:  nop
+801010f0:  bne v0,zero,0x80101108
+801010f4:  _nop
+801010f8:  jal 0x800205f8
+801010fc:  _move a0,s1
+80101100:  slti a0,zero,0x4a1
+80101104:  li v0,-0x1
+80101108:  sltiu a0,zero,0x1cb
+8010110c:  move a0,s1
+80101110:  slti a0,zero,0x4a1
+80101114:  clear v0
+80101118:  lw a3,0x0(a2)
+8010111c:  nop
+80101120:  lbu v1,0x4(a3)
+80101124:  li v0,0x7
+80101128:  bne v1,v0,0x801011c0
+8010112c:  _move s2,a2
+80101130:  lw a0,0x38(s1)
+80101134:  nop
+80101138:  beq a0,zero,0x801011a4
+8010113c:  _nop
+80101140:  lhu v0,0xc(s1)
+80101144:  lhu v1,0xc(a3)
+80101148:  andi v0,v0,0x7f
+8010114c:  sltu v0,v0,v1
+80101150:  beq v0,zero,0x801011a4
+80101154:  _nop
+80101158:  jal 0x8003ff28
+8010115c:  _nop
+80101160:  move s0,v0
+80101164:  addiu v1,v0,0x88
+80101168:  li v0,-0xbeb
+8010116c:  sh zero,0xc(s0)
+80101170:  sw zero,0x88(s0)
+80101174:  sw v0,0x4(v1)
+80101178:  jal 0x8004410c
+8010117c:  _sw zero,0x8(v1)
+80101180:  lui v1,0x8006
+80101184:  lw a1,0x58fc(v1)
+80101188:  move a0,v0
+8010118c:  li a2,0x29
+80101190:  jal 0x8004483c
+80101194:  _addiu a3,s0,0x24
+80101198:  lui v0,0x8004
+8010119c:  addiu v0,v0,-0x349c
+801011a0:  sw v0,0x64(s0)
+801011a4:  lw v0,0x0(s2)
+801011a8:  nop
+801011ac:  lhu a1,0xc(v0)
+801011b0:  jal 0x80022320
+801011b4:  _move a0,s1
+801011b8:  slti a0,zero,0x4a1
+801011bc:  clear v0
+801011c0:  lw v0,0x0(s1)
+801011c4:  nop
+801011c8:  andi v0,v0,0x1
+801011cc:  bne v0,zero,0x80101284
+801011d0:  _clear v0
+801011d4:  lw v0,0xc(a2)
+801011d8:  nop
+801011dc:  beq v0,s1,0x80101284
+801011e0:  _clear v0
+801011e4:  lw a0,0x38(s1)
+801011e8:  jal 0x8003ff28
+801011ec:  _nop
+801011f0:  move a0,s1
+801011f4:  li a1,0x12c
+801011f8:  lui v1,0x8004
+801011fc:  addiu v1,v1,-0x349c
+80101200:  sw v1,0x64(v0)
+80101204:  jal 0x80020890
+80101208:  _sh zero,0xc(v0)
+8010120c:  slti a0,zero,0x4a1
+80101210:  clear v0
+80101214:  move a0,s1
+80101218:  jal 0x80022320
+8010121c:  _move a1,a2
+80101220:  slti a0,zero,0x4a1
+80101224:  clear v0
+80101228:  lw v0,0xa4(s1)
+8010122c:  nop
+80101230:  bne v0,zero,0x80101284
+80101234:  _clear v0
+80101238:  jal 0x8003fc50
+8010123c:  _move a0,s1
+80101240:  slti a0,zero,0x4a1
+80101244:  clear v0
+80101248:  lh v1,0x6(a2)
+8010124c:  lh v0,0x6(s1)
+80101250:  nop
+80101254:  bne v1,v0,0x80101284
+80101258:  _clear v0
+8010125c:  lw v0,0x0(s1)
+80101260:  lui v1,0x1
+80101264:  or v0,v0,v1
+80101268:  slti a0,zero,0x4a0
+8010126c:  sw v0,0x0(s1)
+80101270:  slti a0,zero,0x4a1
+80101274:  li v0,0xb4
+80101278:  sltiu a0,zero,0x1a2
+8010127c:  move a0,s1
+80101280:  clear v0
+80101284:  lw ra,0x1c(sp)
+80101288:  lw s2,0x18(sp)
+8010128c:  lw s1,0x14(sp)
+80101290:  lw s0,0x10(sp)
+80101294:  jr ra
+80101298:  _addiu sp,sp,0x20

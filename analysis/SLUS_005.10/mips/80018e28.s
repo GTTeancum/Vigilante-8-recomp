@@ -1,0 +1,54 @@
+# addr: 0x80018e28  name: FUN_80018e28
+80018e28:  addiu sp,sp,-0x28
+80018e2c:  sw s1,0x14(sp)
+80018e30:  move s1,a0
+80018e34:  sw ra,0x20(sp)
+80018e38:  sw s3,0x1c(sp)
+80018e3c:  sw s2,0x18(sp)
+80018e40:  sw s0,0x10(sp)
+80018e44:  lw s0,0x0(s1)
+80018e48:  nop
+80018e4c:  lbu v0,0x3(s0)
+80018e50:  addiu s0,s0,-0x4
+80018e54:  subu s0,s0,s1
+80018e58:  addiu v0,v0,0x1
+80018e5c:  sll v0,v0,0x2
+80018e60:  addu s0,s0,v0
+80018e64:  jal 0x800116f4
+80018e68:  _addiu a0,s0,0x4
+80018e6c:  move s3,v0
+80018e70:  addiu s2,s3,0x4
+80018e74:  move a0,s2
+80018e78:  addiu a1,s1,0x4
+80018e7c:  jal 0x80044c44
+80018e80:  _move a2,s0
+80018e84:  lw v0,0x0(s1)
+80018e88:  nop
+80018e8c:  subu v0,v0,s1
+80018e90:  addu v0,s3,v0
+80018e94:  beq s2,v0,0x80018edc
+80018e98:  _sw v0,0x0(s3)
+80018e9c:  lui a1,0xff
+80018ea0:  ori a1,a1,0xffff
+80018ea4:  lui a2,0xff00
+80018ea8:  lw a0,0x0(s2)
+80018eac:  lbu v0,0x3(s2)
+80018eb0:  and a0,a0,a2
+80018eb4:  addiu v0,v0,0x1
+80018eb8:  sll v0,v0,0x2
+80018ebc:  addu v0,s2,v0
+80018ec0:  and v1,v0,a1
+80018ec4:  or a0,a0,v1
+80018ec8:  sw a0,0x0(s2)
+80018ecc:  lw v1,0x0(s3)
+80018ed0:  move s2,v0
+80018ed4:  bne s2,v1,0x80018ea8
+80018ed8:  _nop
+80018edc:  lw ra,0x20(sp)
+80018ee0:  move v0,s3
+80018ee4:  lw s3,0x1c(sp)
+80018ee8:  lw s2,0x18(sp)
+80018eec:  lw s1,0x14(sp)
+80018ef0:  lw s0,0x10(sp)
+80018ef4:  jr ra
+80018ef8:  _addiu sp,sp,0x28

@@ -1,0 +1,19 @@
+# addr: 0x80054044  name: PadSetAct
+80054044:  lui v0,0x8006
+80054048:  lw v0,0x5270(v0)
+8005404c:  addiu sp,sp,-0x20
+80054050:  sw s0,0x10(sp)
+80054054:  move s0,a1
+80054058:  sw s1,0x14(sp)
+8005405c:  sw ra,0x18(sp)
+80054060:  jalr v0
+80054064:  _move s1,a2
+80054068:  move a0,v0
+8005406c:  move a1,s0
+80054070:  jal 0x80054c94
+80054074:  _move a2,s1
+80054078:  lw ra,0x18(sp)
+8005407c:  lw s1,0x14(sp)
+80054080:  lw s0,0x10(sp)
+80054084:  jr ra
+80054088:  _addiu sp,sp,0x20

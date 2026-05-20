@@ -1,0 +1,75 @@
+/* vehicle_exp.c -- load Shell\Vehicles.exp -> array of vehicle templates.
+ *
+ * Source: SHELL.DLL @ 0x80102264.
+ *
+ * Vehicles.exp is an IFF FORM-style archive. After the outer header,
+ * each chunk whose 4cc is "XOBF" (big-endian 0x584f4246) carries one
+ * vehicle's XOBF-format object data. The loader:
+ *   1. Stream-opens Shell\Vehicles.exp via the global descriptor.
+ *   2. Reads the outermost chunk header (the wrapping FORM).
+ *   3. Walks every inner chunk in the wrapper:
+ *      - If the chunk is XOBF, parses it via XOBF_Parse (the renamed
+ *        FUN_8002263c) and stores the returned vehicle-template
+ *        pointer into DAT_800737a0[i++].
+ *      - Otherwise, frees the chunk payload and moves on.
+ *   4. Stream-closes.
+ *
+ * After this returns, DAT_800737a0[i] holds an array of N vehicle
+ * template pointers, indexed by character/vehicle id. The runtime
+ * Vehicle struct in RAM is allocated from this template at match
+ * start (still TBD -- pass 2 hunting for the allocation site).
+ *
+ * HIGH confidence on shape; MED on the per-XOBF body until pass 2
+ * promotes XOBF_Parse.
+ */
+#include <stdint.h>
+
+extern void  Stream_OpenByName(const char *path);
+extern void  Stream_Close(void);
+extern void *Iff_ReadChunkData(uint32_t *hdrOut, uint32_t *parentRemaining);
+extern void  Heap_Free(void *p);
+extern void *XOBF_Parse(void *body, int flags);     /* FUN_8002263c -- pass 2 promotes */
+
+/* 14 entries -- matches the V8 character roster: 10 default vehicles +
+ * Y the Alien + 3 secret characters/bosses. Confirmed by VehicleExp_Free
+ * (SHELL.DLL FUN_80102334) walking exactly 0..0xd. */
+extern void *DAT_800737a0[14];
+
+#define FOURCC_BE_XOBF   0x584f4246u    /* 'X','O','B','F' big-endian */
+
+void VehicleExp_Load(void)
+{
+    Stream_OpenByName("Shell\\Vehicles.exp");
+
+    uint32_t hdr[2];
+    uint32_t remaining = 0;
+    Iff_ReadChunkData(hdr, &remaining);
+    remaining = hdr[1];          /* the FORM body's bytes-remaining counter */
+
+    void **out = DAT_800737a0;
+    while (remaining != 0) {
+        void *body = Iff_ReadChunkData(hdr, &remaining);
+        /* hdr[0] is the LE byte-swapped fourcc; byteswap back to BE for compare. */
+        uint32_t fcc_be = (hdr[0] >> 24) | ((hdr[0] >> 8) & 0xff00u)
+                        | ((hdr[0] & 0xff00u) << 8) | (hdr[0] << 24);
+        if (body != NULL && fcc_be != FOURCC_BE_XOBF) {
+            Heap_Free(body);
+        } else if (fcc_be == FOURCC_BE_XOBF) {
+            *out++ = XOBF_Parse(body, 0);
+        }
+    }
+
+    Stream_Close();
+}
+
+/* HIGH: counterpart of VehicleExp_Load. Iterates 0..0xe of
+ * DAT_800737a0[] and frees each non-NULL object via the Renderer
+ * object teardown (FUN_8001aa38). The 0xe upper bound is the recovered
+ * V8 roster size. */
+extern void Object_Free(void *obj);    /* FUN_8001aa38 */
+void VehicleExp_Free(void)
+{
+    for (int i = 0; i < 14; i++) {
+        if (DAT_800737a0[i] != NULL) Object_Free(DAT_800737a0[i]);
+    }
+}

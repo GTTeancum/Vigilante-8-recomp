@@ -1,0 +1,20 @@
+# addr: 0x800220d4  name: FUN_800220d4
+800220d4:  addiu sp,sp,-0x20
+800220d8:  addiu a0,sp,0x10
+800220dc:  clear a1
+800220e0:  sw ra,0x18(sp)
+800220e4:  jal 0x80044efc
+800220e8:  _li a2,0x8
+800220ec:  lw a0,0x6fc(gp)
+800220f0:  lui a1,0x8002
+800220f4:  addiu a1,a1,0x2044
+800220f8:  jal 0x8002123c
+800220fc:  _addiu a2,sp,0x10
+80022100:  lw v0,0x14(sp)
+80022104:  lw v1,0x10(sp)
+80022108:  lw ra,0x18(sp)
+8002210c:  sll v0,v0,0x1
+80022110:  slt v0,v0,v1
+80022114:  xori v0,v0,0x1
+80022118:  jr ra
+8002211c:  _addiu sp,sp,0x20

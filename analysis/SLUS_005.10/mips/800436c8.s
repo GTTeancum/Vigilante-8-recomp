@@ -1,0 +1,36 @@
+# addr: 0x800436c8  name: FUN_800436c8
+800436c8:  lw v0,0x0(a0)
+800436cc:  lw v1,0x4(a0)
+800436d0:  bgez v0,0x800436dc
+800436d4:  _lw t1,0x8(a0)
+800436d8:  sub v0,zero,v0
+800436dc:  sll t0,v0,0x10
+800436e0:  bgez t0,0x800436ec
+800436e4:  _nop
+800436e8:  xori v0,v0,0xffff
+800436ec:  bgez v1,0x800436f8
+800436f0:  _gte_ldR11R12 v0
+800436f4:  sub v1,zero,v1
+800436f8:  sll t0,v1,0x10
+800436fc:  bgez t0,0x80043708
+80043700:  _lw v0,0xc(a0)
+80043704:  xori v1,v1,0xffff
+80043708:  bgez t1,0x80043714
+8004370c:  _gte_ldR13R21 v1
+80043710:  sub t1,zero,t1
+80043714:  sll t0,t1,0x10
+80043718:  bgez t0,0x80043724
+8004371c:  _lh v1,0x10(a0)
+80043720:  xori t1,t1,0xffff
+80043724:  bgez v0,0x80043730
+80043728:  _gte_ldR22R23 t1
+8004372c:  sub v0,zero,v0
+80043730:  sll t0,v0,0x10
+80043734:  bgez t0,0x80043740
+80043738:  _nop
+8004373c:  xori v0,v0,0xffff
+80043740:  bgez v1,0x8004374c
+80043744:  _gte_ldR31R32 v0
+80043748:  sub v1,zero,v1
+8004374c:  jr ra
+80043750:  _gte_ldR33 v1

@@ -1,0 +1,27 @@
+# addr: 0x800154f4  name: FUN_800154f4
+800154f4:  addiu sp,sp,-0x28
+800154f8:  sw s1,0x1c(sp)
+800154fc:  move s1,a0
+80015500:  move a0,a1
+80015504:  addiu a1,sp,0x10
+80015508:  sw s0,0x18(sp)
+8001550c:  sw ra,0x20(sp)
+80015510:  jal 0x80049430
+80015514:  _move s0,a2
+80015518:  li a0,0x15
+8001551c:  addiu a1,sp,0x10
+80015520:  jal 0x80048fd0
+80015524:  _clear a2
+80015528:  move a0,s0
+8001552c:  move a1,s1
+80015530:  jal 0x8004b2c4
+80015534:  _li a2,0x80
+80015538:  clear a0
+8001553c:  jal 0x8004b3c4
+80015540:  _move a1,a0
+80015544:  lw ra,0x20(sp)
+80015548:  move v0,s1
+8001554c:  lw s1,0x1c(sp)
+80015550:  lw s0,0x18(sp)
+80015554:  jr ra
+80015558:  _addiu sp,sp,0x28

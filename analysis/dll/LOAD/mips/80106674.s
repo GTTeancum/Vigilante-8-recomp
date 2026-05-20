@@ -1,0 +1,36 @@
+# addr: 0x80106674  name: FUN_80106674
+80106674:  addiu sp,sp,-0x20
+80106678:  sw s1,0x14(sp)
+8010667c:  move s1,a0
+80106680:  sw s0,0x10(sp)
+80106684:  sw ra,0x18(sp)
+80106688:  sltiu a0,zero,0x19e5
+8010668c:  move s0,a1
+80106690:  lui v1,0x8010
+80106694:  lw v1,0x6f44(v1)
+80106698:  nop
+8010669c:  lw v0,0x0(v1)
+801066a0:  srl s0,s0,0x5
+801066a4:  ori v0,v0,0x88
+801066a8:  sw v0,0x0(v1)
+801066ac:  lui v0,0x8010
+801066b0:  lw v0,0x6f20(v0)
+801066b4:  sll s0,s0,0x10
+801066b8:  sw zero,0x0(v0)
+801066bc:  lui v0,0x8010
+801066c0:  lw v0,0x6f18(v0)
+801066c4:  ori s0,s0,0x20
+801066c8:  sw s1,0x0(v0)
+801066cc:  lui v0,0x8010
+801066d0:  lw v0,0x6f1c(v0)
+801066d4:  lui v1,0x100
+801066d8:  sw s0,0x0(v0)
+801066dc:  lui v0,0x8010
+801066e0:  lw v0,0x6f20(v0)
+801066e4:  ori v1,v1,0x200
+801066e8:  sw v1,0x0(v0)
+801066ec:  lw ra,0x18(sp)
+801066f0:  lw s1,0x14(sp)
+801066f4:  lw s0,0x10(sp)
+801066f8:  jr ra
+801066fc:  _addiu sp,sp,0x20

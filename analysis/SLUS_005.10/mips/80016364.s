@@ -1,0 +1,149 @@
+# addr: 0x80016364  name: FUN_80016364
+80016364:  lw v1,0x4(gp)
+80016368:  addiu sp,sp,-0x50
+8001636c:  addiu a0,sp,0x18
+80016370:  clear a1
+80016374:  sw ra,0x4c(sp)
+80016378:  sw s2,0x48(sp)
+8001637c:  sw s1,0x44(sp)
+80016380:  sw s0,0x40(sp)
+80016384:  lw a2,0x6bc(gp)
+80016388:  sll v0,v1,0x1
+8001638c:  addu v0,v0,v1
+80016390:  sll v0,v0,0x4
+80016394:  subu v0,v0,v1
+80016398:  sll v0,v0,0x3
+8001639c:  subu v0,v0,v1
+800163a0:  sll v0,v0,0x5
+800163a4:  addu s1,a2,v0
+800163a8:  jal 0x80044efc
+800163ac:  _li a2,0x8
+800163b0:  lw v1,0x6bc(gp)
+800163b4:  nop
+800163b8:  lhu v0,0x5dc0(v1)
+800163bc:  nop
+800163c0:  sh v0,0x18(sp)
+800163c4:  lw v0,0x5dc0(v1)
+800163c8:  nop
+800163cc:  sll v0,v0,0x1
+800163d0:  sh v0,0x1a(sp)
+800163d4:  lw t2,0x18(sp)
+800163d8:  lw t3,0x1c(sp)
+800163dc:  sw t2,0x10(sp)
+800163e0:  sw t3,0x14(sp)
+800163e4:  lw v1,0x5dc4(v1)
+800163e8:  clear a1
+800163ec:  li v0,0x80
+800163f0:  subu v0,v0,v1
+800163f4:  blez v0,0x80016400
+800163f8:  _addiu s0,sp,0x10
+800163fc:  move a1,v0
+80016400:  lw v0,0x4(gp)
+80016404:  move s2,a1
+80016408:  sll a0,v0,0x1
+8001640c:  addu a0,a0,v0
+80016410:  sll a0,a0,0x3
+80016414:  subu a0,a0,v0
+80016418:  sll a0,a0,0x2
+8001641c:  lui v0,0x8007
+80016420:  addiu v0,v0,-0xdf8
+80016424:  jal 0x8004fbe4
+80016428:  _addu a0,a0,v0
+8001642c:  lw v1,0x4(gp)
+80016430:  lui a0,0x8007
+80016434:  addiu a0,a0,-0xa60
+80016438:  sll v0,v1,0x2
+8001643c:  addu v0,v0,v1
+80016440:  sll v0,v0,0x2
+80016444:  jal 0x8004fdb0
+80016448:  _addu a0,v0,a0
+8001644c:  move a0,s0
+80016450:  addiu s0,sp,0x20
+80016454:  jal 0x8004dab4
+80016458:  _move a1,s0
+8001645c:  jal 0x8004d344
+80016460:  _move a0,s0
+80016464:  lw v0,0x6bc(gp)
+80016468:  nop
+8001646c:  lw v0,0x5dc4(v0)
+80016470:  nop
+80016474:  subu v1,zero,v0
+80016478:  sll v0,v0,0x2
+8001647c:  addiu v0,v0,0x100
+80016480:  ldtr v1,v1,v0
+8001648c:  jal 0x80011a10
+80016490:  _nop
+80016494:  li a3,-0x78
+80016498:  li a1,-0xa0
+8001649c:  sll t1,a3,0x10
+800164a0:  addiu v0,a3,0x10
+800164a4:  sll t0,v0,0x10
+800164a8:  addiu a2,s1,0x20
+800164ac:  andi v1,a1,0xffff
+800164b0:  addu v0,v1,t1
+800164b4:  clear t2
+800164b8:  gte_ldVXY0 v0
+800164bc:  gte_ldVZ0 t2
+800164c0:  addiu a1,a1,0x10
+800164c4:  andi a0,a1,0xffff
+800164c8:  addu v0,a0,t1
+800164cc:  gte_ldVXY1 v0
+800164d0:  gte_ldVZ1 t2
+800164d4:  addu v1,v1,t0
+800164d8:  gte_ldVXY2 v1
+800164dc:  gte_ldVZ2 t2
+800164e0:  nRTPT
+800164ec:  sb s2,-0x1c(a2)
+800164f0:  sb s2,-0x1b(a2)
+800164f4:  sb s2,-0x1a(a2)
+800164f8:  gte_stSXY0 -0x18(a2)
+800164fc:  gte_stSXY1 -0x10(a2)
+80016500:  gte_stSXY2 -0x8(a2)
+80016504:  addu a0,a0,t0
+80016508:  gte_ldVXY0 a0
+8001650c:  gte_ldVZ0 t2
+80016510:  nRTPS
+8001651c:  stsxy a2
+80016520:  lw v1,0x60c(gp)
+80016524:  nop
+80016528:  lw a0,0x0(v1)
+8001652c:  sll v0,s1,0x8
+80016530:  srl v0,v0,0x8
+80016534:  sw v0,0x0(v1)
+80016538:  lbu v0,0x3(s1)
+8001653c:  addiu a2,a2,0x28
+80016540:  sll v0,v0,0x18
+80016544:  or v0,v0,a0
+80016548:  sw v0,0x0(s1)
+8001654c:  slti v0,a1,0xa0
+80016550:  bne v0,zero,0x800164ac
+80016554:  _addiu s1,s1,0x28
+80016558:  addiu a3,a3,0x10
+8001655c:  slti v0,a3,0x78
+80016560:  bne v0,zero,0x8001649c
+80016564:  _li a1,-0xa0
+80016568:  lw a0,0x60c(gp)
+8001656c:  jal 0x8004fb74
+80016570:  _nop
+80016574:  lw v1,0x6bc(gp)
+80016578:  nop
+8001657c:  lw v0,0x5dc4(v1)
+80016580:  lw a0,0x5dc0(v1)
+80016584:  lw a1,0x5dd0(v1)
+80016588:  addiu v0,v0,0x1
+8001658c:  addiu a0,a0,0x22
+80016590:  sw v0,0x5dc4(v1)
+80016594:  slti v0,v0,0x80
+80016598:  xori v0,v0,0x1
+8001659c:  sw a0,0x5dc0(v1)
+800165a0:  sw v0,0x5dcc(v1)
+800165a4:  beq a1,zero,0x800165b4
+800165a8:  _nop
+800165ac:  jalr a1
+800165b0:  _nop
+800165b4:  lw ra,0x4c(sp)
+800165b8:  lw s2,0x48(sp)
+800165bc:  lw s1,0x44(sp)
+800165c0:  lw s0,0x40(sp)
+800165c4:  jr ra
+800165c8:  _addiu sp,sp,0x50

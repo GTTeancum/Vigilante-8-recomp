@@ -1,0 +1,31 @@
+# addr: 0x80052734  name: PRNT_OBJ_F0
+80052734:  addiu s7,s7,0x1
+80052738:  lbu v1,0x0(s7)
+8005273c:  li v0,0x2a
+80052740:  bne v1,v0,0x80052758
+80052744:  _sltiu v0,v1,0x80
+80052748:  addiu s1,s1,0x4
+8005274c:  lw s0,-0x4(s1)
+80052750:  j 0x800527ac
+80052754:  _move s4,s0
+80052758:  beq v0,zero,0x800527a4
+8005275c:  _clear s0
+80052760:  lbu a0,0x0(s7)
+80052764:  lui v0,0x8006
+80052768:  addu v0,v0,a0
+8005276c:  lbu v0,0x5175(v0)
+80052770:  nop
+80052774:  andi v0,v0,0x4
+80052778:  beq v0,zero,0x800527a4
+8005277c:  _sll v0,s0,0x2
+80052780:  addiu s7,s7,0x1
+80052784:  addu v0,v0,s0
+80052788:  sll v0,v0,0x1
+8005278c:  addiu v0,v0,-0x30
+80052790:  lbu v1,0x0(s7)
+80052794:  nop
+80052798:  sltiu v1,v1,0x80
+8005279c:  bne v1,zero,0x80052760
+800527a0:  _addu s0,v0,a0
+800527a4:  addiu s7,s7,-0x1
+800527a8:  move s4,s0

@@ -1,0 +1,15 @@
+# addr: 0x8011142c  name: FUN_8011142c
+8011142c:  addiu sp,sp,-0x18
+80111430:  sw ra,0x10(sp)
+80111434:  jal 0x80053a24
+80111438:  _nop
+8011143c:  sltiu a0,zero,0x4528
+80111440:  nop
+80111444:  jal 0x80053a54
+80111448:  _clear a0
+8011144c:  jal 0x80053a34
+80111450:  _nop
+80111454:  lw ra,0x10(sp)
+80111458:  addiu sp,sp,0x18
+8011145c:  jr ra
+80111460:  _nop

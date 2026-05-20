@@ -1,0 +1,4 @@
+# addr: 0x80053594  name: SPRINTF_OBJ_590
+80053594:  lui a3,0x8001
+80053598:  j 0x800535a8
+8005359c:  _addiu a3,a3,0x15a4

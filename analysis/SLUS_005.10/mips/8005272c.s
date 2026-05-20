@@ -1,0 +1,3 @@
+# addr: 0x8005272c  name: PRNT_OBJ_E8
+8005272c:  j 0x800526c0
+80052730:  _li s8,0x2b

@@ -1,0 +1,22 @@
+# addr: 0x80050454  name: SetDrawMode
+80050454:  addiu sp,sp,-0x20
+80050458:  sw s0,0x10(sp)
+8005045c:  move s0,a0
+80050460:  move a0,a1
+80050464:  li v0,0x2
+80050468:  move a1,a2
+8005046c:  sw s1,0x14(sp)
+80050470:  lw s1,0x30(sp)
+80050474:  andi a2,a3,0xffff
+80050478:  sw ra,0x18(sp)
+8005047c:  jal 0x80050910
+80050480:  _sb v0,0x3(s0)
+80050484:  sw v0,0x4(s0)
+80050488:  jal 0x80050a7c
+8005048c:  _move a0,s1
+80050490:  sw v0,0x8(s0)
+80050494:  lw ra,0x18(sp)
+80050498:  lw s1,0x14(sp)
+8005049c:  lw s0,0x10(sp)
+800504a0:  jr ra
+800504a4:  _addiu sp,sp,0x20

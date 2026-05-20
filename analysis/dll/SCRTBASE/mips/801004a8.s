@@ -1,0 +1,96 @@
+# addr: 0x801004a8  name: FUN_801004a8
+801004a8:  addiu sp,sp,-0x18
+801004ac:  sw s0,0x10(sp)
+801004b0:  move s0,a0
+801004b4:  move v1,a1
+801004b8:  move a1,a2
+801004bc:  sltiu v0,v1,0xa
+801004c0:  beq v0,zero,0x80100610
+801004c4:  _sw ra,0x14(sp)
+801004c8:  lui v0,0x8010
+801004cc:  addiu v0,v0,0x78
+801004d0:  sll v1,v1,0x2
+801004d4:  addu v1,v1,v0
+801004d8:  lw v0,0x0(v1)
+801004dc:  nop
+801004e0:  jr v0
+801004e4:  _nop
+801004e8:  lw v1,0x38(s0)
+801004ec:  nop
+801004f0:  lhu v0,0x42(v1)
+801004f4:  nop
+801004f8:  addiu v0,v0,0x11
+801004fc:  beq a1,zero,0x80100610
+80100500:  _sh v0,0x42(v1)
+80100504:  lw a0,0x38(s0)
+80100508:  jal 0x8001d708
+8010050c:  _nop
+80100510:  lw v0,0x0(s0)
+80100514:  nop
+80100518:  andi v0,v0,0x80
+8010051c:  beq v0,zero,0x80100610
+80100520:  _move a0,s0
+80100524:  sltiu a0,zero,0xfd
+80100528:  li a1,0x1
+8010052c:  slti a0,zero,0x184
+80100530:  nop
+80100534:  beq a1,zero,0x8010054c
+80100538:  _li v0,0x1
+8010053c:  beq a1,v0,0x80100568
+80100540:  _nop
+80100544:  slti a0,zero,0x184
+80100548:  nop
+8010054c:  jal 0x80020778
+80100550:  _move a0,s0
+80100554:  lb a0,0x5(s0)
+80100558:  jal 0x800441c8
+8010055c:  _nop
+80100560:  slti a0,zero,0x184
+80100564:  sb zero,0x5(s0)
+80100568:  lw v0,0x0(s0)
+8010056c:  nop
+80100570:  andi v0,v0,0x80
+80100574:  beq v0,zero,0x80100588
+80100578:  _nop
+8010057c:  lui a0,0x8010
+80100580:  jal 0x80015368
+80100584:  _addiu a0,a0,0x74
+80100588:  lw v0,0x38(s0)
+8010058c:  nop
+80100590:  beq v0,zero,0x80100610
+80100594:  _nop
+80100598:  jal 0x80020744
+8010059c:  _move a0,s0
+801005a0:  lw v0,0x38(s0)
+801005a4:  nop
+801005a8:  lw v1,0x30(v0)
+801005ac:  nop
+801005b0:  lhu v0,0x0(v1)
+801005b4:  nop
+801005b8:  andi v0,v0,0xfffb
+801005bc:  ori v0,v0,0x1
+801005c0:  slti a0,zero,0x184
+801005c4:  sh v0,0x0(v1)
+801005c8:  lw a1,0x0(a1)
+801005cc:  nop
+801005d0:  lbu v1,0x4(a1)
+801005d4:  li v0,0x7
+801005d8:  bne v1,v0,0x80100610
+801005dc:  _nop
+801005e0:  lhu a1,0xc(a1)
+801005e4:  jal 0x80022320
+801005e8:  _move a0,s0
+801005ec:  beq v0,zero,0x80100610
+801005f0:  _nop
+801005f4:  jal 0x80020778
+801005f8:  _move a0,s0
+801005fc:  slti a0,zero,0x184
+80100600:  nop
+80100604:  lb a0,0x5(s0)
+80100608:  jal 0x800441c8
+8010060c:  _nop
+80100610:  lw ra,0x14(sp)
+80100614:  lw s0,0x10(sp)
+80100618:  clear v0
+8010061c:  jr ra
+80100620:  _addiu sp,sp,0x18

@@ -1,0 +1,49 @@
+# addr: 0x80054eb8  name: _padLoadActInfo
+80054eb8:  addiu sp,sp,-0x20
+80054ebc:  sw s0,0x10(sp)
+80054ec0:  move s0,a0
+80054ec4:  sw s1,0x14(sp)
+80054ec8:  move s1,a1
+80054ecc:  beq s1,zero,0x80054f00
+80054ed0:  _sw ra,0x18(sp)
+80054ed4:  lw v0,0x4(s0)
+80054ed8:  nop
+80054edc:  bne v0,zero,0x80054f78
+80054ee0:  _clear v0
+80054ee4:  lui v0,0x8006
+80054ee8:  lw v0,0x5278(v0)
+80054eec:  nop
+80054ef0:  jalr v0
+80054ef4:  _nop
+80054ef8:  beq v0,zero,0x80054f08
+80054efc:  _li v0,0x1
+80054f00:  j 0x80054f78
+80054f04:  _clear v0
+80054f08:  li v1,0x4
+80054f0c:  addiu a1,s1,0x3
+80054f10:  sra a1,a1,0x2
+80054f14:  sb v1,0x49(s0)
+80054f18:  li v1,0x1
+80054f1c:  sb v1,0x46(s0)
+80054f20:  lui v1,0x8005
+80054f24:  addiu v1,v1,0x4f8c
+80054f28:  sw v1,0x14(s0)
+80054f2c:  lbu v1,0xe3(s0)
+80054f30:  lui a0,0x8005
+80054f34:  addiu a0,a0,0x5034
+80054f38:  sw a0,0x18(s0)
+80054f3c:  lbu a0,0xe9(s0)
+80054f40:  sll a1,a1,0x2
+80054f44:  sw a1,0x0(s0)
+80054f48:  sb zero,0x47(s0)
+80054f4c:  addiu v1,v1,0x1
+80054f50:  sra v1,v1,0x1
+80054f54:  sll v1,v1,0x2
+80054f58:  addu a1,a1,v1
+80054f5c:  sll v1,a0,0x2
+80054f60:  addu v1,v1,a0
+80054f64:  addiu v1,v1,0x3
+80054f68:  andi v1,v1,0xffc
+80054f6c:  sw a1,0x4(s0)
+80054f70:  addu a1,a1,v1
+80054f74:  sw a1,0x8(s0)

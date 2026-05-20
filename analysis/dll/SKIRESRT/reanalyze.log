@@ -1,0 +1,87 @@
+INFO  Using log config file: jar:file:/C:/Programming/GitHub/Vigilante%208%20recomp/ghidra/ghidra_install/Ghidra/Framework/Generic/lib/Generic.jar!/generic.log4j.xml (LoggingInitialization)  
+INFO  Using log file: C:\Users\smmel\AppData\Roaming\ghidra\ghidra_12.0.4_PUBLIC\application.log (LoggingInitialization)  
+INFO  Loading user preferences: C:\Users\smmel\AppData\Roaming\ghidra\ghidra_12.0.4_PUBLIC\preferences (Preferences)  
+INFO  Loading previous preferences: C:\Users\smmel\AppData\Roaming\ghidra\ghidra_11.3.2_PUBLIC\preferences (Preferences)  
+INFO  Searching for classes... (ClassSearcher)  
+INFO  Ignoring class 'ghidra.app.plugin.core.analysis.MipsPreAnalyzer' from 'C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Extensions\ghidra_psx_ldr\lib\ghidra_psx_ldr.jar'. Already found at 'C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\MIPS\lib\MIPS.jar'. (ClassSearcher)  
+INFO  Class search complete (919 ms) (ClassSearcher)  
+INFO  Initializing SSL Context (DefaultSSLContextInitializer)  
+INFO  Initializing Random Number Generator... (SecureRandomFactory)  
+INFO  Random Number Generator initialization complete: SHA1PRNG (SecureRandomFactory)  
+INFO  Trust manager disabled, cacerts have not been set (DefaultTrustManagerFactory)  
+INFO  Headless startup complete (3346 ms) (AnalyzeHeadless)  
+INFO  Class searcher loaded 59 extension points (18 false positives) (ClassSearcher)  
+INFO  HEADLESS Script Paths:
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\BSim\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\Decompiler\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\PyGhidra\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\SwiftDemangler\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\Base\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\8051\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Debug\Debugger-rmi-trace\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\JVM\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\MicrosoftCodeAnalyzer\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\DATA\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\tools\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\DecompilerDependent\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Extensions\ghidra_psx_ldr\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\BytePatterns\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\Jython\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\GnuDemangler\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\PIC\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\WildcardAssembler\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\PDB\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\VersionTracking\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\FileFormats\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Processors\Atmel\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Debug\Debugger\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\SystemEmulation\ghidra_scripts
+    C:\Programming\GitHub\Vigilante 8 recomp\ghidra\ghidra_install\Ghidra\Features\FunctionID\ghidra_scripts (HeadlessAnalyzer)  
+INFO  HEADLESS: execution starts (HeadlessAnalyzer)  
+INFO  Opening existing project: C:\Programming\GitHub\Vigilante 8 recomp\ghidra\projects\v8 (HeadlessAnalyzer)  
+INFO  Opening project: C:\Programming\GitHub\Vigilante 8 recomp\ghidra\projects\v8 (HeadlessProject)  
+INFO  REPORT: Processing project file: /SKIRESRT.bin (HeadlessAnalyzer)  
+INFO  REPORT: Execute script: MarkDllEntry.java '0x80100000'  (HeadlessAnalyzer)  
+INFO  SCRIPT: C:\Programming\GitHub\Vigilante 8 recomp\tools\ghidra_scripts\MarkDllEntry.java (HeadlessAnalyzer)  
+INFO  MarkDllEntry.java> DLL: base=0x80100000 imageEnd=0x00002158 entry=0x80100008 (GhidraScript)  
+INFO  MarkDllEntry.java> created function at 80100008 (GhidraScript)  
+INFO  ANALYZING all memory and code: /SKIRESRT.bin (HeadlessAnalyzer)  
+INFO  Packed database cache: C:\Users\smmel\AppData\Local\ghidra\packed-db-cache (PackedDatabaseCache)  
+INFO  Applied data type archive: generic_clib (ApplyDataArchiveAnalyzer)  
+INFO  -----------------------------------------------------
+    ASCII Strings                              0.522 secs
+    Apply Data Archives                        0.953 secs
+    Call Convention ID                         0.003 secs
+    Call-Fixup Installer                       0.003 secs
+    Create Address Tables                      0.012 secs
+    Create Address Tables - One Time           0.014 secs
+    Create Function                            0.006 secs
+    Data Reference                             0.012 secs
+    Decompiler Switch Analysis                 0.019 secs
+    Demangler GNU                              0.001 secs
+    Disassemble Entry Points                   0.031 secs
+    Embedded Media                             0.008 secs
+    External Entry References                  0.000 secs
+    Function ID                                0.254 secs
+    Function Start Search                      0.056 secs
+    MIPS Constant Reference Analyzer           0.200 secs
+    MIPS Symbol                                0.012 secs
+    MIPS UnAlligned Instruction Fix            0.007 secs
+    Non-Returning Functions - Discovered       0.019 secs
+    Reference                                  0.031 secs
+    Shared Return Calls                        0.015 secs
+    Stack                                      0.009 secs
+    Subroutine References                      0.020 secs
+-----------------------------------------------------
+     Total Time   2 secs
+-----------------------------------------------------
+ (AutoAnalysisManager)  
+INFO  REPORT: Analysis succeeded for file: /SKIRESRT.bin (HeadlessAnalyzer)  
+INFO  REPORT: Execute script: ExportAllToDisk.java 'analysis/dll/SKIRESRT'  (HeadlessAnalyzer)  
+INFO  SCRIPT: C:\Programming\GitHub\Vigilante 8 recomp\tools\ghidra_scripts\ExportAllToDisk.java (HeadlessAnalyzer)  
+INFO  ExportAllToDisk.java> ExportAllToDisk: program=SKIRESRT.bin out=C:\Programming\GitHub\Vigilante 8 recomp\analysis\dll\SKIRESRT (GhidraScript)  
+INFO  ExportAllToDisk.java> functions exported: 12 (GhidraScript)  
+INFO  ExportAllToDisk.java> ExportAllToDisk: done (GhidraScript)  
+INFO  ANALYZING changes made by post scripts: /SKIRESRT.bin (HeadlessAnalyzer)  
+INFO  REPORT: Post-analysis succeeded for file: /SKIRESRT.bin (HeadlessAnalyzer)  
+INFO  REPORT: Save succeeded for processed file: /SKIRESRT.bin (HeadlessAnalyzer)  

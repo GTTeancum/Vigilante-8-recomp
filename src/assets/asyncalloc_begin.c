@@ -1,0 +1,46 @@
+/* asyncalloc_begin.c -- begin the VSync-callback driven allocator.
+ *
+ * Source: SLUS_005.10  FUN_80016678.
+ *
+ * Counterpart to Async_StopAllocCallback (src/assets/async_alloc.c).
+ * Sequence:
+ *   1. Vram_BinPacker_Reset (FUN_80017e0c) -- the VRAM allocator's
+ *      tree is reset before the new state block claims it.
+ *   2. AsyncList_RecycleHead (FUN_80011834) -- walk the free chain
+ *      anchored at piRamffff9a48 to coalesce idle nodes.
+ *   3. Render_BuildLogoSurface (FUN_80016024) -- allocates the
+ *      ~24 KiB state block (kong-logo background + per-frame tile
+ *      ring); returns a pointer that becomes iRam000006bc.
+ *   4. Swap the VSync callback to LAB_80016364 (the per-field tile
+ *      step) and store the previous callback at offset +0x5dd0 for
+ *      Async_StopAllocCallback to restore on teardown.
+ *   5. Set the OT interlock fields DAT_8006f27c / DAT_8006f220 to 1
+ *      so the renderer's main draw loop blocks on the async producer.
+ *
+ * HIGH confidence: matches the canonical "install callback + state
+ * block" pattern. Render_BuildLogoSurface is out of scope (renderer)
+ * so we don't reproduce its body, but the boundary it sits on is
+ * documented here.
+ */
+#include <stdint.h>
+
+extern void  Vram_BinPacker_Reset(void);                /* FUN_80017e0c */
+extern void  AsyncList_RecycleHead(void);               /* FUN_80011834 */
+extern void *Render_BuildLogoSurface(uint32_t pathHandle);   /* FUN_80016024 (renderer-side) */
+extern void (*VSyncCallback(void (*cb)(void)))(void);
+
+extern void Async_LogoTick(void);                        /* LAB_80016364 */
+extern uintptr_t iRam000006bc;
+extern uint32_t  DAT_8006f27c;
+extern uint32_t  DAT_8006f220;
+
+void Async_StartLogo(uint32_t pathHandle)
+{
+    Vram_BinPacker_Reset();
+    AsyncList_RecycleHead();
+    iRam000006bc = (uintptr_t)Render_BuildLogoSurface(pathHandle);
+    void (*prev)(void) = VSyncCallback(Async_LogoTick);
+    *(void (**)(void))(iRam000006bc + 0x5dd0) = prev;
+    DAT_8006f27c = 1;
+    DAT_8006f220 = 1;
+}

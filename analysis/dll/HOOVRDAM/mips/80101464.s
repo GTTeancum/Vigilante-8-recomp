@@ -1,0 +1,72 @@
+# addr: 0x80101464  name: FUN_80101464
+80101464:  addiu sp,sp,-0x18
+80101468:  sw s0,0x10(sp)
+8010146c:  move s0,a0
+80101470:  sltiu v0,a1,0x5
+80101474:  beq v0,zero,0x8010156c
+80101478:  _sw ra,0x14(sp)
+8010147c:  lui v0,0x8010
+80101480:  addiu v0,v0,0x148
+80101484:  sll v1,a1,0x2
+80101488:  addu v1,v1,v0
+8010148c:  lw v0,0x0(v1)
+80101490:  nop
+80101494:  jr v0
+80101498:  _nop
+8010149c:  lw v0,0x2c(s0)
+801014a0:  nop
+801014a4:  addiu v0,v0,-0x3b9a
+801014a8:  beq a2,zero,0x8010156c
+801014ac:  _sw v0,0x2c(s0)
+801014b0:  jal 0x800449bc
+801014b4:  _addiu a0,s0,0x24
+801014b8:  lb a0,0x5(s0)
+801014bc:  jal 0x80044574
+801014c0:  _move a1,v0
+801014c4:  slti a0,zero,0x55b
+801014c8:  nop
+801014cc:  lw a2,0x0(a2)
+801014d0:  nop
+801014d4:  lbu v1,0x4(a2)
+801014d8:  li v0,0x2
+801014dc:  bne v1,v0,0x8010156c
+801014e0:  _lui v0,0xfff7
+801014e4:  ori v0,v0,0xf80
+801014e8:  addiu s0,a2,0x24
+801014ec:  move a0,s0
+801014f0:  jal 0x80040234
+801014f4:  _sw v0,0x84(a2)
+801014f8:  jal 0x8004410c
+801014fc:  _nop
+80101500:  lui v1,0x8006
+80101504:  lw a1,0x58fc(v1)
+80101508:  move a0,v0
+8010150c:  li a2,0x41
+80101510:  jal 0x8004483c
+80101514:  _move a3,s0
+80101518:  slti a0,zero,0x55b
+8010151c:  nop
+80101520:  jal 0x800205f8
+80101524:  _move a0,s0
+80101528:  slti a0,zero,0x55b
+8010152c:  nop
+80101530:  jal 0x8004410c
+80101534:  _nop
+80101538:  lw v1,0x58(s0)
+8010153c:  sb v0,0x5(s0)
+80101540:  lw a1,0x8(v1)
+80101544:  sll v0,v0,0x18
+80101548:  sra a0,v0,0x18
+8010154c:  li a2,0x2
+80101550:  jal 0x800443c8
+80101554:  _clear a3
+80101558:  slti a0,zero,0x55b
+8010155c:  nop
+80101560:  lb a0,0x5(s0)
+80101564:  jal 0x800441c8
+80101568:  _nop
+8010156c:  lw ra,0x14(sp)
+80101570:  lw s0,0x10(sp)
+80101574:  clear v0
+80101578:  jr ra
+8010157c:  _addiu sp,sp,0x18

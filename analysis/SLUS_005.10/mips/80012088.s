@@ -1,0 +1,20 @@
+# addr: 0x80012088  name: FUN_80012088
+80012088:  andi v0,a0,0xffff
+8001208c:  beq v0,zero,0x800120cc
+80012090:  _clear a1
+80012094:  lui t0,0x1
+80012098:  ori t0,t0,0x1
+8001209c:  and v0,a0,t0
+800120a0:  andi v1,a2,0xf
+800120a4:  sllv v0,v0,v1
+800120a8:  or a1,a1,v0
+800120ac:  srl a2,a2,0x4
+800120b0:  sll v0,a3,0x1c
+800120b4:  or a2,a2,v0
+800120b8:  srl a3,a3,0x4
+800120bc:  srl a0,a0,0x1
+800120c0:  andi v0,a0,0xffff
+800120c4:  bne v0,zero,0x800120a0
+800120c8:  _and v0,a0,t0
+800120cc:  jr ra
+800120d0:  _move v0,a1

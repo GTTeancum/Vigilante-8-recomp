@@ -1,0 +1,30 @@
+# addr: 0x80055d9c  name: PADPORTD_OBJ_1C8
+80055d9c:  addiu sp,sp,-0x28
+80055da0:  move a1,a0
+80055da4:  sw s1,0x14(sp)
+80055da8:  lui s1,0x800a
+80055dac:  addiu s1,s1,0x4d28
+80055db0:  sw s3,0x1c(sp)
+80055db4:  li s3,-0x9
+80055db8:  sw s2,0x18(sp)
+80055dbc:  lui s2,0x8006
+80055dc0:  addiu s2,s2,0x52b4
+80055dc4:  sw ra,0x20(sp)
+80055dc8:  sw s0,0x10(sp)
+80055dcc:  lui v1,0x8006
+80055dd0:  lw v1,0x529c(v1)
+80055dd4:  nop
+80055dd8:  sll v0,v1,0x4
+80055ddc:  subu v0,v0,v1
+80055de0:  sll v0,v0,0x4
+80055de4:  beq a1,s3,0x80055e10
+80055de8:  _addu s0,v0,s1
+80055dec:  bne a1,zero,0x80055e00
+80055df0:  _sll v0,v1,0x2
+80055df4:  addu v0,v0,s2
+80055df8:  j 0x80055e10
+80055dfc:  _sw zero,0x0(v0)
+80055e00:  jal 0x800565a0
+80055e04:  _move a0,s0
+80055e08:  jal 0x80055e90
+80055e0c:  _move a0,s0

@@ -1,0 +1,37 @@
+# addr: 0x8004f704  name: ClearImage
+8004f704:  addiu sp,sp,-0x28
+8004f708:  sw s3,0x1c(sp)
+8004f70c:  move s3,a0
+8004f710:  lui a0,0x8001
+8004f714:  addiu a0,a0,0x1274
+8004f718:  sw s2,0x18(sp)
+8004f71c:  move s2,a1
+8004f720:  move a1,s3
+8004f724:  sw s1,0x14(sp)
+8004f728:  move s1,a2
+8004f72c:  sw s0,0x10(sp)
+8004f730:  sw ra,0x20(sp)
+8004f734:  jal 0x8004f5e8
+8004f738:  _move s0,a3
+8004f73c:  move a1,s3
+8004f740:  andi s0,s0,0xff
+8004f744:  sll s0,s0,0x10
+8004f748:  andi s1,s1,0xff
+8004f74c:  sll s1,s1,0x8
+8004f750:  or s0,s0,s1
+8004f754:  andi s2,s2,0xff
+8004f758:  lui v0,0x8006
+8004f75c:  lw v0,0x501c(v0)
+8004f760:  li a2,0x8
+8004f764:  lw a0,0xc(v0)
+8004f768:  lw v0,0x8(v0)
+8004f76c:  nop
+8004f770:  jalr v0
+8004f774:  _or a3,s0,s2
+8004f778:  lw ra,0x20(sp)
+8004f77c:  lw s3,0x1c(sp)
+8004f780:  lw s2,0x18(sp)
+8004f784:  lw s1,0x14(sp)
+8004f788:  lw s0,0x10(sp)
+8004f78c:  jr ra
+8004f790:  _addiu sp,sp,0x28

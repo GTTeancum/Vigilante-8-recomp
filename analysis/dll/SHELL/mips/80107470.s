@@ -1,0 +1,41 @@
+# addr: 0x80107470  name: FUN_80107470
+80107470:  addiu sp,sp,-0x28
+80107474:  sw s0,0x18(sp)
+80107478:  move s0,a0
+8010747c:  sw s1,0x1c(sp)
+80107480:  sw ra,0x20(sp)
+80107484:  jal 0x80019e20
+80107488:  _move s1,a1
+8010748c:  lui v0,0x8011
+80107490:  lw v0,0x3388(v0)
+80107494:  nop
+80107498:  lw v1,0x8(v0)
+8010749c:  nop
+801074a0:  addu v0,v0,v1
+801074a4:  lbu v1,0x6(v0)
+801074a8:  lui v0,0x8011
+801074ac:  lw a0,0x339c(v0)
+801074b0:  clear a1
+801074b4:  li a2,0x1ba
+801074b8:  srl v1,v1,0x1
+801074bc:  jal 0x8001a2ac
+801074c0:  _subu a2,a2,v1
+801074c4:  addiu a0,sp,0x10
+801074c8:  clear a1
+801074cc:  li v0,0xe0
+801074d0:  sh v0,0x10(sp)
+801074d4:  li v0,0x1a4
+801074d8:  sh v0,0x12(sp)
+801074dc:  li v0,0x1a0
+801074e0:  sh v0,0x14(sp)
+801074e4:  li v0,0x3c
+801074e8:  jal 0x8001a0ac
+801074ec:  _sh v0,0x16(sp)
+801074f0:  move a0,s0
+801074f4:  sltiu a0,zero,0x68c
+801074f8:  move a1,s1
+801074fc:  lw ra,0x20(sp)
+80107500:  lw s1,0x1c(sp)
+80107504:  lw s0,0x18(sp)
+80107508:  jr ra
+8010750c:  _addiu sp,sp,0x28

@@ -1,0 +1,7412 @@
+{
+ "0x20000000": {
+  "name": "gte_ldv0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000004": {
+  "name": "gte_ldv1",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000008": {
+  "name": "gte_ldv2",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000000c": {
+  "name": "gte_ldv3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000010": {
+  "name": "gte_ldv3c",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000014": {
+  "name": "gte_ldv3c_vertc",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000018": {
+  "name": "gte_ldv01",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000001c": {
+  "name": "gte_ldv01c",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000020": {
+  "name": "gte_ldrgb",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000024": {
+  "name": "gte_ldrgb3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000028": {
+  "name": "gte_ldrgb3c",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000002c": {
+  "name": "gte_ldlv0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000030": {
+  "name": "gte_ldlvl",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000034": {
+  "name": "gte_ldsv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000038": {
+  "name": "gte_ldbv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000003c": {
+  "name": "gte_ldcv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000040": {
+  "name": "gte_ldclmv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000044": {
+  "name": "gte_lddp",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000048": {
+  "name": "gte_ldsxy0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000004c": {
+  "name": "gte_ldsxy1",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000050": {
+  "name": "gte_ldsxy2",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000054": {
+  "name": "gte_ldsxy3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000058": {
+  "name": "gte_ldsxy3c",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000005c": {
+  "name": "gte_ldsz3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000060": {
+  "name": "gte_ldsz4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000064": {
+  "name": "gte_ldopv1",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000068": {
+  "name": "gte_ldopv2",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000006c": {
+  "name": "gte_ldopv1SV",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000070": {
+  "name": "gte_ldopv2SV",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000074": {
+  "name": "gte_ldlzc",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000078": {
+  "name": "gte_SetRGBcd",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000007c": {
+  "name": "gte_ldbkdir",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000080": {
+  "name": "gte_SetBackColor",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000084": {
+  "name": "gte_ldfcdir",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000088": {
+  "name": "gte_SetFarColor",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000008c": {
+  "name": "gte_SetGeomOffset",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000090": {
+  "name": "gte_SetGeomScreen",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000094": {
+  "name": "gte_ldsvrtrow0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000098": {
+  "name": "gte_SetRotMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000009c": {
+  "name": "gte_ldsvllrow0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000a0": {
+  "name": "gte_SetLightMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000a4": {
+  "name": "gte_ldsvlcrow0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000a8": {
+  "name": "gte_SetColorMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000ac": {
+  "name": "gte_SetTransMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000b0": {
+  "name": "gte_ldtr",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000b4": {
+  "name": "gte_SetTransVector",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000b8": {
+  "name": "gte_ld_intpol_uv0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000bc": {
+  "name": "gte_ld_intpol_uv1",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000c0": {
+  "name": "gte_ld_intpol_bv0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000c4": {
+  "name": "gte_ld_intpol_bv1",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000c8": {
+  "name": "gte_ld_intpol_sv0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000cc": {
+  "name": "gte_ldfc",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000d0": {
+  "name": "gte_stsxy",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000d4": {
+  "name": "gte_stsxy3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000d8": {
+  "name": "gte_stsxy3c",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000dc": {
+  "name": "gte_stsxy2",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000e0": {
+  "name": "gte_stsxy1",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000e4": {
+  "name": "gte_stsxy0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000e8": {
+  "name": "gte_stsxy01",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000ec": {
+  "name": "gte_stsxy01c",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000f0": {
+  "name": "gte_stsxy3_f3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000f4": {
+  "name": "gte_stsxy3_g3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000f8": {
+  "name": "gte_stsxy3_ft3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200000fc": {
+  "name": "gte_stsxy3_gt3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000100": {
+  "name": "gte_stsxy3_f4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000104": {
+  "name": "gte_stsxy3_g4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000108": {
+  "name": "gte_stsxy3_ft4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000010c": {
+  "name": "gte_stsxy3_gt4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000110": {
+  "name": "gte_stdp",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000114": {
+  "name": "gte_stflg",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000118": {
+  "name": "gte_stflg_4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000011c": {
+  "name": "gte_stsz",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000120": {
+  "name": "gte_stsz3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000124": {
+  "name": "gte_stsz4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000128": {
+  "name": "gte_stsz3c",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000012c": {
+  "name": "gte_stsz4c",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000130": {
+  "name": "gte_stszotz",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000134": {
+  "name": "gte_stotz",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000138": {
+  "name": "gte_stopz",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000013c": {
+  "name": "gte_stlvl",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000140": {
+  "name": "gte_stlvnl",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000144": {
+  "name": "gte_stlvnl0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000148": {
+  "name": "gte_stlvnl1",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000014c": {
+  "name": "gte_stlvnl2",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000150": {
+  "name": "gte_stsv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000154": {
+  "name": "gte_stclmv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000158": {
+  "name": "gte_stbv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000015c": {
+  "name": "gte_stcv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000160": {
+  "name": "gte_strgb",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000164": {
+  "name": "gte_strgb3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000168": {
+  "name": "gte_strgb3_g3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000016c": {
+  "name": "gte_strgb3_gt3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000170": {
+  "name": "gte_strgb3_g4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000174": {
+  "name": "gte_strgb3_gt4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000178": {
+  "name": "gte_ReadGeomOffset",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000017c": {
+  "name": "gte_ReadGeomScreen",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000180": {
+  "name": "gte_ReadRotMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000184": {
+  "name": "gte_sttr",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000188": {
+  "name": "gte_ReadLightMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000018c": {
+  "name": "gte_ReadColorMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000190": {
+  "name": "gte_stlzc",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000194": {
+  "name": "gte_stfc",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000198": {
+  "name": "gte_subdvl",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000019c": {
+  "name": "gte_subdvd",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001a0": {
+  "name": "gte_adddvl",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001a4": {
+  "name": "gte_adddvd",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001a8": {
+  "name": "gte_RotTransPers",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001ac": {
+  "name": "gte_RotTransPers3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001b0": {
+  "name": "gte_RotTrans",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001b4": {
+  "name": "gte_LocalLight",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001b8": {
+  "name": "gte_LightColor",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001bc": {
+  "name": "gte_DpqColorLight",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001c0": {
+  "name": "gte_DpqColor",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001c4": {
+  "name": "gte_DpqColor3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001c8": {
+  "name": "gte_Intpl",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001cc": {
+  "name": "gte_Square12",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001d0": {
+  "name": "gte_Square0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001d4": {
+  "name": "gte_NormalColor",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001d8": {
+  "name": "gte_NormalColor3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001dc": {
+  "name": "gte_NormalColorDpq",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001e0": {
+  "name": "gte_NormalColorDpq3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001e4": {
+  "name": "gte_NormalColorCol",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001e8": {
+  "name": "gte_NormalColorCol3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001ec": {
+  "name": "gte_ColorDpq",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001f0": {
+  "name": "gte_ColorCol",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001f4": {
+  "name": "gte_NormalClip",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001f8": {
+  "name": "gte_AverageZ3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x200001fc": {
+  "name": "gte_AverageZ4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000200": {
+  "name": "gte_OuterProduct12",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000204": {
+  "name": "gte_OuterProduct0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000208": {
+  "name": "gte_OuterProduct12SVL",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000020c": {
+  "name": "gte_OuterProduct0SVL",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000210": {
+  "name": "gte_OuterProduct12SV",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000214": {
+  "name": "gte_OuterProduct0SV",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000218": {
+  "name": "gte_Lzc",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000021c": {
+  "name": "gte_RotAverage3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000220": {
+  "name": "gte_RotNclip3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000224": {
+  "name": "gte_RotAverageNclip3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000228": {
+  "name": "gte_RotColorDpq",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000022c": {
+  "name": "gte_RotColorDpq3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000230": {
+  "name": "gte_RotAverageNclipColorDpq3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000234": {
+  "name": "gte_RotAverageNclipColorCol3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000238": {
+  "name": "gte_LoadAverage12",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000023c": {
+  "name": "gte_LoadAverage0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000240": {
+  "name": "gte_LoadAverageShort12",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000244": {
+  "name": "gte_LoadAverageShort0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000248": {
+  "name": "gte_LoadAverageByte",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000024c": {
+  "name": "gte_LoadAverageCol",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000250": {
+  "name": "gte_MulMatrix0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000254": {
+  "name": "gte_ApplyMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000258": {
+  "name": "gte_ApplyMatrixSV",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x2000025c": {
+  "name": "gte_CompMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x20000260": {
+  "name": "gte_ApplyRotMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1
+ },
+ "0x800116b4": {
+  "name": "start",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 56
+ },
+ "0x800116ec": {
+  "name": "FUN_800116ec",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 8
+ },
+ "0x800116f4": {
+  "name": "FUN_800116f4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 152
+ },
+ "0x8001178c": {
+  "name": "FUN_8001178c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 168
+ },
+ "0x80011834": {
+  "name": "FUN_80011834",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 128
+ },
+ "0x800118b4": {
+  "name": "FUN_800118b4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 96
+ },
+ "0x80011914": {
+  "name": "FUN_80011914",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 172
+ },
+ "0x800119c0": {
+  "name": "FUN_800119c0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 80
+ },
+ "0x80011a10": {
+  "name": "FUN_80011a10",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x80011adc": {
+  "name": "FUN_80011adc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 264
+ },
+ "0x80011c58": {
+  "name": "FUN_80011c58",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 116
+ },
+ "0x80011f8c": {
+  "name": "FUN_80011f8c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 156
+ },
+ "0x80012028": {
+  "name": "FUN_80012028",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x80012050": {
+  "name": "FUN_80012050",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 24
+ },
+ "0x80012068": {
+  "name": "FUN_80012068",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 32
+ },
+ "0x80012088": {
+  "name": "FUN_80012088",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 76
+ },
+ "0x800120d4": {
+  "name": "FUN_800120d4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1200
+ },
+ "0x8001265c": {
+  "name": "FUN_8001265c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x800126c8": {
+  "name": "FUN_800126c8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x800126f0": {
+  "name": "FUN_800126f0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 32
+ },
+ "0x80012828": {
+  "name": "FUN_80012828",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 148
+ },
+ "0x800128bc": {
+  "name": "FUN_800128bc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 24
+ },
+ "0x800128d4": {
+  "name": "FUN_800128d4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 172
+ },
+ "0x80012980": {
+  "name": "FUN_80012980",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 44
+ },
+ "0x800129e8": {
+  "name": "FUN_800129e8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 168
+ },
+ "0x80012a90": {
+  "name": "FUN_80012a90",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 2780
+ },
+ "0x8001356c": {
+  "name": "FUN_8001356c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 344
+ },
+ "0x800136c4": {
+  "name": "FUN_800136c4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 616
+ },
+ "0x8001392c": {
+  "name": "FUN_8001392c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 896
+ },
+ "0x80013cac": {
+  "name": "FUN_80013cac",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 4932
+ },
+ "0x80015010": {
+  "name": "FUN_80015010",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 48
+ },
+ "0x80015098": {
+  "name": "FUN_80015098",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 204
+ },
+ "0x80015164": {
+  "name": "FUN_80015164",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 256
+ },
+ "0x80015288": {
+  "name": "FUN_80015288",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 176
+ },
+ "0x80015368": {
+  "name": "FUN_80015368",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x800154f4": {
+  "name": "FUN_800154f4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 104
+ },
+ "0x8001555c": {
+  "name": "FUN_8001555c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 180
+ },
+ "0x80015610": {
+  "name": "FUN_80015610",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 52
+ },
+ "0x800156d4": {
+  "name": "FUN_800156d4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 56
+ },
+ "0x8001570c": {
+  "name": "FUN_8001570c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 140
+ },
+ "0x80015798": {
+  "name": "FUN_80015798",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 60
+ },
+ "0x800157d4": {
+  "name": "FUN_800157d4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 372
+ },
+ "0x80015948": {
+  "name": "FUN_80015948",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 108
+ },
+ "0x800159b4": {
+  "name": "FUN_800159b4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 76
+ },
+ "0x80015a00": {
+  "name": "FUN_80015a00",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 32
+ },
+ "0x80015a20": {
+  "name": "FUN_80015a20",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 380
+ },
+ "0x80015be4": {
+  "name": "FUN_80015be4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 12
+ },
+ "0x80015bf0": {
+  "name": "FUN_80015bf0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 120
+ },
+ "0x80015c68": {
+  "name": "FUN_80015c68",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 548
+ },
+ "0x80015e8c": {
+  "name": "FUN_80015e8c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 244
+ },
+ "0x80015f80": {
+  "name": "FUN_80015f80",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 52
+ },
+ "0x80016024": {
+  "name": "FUN_80016024",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 832
+ },
+ "0x800165cc": {
+  "name": "FUN_800165cc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 172
+ },
+ "0x80016678": {
+  "name": "FUN_80016678",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 100
+ },
+ "0x800166dc": {
+  "name": "FUN_800166dc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 48
+ },
+ "0x80016a20": {
+  "name": "FUN_80016a20",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 140
+ },
+ "0x80016aac": {
+  "name": "FUN_80016aac",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 92
+ },
+ "0x80016b08": {
+  "name": "FUN_80016b08",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 208
+ },
+ "0x80016bd8": {
+  "name": "FUN_80016bd8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 92
+ },
+ "0x80016c54": {
+  "name": "FUN_80016c54",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 52
+ },
+ "0x80016c88": {
+  "name": "FUN_80016c88",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 48
+ },
+ "0x80016cb8": {
+  "name": "FUN_80016cb8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 52
+ },
+ "0x80016cec": {
+  "name": "FUN_80016cec",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 188
+ },
+ "0x80016da8": {
+  "name": "FUN_80016da8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 84
+ },
+ "0x80016dfc": {
+  "name": "FUN_80016dfc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 104
+ },
+ "0x80016e64": {
+  "name": "FUN_80016e64",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 324
+ },
+ "0x80016fa8": {
+  "name": "FUN_80016fa8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 288
+ },
+ "0x800170c8": {
+  "name": "FUN_800170c8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 132
+ },
+ "0x8001714c": {
+  "name": "FUN_8001714c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 20
+ },
+ "0x80017160": {
+  "name": "FUN_80017160",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 60
+ },
+ "0x800171d4": {
+  "name": "FUN_800171d4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 108
+ },
+ "0x80017240": {
+  "name": "FUN_80017240",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 116
+ },
+ "0x80017324": {
+  "name": "FUN_80017324",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 216
+ },
+ "0x800173fc": {
+  "name": "FUN_800173fc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 408
+ },
+ "0x80017594": {
+  "name": "FUN_80017594",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 356
+ },
+ "0x800176f8": {
+  "name": "FUN_800176f8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 388
+ },
+ "0x8001787c": {
+  "name": "FUN_8001787c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 812
+ },
+ "0x80017ba8": {
+  "name": "FUN_80017ba8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 436
+ },
+ "0x80017d5c": {
+  "name": "FUN_80017d5c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 88
+ },
+ "0x80017db4": {
+  "name": "FUN_80017db4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 88
+ },
+ "0x80017e0c": {
+  "name": "FUN_80017e0c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 48
+ },
+ "0x80017e3c": {
+  "name": "FUN_80017e3c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 136
+ },
+ "0x80017ec4": {
+  "name": "FUN_80017ec4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 136
+ },
+ "0x80017f4c": {
+  "name": "FUN_80017f4c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 136
+ },
+ "0x80017fd4": {
+  "name": "FUN_80017fd4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 172
+ },
+ "0x80018124": {
+  "name": "FUN_80018124",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 712
+ },
+ "0x800183ec": {
+  "name": "FUN_800183ec",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 132
+ },
+ "0x80018470": {
+  "name": "FUN_80018470",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 192
+ },
+ "0x80018530": {
+  "name": "FUN_80018530",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 60
+ },
+ "0x8001859c": {
+  "name": "FUN_8001859c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 48
+ },
+ "0x800185cc": {
+  "name": "FUN_800185cc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 76
+ },
+ "0x80018618": {
+  "name": "FUN_80018618",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 460
+ },
+ "0x800187e4": {
+  "name": "FUN_800187e4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 104
+ },
+ "0x8001884c": {
+  "name": "FUN_8001884c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 160
+ },
+ "0x80018bd0": {
+  "name": "FUN_80018bd0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x80018c3c": {
+  "name": "FUN_80018c3c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 124
+ },
+ "0x80018cb8": {
+  "name": "FUN_80018cb8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 72
+ },
+ "0x80018d64": {
+  "name": "FUN_80018d64",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 196
+ },
+ "0x80018e28": {
+  "name": "FUN_80018e28",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 212
+ },
+ "0x80018efc": {
+  "name": "FUN_80018efc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 64
+ },
+ "0x80018f3c": {
+  "name": "FUN_80018f3c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 64
+ },
+ "0x80018f7c": {
+  "name": "FUN_80018f7c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x80019010": {
+  "name": "FUN_80019010",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 36
+ },
+ "0x80019034": {
+  "name": "FUN_80019034",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 116
+ },
+ "0x800190a8": {
+  "name": "FUN_800190a8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 48
+ },
+ "0x800190d8": {
+  "name": "FUN_800190d8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 52
+ },
+ "0x8001910c": {
+  "name": "FUN_8001910c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 44
+ },
+ "0x80019138": {
+  "name": "FUN_80019138",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 168
+ },
+ "0x800191e0": {
+  "name": "FUN_800191e0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 84
+ },
+ "0x80019370": {
+  "name": "FUN_80019370",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 232
+ },
+ "0x80019458": {
+  "name": "FUN_80019458",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 924
+ },
+ "0x800197f4": {
+  "name": "FUN_800197f4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 364
+ },
+ "0x80019960": {
+  "name": "FUN_80019960",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 248
+ },
+ "0x80019a58": {
+  "name": "FUN_80019a58",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 436
+ },
+ "0x80019c0c": {
+  "name": "FUN_80019c0c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 88
+ },
+ "0x80019c64": {
+  "name": "FUN_80019c64",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 88
+ },
+ "0x80019cbc": {
+  "name": "FUN_80019cbc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 84
+ },
+ "0x80019d10": {
+  "name": "FUN_80019d10",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 272
+ },
+ "0x80019f44": {
+  "name": "FUN_80019f44",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 88
+ },
+ "0x80019f9c": {
+  "name": "FUN_80019f9c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 272
+ },
+ "0x8001a0ac": {
+  "name": "FUN_8001a0ac",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 112
+ },
+ "0x8001a640": {
+  "name": "FUN_8001a640",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 700
+ },
+ "0x8001a91c": {
+  "name": "FUN_8001a91c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 120
+ },
+ "0x8001a994": {
+  "name": "FUN_8001a994",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 120
+ },
+ "0x8001aa0c": {
+  "name": "FUN_8001aa0c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 44
+ },
+ "0x8001aa38": {
+  "name": "FUN_8001aa38",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 112
+ },
+ "0x8001aaa8": {
+  "name": "FUN_8001aaa8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 240
+ },
+ "0x8001ab98": {
+  "name": "FUN_8001ab98",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 56
+ },
+ "0x8001ac08": {
+  "name": "FUN_8001ac08",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 60
+ },
+ "0x8001ac44": {
+  "name": "FUN_8001ac44",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 396
+ },
+ "0x8001add0": {
+  "name": "FUN_8001add0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 376
+ },
+ "0x8001af48": {
+  "name": "FUN_8001af48",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 88
+ },
+ "0x8001afa0": {
+  "name": "FUN_8001afa0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 92
+ },
+ "0x8001affc": {
+  "name": "FUN_8001affc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 60
+ },
+ "0x8001b038": {
+  "name": "FUN_8001b038",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x8001b07c": {
+  "name": "FUN_8001b07c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 72
+ },
+ "0x8001b0c4": {
+  "name": "FUN_8001b0c4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 308
+ },
+ "0x8001b1f8": {
+  "name": "FUN_8001b1f8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 120
+ },
+ "0x8001b270": {
+  "name": "FUN_8001b270",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 140
+ },
+ "0x8001b2fc": {
+  "name": "FUN_8001b2fc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 112
+ },
+ "0x8001b36c": {
+  "name": "FUN_8001b36c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 104
+ },
+ "0x8001b3d4": {
+  "name": "FUN_8001b3d4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 116
+ },
+ "0x8001b49c": {
+  "name": "FUN_8001b49c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 2308
+ },
+ "0x8001bda0": {
+  "name": "FUN_8001bda0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 60
+ },
+ "0x8001bddc": {
+  "name": "FUN_8001bddc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 128
+ },
+ "0x8001be5c": {
+  "name": "FUN_8001be5c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 684
+ },
+ "0x8001d370": {
+  "name": "FUN_8001d370",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 104
+ },
+ "0x8001d470": {
+  "name": "FUN_8001d470",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 32
+ },
+ "0x8001d4f0": {
+  "name": "FUN_8001d4f0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 84
+ },
+ "0x8001d544": {
+  "name": "FUN_8001d544",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 32
+ },
+ "0x8001d564": {
+  "name": "FUN_8001d564",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 60
+ },
+ "0x8001d5a0": {
+  "name": "FUN_8001d5a0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 64
+ },
+ "0x8001d5e0": {
+  "name": "FUN_8001d5e0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x8001d624": {
+  "name": "FUN_8001d624",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 104
+ },
+ "0x8001d68c": {
+  "name": "FUN_8001d68c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 84
+ },
+ "0x8001d6e0": {
+  "name": "FUN_8001d6e0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x8001d708": {
+  "name": "FUN_8001d708",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 64
+ },
+ "0x8001d748": {
+  "name": "FUN_8001d748",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 248
+ },
+ "0x8001d840": {
+  "name": "FUN_8001d840",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 88
+ },
+ "0x8001d898": {
+  "name": "FUN_8001d898",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 252
+ },
+ "0x8001d994": {
+  "name": "FUN_8001d994",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 44
+ },
+ "0x8001d9c0": {
+  "name": "FUN_8001d9c0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 356
+ },
+ "0x8001db24": {
+  "name": "FUN_8001db24",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 48
+ },
+ "0x8001db54": {
+  "name": "FUN_8001db54",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 200
+ },
+ "0x8001dc1c": {
+  "name": "FUN_8001dc1c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 172
+ },
+ "0x8001dcc8": {
+  "name": "FUN_8001dcc8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 320
+ },
+ "0x8001de08": {
+  "name": "FUN_8001de08",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 792
+ },
+ "0x8001e120": {
+  "name": "FUN_8001e120",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x8001e1c0": {
+  "name": "FUN_8001e1c0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 584
+ },
+ "0x8001e408": {
+  "name": "FUN_8001e408",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 724
+ },
+ "0x8001e6dc": {
+  "name": "FUN_8001e6dc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 708
+ },
+ "0x8001e9a0": {
+  "name": "FUN_8001e9a0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 680
+ },
+ "0x8001ec48": {
+  "name": "FUN_8001ec48",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 124
+ },
+ "0x8001ecc4": {
+  "name": "FUN_8001ecc4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 240
+ },
+ "0x8001edb4": {
+  "name": "FUN_8001edb4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 448
+ },
+ "0x8001ef74": {
+  "name": "FUN_8001ef74",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1080
+ },
+ "0x8001f3ac": {
+  "name": "FUN_8001f3ac",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 368
+ },
+ "0x8001f51c": {
+  "name": "FUN_8001f51c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 132
+ },
+ "0x8001f5a0": {
+  "name": "FUN_8001f5a0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 980
+ },
+ "0x8001f9cc": {
+  "name": "FUN_8001f9cc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 620
+ },
+ "0x8001fc38": {
+  "name": "FUN_8001fc38",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 124
+ },
+ "0x8001fcb4": {
+  "name": "FUN_8001fcb4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 84
+ },
+ "0x8001fe50": {
+  "name": "FUN_8001fe50",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 60
+ },
+ "0x8001fe8c": {
+  "name": "FUN_8001fe8c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 128
+ },
+ "0x8001ff0c": {
+  "name": "FUN_8001ff0c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 76
+ },
+ "0x8001ff58": {
+  "name": "FUN_8001ff58",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 92
+ },
+ "0x8001ffd4": {
+  "name": "FUN_8001ffd4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 44
+ },
+ "0x800200b8": {
+  "name": "FUN_800200b8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 104
+ },
+ "0x80020120": {
+  "name": "FUN_80020120",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 112
+ },
+ "0x80020190": {
+  "name": "FUN_80020190",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 128
+ },
+ "0x800202f4": {
+  "name": "FUN_800202f4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 120
+ },
+ "0x8002036c": {
+  "name": "FUN_8002036c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 144
+ },
+ "0x800203fc": {
+  "name": "FUN_800203fc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 168
+ },
+ "0x800204dc": {
+  "name": "FUN_800204dc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 100
+ },
+ "0x80020540": {
+  "name": "FUN_80020540",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 96
+ },
+ "0x800205a0": {
+  "name": "FUN_800205a0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 88
+ },
+ "0x800205f8": {
+  "name": "FUN_800205f8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x80020620": {
+  "name": "FUN_80020620",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 56
+ },
+ "0x80020658": {
+  "name": "FUN_80020658",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 152
+ },
+ "0x800206f0": {
+  "name": "FUN_800206f0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 84
+ },
+ "0x80020744": {
+  "name": "FUN_80020744",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 52
+ },
+ "0x80020778": {
+  "name": "FUN_80020778",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 76
+ },
+ "0x800207c4": {
+  "name": "FUN_800207c4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 52
+ },
+ "0x800207f8": {
+  "name": "FUN_800207f8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 76
+ },
+ "0x80020890": {
+  "name": "FUN_80020890",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 216
+ },
+ "0x80020968": {
+  "name": "FUN_80020968",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 100
+ },
+ "0x800209cc": {
+  "name": "FUN_800209cc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 260
+ },
+ "0x80020ad0": {
+  "name": "FUN_80020ad0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 284
+ },
+ "0x80020bec": {
+  "name": "FUN_80020bec",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 336
+ },
+ "0x80020d3c": {
+  "name": "FUN_80020d3c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 472
+ },
+ "0x80020f14": {
+  "name": "FUN_80020f14",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 400
+ },
+ "0x800210a4": {
+  "name": "FUN_800210a4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 120
+ },
+ "0x8002123c": {
+  "name": "FUN_8002123c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 136
+ },
+ "0x800212c4": {
+  "name": "FUN_800212c4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 88
+ },
+ "0x8002131c": {
+  "name": "FUN_8002131c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 120
+ },
+ "0x80021394": {
+  "name": "FUN_80021394",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 204
+ },
+ "0x80021460": {
+  "name": "FUN_80021460",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 368
+ },
+ "0x800215d0": {
+  "name": "FUN_800215d0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 48
+ },
+ "0x80021600": {
+  "name": "FUN_80021600",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 120
+ },
+ "0x80021678": {
+  "name": "FUN_80021678",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 36
+ },
+ "0x8002169c": {
+  "name": "FUN_8002169c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 256
+ },
+ "0x8002179c": {
+  "name": "FUN_8002179c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x80021978": {
+  "name": "FUN_80021978",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 184
+ },
+ "0x80021a30": {
+  "name": "FUN_80021a30",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 336
+ },
+ "0x80021b80": {
+  "name": "FUN_80021b80",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 160
+ },
+ "0x800220d4": {
+  "name": "FUN_800220d4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 76
+ },
+ "0x80022524": {
+  "name": "FUN_80022524",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 176
+ },
+ "0x800225d4": {
+  "name": "FUN_800225d4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 104
+ },
+ "0x8002263c": {
+  "name": "FUN_8002263c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 360
+ },
+ "0x800227a4": {
+  "name": "FUN_800227a4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 632
+ },
+ "0x80022a1c": {
+  "name": "FUN_80022a1c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 396
+ },
+ "0x80022ba8": {
+  "name": "FUN_80022ba8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 172
+ },
+ "0x80022cd0": {
+  "name": "FUN_80022cd0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 132
+ },
+ "0x80022d54": {
+  "name": "FUN_80022d54",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 228
+ },
+ "0x80022e38": {
+  "name": "FUN_80022e38",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 88
+ },
+ "0x80022e90": {
+  "name": "FUN_80022e90",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 460
+ },
+ "0x8002305c": {
+  "name": "FUN_8002305c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 824
+ },
+ "0x80023394": {
+  "name": "FUN_80023394",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 216
+ },
+ "0x8002346c": {
+  "name": "FUN_8002346c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1236
+ },
+ "0x80023940": {
+  "name": "FUN_80023940",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 128
+ },
+ "0x800244c4": {
+  "name": "FUN_800244c4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 92
+ },
+ "0x80024748": {
+  "name": "FUN_80024748",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 84
+ },
+ "0x8002479c": {
+  "name": "FUN_8002479c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 64
+ },
+ "0x800247dc": {
+  "name": "FUN_800247dc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 172
+ },
+ "0x80024888": {
+  "name": "FUN_80024888",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 272
+ },
+ "0x80024998": {
+  "name": "FUN_80024998",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 808
+ },
+ "0x80024cc0": {
+  "name": "FUN_80024cc0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 112
+ },
+ "0x80024d30": {
+  "name": "FUN_80024d30",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 36
+ },
+ "0x80024d54": {
+  "name": "FUN_80024d54",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1192
+ },
+ "0x800251fc": {
+  "name": "FUN_800251fc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 516
+ },
+ "0x80025400": {
+  "name": "FUN_80025400",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 500
+ },
+ "0x800255f4": {
+  "name": "FUN_800255f4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 84
+ },
+ "0x80025648": {
+  "name": "FUN_80025648",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 440
+ },
+ "0x80025800": {
+  "name": "FUN_80025800",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 800
+ },
+ "0x80025b20": {
+  "name": "FUN_80025b20",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 160
+ },
+ "0x80025bc0": {
+  "name": "FUN_80025bc0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1660
+ },
+ "0x8002623c": {
+  "name": "FUN_8002623c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 9920
+ },
+ "0x800288fc": {
+  "name": "FUN_800288fc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 220
+ },
+ "0x800289d8": {
+  "name": "FUN_800289d8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1756
+ },
+ "0x800290b4": {
+  "name": "FUN_800290b4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 36
+ },
+ "0x800290d8": {
+  "name": "FUN_800290d8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1656
+ },
+ "0x80029750": {
+  "name": "FUN_80029750",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1300
+ },
+ "0x80029c64": {
+  "name": "FUN_80029c64",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 80
+ },
+ "0x80029dec": {
+  "name": "FUN_80029dec",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 92
+ },
+ "0x80029e48": {
+  "name": "FUN_80029e48",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 928
+ },
+ "0x8002a1e8": {
+  "name": "FUN_8002a1e8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 116
+ },
+ "0x8002a25c": {
+  "name": "FUN_8002a25c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 244
+ },
+ "0x8002a350": {
+  "name": "FUN_8002a350",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 152
+ },
+ "0x8002a598": {
+  "name": "FUN_8002a598",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1844
+ },
+ "0x8002accc": {
+  "name": "FUN_8002accc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 100
+ },
+ "0x8002ad30": {
+  "name": "FUN_8002ad30",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 616
+ },
+ "0x8002af98": {
+  "name": "FUN_8002af98",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1656
+ },
+ "0x8002b610": {
+  "name": "FUN_8002b610",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 428
+ },
+ "0x8002b7bc": {
+  "name": "FUN_8002b7bc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 276
+ },
+ "0x8002b8d0": {
+  "name": "FUN_8002b8d0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 112
+ },
+ "0x8002b940": {
+  "name": "FUN_8002b940",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 76
+ },
+ "0x8002bc18": {
+  "name": "FUN_8002bc18",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 364
+ },
+ "0x8002bd84": {
+  "name": "FUN_8002bd84",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 76
+ },
+ "0x8002be84": {
+  "name": "FUN_8002be84",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 308
+ },
+ "0x8002c018": {
+  "name": "FUN_8002c018",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 504
+ },
+ "0x8002c3ac": {
+  "name": "FUN_8002c3ac",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 272
+ },
+ "0x8002c4bc": {
+  "name": "FUN_8002c4bc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 224
+ },
+ "0x8002c59c": {
+  "name": "FUN_8002c59c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 352
+ },
+ "0x8002c6fc": {
+  "name": "FUN_8002c6fc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 604
+ },
+ "0x8002c958": {
+  "name": "FUN_8002c958",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x8002c99c": {
+  "name": "FUN_8002c99c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 248
+ },
+ "0x8002ca94": {
+  "name": "FUN_8002ca94",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 232
+ },
+ "0x8002cb7c": {
+  "name": "FUN_8002cb7c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 108
+ },
+ "0x8002cbe8": {
+  "name": "FUN_8002cbe8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 256
+ },
+ "0x8002cce8": {
+  "name": "FUN_8002cce8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 384
+ },
+ "0x8002ce68": {
+  "name": "FUN_8002ce68",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 296
+ },
+ "0x8002cf90": {
+  "name": "FUN_8002cf90",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 196
+ },
+ "0x8002d054": {
+  "name": "FUN_8002d054",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1016
+ },
+ "0x8002d44c": {
+  "name": "FUN_8002d44c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 72
+ },
+ "0x8002d494": {
+  "name": "FUN_8002d494",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 920
+ },
+ "0x8002d82c": {
+  "name": "FUN_8002d82c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 2704
+ },
+ "0x8002e630": {
+  "name": "FUN_8002e630",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1124
+ },
+ "0x8002ea94": {
+  "name": "FUN_8002ea94",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 672
+ },
+ "0x8002ed34": {
+  "name": "FUN_8002ed34",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 352
+ },
+ "0x8002ee94": {
+  "name": "FUN_8002ee94",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 332
+ },
+ "0x8002efe0": {
+  "name": "FUN_8002efe0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 2488
+ },
+ "0x8002f998": {
+  "name": "FUN_8002f998",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 36
+ },
+ "0x8002f9bc": {
+  "name": "FUN_8002f9bc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 4300
+ },
+ "0x80030a88": {
+  "name": "FUN_80030a88",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 384
+ },
+ "0x80030c08": {
+  "name": "FUN_80030c08",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 812
+ },
+ "0x80031300": {
+  "name": "FUN_80031300",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 340
+ },
+ "0x80031454": {
+  "name": "FUN_80031454",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 480
+ },
+ "0x80031864": {
+  "name": "FUN_80031864",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 664
+ },
+ "0x80031dfc": {
+  "name": "FUN_80031dfc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 420
+ },
+ "0x80032e48": {
+  "name": "FUN_80032e48",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 484
+ },
+ "0x8003351c": {
+  "name": "FUN_8003351c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 480
+ },
+ "0x80033db4": {
+  "name": "FUN_80033db4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 648
+ },
+ "0x800346cc": {
+  "name": "FUN_800346cc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 596
+ },
+ "0x80034b5c": {
+  "name": "FUN_80034b5c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 400
+ },
+ "0x800354e0": {
+  "name": "FUN_800354e0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 380
+ },
+ "0x8003733c": {
+  "name": "FUN_8003733c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1428
+ },
+ "0x8003c288": {
+  "name": "FUN_8003c288",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 688
+ },
+ "0x8003c538": {
+  "name": "FUN_8003c538",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 228
+ },
+ "0x8003ce24": {
+  "name": "FUN_8003ce24",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 188
+ },
+ "0x8003cee0": {
+  "name": "FUN_8003cee0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 176
+ },
+ "0x8003d188": {
+  "name": "FUN_8003d188",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 96
+ },
+ "0x8003d1e8": {
+  "name": "FUN_8003d1e8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 44
+ },
+ "0x8003d898": {
+  "name": "FUN_8003d898",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 44
+ },
+ "0x8003e254": {
+  "name": "FUN_8003e254",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 112
+ },
+ "0x8003e2c4": {
+  "name": "FUN_8003e2c4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 56
+ },
+ "0x8003e2fc": {
+  "name": "FUN_8003e2fc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 548
+ },
+ "0x8003e520": {
+  "name": "FUN_8003e520",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x8003e598": {
+  "name": "FUN_8003e598",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 408
+ },
+ "0x8003e730": {
+  "name": "FUN_8003e730",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 60
+ },
+ "0x8003e76c": {
+  "name": "FUN_8003e76c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 72
+ },
+ "0x8003eab0": {
+  "name": "FUN_8003eab0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 648
+ },
+ "0x8003f0b4": {
+  "name": "FUN_8003f0b4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 936
+ },
+ "0x8003f4a0": {
+  "name": "FUN_8003f4a0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 1020
+ },
+ "0x8003f89c": {
+  "name": "FUN_8003f89c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 476
+ },
+ "0x8003fac4": {
+  "name": "FUN_8003fac4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 260
+ },
+ "0x8003fbc8": {
+  "name": "FUN_8003fbc8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 136
+ },
+ "0x8003fc50": {
+  "name": "FUN_8003fc50",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x8003fc94": {
+  "name": "FUN_8003fc94",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 144
+ },
+ "0x8003fd24": {
+  "name": "FUN_8003fd24",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 168
+ },
+ "0x8003fdcc": {
+  "name": "FUN_8003fdcc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 220
+ },
+ "0x8003fea8": {
+  "name": "FUN_8003fea8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 128
+ },
+ "0x8003ff28": {
+  "name": "FUN_8003ff28",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 340
+ },
+ "0x80040234": {
+  "name": "FUN_80040234",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 132
+ },
+ "0x800407b4": {
+  "name": "FUN_800407b4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 224
+ },
+ "0x80040a80": {
+  "name": "FUN_80040a80",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 184
+ },
+ "0x80040c40": {
+  "name": "FUN_80040c40",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 472
+ },
+ "0x80040e18": {
+  "name": "FUN_80040e18",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 32
+ },
+ "0x80040e38": {
+  "name": "FUN_80040e38",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 36
+ },
+ "0x80040e5c": {
+  "name": "FUN_80040e5c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 3584
+ },
+ "0x80041c5c": {
+  "name": "FUN_80041c5c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 228
+ },
+ "0x80041da0": {
+  "name": "FUN_80041da0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 224
+ },
+ "0x80041e80": {
+  "name": "FUN_80041e80",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 340
+ },
+ "0x80041fd4": {
+  "name": "FUN_80041fd4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 288
+ },
+ "0x800420f4": {
+  "name": "FUN_800420f4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 484
+ },
+ "0x800422d8": {
+  "name": "FUN_800422d8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 184
+ },
+ "0x80042e78": {
+  "name": "FUN_80042e78",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 120
+ },
+ "0x80042ef0": {
+  "name": "FUN_80042ef0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 108
+ },
+ "0x80042f5c": {
+  "name": "FUN_80042f5c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 60
+ },
+ "0x80042f98": {
+  "name": "FUN_80042f98",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 264
+ },
+ "0x8004316c": {
+  "name": "FUN_8004316c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 48
+ },
+ "0x80043248": {
+  "name": "FUN_80043248",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 136
+ },
+ "0x800432d0": {
+  "name": "FUN_800432d0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 136
+ },
+ "0x80043358": {
+  "name": "FUN_80043358",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 176
+ },
+ "0x80043408": {
+  "name": "FUN_80043408",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 200
+ },
+ "0x800434d0": {
+  "name": "FUN_800434d0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x800434f8": {
+  "name": "FUN_800434f8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 52
+ },
+ "0x8004352c": {
+  "name": "FUN_8004352c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 148
+ },
+ "0x800435c0": {
+  "name": "FUN_800435c0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 172
+ },
+ "0x8004366c": {
+  "name": "FUN_8004366c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 92
+ },
+ "0x800436c8": {
+  "name": "FUN_800436c8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 140
+ },
+ "0x80043754": {
+  "name": "FUN_80043754",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 272
+ },
+ "0x80043864": {
+  "name": "FUN_80043864",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 272
+ },
+ "0x80043974": {
+  "name": "FUN_80043974",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x800439b8": {
+  "name": "FUN_800439b8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 188
+ },
+ "0x80043a74": {
+  "name": "FUN_80043a74",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 120
+ },
+ "0x80043aec": {
+  "name": "FUN_80043aec",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 200
+ },
+ "0x80043bb4": {
+  "name": "FUN_80043bb4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 48
+ },
+ "0x80043be4": {
+  "name": "FUN_80043be4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x80043c0c": {
+  "name": "FUN_80043c0c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x80043ce0": {
+  "name": "FUN_80043ce0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 180
+ },
+ "0x80043df8": {
+  "name": "FUN_80043df8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 248
+ },
+ "0x80043ef0": {
+  "name": "FUN_80043ef0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 256
+ },
+ "0x80043ff0": {
+  "name": "FUN_80043ff0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 100
+ },
+ "0x80044054": {
+  "name": "FUN_80044054",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 44
+ },
+ "0x80044080": {
+  "name": "FUN_80044080",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 140
+ },
+ "0x8004410c": {
+  "name": "FUN_8004410c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 124
+ },
+ "0x800441c8": {
+  "name": "FUN_800441c8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 48
+ },
+ "0x800441f8": {
+  "name": "FUN_800441f8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 360
+ },
+ "0x80044360": {
+  "name": "FUN_80044360",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 52
+ },
+ "0x80044394": {
+  "name": "FUN_80044394",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 52
+ },
+ "0x800443c8": {
+  "name": "FUN_800443c8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 148
+ },
+ "0x8004445c": {
+  "name": "FUN_8004445c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x80044484": {
+  "name": "FUN_80044484",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 200
+ },
+ "0x80044574": {
+  "name": "FUN_80044574",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 32
+ },
+ "0x800445b8": {
+  "name": "FUN_800445b8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 72
+ },
+ "0x80044600": {
+  "name": "FUN_80044600",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 220
+ },
+ "0x800446dc": {
+  "name": "FUN_800446dc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 268
+ },
+ "0x800447e8": {
+  "name": "FUN_800447e8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 84
+ },
+ "0x8004483c": {
+  "name": "FUN_8004483c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 84
+ },
+ "0x80044890": {
+  "name": "FUN_80044890",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 92
+ },
+ "0x800448ec": {
+  "name": "FUN_800448ec",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 208
+ },
+ "0x800449bc": {
+  "name": "FUN_800449bc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 268
+ },
+ "0x80044c44": {
+  "name": "FUN_80044c44",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 336
+ },
+ "0x80044d9c": {
+  "name": "FUN_80044d9c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 352
+ },
+ "0x80044efc": {
+  "name": "FUN_80044efc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 104
+ },
+ "0x80044f64": {
+  "name": "FUN_80044f64",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 88
+ },
+ "0x80044fbc": {
+  "name": "FUN_80044fbc",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 72
+ },
+ "0x80045004": {
+  "name": "FUN_80045004",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 132
+ },
+ "0x80045088": {
+  "name": "FUN_80045088",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 172
+ },
+ "0x80045134": {
+  "name": "FUN_80045134",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 140
+ },
+ "0x800451c0": {
+  "name": "FUN_800451c0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 56
+ },
+ "0x80045354": {
+  "name": "SsUtReverbOff",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x80045374": {
+  "name": "_SpuInit",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 232
+ },
+ "0x8004545c": {
+  "name": "SpuStart",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 112
+ },
+ "0x800454d4": {
+  "name": "_spu_init",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 212
+ },
+ "0x800455a8": {
+  "name": "SPU_OBJ_D4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 428
+ },
+ "0x80045754": {
+  "name": "SPU_OBJ_280",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 272
+ },
+ "0x80045864": {
+  "name": "SPU_OBJ_390",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 148
+ },
+ "0x800458f8": {
+  "name": "SPU_OBJ_424",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x80045914": {
+  "name": "_spu_FiDMA",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 172
+ },
+ "0x800459c0": {
+  "name": "SPU_OBJ_4EC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x800459d0": {
+  "name": "_spu_Fr_",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 168
+ },
+ "0x80045a78": {
+  "name": "_spu_t",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 488
+ },
+ "0x80045c60": {
+  "name": "SPU_OBJ_78C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 136
+ },
+ "0x80045ce8": {
+  "name": "SPU_OBJ_814",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x80045cf8": {
+  "name": "_spu_Fw",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 112
+ },
+ "0x80045d68": {
+  "name": "SPU_OBJ_894",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80045d7c": {
+  "name": "_spu_Fr",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 100
+ },
+ "0x80045de0": {
+  "name": "_spu_FsetRXX",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x80045e1c": {
+  "name": "SPU_OBJ_948",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80045e24": {
+  "name": "_spu_FsetRXXa",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 156
+ },
+ "0x80045ec0": {
+  "name": "SPU_OBJ_9EC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80045ec8": {
+  "name": "_spu_FgetRXXa",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x80045efc": {
+  "name": "SPU_OBJ_A28",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80045f04": {
+  "name": "_spu_FsetPCR",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 76
+ },
+ "0x80045f50": {
+  "name": "SPU_OBJ_A7C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80045f5c": {
+  "name": "SPU_OBJ_A88",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x80045f84": {
+  "name": "SPU_OBJ_AB0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x80045fac": {
+  "name": "_spu_Fw1ts",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 64
+ },
+ "0x80045fec": {
+  "name": "SPU_OBJ_B18",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x80046014": {
+  "name": "FUN_80046014",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 36
+ },
+ "0x80046044": {
+  "name": "SpuInitMalloc",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 76
+ },
+ "0x80046090": {
+  "name": "S_M_INIT_OBJ_4C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800460a4": {
+  "name": "SpuMalloc",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 84
+ },
+ "0x800460f8": {
+  "name": "S_M_M_OBJ_54",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 216
+ },
+ "0x800461d0": {
+  "name": "S_M_M_OBJ_12C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 380
+ },
+ "0x8004634c": {
+  "name": "S_M_M_OBJ_2A8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x80046374": {
+  "name": "_spu_gcSPU",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 84
+ },
+ "0x800463c8": {
+  "name": "S_M_INT_OBJ_54",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 112
+ },
+ "0x80046438": {
+  "name": "S_M_INT_OBJ_C4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 428
+ },
+ "0x800465e4": {
+  "name": "S_M_INT_OBJ_270",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 144
+ },
+ "0x80046674": {
+  "name": "SpuFree",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 100
+ },
+ "0x800466d8": {
+  "name": "S_M_F_OBJ_64",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x800466f4": {
+  "name": "SpuRead",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 92
+ },
+ "0x80046754": {
+  "name": "SpuSetTransferStartAddr",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 76
+ },
+ "0x800467a0": {
+  "name": "S_STSA_OBJ_4C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x800467b4": {
+  "name": "SpuSetTransferMode",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 28
+ },
+ "0x800467d0": {
+  "name": "S_STM_OBJ_1C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x800467e4": {
+  "name": "SpuIsTransferCompleted",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 136
+ },
+ "0x8004686c": {
+  "name": "S_ITC_OBJ_88",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046874": {
+  "name": "S_ITC_OBJ_90",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80046894": {
+  "name": "SpuSetCommonAttr",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 88
+ },
+ "0x800468ec": {
+  "name": "S_SCA_OBJ_58",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800468f4": {
+  "name": "S_SCA_OBJ_60",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800468fc": {
+  "name": "S_SCA_OBJ_68",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046904": {
+  "name": "S_SCA_OBJ_70",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x8004690c": {
+  "name": "S_SCA_OBJ_78",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046914": {
+  "name": "S_SCA_OBJ_80",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x8004691c": {
+  "name": "S_SCA_OBJ_88",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046924": {
+  "name": "S_SCA_OBJ_90",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x8004692c": {
+  "name": "S_SCA_OBJ_98",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 128
+ },
+ "0x800469ac": {
+  "name": "S_SCA_OBJ_118",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800469b4": {
+  "name": "S_SCA_OBJ_120",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800469bc": {
+  "name": "S_SCA_OBJ_128",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800469c4": {
+  "name": "S_SCA_OBJ_130",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800469cc": {
+  "name": "S_SCA_OBJ_138",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800469d4": {
+  "name": "S_SCA_OBJ_140",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800469dc": {
+  "name": "S_SCA_OBJ_148",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800469e4": {
+  "name": "S_SCA_OBJ_150",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800469ec": {
+  "name": "S_SCA_OBJ_158",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 284
+ },
+ "0x80046b08": {
+  "name": "S_SCA_OBJ_274",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 84
+ },
+ "0x80046b5c": {
+  "name": "S_SCA_OBJ_2C8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 84
+ },
+ "0x80046bb0": {
+  "name": "S_SCA_OBJ_31C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 84
+ },
+ "0x80046c04": {
+  "name": "S_SCA_OBJ_370",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80046c14": {
+  "name": "SpuSetVoiceVolume",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 96
+ },
+ "0x80046c74": {
+  "name": "S_SVV_OBJ_60",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x80046c94": {
+  "name": "SpuSetVoicePitch",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 84
+ },
+ "0x80046ce8": {
+  "name": "S_SVP_OBJ_54",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x80046d04": {
+  "name": "SpuSetVoiceStartAddr",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 80
+ },
+ "0x80046d54": {
+  "name": "S_SVSA_OBJ_50",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x80046d84": {
+  "name": "SpuSetVoiceAttr",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 316
+ },
+ "0x80046ec0": {
+  "name": "S_SVA_OBJ_13C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046ec8": {
+  "name": "S_SVA_OBJ_144",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046ed0": {
+  "name": "S_SVA_OBJ_14C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046ed8": {
+  "name": "S_SVA_OBJ_154",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046ee0": {
+  "name": "S_SVA_OBJ_15C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046ee8": {
+  "name": "S_SVA_OBJ_164",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046ef0": {
+  "name": "S_SVA_OBJ_16C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 4
+ },
+ "0x80046ef4": {
+  "name": "S_SVA_OBJ_170",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x80046f24": {
+  "name": "S_SVA_OBJ_1A0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 124
+ },
+ "0x80046fa0": {
+  "name": "S_SVA_OBJ_21C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046fa8": {
+  "name": "S_SVA_OBJ_224",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046fb0": {
+  "name": "S_SVA_OBJ_22C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046fb8": {
+  "name": "S_SVA_OBJ_234",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046fc0": {
+  "name": "S_SVA_OBJ_23C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046fc8": {
+  "name": "S_SVA_OBJ_244",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80046fd0": {
+  "name": "S_SVA_OBJ_24C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 4
+ },
+ "0x80046fd4": {
+  "name": "S_SVA_OBJ_250",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x80047004": {
+  "name": "S_SVA_OBJ_280",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 512
+ },
+ "0x80047204": {
+  "name": "S_SVA_OBJ_480",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 320
+ },
+ "0x80047344": {
+  "name": "S_SVA_OBJ_5C0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 56
+ },
+ "0x80047384": {
+  "name": "_spu_2pitch",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 140
+ },
+ "0x80047410": {
+  "name": "_spu_note2pitch",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 140
+ },
+ "0x8004749c": {
+  "name": "S_N2P_OBJ_118",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 172
+ },
+ "0x80047548": {
+  "name": "_spu_pitch2note",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x80047584": {
+  "name": "S_N2P_OBJ_200",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 236
+ },
+ "0x80047674": {
+  "name": "FUN_80047674",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 24
+ },
+ "0x800476a4": {
+  "name": "PCcreat",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x800476c4": {
+  "name": "PCread",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 148
+ },
+ "0x80047758": {
+  "name": "READ_OBJ_94",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 44
+ },
+ "0x80047784": {
+  "name": "_SN_write",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x8004779c": {
+  "name": "__divdi3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 152
+ },
+ "0x80047834": {
+  "name": "__udivmoddi4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 96
+ },
+ "0x80047894": {
+  "name": "_UDIVMOD_OBJ_60",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 272
+ },
+ "0x800479fc": {
+  "name": "_UDIVMOD_OBJ_1C8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 284
+ },
+ "0x80047b18": {
+  "name": "_UDIVMOD_OBJ_2E4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 208
+ },
+ "0x80047be8": {
+  "name": "_UDIVMOD_OBJ_3B4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x80047c50": {
+  "name": "_UDIVMOD_OBJ_41C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 96
+ },
+ "0x80047cb0": {
+  "name": "_UDIVMOD_OBJ_47C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80047e18": {
+  "name": "_UDIVMOD_OBJ_5E4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 44
+ },
+ "0x80047e44": {
+  "name": "VSync",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 164
+ },
+ "0x80047ee8": {
+  "name": "VSYNC_OBJ_A4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 192
+ },
+ "0x80047fa8": {
+  "name": "VSYNC_OBJ_164",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80047fbc": {
+  "name": "VSYNC_OBJ_178",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 136
+ },
+ "0x80048044": {
+  "name": "VSYNC_OBJ_200",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x80048054": {
+  "name": "ResetCallback",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 48
+ },
+ "0x80048084": {
+  "name": "InterruptCallback",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x800480b4": {
+  "name": "DMACallback",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 48
+ },
+ "0x800480e4": {
+  "name": "VSyncCallback",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 52
+ },
+ "0x80048118": {
+  "name": "VSyncCallbacks",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 48
+ },
+ "0x80048148": {
+  "name": "StopCallback",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x80048178": {
+  "name": "RestartCallback",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x800481a8": {
+  "name": "CheckCallback",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x800481b8": {
+  "name": "GetIntrMask",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x800481d0": {
+  "name": "SetIntrMask",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x800481e8": {
+  "name": "INTR_OBJ_194",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 216
+ },
+ "0x800482c0": {
+  "name": "INTR_OBJ_26C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 420
+ },
+ "0x80048464": {
+  "name": "INTR_OBJ_410",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 44
+ },
+ "0x80048490": {
+  "name": "INTR_OBJ_43C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 176
+ },
+ "0x80048540": {
+  "name": "INTR_OBJ_4EC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 152
+ },
+ "0x800485d8": {
+  "name": "INTR_OBJ_584",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 160
+ },
+ "0x80048678": {
+  "name": "INTR_OBJ_624",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 104
+ },
+ "0x800486e0": {
+  "name": "INTR_OBJ_68C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x800486f0": {
+  "name": "INTR_OBJ_69C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x80048714": {
+  "name": "startIntrVSync",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 88
+ },
+ "0x8004876c": {
+  "name": "INTR_VB_OBJ_58",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 108
+ },
+ "0x800487d8": {
+  "name": "INTR_VB_OBJ_C4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 44
+ },
+ "0x80048804": {
+  "name": "INTR_VB_OBJ_F0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x80048834": {
+  "name": "startIntrDMA",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 76
+ },
+ "0x80048880": {
+  "name": "INTR_DMA_OBJ_4C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 384
+ },
+ "0x80048a00": {
+  "name": "INTR_DMA_OBJ_1CC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 164
+ },
+ "0x80048aa4": {
+  "name": "INTR_DMA_OBJ_270",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80048aac": {
+  "name": "INTR_DMA_OBJ_278",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x80048ad4": {
+  "name": "CdGetToc",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 36
+ },
+ "0x80048af8": {
+  "name": "CdGetToc2",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 508
+ },
+ "0x80048cf4": {
+  "name": "TOC_OBJ_220",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x80048d24": {
+  "name": "CdInit",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 116
+ },
+ "0x80048d98": {
+  "name": "EVENT_OBJ_74",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x80048da8": {
+  "name": "EVENT_OBJ_84",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x80048dd0": {
+  "name": "EVENT_OBJ_AC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x80048df8": {
+  "name": "EVENT_OBJ_D4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x80048e24": {
+  "name": "CdStatus",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x80048e34": {
+  "name": "CdMode",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x80048e44": {
+  "name": "CdLastCom",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x80048e54": {
+  "name": "CdLastPos",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 12
+ },
+ "0x80048e60": {
+  "name": "CdReset",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 92
+ },
+ "0x80048ebc": {
+  "name": "SYS_OBJ_98",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x80048ecc": {
+  "name": "CdFlush",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x80048eec": {
+  "name": "CdSetDebug",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 20
+ },
+ "0x80048f00": {
+  "name": "CdComstr",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 44
+ },
+ "0x80048f2c": {
+  "name": "SYS_OBJ_108",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80048f34": {
+  "name": "CdIntstr",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 44
+ },
+ "0x80048f60": {
+  "name": "SYS_OBJ_13C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80048f68": {
+  "name": "CdSync",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x80048f88": {
+  "name": "CdReady",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x80048fa8": {
+  "name": "CdSyncCallback",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 20
+ },
+ "0x80048fbc": {
+  "name": "CdReadyCallback",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 20
+ },
+ "0x80048fd0": {
+  "name": "CdControl",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 316
+ },
+ "0x8004910c": {
+  "name": "CdControlF",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 308
+ },
+ "0x80049240": {
+  "name": "CdControlB",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 284
+ },
+ "0x8004935c": {
+  "name": "SYS_OBJ_538",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x8004938c": {
+  "name": "CdMix",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x800493ac": {
+  "name": "CdGetSector",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x800493cc": {
+  "name": "CdGetSector2",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x800493ec": {
+  "name": "CdDataCallback",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 36
+ },
+ "0x80049410": {
+  "name": "CdDataSync",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x80049430": {
+  "name": "CdIntToPos",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 260
+ },
+ "0x80049534": {
+  "name": "CdPosToInt",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 128
+ },
+ "0x800495b4": {
+  "name": "BIOS_OBJ_0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 100
+ },
+ "0x80049618": {
+  "name": "BIOS_OBJ_64",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 504
+ },
+ "0x80049810": {
+  "name": "BIOS_OBJ_25C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 256
+ },
+ "0x80049910": {
+  "name": "BIOS_OBJ_35C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 76
+ },
+ "0x8004995c": {
+  "name": "BIOS_OBJ_3A8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 128
+ },
+ "0x800499dc": {
+  "name": "BIOS_OBJ_428",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 128
+ },
+ "0x80049a5c": {
+  "name": "BIOS_OBJ_4A8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 128
+ },
+ "0x80049afc": {
+  "name": "BIOS_OBJ_548",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80049b10": {
+  "name": "CD_sync",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 312
+ },
+ "0x80049c48": {
+  "name": "BIOS_OBJ_694",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x80049c78": {
+  "name": "BIOS_OBJ_6C4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 232
+ },
+ "0x80049d60": {
+  "name": "BIOS_OBJ_7AC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x80049d90": {
+  "name": "CD_ready",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 312
+ },
+ "0x80049ec8": {
+  "name": "BIOS_OBJ_914",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x80049ef8": {
+  "name": "BIOS_OBJ_944",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 304
+ },
+ "0x8004a028": {
+  "name": "BIOS_OBJ_A74",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x8004a058": {
+  "name": "CD_cw",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 716
+ },
+ "0x8004a324": {
+  "name": "BIOS_OBJ_D70",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x8004a354": {
+  "name": "BIOS_OBJ_DA0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 232
+ },
+ "0x8004a43c": {
+  "name": "BIOS_OBJ_E88",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x8004a464": {
+  "name": "CD_vol",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 136
+ },
+ "0x8004a4ec": {
+  "name": "CD_flush",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 212
+ },
+ "0x8004a5c0": {
+  "name": "CD_initvol",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 240
+ },
+ "0x8004a6b0": {
+  "name": "CD_initintr",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 76
+ },
+ "0x8004a6fc": {
+  "name": "CD_init",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 464
+ },
+ "0x8004a8cc": {
+  "name": "BIOS_OBJ_1318",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x8004a8dc": {
+  "name": "CD_datasync",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 280
+ },
+ "0x8004a9f4": {
+  "name": "BIOS_OBJ_1440",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 80
+ },
+ "0x8004aa44": {
+  "name": "CD_getsector",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 256
+ },
+ "0x8004ab44": {
+  "name": "CD_getsector2",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 236
+ },
+ "0x8004ac30": {
+  "name": "CD_set_test_parmnum",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x8004ac3c": {
+  "name": "BIOS_OBJ_1688",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x8004ac70": {
+  "name": "BIOS_OBJ_16BC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 164
+ },
+ "0x8004ad14": {
+  "name": "CDREAD_OBJ_0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 160
+ },
+ "0x8004adb0": {
+  "name": "CDREAD_OBJ_9C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 184
+ },
+ "0x8004ae6c": {
+  "name": "CDREAD_OBJ_158",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 264
+ },
+ "0x8004af74": {
+  "name": "CDREAD_OBJ_260",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 204
+ },
+ "0x8004b040": {
+  "name": "CDREAD_OBJ_32C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 472
+ },
+ "0x8004b218": {
+  "name": "CDREAD_OBJ_504",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x8004b230": {
+  "name": "CdReadBreak",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 148
+ },
+ "0x8004b2c4": {
+  "name": "CdRead",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 88
+ },
+ "0x8004b31c": {
+  "name": "CDREAD_OBJ_608",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x8004b328": {
+  "name": "CDREAD_OBJ_614",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 156
+ },
+ "0x8004b3c4": {
+  "name": "CdReadSync",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 144
+ },
+ "0x8004b454": {
+  "name": "CDREAD_OBJ_740",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 56
+ },
+ "0x8004b48c": {
+  "name": "CdReadCallback",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 20
+ },
+ "0x8004b4a0": {
+  "name": "CdReadMode",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 24
+ },
+ "0x8004b4c4": {
+  "name": "CdRead2",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 76
+ },
+ "0x8004b510": {
+  "name": "CDREAD2_OBJ_4C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 56
+ },
+ "0x8004b548": {
+  "name": "CDREAD2_OBJ_84",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x8004b574": {
+  "name": "CdDiskReady",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 264
+ },
+ "0x8004b67c": {
+  "name": "TYPE_OBJ_108",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004b690": {
+  "name": "CdGetDiskType",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 92
+ },
+ "0x8004b6ec": {
+  "name": "TYPE_OBJ_178",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 216
+ },
+ "0x8004b7c4": {
+  "name": "TYPE_OBJ_250",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004b7e4": {
+  "name": "data_ready_callback",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 140
+ },
+ "0x8004b870": {
+  "name": "StGetBackloc",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 72
+ },
+ "0x8004b8b8": {
+  "name": "C_004_OBJ_D4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x8004b8d4": {
+  "name": "StSetRing",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 44
+ },
+ "0x8004b904": {
+  "name": "StClearRing",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 96
+ },
+ "0x8004b964": {
+  "name": "StSetStream",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 132
+ },
+ "0x8004b9f4": {
+  "name": "init_ring_status",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x8004ba34": {
+  "name": "FUN_8004ba34",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 28
+ },
+ "0x8004ba54": {
+  "name": "StCdInterrupt",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 600
+ },
+ "0x8004bcac": {
+  "name": "C_011_OBJ_258",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 340
+ },
+ "0x8004be00": {
+  "name": "C_011_OBJ_3AC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x8004c1cc": {
+  "name": "C_011_OBJ_778",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 156
+ },
+ "0x8004c268": {
+  "name": "C_011_OBJ_814",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x8004c304": {
+  "name": "C_011_OBJ_8B0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 92
+ },
+ "0x8004c360": {
+  "name": "C_011_OBJ_90C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x8004c370": {
+  "name": "C_011_OBJ_91C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 44
+ },
+ "0x8004c39c": {
+  "name": "C_011_OBJ_948",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 124
+ },
+ "0x8004c418": {
+  "name": "C_011_OBJ_9C4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x8004c474": {
+  "name": "C_011_OBJ_A20",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 208
+ },
+ "0x8004c544": {
+  "name": "SetFogNearFar",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 260
+ },
+ "0x8004c65c": {
+  "name": "InitGeom",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 128
+ },
+ "0x8004c6e4": {
+  "name": "SquareRoot0",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 124
+ },
+ "0x8004c774": {
+  "name": "InvSquareRoot",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 132
+ },
+ "0x8004c800": {
+  "name": "VectorNormalS",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004c814": {
+  "name": "VectorNormal",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x8004c844": {
+  "name": "VectorNormalSS",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x8004c874": {
+  "name": "MSC02_OBJ_100",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 192
+ },
+ "0x8004c934": {
+  "name": "MatrixNormal",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 232
+ },
+ "0x8004ca24": {
+  "name": "LoadAverage12",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 80
+ },
+ "0x8004ca74": {
+  "name": "LoadAverage0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 80
+ },
+ "0x8004cac4": {
+  "name": "LoadAverageShort12",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 136
+ },
+ "0x8004cb4c": {
+  "name": "LoadAverageShort0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 136
+ },
+ "0x8004cbd4": {
+  "name": "LoadAverageByte",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 96
+ },
+ "0x8004cc34": {
+  "name": "LoadAverageCol",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 124
+ },
+ "0x8004ccb4": {
+  "name": "MulMatrix0",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 268
+ },
+ "0x8004cdc4": {
+  "name": "MulRotMatrix0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 228
+ },
+ "0x8004ceb4": {
+  "name": "ReadRotMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 72
+ },
+ "0x8004cf04": {
+  "name": "CompMatrixLV",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 592
+ },
+ "0x8004d154": {
+  "name": "MulMatrix2",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 268
+ },
+ "0x8004d264": {
+  "name": "ApplyMatrix",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 80
+ },
+ "0x8004d2b4": {
+  "name": "ApplyMatrixSV",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 92
+ },
+ "0x8004d314": {
+  "name": "FUN_8004d314",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 36
+ },
+ "0x8004d344": {
+  "name": "SetRotMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x8004d374": {
+  "name": "SetLightMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x8004d3a4": {
+  "name": "SetColorMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x8004d3d4": {
+  "name": "SetVertex0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x8004d3e4": {
+  "name": "SetVertex1",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x8004d3f4": {
+  "name": "SetVertex2",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x8004d404": {
+  "name": "SetVertexTri",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x8004d424": {
+  "name": "SetRGBfifo",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004d438": {
+  "name": "SetIR123",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004d44c": {
+  "name": "SetIR0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x8004d458": {
+  "name": "SetSZfifo3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004d46c": {
+  "name": "SetSZfifo4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x8004d484": {
+  "name": "SetSXSYfifo",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004d498": {
+  "name": "SetRii",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004d4ac": {
+  "name": "SetMAC123",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004d4c0": {
+  "name": "SetData32",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x8004d4cc": {
+  "name": "SetDQA",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x8004d4d8": {
+  "name": "SetDQB",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x8004d4e4": {
+  "name": "SetBackColor",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x8004d504": {
+  "name": "SetFarColor",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x8004d524": {
+  "name": "FUN_8004d524",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 24
+ },
+ "0x8004d544": {
+  "name": "FUN_8004d544",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 12
+ },
+ "0x8004d554": {
+  "name": "LocalLight",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x8004d578": {
+  "name": "DpqColor",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x8004d594": {
+  "name": "NormalColor",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x8004d5b0": {
+  "name": "NormalColor3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x8004d5ec": {
+  "name": "NormalColorDpq",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x8004d610": {
+  "name": "NormalColorDpq3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 72
+ },
+ "0x8004d658": {
+  "name": "NormalColorCol",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x8004d678": {
+  "name": "NormalColorCol3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 68
+ },
+ "0x8004d6bc": {
+  "name": "ColorDpq",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x8004d6e4": {
+  "name": "ColorCol",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x8004d708": {
+  "name": "AverageSZ3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x8004d718": {
+  "name": "AverageSZ4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x8004d734": {
+  "name": "TransposeMatrix",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 64
+ },
+ "0x8004d774": {
+  "name": "RotMatrixX",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 100
+ },
+ "0x8004d7d8": {
+  "name": "FGO_04_OBJ_64",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 308
+ },
+ "0x8004d914": {
+  "name": "RotMatrixY",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 100
+ },
+ "0x8004d978": {
+  "name": "FGO_05_OBJ_64",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 308
+ },
+ "0x8004dab4": {
+  "name": "RotMatrixYXZ_gte",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 508
+ },
+ "0x8004dcb4": {
+  "name": "RCpolyF3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x8004dcbc": {
+  "name": "RCpolyF3A",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 792
+ },
+ "0x8004dfd4": {
+  "name": "DIVF3A_OBJ_320",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 76
+ },
+ "0x8004e024": {
+  "name": "RCpolyFT3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x8004e02c": {
+  "name": "RCpolyFT3A",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 884
+ },
+ "0x8004e3a0": {
+  "name": "DIVFT3A_OBJ_37C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 124
+ },
+ "0x8004e424": {
+  "name": "RCpolyG3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x8004e42c": {
+  "name": "RCpolyG3A",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 932
+ },
+ "0x8004e7d0": {
+  "name": "DIVG3A_OBJ_3AC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 100
+ },
+ "0x8004e834": {
+  "name": "RCpolyGT3",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x8004e83c": {
+  "name": "RCpolyGT3A",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 1028
+ },
+ "0x8004ec40": {
+  "name": "DIVGT3A_OBJ_40C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 148
+ },
+ "0x8004ecd4": {
+  "name": "ratan2",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 180
+ },
+ "0x8004ed88": {
+  "name": "RATAN_OBJ_B4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004ee10": {
+  "name": "RATAN_OBJ_13C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004ee24": {
+  "name": "RATAN_OBJ_150",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x8004ee54": {
+  "name": "_patch_gte",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 172
+ },
+ "0x8004ef30": {
+  "name": "PATCHGTE_OBJ_DC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 4
+ },
+ "0x8004ef34": {
+  "name": "LoadTPage",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 168
+ },
+ "0x8004efdc": {
+  "name": "EXT_OBJ_A8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 4
+ },
+ "0x8004efe0": {
+  "name": "EXT_OBJ_AC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x8004f01c": {
+  "name": "LoadClut",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 100
+ },
+ "0x8004f080": {
+  "name": "LoadClut2",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 100
+ },
+ "0x8004f0e4": {
+  "name": "SetDefDrawEnv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 120
+ },
+ "0x8004f15c": {
+  "name": "EXT_OBJ_228",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x8004f198": {
+  "name": "SetDefDispEnv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x8004f1e8": {
+  "name": "FUN_8004f1e8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 16
+ },
+ "0x8004f204": {
+  "name": "ResetGraph",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 272
+ },
+ "0x8004f314": {
+  "name": "SYS_OBJ_110",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 80
+ },
+ "0x8004f364": {
+  "name": "SYS_OBJ_160",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8004f378": {
+  "name": "SetGraphDebug",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 92
+ },
+ "0x8004f3d4": {
+  "name": "SetGraphQueue",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 164
+ },
+ "0x8004f478": {
+  "name": "GetGraphDebug",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x8004f488": {
+  "name": "DrawSyncCallback",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 96
+ },
+ "0x8004f4e8": {
+  "name": "SetDispMask",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 152
+ },
+ "0x8004f580": {
+  "name": "DrawSync",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 104
+ },
+ "0x8004f5e8": {
+  "name": "SYS_OBJ_3E4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 208
+ },
+ "0x8004f6b8": {
+  "name": "SYS_OBJ_4B4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x8004f6f4": {
+  "name": "SYS_OBJ_4F0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x8004f704": {
+  "name": "ClearImage",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 144
+ },
+ "0x8004f794": {
+  "name": "ClearImage2",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 152
+ },
+ "0x8004f82c": {
+  "name": "LoadImage",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 96
+ },
+ "0x8004f88c": {
+  "name": "StoreImage",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 96
+ },
+ "0x8004f8ec": {
+  "name": "MoveImage",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 160
+ },
+ "0x8004f98c": {
+  "name": "SYS_OBJ_788",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x8004f9a4": {
+  "name": "ClearOTag",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 200
+ },
+ "0x8004fa6c": {
+  "name": "ClearOTagR",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 172
+ },
+ "0x8004fb18": {
+  "name": "DrawPrim",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 92
+ },
+ "0x8004fb74": {
+  "name": "DrawOTag",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 112
+ },
+ "0x8004fbe4": {
+  "name": "PutDrawEnv",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 192
+ },
+ "0x8004fca4": {
+  "name": "DrawOTagEnv",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 216
+ },
+ "0x8004fd7c": {
+  "name": "GetDrawEnv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x8004fdb0": {
+  "name": "PutDispEnv",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 416
+ },
+ "0x8004ff50": {
+  "name": "SYS_OBJ_D4C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 536
+ },
+ "0x80050168": {
+  "name": "SYS_OBJ_F64",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x800501f8": {
+  "name": "SYS_OBJ_FF4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x80050210": {
+  "name": "SYS_OBJ_100C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 152
+ },
+ "0x800502a8": {
+  "name": "GetDispEnv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x800502dc": {
+  "name": "GetODE",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x8005030c": {
+  "name": "SetTexWindow",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 56
+ },
+ "0x80050344": {
+  "name": "SetDrawArea",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 128
+ },
+ "0x800503c4": {
+  "name": "SetDrawOffset",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 64
+ },
+ "0x80050404": {
+  "name": "SetPriority",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x8005042c": {
+  "name": "SetDrawStp",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x80050448": {
+  "name": "SYS_OBJ_1244",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80050454": {
+  "name": "SetDrawMode",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 84
+ },
+ "0x800504a8": {
+  "name": "SetDrawEnv",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 348
+ },
+ "0x80050604": {
+  "name": "SYS_OBJ_1400",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 156
+ },
+ "0x800506a0": {
+  "name": "SYS_OBJ_149C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 348
+ },
+ "0x800507fc": {
+  "name": "SYS_OBJ_15F8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 248
+ },
+ "0x800508f4": {
+  "name": "SYS_OBJ_16F0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x80050910": {
+  "name": "SYS_OBJ_170C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x80050930": {
+  "name": "SYS_OBJ_172C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 124
+ },
+ "0x800509ac": {
+  "name": "SYS_OBJ_17A8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x800509c8": {
+  "name": "SYS_OBJ_17C4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 124
+ },
+ "0x80050a44": {
+  "name": "SYS_OBJ_1840",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x80050a60": {
+  "name": "SYS_OBJ_185C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x80050a7c": {
+  "name": "SYS_OBJ_1878",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 120
+ },
+ "0x80050af4": {
+  "name": "SYS_OBJ_18F0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80050afc": {
+  "name": "SYS_OBJ_18F8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x80050b14": {
+  "name": "SYS_OBJ_1910",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 224
+ },
+ "0x80050bf4": {
+  "name": "SYS_OBJ_19F0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 88
+ },
+ "0x80050c4c": {
+  "name": "SYS_OBJ_1A48",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 64
+ },
+ "0x80050c8c": {
+  "name": "SYS_OBJ_1A88",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 368
+ },
+ "0x80050dfc": {
+  "name": "SYS_OBJ_1BF8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x80050e24": {
+  "name": "SYS_OBJ_1C20",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 104
+ },
+ "0x80050e8c": {
+  "name": "SYS_OBJ_1C88",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x80050ec8": {
+  "name": "SYS_OBJ_1CC4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 372
+ },
+ "0x8005103c": {
+  "name": "SYS_OBJ_1E38",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x80051060": {
+  "name": "SYS_OBJ_1E5C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 96
+ },
+ "0x800510c0": {
+  "name": "SYS_OBJ_1EBC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x800510fc": {
+  "name": "SYS_OBJ_1EF8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 452
+ },
+ "0x800512c0": {
+  "name": "SYS_OBJ_20BC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x800512e0": {
+  "name": "SYS_OBJ_20DC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x80051304": {
+  "name": "SYS_OBJ_2100",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80051318": {
+  "name": "SYS_OBJ_2114",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 64
+ },
+ "0x80051358": {
+  "name": "SYS_OBJ_2154",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 72
+ },
+ "0x800513a0": {
+  "name": "SYS_OBJ_219C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x800513d0": {
+  "name": "SYS_OBJ_21CC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x800513f4": {
+  "name": "SYS_OBJ_21F0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 76
+ },
+ "0x80051440": {
+  "name": "SYS_OBJ_223C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 256
+ },
+ "0x80051540": {
+  "name": "SYS_OBJ_233C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 148
+ },
+ "0x800515f8": {
+  "name": "SYS_OBJ_23F4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 144
+ },
+ "0x80051688": {
+  "name": "SYS_OBJ_2484",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x800516a4": {
+  "name": "SYS_OBJ_24A0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 608
+ },
+ "0x80051904": {
+  "name": "SYS_OBJ_2700",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 284
+ },
+ "0x80051a20": {
+  "name": "SYS_OBJ_281C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x80051a54": {
+  "name": "SYS_OBJ_2850",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x80051a74": {
+  "name": "SYS_OBJ_2870",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x80051a8c": {
+  "name": "SYS_OBJ_2888",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 124
+ },
+ "0x80051b80": {
+  "name": "SYS_OBJ_297C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x80051b90": {
+  "name": "SYS_OBJ_298C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x80051bc4": {
+  "name": "SYS_OBJ_29C0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 308
+ },
+ "0x80051cf8": {
+  "name": "SYS_OBJ_2AF4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x80051d08": {
+  "name": "SYS_OBJ_2B04",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 152
+ },
+ "0x80051da0": {
+  "name": "SYS_OBJ_2B9C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80051da8": {
+  "name": "LoadImage2",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 124
+ },
+ "0x80051e24": {
+  "name": "SYS_OBJ_2C20",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 112
+ },
+ "0x80051e94": {
+  "name": "StoreImage2",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 124
+ },
+ "0x80051f10": {
+  "name": "SYS_OBJ_2D0C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 112
+ },
+ "0x80051f80": {
+  "name": "MoveImage2",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 132
+ },
+ "0x80052004": {
+  "name": "SYS_OBJ_2E00",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 168
+ },
+ "0x800520ac": {
+  "name": "SYS_OBJ_2EA8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x800520c4": {
+  "name": "DrawOTag2",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 144
+ },
+ "0x80052154": {
+  "name": "SYS_OBJ_2F50",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 108
+ },
+ "0x800521c0": {
+  "name": "SYS_OBJ_2FBC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x800521e8": {
+  "name": "SYS_OBJ_2FE4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x80052214": {
+  "name": "GetTPage",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x80052254": {
+  "name": "GetClut",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x80052274": {
+  "name": "AddPrim",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x800522b4": {
+  "name": "SetDrawTPage",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 44
+ },
+ "0x800522e4": {
+  "name": "SetDrawMove",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 96
+ },
+ "0x80052344": {
+  "name": "MargePrim",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x80052374": {
+  "name": "P36_OBJ_30",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80052384": {
+  "name": "thunk_FUN_800523a0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800523a0": {
+  "name": "FUN_800523a0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x800523d4": {
+  "name": "strcat",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 140
+ },
+ "0x80052460": {
+  "name": "STRCAT_OBJ_8C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x80052484": {
+  "name": "strcmp",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 92
+ },
+ "0x800524e0": {
+  "name": "STRCMP_OBJ_5C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800524f4": {
+  "name": "strcpy",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 68
+ },
+ "0x80052544": {
+  "name": "FUN_80052544",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 52
+ },
+ "0x80052584": {
+  "name": "strncmp",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 120
+ },
+ "0x800525fc": {
+  "name": "STRNCMP_OBJ_78",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80052604": {
+  "name": "printf",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 60
+ },
+ "0x80052644": {
+  "name": "prnt",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 80
+ },
+ "0x80052694": {
+  "name": "PRNT_OBJ_50",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 44
+ },
+ "0x800526c0": {
+  "name": "PRNT_OBJ_7C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x800526f0": {
+  "name": "PRNT_OBJ_AC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x80052700": {
+  "name": "PRNT_OBJ_BC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80052708": {
+  "name": "PRNT_OBJ_C4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x80052724": {
+  "name": "PRNT_OBJ_E0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x8005272c": {
+  "name": "PRNT_OBJ_E8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80052734": {
+  "name": "PRNT_OBJ_F0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 120
+ },
+ "0x800527ac": {
+  "name": "PRNT_OBJ_168",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x800527bc": {
+  "name": "PRNT_OBJ_178",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800527c4": {
+  "name": "PRNT_OBJ_180",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 92
+ },
+ "0x80052820": {
+  "name": "PRNT_OBJ_1DC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80052828": {
+  "name": "PRNT_OBJ_1E4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80052830": {
+  "name": "PRNT_OBJ_1EC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80052838": {
+  "name": "PRNT_OBJ_1F4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 28
+ },
+ "0x80052854": {
+  "name": "PRNT_OBJ_210",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 4
+ },
+ "0x80052858": {
+  "name": "PRNT_OBJ_214",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x80052888": {
+  "name": "PRNT_OBJ_244",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x8005289c": {
+  "name": "PRNT_OBJ_258",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x800528d8": {
+  "name": "PRNT_OBJ_294",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 4
+ },
+ "0x800528dc": {
+  "name": "PRNT_OBJ_298",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x80052910": {
+  "name": "PRNT_OBJ_2CC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x80052920": {
+  "name": "PRNT_OBJ_2DC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 88
+ },
+ "0x80052978": {
+  "name": "PRNT_OBJ_334",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80052980": {
+  "name": "PRNT_OBJ_33C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 4
+ },
+ "0x80052984": {
+  "name": "PRNT_OBJ_340",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x800529b8": {
+  "name": "PRNT_OBJ_374",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x800529c4": {
+  "name": "PRNT_OBJ_380",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x800529f8": {
+  "name": "PRNT_OBJ_3B4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80052a0c": {
+  "name": "PRNT_OBJ_3C8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 4
+ },
+ "0x80052a10": {
+  "name": "PRNT_OBJ_3CC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 160
+ },
+ "0x80052ab0": {
+  "name": "PRNT_OBJ_46C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 288
+ },
+ "0x80052bd0": {
+  "name": "PRNT_OBJ_58C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 164
+ },
+ "0x80052c74": {
+  "name": "PRNT_OBJ_630",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80052c88": {
+  "name": "PRNT_OBJ_644",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x80052ca0": {
+  "name": "PRNT_OBJ_65C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80052ca8": {
+  "name": "PRNT_OBJ_664",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x80052ce4": {
+  "name": "toupper",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x80052d18": {
+  "name": "tolower",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x80052d54": {
+  "name": "memchr",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x80052d74": {
+  "name": "MEMCHR_OBJ_20",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x80052d9c": {
+  "name": "MEMCHR_OBJ_48",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80052da4": {
+  "name": "_putchar",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 64
+ },
+ "0x80052de4": {
+  "name": "PUTCHAR_OBJ_40",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x80052e40": {
+  "name": "PUTCHAR_OBJ_9C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 96
+ },
+ "0x80052ea0": {
+  "name": "_putchar_flash",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x80052edc": {
+  "name": "putchar",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 64
+ },
+ "0x80052f1c": {
+  "name": "PUTCHAR_OBJ_178",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x80052f78": {
+  "name": "PUTCHAR_OBJ_1D4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 140
+ },
+ "0x80053004": {
+  "name": "sprintf",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 144
+ },
+ "0x80053094": {
+  "name": "SPRINTF_OBJ_90",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 300
+ },
+ "0x800531c0": {
+  "name": "SPRINTF_OBJ_1BC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 156
+ },
+ "0x8005325c": {
+  "name": "SPRINTF_OBJ_258",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 68
+ },
+ "0x800532a0": {
+  "name": "SPRINTF_OBJ_29C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 36
+ },
+ "0x800532c4": {
+  "name": "SPRINTF_OBJ_2C0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x800532d0": {
+  "name": "SPRINTF_OBJ_2CC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x800532dc": {
+  "name": "SPRINTF_OBJ_2D8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x800532e8": {
+  "name": "SPRINTF_OBJ_2E4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x80053308": {
+  "name": "SPRINTF_OBJ_304",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 88
+ },
+ "0x80053360": {
+  "name": "SPRINTF_OBJ_35C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x80053394": {
+  "name": "SPRINTF_OBJ_390",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 236
+ },
+ "0x80053480": {
+  "name": "SPRINTF_OBJ_47C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 256
+ },
+ "0x80053580": {
+  "name": "SPRINTF_OBJ_57C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80053594": {
+  "name": "SPRINTF_OBJ_590",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x800535a0": {
+  "name": "SPRINTF_OBJ_59C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x800535a8": {
+  "name": "SPRINTF_OBJ_5A4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 260
+ },
+ "0x800536ac": {
+  "name": "SPRINTF_OBJ_6A8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x800536cc": {
+  "name": "SPRINTF_OBJ_6C8",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 140
+ },
+ "0x80053758": {
+  "name": "SPRINTF_OBJ_754",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x8005378c": {
+  "name": "SPRINTF_OBJ_788",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 24
+ },
+ "0x800537a4": {
+  "name": "SPRINTF_OBJ_7A0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 140
+ },
+ "0x80053830": {
+  "name": "SPRINTF_OBJ_82C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 84
+ },
+ "0x80053884": {
+  "name": "puts",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 40
+ },
+ "0x800538ac": {
+  "name": "PUTS_OBJ_28",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 44
+ },
+ "0x800538e4": {
+  "name": "setjmp",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x80053920": {
+  "name": "longjmp",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 60
+ },
+ "0x80053964": {
+  "name": "FlushCache",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80053974": {
+  "name": "GPU_cw",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x8005398c": {
+  "name": "FUN_8005398c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 12
+ },
+ "0x800539a4": {
+  "name": "_boot",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x800539b4": {
+  "name": "DeliverEvent",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 12
+ },
+ "0x800539c4": {
+  "name": "OpenEvent",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 12
+ },
+ "0x800539d4": {
+  "name": "TestEvent",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 12
+ },
+ "0x800539e4": {
+  "name": "EnableEvent",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 12
+ },
+ "0x800539f4": {
+  "name": "ReturnFromException",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80053a04": {
+  "name": "ResetEntryInt",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 12
+ },
+ "0x80053a14": {
+  "name": "HookEntryInt",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80053a24": {
+  "name": "FUN_80053a24",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 16
+ },
+ "0x80053a34": {
+  "name": "FUN_80053a34",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 16
+ },
+ "0x80053a44": {
+  "name": "write",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80053a54": {
+  "name": "ChangeClearPAD",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80053a64": {
+  "name": "ChangeClearRCnt",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80053a74": {
+  "name": "SetRCnt",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 116
+ },
+ "0x80053ae8": {
+  "name": "COUNTER_OBJ_74",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 32
+ },
+ "0x80053b08": {
+  "name": "COUNTER_OBJ_94",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80053b10": {
+  "name": "GetRCnt",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x80053b40": {
+  "name": "COUNTER_OBJ_CC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80053b48": {
+  "name": "StartRCnt",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 48
+ },
+ "0x80053b78": {
+  "name": "StopRCnt",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 52
+ },
+ "0x80053bac": {
+  "name": "ResetRCnt",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 44
+ },
+ "0x80053bd8": {
+  "name": "COUNTER_OBJ_164",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80053be4": {
+  "name": "PadChkVsync",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x80053c04": {
+  "name": "PadStartCom",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x80053c24": {
+  "name": "PadStopCom",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x80053c44": {
+  "name": "PadChkMtap",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 68
+ },
+ "0x80053c88": {
+  "name": "PADENTRY_OBJ_A4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 8
+ },
+ "0x80053c90": {
+  "name": "PadGetState",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 172
+ },
+ "0x80053d3c": {
+  "name": "PADENTRY_OBJ_158",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 4
+ },
+ "0x80053d40": {
+  "name": "PADENTRY_OBJ_15C",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 16
+ },
+ "0x80053d50": {
+  "name": "PadInfoMode",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 228
+ },
+ "0x80053e34": {
+  "name": "PADENTRY_OBJ_250",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80053e48": {
+  "name": "PadInfoAct",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 132
+ },
+ "0x80053ec8": {
+  "name": "PADENTRY_OBJ_2E4",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80053ed4": {
+  "name": "PADENTRY_OBJ_2F0",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80053ee0": {
+  "name": "PADENTRY_OBJ_2FC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80053eec": {
+  "name": "PADENTRY_OBJ_308",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80053ef8": {
+  "name": "PADENTRY_OBJ_314",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80053f08": {
+  "name": "PADENTRY_OBJ_324",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80053f1c": {
+  "name": "PadInfoComb",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 148
+ },
+ "0x80053fb0": {
+  "name": "PADENTRY_OBJ_3CC",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 20
+ },
+ "0x80053fc4": {
+  "name": "PadSetActAlign",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 56
+ },
+ "0x80053ffc": {
+  "name": "PadSetMainMode",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 72
+ },
+ "0x80054044": {
+  "name": "PadSetAct",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 72
+ },
+ "0x800541ac": {
+  "name": "FUN_800541ac",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 44
+ },
+ "0x800543ac": {
+  "name": "FUN_800543ac",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 20
+ },
+ "0x800543c0": {
+  "name": "FUN_800543c0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 204
+ },
+ "0x8005448c": {
+  "name": "FUN_8005448c",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 68
+ },
+ "0x800544d0": {
+  "name": "FUN_800544d0",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 532
+ },
+ "0x800546e4": {
+  "name": "FUN_800546e4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 200
+ },
+ "0x800547ac": {
+  "name": "FUN_800547ac",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 472
+ },
+ "0x80054984": {
+  "name": "FUN_80054984",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 564
+ },
+ "0x80054bb8": {
+  "name": "FUN_80054bb8",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 144
+ },
+ "0x80054c48": {
+  "name": "FUN_80054c48",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 40
+ },
+ "0x80054c74": {
+  "name": "SysEnqIntRP",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80054c84": {
+  "name": "SysDeqIntRP",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 12
+ },
+ "0x80054c94": {
+  "name": "_padSetAct",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 12
+ },
+ "0x80054ca0": {
+  "name": "_padSetCmd",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x80054cb0": {
+  "name": "_padSendAtLoadInfo",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 116
+ },
+ "0x80054d24": {
+  "name": "PADCMD_OBJ_90",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x80054d34": {
+  "name": "_padRecvAtLoadInfo",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 236
+ },
+ "0x80054e20": {
+  "name": "PADCMD_OBJ_18C",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 8
+ },
+ "0x80054e6c": {
+  "name": "PADCMD_OBJ_1D8",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 4
+ },
+ "0x80054e70": {
+  "name": "PADCMD_OBJ_1DC",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x80054e80": {
+  "name": "_padGetActSize",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 56
+ },
+ "0x80054eb8": {
+  "name": "_padLoadActInfo",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 192
+ },
+ "0x80054f78": {
+  "name": "PADCMD_OBJ_2E4",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 20
+ },
+ "0x80054f8c": {
+  "name": "PADCMD_OBJ_2F8",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 152
+ },
+ "0x80055024": {
+  "name": "PADCMD_OBJ_390",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x80055034": {
+  "name": "PADCMD_OBJ_3A0",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 408
+ },
+ "0x800551cc": {
+  "name": "PADCMD_OBJ_538",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 24
+ },
+ "0x800551f4": {
+  "name": "PADCMD_OBJ_560",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 100
+ },
+ "0x80055258": {
+  "name": "PADCMD_OBJ_5C4",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 8
+ },
+ "0x8005529c": {
+  "name": "PADCMD_OBJ_608",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 4
+ },
+ "0x800552a0": {
+  "name": "PADCMD_OBJ_60C",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 8
+ },
+ "0x800552a8": {
+  "name": "_padSetActAlign",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 104
+ },
+ "0x80055310": {
+  "name": "PADCMD_OBJ_67C",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 28
+ },
+ "0x8005532c": {
+  "name": "PADCMD_OBJ_698",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 148
+ },
+ "0x800553c0": {
+  "name": "PADCMD_OBJ_72C",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 52
+ },
+ "0x800553f4": {
+  "name": "_padSetMainMode",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 152
+ },
+ "0x8005548c": {
+  "name": "PADCMD_OBJ_7F8",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 76
+ },
+ "0x800554d8": {
+  "name": "PADCMD_OBJ_844",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 8
+ },
+ "0x800554e0": {
+  "name": "PADCMD_OBJ_84C",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 76
+ },
+ "0x8005552c": {
+  "name": "PADCMD_OBJ_898",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 4
+ },
+ "0x80055530": {
+  "name": "PADCMD_OBJ_89C",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x80055540": {
+  "name": "_padCmdParaMode",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x80055560": {
+  "name": "PADCMD_OBJ_8CC",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 20
+ },
+ "0x80055574": {
+  "name": "PADCMD_OBJ_8E0",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x80055594": {
+  "name": "PADCMD_OBJ_900",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x800555b4": {
+  "name": "PADCMD_OBJ_920",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x800555d4": {
+  "name": "PADCMD_OBJ_940",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 20
+ },
+ "0x80055bd4": {
+  "name": "PadInitDirect",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 352
+ },
+ "0x80055d34": {
+  "name": "PADPORTD_OBJ_160",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 104
+ },
+ "0x80055d9c": {
+  "name": "PADPORTD_OBJ_1C8",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 116
+ },
+ "0x80055e10": {
+  "name": "PADPORTD_OBJ_23C",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 92
+ },
+ "0x80055e6c": {
+  "name": "PADPORTD_OBJ_298",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 36
+ },
+ "0x80055e90": {
+  "name": "PADPORTD_OBJ_2BC",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x80055ea0": {
+  "name": "PADPORTD_OBJ_2CC",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 100
+ },
+ "0x80055f04": {
+  "name": "PADPORTD_OBJ_330",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 12
+ },
+ "0x80055f30": {
+  "name": "PADPORTD_OBJ_35C",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 36
+ },
+ "0x80055f54": {
+  "name": "PADPORTD_OBJ_380",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 8
+ },
+ "0x80055f5c": {
+  "name": "PADPORTD_OBJ_388",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 212
+ },
+ "0x80056030": {
+  "name": "PADPORTD_OBJ_45C",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 76
+ },
+ "0x8005607c": {
+  "name": "PADPORTD_OBJ_4A8",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 88
+ },
+ "0x800561c8": {
+  "name": "PADPORTD_OBJ_5F4",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x800561d8": {
+  "name": "PADPORTD_OBJ_604",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 56
+ },
+ "0x80056210": {
+  "name": "PADPORTD_OBJ_63C",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 32
+ },
+ "0x80056234": {
+  "name": "_padInitDirSeq",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 52
+ },
+ "0x80056268": {
+  "name": "PADSEQD_OBJ_34",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 156
+ },
+ "0x80056304": {
+  "name": "PADSEQD_OBJ_D0",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 40
+ },
+ "0x8005632c": {
+  "name": "PADSEQD_OBJ_F8",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x8005633c": {
+  "name": "PADSEQD_OBJ_108",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 152
+ },
+ "0x800563d4": {
+  "name": "PADSEQD_OBJ_1A0",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 364
+ },
+ "0x80056540": {
+  "name": "PADSEQD_OBJ_30C",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 12
+ },
+ "0x80056554": {
+  "name": "PADSEQD_OBJ_320",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 40
+ },
+ "0x8005657c": {
+  "name": "PADSEQD_OBJ_348",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x8005658c": {
+  "name": "PADSEQD_OBJ_358",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 20
+ },
+ "0x800565a0": {
+  "name": "_dirFailAuto",
+  "subsystem": "runtime",
+  "reason": "named-symbol",
+  "size": 204
+ },
+ "0x8005666c": {
+  "name": "PADSEQD_OBJ_438",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 16
+ },
+ "0x8005667c": {
+  "name": "PADSEQD_OBJ_448",
+  "subsystem": "runtime",
+  "reason": "psyq-name",
+  "size": 44
+ },
+ "0x800566b4": {
+  "name": "FUN_800566b4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 32
+ },
+ "0x800566d4": {
+  "name": "FUN_800566d4",
+  "subsystem": "unknown",
+  "reason": "",
+  "size": 160
+ }
+}

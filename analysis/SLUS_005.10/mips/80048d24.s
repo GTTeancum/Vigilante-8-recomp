@@ -1,0 +1,30 @@
+# addr: 0x80048d24  name: CdInit
+80048d24:  addiu sp,sp,-0x18
+80048d28:  sw s0,0x10(sp)
+80048d2c:  li s0,0x4
+80048d30:  sw ra,0x14(sp)
+80048d34:  jal 0x80048e60
+80048d38:  _li a0,0x1
+80048d3c:  li v1,0x1
+80048d40:  bne v0,v1,0x80048d7c
+80048d44:  _addiu s0,s0,-0x1
+80048d48:  lui a0,0x8005
+80048d4c:  jal 0x80048fa8
+80048d50:  _addiu a0,a0,-0x7258
+80048d54:  lui a0,0x8005
+80048d58:  jal 0x80048fbc
+80048d5c:  _addiu a0,a0,-0x7230
+80048d60:  lui a0,0x8005
+80048d64:  jal 0x8004b48c
+80048d68:  _addiu a0,a0,-0x7208
+80048d6c:  jal 0x8004b4a0
+80048d70:  _clear a0
+80048d74:  j 0x80048d98
+80048d78:  _li v0,0x1
+80048d7c:  li v0,-0x1
+80048d80:  bne s0,v0,0x80048d34
+80048d84:  _nop
+80048d88:  lui a0,0x8001
+80048d8c:  jal 0x80052604
+80048d90:  _addiu a0,a0,0xe54
+80048d94:  clear v0

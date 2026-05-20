@@ -1,0 +1,26 @@
+# Decisions Log
+
+Append-only. Every judgment call made without user input goes here.
+
+Format:
+```
+[ISO 8601 timestamp] [CONTEXT]
+Chose: <option taken>
+Over:  <option(s) rejected>
+Because: <reasoning>
+Reversible: <yes/no — can this be revisited later?>
+```
+
+Use this when:
+- A function's subsystem assignment is ambiguous (physics or gameplay?)
+- A struct field's name is a coin-flip between two valid interpretations
+- A base address must be chosen heuristically for an overlay
+- The "scope" boundary is unclear (e.g., is this audio-data parsing in-scope or out-of-scope?)
+- Any other point where a different reasonable Claude would make a different call
+
+The user reviews this log to spot-check judgment calls.
+
+---
+
+[2026-05-19T08:40:00Z] [SETUP/Ghidra version] Chose Ghidra 12.0.4 over latest 12.1 because ghidra_psx_ldr extension's latest build (2026.03.10) only ships through 12.0.4. Loader/version compatibility outweighs newest Ghidra.
+[2026-05-19T08:40:00Z] [SETUP/inputs] Inputs are SLUS_005.10 (PS-X EXE), terrain DLLs (overlay code per level), terrain EXPs (level data archives, IFF FORM), SHELL.DLL/LOAD.DLL (UI overlays), various EXPs (vehicles, hud, common). Will import each DLL as a separate Ghidra program; EXP files are data not code so they are not imported into Ghidra (parsed by custom tools instead).

@@ -1,0 +1,48 @@
+/* culling.c -- frustum reject test for an object's bounding sphere.
+ *
+ * Source: SLUS_005.10  FUN_8001db54.
+ *
+ * Loads the projection-onto-camera-axes matrix at DAT_8006f780 into
+ * the GTE, then transforms the vector from the object's world pos
+ * (param_1[0..2]) to the camera world pos (DAT_8006f6f4/f8/fc),
+ * scaled down by 256 (>> 8). The transformed extents are compared
+ * componentwise against `radius >> 8`; the object is in-view iff all
+ * three transformed components are less than the (scaled) radius.
+ *
+ * Used by every renderer-seam call -- physics code calls this to
+ * decide whether to feed the object to the renderer.
+ *
+ * HIGH-MED: shape unambiguous; the matrix at DAT_8006f780 is the
+ * "view frustum projection" cached once per frame (likely written by
+ * camera setup code).
+ */
+#include <stdint.h>
+#include "structs.h"
+
+extern void gte_SetRotMatrix(MATRIX *m);
+extern void gte_ldsv_(int x, int y, int z);
+extern void gte_rtir(void);
+extern int32_t gte_stIR1(void);
+extern int32_t gte_stIR2(void);
+extern int32_t gte_stIR3(void);
+
+extern int32_t DAT_8006f6f4;   /* camera world x */
+extern int32_t DAT_8006f6f8;   /* camera world y */
+extern int32_t DAT_8006f6fc;   /* camera world z */
+extern MATRIX  DAT_8006f780;   /* view projection matrix */
+
+/* HIGH: true iff bounding sphere {pos, radius} is inside the view frustum. */
+int Culling_SphereInsideFrustum(const int32_t *pos, int32_t radius)
+{
+    gte_SetRotMatrix(&DAT_8006f780);
+    gte_ldsv_((pos[0] - DAT_8006f6f4) >> 8,
+              (pos[1] - DAT_8006f6f8) >> 8,
+              (pos[2] - DAT_8006f6fc) >> 8);
+    gte_rtir();
+
+    int32_t r = radius >> 8;
+    if (gte_stIR1() >= r) return 0;
+    if (gte_stIR2() >= r) return 0;
+    if (gte_stIR3() >= r) return 0;
+    return 1;
+}

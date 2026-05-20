@@ -1,0 +1,36 @@
+# addr: 0x80047384  name: _spu_2pitch
+80047384:  li v1,0x103b
+80047388:  mult a0,v1
+8004738c:  addiu sp,sp,-0x8
+80047390:  sll t0,a0,0xc
+80047394:  clear a2
+80047398:  srl a3,a1,0x5
+8004739c:  andi a1,a1,0x1f
+800473a0:  mflo t1
+800473a4:  beq a3,zero,0x800473e8
+800473a8:  _sw t1,0x0(sp)
+800473ac:  mult a0,v1
+800473b0:  sll v0,v1,0x6
+800473b4:  addu v0,v0,v1
+800473b8:  sll v0,v0,0x4
+800473bc:  subu v0,v0,v1
+800473c0:  sll v0,v0,0x2
+800473c4:  mflo t0
+800473c8:  subu v1,v0,v1
+800473cc:  srl v1,v1,0xc
+800473d0:  mult a0,v1
+800473d4:  addiu a2,a2,0x1
+800473d8:  slt v0,a2,a3
+800473dc:  mflo t1
+800473e0:  bne v0,zero,0x800473b0
+800473e4:  _sw t1,0x0(sp)
+800473e8:  lw t1,0x0(sp)
+800473ec:  nop
+800473f0:  subu v0,t1,t0
+800473f4:  srl v0,v0,0x5
+800473f8:  mult v0,a1
+800473fc:  mflo t1
+80047400:  addu v0,t0,t1
+80047404:  srl v0,v0,0xc
+80047408:  jr ra
+8004740c:  _addiu sp,sp,0x8

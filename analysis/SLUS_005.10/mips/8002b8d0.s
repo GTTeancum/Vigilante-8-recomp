@@ -1,0 +1,29 @@
+# addr: 0x8002b8d0  name: FUN_8002b8d0
+8002b8d0:  lw v0,0x8b0(gp)
+8002b8d4:  addiu sp,sp,-0x40
+8002b8d8:  move v1,a0
+8002b8dc:  beq v0,zero,0x8002b930
+8002b8e0:  _sw ra,0x38(sp)
+8002b8e4:  li v0,-0x88
+8002b8e8:  addiu a0,sp,0x30
+8002b8ec:  sh v0,0x30(sp)
+8002b8f0:  sh zero,0x2(a0)
+8002b8f4:  lh v0,0xa4(v1)
+8002b8f8:  addiu a1,sp,0x10
+8002b8fc:  sll v0,v0,0x1
+8002b900:  jal 0x8004dab4
+8002b904:  _sh v0,0x4(a0)
+8002b908:  lw a0,0x8b0(gp)
+8002b90c:  lw a2,0x60c(gp)
+8002b910:  addiu a1,sp,0x10
+8002b914:  li v0,-0x700
+8002b918:  sw v0,0x24(sp)
+8002b91c:  li v0,0x1800
+8002b920:  sw v0,0x28(sp)
+8002b924:  li v0,0x2000
+8002b928:  jal 0x8001be5c
+8002b92c:  _sw v0,0x2c(sp)
+8002b930:  lw ra,0x38(sp)
+8002b934:  nop
+8002b938:  jr ra
+8002b93c:  _addiu sp,sp,0x40

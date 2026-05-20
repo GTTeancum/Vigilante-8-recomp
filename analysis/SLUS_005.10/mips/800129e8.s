@@ -1,0 +1,43 @@
+# addr: 0x800129e8  name: FUN_800129e8
+800129e8:  addiu sp,sp,-0x20
+800129ec:  sw s0,0x10(sp)
+800129f0:  move s0,a0
+800129f4:  lw a0,0x628(gp)
+800129f8:  sw s1,0x14(sp)
+800129fc:  sw ra,0x18(sp)
+80012a00:  jal 0x800191e0
+80012a04:  _move s1,a1
+80012a08:  move v1,v0
+80012a0c:  beq s0,zero,0x80012a18
+80012a10:  _li v0,0x140
+80012a14:  lw v0,0x6d8(gp)
+80012a18:  nop
+80012a1c:  subu v0,v0,v1
+80012a20:  srl v1,v0,0x1f
+80012a24:  addu v0,v0,v1
+80012a28:  sra a2,v0,0x1
+80012a2c:  sll v1,s0,0x5
+80012a30:  addu v1,v1,s0
+80012a34:  sll v1,v1,0x3
+80012a38:  lui v0,0x8007
+80012a3c:  addiu v0,v0,-0x1110
+80012a40:  beq s0,zero,0x80012a60
+80012a44:  _addu a0,v1,v0
+80012a48:  lw v0,0x6dc(gp)
+80012a4c:  nop
+80012a50:  srl v1,v0,0x1f
+80012a54:  addu v0,v0,v1
+80012a58:  j 0x80012a74
+80012a5c:  _sra a3,v0,0x1
+80012a60:  lw v1,0x10(gp)
+80012a64:  li v0,0x2
+80012a68:  bne v1,v0,0x80012a74
+80012a6c:  _li a3,0x78
+80012a70:  li a3,0x98
+80012a74:  jal 0x80019cbc
+80012a78:  _move a1,s1
+80012a7c:  lw ra,0x18(sp)
+80012a80:  lw s1,0x14(sp)
+80012a84:  lw s0,0x10(sp)
+80012a88:  jr ra
+80012a8c:  _addiu sp,sp,0x20

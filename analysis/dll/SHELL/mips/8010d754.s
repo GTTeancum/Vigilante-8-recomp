@@ -1,0 +1,29 @@
+# addr: 0x8010d754  name: FUN_8010d754
+8010d754:  addiu sp,sp,-0x20
+8010d758:  sw s0,0x18(sp)
+8010d75c:  move s0,a0
+8010d760:  li v0,0x80
+8010d764:  sw ra,0x1c(sp)
+8010d768:  sb v0,0x10(sp)
+8010d76c:  li a0,0x2
+8010d770:  move a1,s0
+8010d774:  jal 0x80048fd0
+8010d778:  _clear a2
+8010d77c:  beq v0,zero,0x8010d770
+8010d780:  _li a0,0x2
+8010d784:  li a0,0xe
+8010d788:  addiu a1,sp,0x10
+8010d78c:  jal 0x80048fd0
+8010d790:  _clear a2
+8010d794:  beq v0,zero,0x8010d788
+8010d798:  _li a0,0xe
+8010d79c:  jal 0x80047e44
+8010d7a0:  _li a0,0x3
+8010d7a4:  jal 0x8004b4c4
+8010d7a8:  _li a0,0x1e0
+8010d7ac:  beq v0,zero,0x8010d76c
+8010d7b0:  _nop
+8010d7b4:  lw ra,0x1c(sp)
+8010d7b8:  lw s0,0x18(sp)
+8010d7bc:  jr ra
+8010d7c0:  _addiu sp,sp,0x20

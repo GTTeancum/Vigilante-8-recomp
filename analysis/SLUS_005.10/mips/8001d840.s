@@ -1,0 +1,23 @@
+# addr: 0x8001d840  name: FUN_8001d840
+8001d840:  addiu sp,sp,-0x28
+8001d844:  sw s0,0x18(sp)
+8001d848:  move s0,a1
+8001d84c:  sw s1,0x1c(sp)
+8001d850:  move s1,a2
+8001d854:  addiu a2,sp,0x10
+8001d858:  sw ra,0x20(sp)
+8001d85c:  jal 0x8001d748
+8001d860:  _clear a3
+8001d864:  lw v1,0x0(s0)
+8001d868:  sw v0,0x18(s1)
+8001d86c:  sw v1,0x14(s1)
+8001d870:  lw v0,0x8(s0)
+8001d874:  move a0,s1
+8001d878:  addiu a1,sp,0x10
+8001d87c:  jal 0x80016fa8
+8001d880:  _sw v0,0x1c(a0)
+8001d884:  lw ra,0x20(sp)
+8001d888:  lw s1,0x1c(sp)
+8001d88c:  lw s0,0x18(sp)
+8001d890:  jr ra
+8001d894:  _addiu sp,sp,0x28

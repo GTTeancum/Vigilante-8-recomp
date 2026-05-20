@@ -1,0 +1,22 @@
+# addr: 0x8001d68c  name: FUN_8001d68c
+8001d68c:  addiu sp,sp,-0x20
+8001d690:  sw s1,0x14(sp)
+8001d694:  move s1,a0
+8001d698:  move a0,a1
+8001d69c:  sw s0,0x10(sp)
+8001d6a0:  sw ra,0x18(sp)
+8001d6a4:  jal 0x8001d624
+8001d6a8:  _move s0,a2
+8001d6ac:  move a0,s1
+8001d6b0:  move a1,s0
+8001d6b4:  jal 0x8001b07c
+8001d6b8:  _move s0,v0
+8001d6bc:  move a0,s0
+8001d6c0:  move a1,v0
+8001d6c4:  jal 0x8004cf04
+8001d6c8:  _move a2,s1
+8001d6cc:  lw ra,0x18(sp)
+8001d6d0:  lw s1,0x14(sp)
+8001d6d4:  lw s0,0x10(sp)
+8001d6d8:  jr ra
+8001d6dc:  _addiu sp,sp,0x20

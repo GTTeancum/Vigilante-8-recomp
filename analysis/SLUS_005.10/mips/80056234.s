@@ -1,0 +1,14 @@
+# addr: 0x80056234  name: _padInitDirSeq
+80056234:  lui v0,0x8005
+80056238:  addiu v0,v0,0x6268
+8005623c:  lui at,0x8006
+80056240:  sw v0,0x5274(at)
+80056244:  lui v0,0x8005
+80056248:  addiu v0,v0,0x667c
+8005624c:  lui at,0x8006
+80056250:  sw v0,0x5278(at)
+80056254:  lui v0,0x8005
+80056258:  addiu v0,v0,0x633c
+8005625c:  lui at,0x8006
+80056260:  jr ra
+80056264:  _sw v0,0x527c(at)

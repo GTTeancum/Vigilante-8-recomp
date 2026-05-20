@@ -1,0 +1,75 @@
+/* quest_loader.c -- Vigilante 8 Quest.bin loader.
+ *
+ * Source: SLUS_005.10 FUN_800128d4.
+ *
+ * Quest.bin is the per-character quest table for the main (quest)
+ * game mode. Loaded as a flat blob with embedded relative offsets;
+ * the loader walks the table-of-contents and fixes up the offsets to
+ * become absolute pointers into the loaded image.
+ *
+ * On-disc layout (recovered):
+ *
+ *   u32     nCharacters
+ *   {
+ *       u32  nQuests          -- # of mission entries for this character
+ *       u32  recsRel          -- relative offset to first QuestRecord
+ *   }  groups[nCharacters]
+ *   ...payload (per-character record arrays) ...
+ *
+ * Each QuestRecord is 16 bytes (confirmed via cRam00000600 * 0x10
+ * indexing in V8_MainLoop @ src/gameplay/main_loop.c:211):
+ *
+ *   offset  type     field           consumer
+ *   +0x00   u8       questId         (read elsewhere; quest selector)
+ *   +0x01   u8       bannerKind      -> V8_MainLoop bannerKind param
+ *   +0x02   u16      configA         -> uRam000006f0 (sky/weather code)
+ *   +0x04   u16      configB         -> uRam000007dc (intro / win-cue id)
+ *   +0x06   u16      pad / reserved
+ *   +0x08   void*    fld2            (relocated by Quest_Load)
+ *   +0x0c   char*    bannerText      (relocated by Quest_Load)
+ *
+ * The loader fixes up records[i].fld2 and records[i].bannerText (both
+ * relative offsets in the file) to absolute pointers by adding the
+ * load base.
+ *
+ * After this function returns, the global `g_questTable`
+ * (iRam00000608) points at the loaded image with all embedded
+ * pointers resolved. V8_MainLoop reads the current quest's record
+ * as:
+ *   QuestRecord *q = (records for DAT_80065674) + cRam00000600;
+ * and uses q->bannerKind/configA/configB/bannerText to drive the
+ * loading screen + initial level state.
+ *
+ * HIGH confidence: loader logic + consumer wiring both confirmed.
+ */
+#include <stdint.h>
+
+extern void *Asset_LoadFile(const char *path);   /* FUN_80015f80 */
+
+uint32_t *g_questTable;     /* @ piRam00000608 */
+
+void Quest_Load(void)
+{
+    uint32_t *q = (uint32_t *)Asset_LoadFile("Quest.bin");
+    g_questTable = q;
+    if (q == 0) return;
+
+    uint32_t nCharacters = q[0];
+    /* Group table starts at q+1 (two u32 per character: count, offset). */
+    for (uint32_t g = 0; g < nCharacters; g++) {
+        uint32_t *grp = q + 1 + g * 2;
+        uint32_t  nQuests = grp[0];
+
+        /* Fix up the per-character records offset to an absolute pointer. */
+        uint32_t  rel = grp[1];
+        uint32_t *recs = (uint32_t *)((uint8_t *)q + rel);
+        grp[1] = (uint32_t)recs;
+
+        /* Each record is 16 bytes; fixup the two embedded pointer fields. */
+        for (uint32_t i = 0; i < nQuests; i++) {
+            uint32_t *r = recs + i * 4;
+            r[2] = r[2] + (uint32_t)q;     /* fld2 += base       */
+            r[3] = r[3] + (uint32_t)q;     /* bannerText += base */
+        }
+    }
+}

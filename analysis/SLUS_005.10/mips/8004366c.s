@@ -1,0 +1,24 @@
+# addr: 0x8004366c  name: FUN_8004366c
+8004366c:  lw v0,0x0(a0)
+80043670:  lw v1,0x4(a0)
+80043674:  andi t0,v0,0xffff
+80043678:  sub v0,v0,t0
+8004367c:  andi t1,v1,0xffff
+80043680:  sub v1,v1,t1
+80043684:  or t0,t0,v1
+80043688:  lw v1,0x8(a0)
+8004368c:  gte_ldR11R12 t0
+80043690:  andi t0,v1,0xffff
+80043694:  sub v1,v1,t0
+80043698:  or t1,t1,v1
+8004369c:  lw v1,0xc(a0)
+800436a0:  gte_ldR31R32 t1
+800436a4:  andi t1,v1,0xffff
+800436a8:  sub v1,v1,t1
+800436ac:  or v0,v0,t1
+800436b0:  or v1,v1,t0
+800436b4:  lw t0,0x10(a0)
+800436b8:  gte_ldR13R21 v0
+800436bc:  gte_ldR22R23 v1
+800436c0:  jr ra
+800436c4:  _gte_ldR33 t0

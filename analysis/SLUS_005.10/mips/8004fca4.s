@@ -1,0 +1,55 @@
+# addr: 0x8004fca4  name: DrawOTagEnv
+8004fca4:  addiu sp,sp,-0x28
+8004fca8:  sw s2,0x18(sp)
+8004fcac:  move s2,a0
+8004fcb0:  sw s3,0x1c(sp)
+8004fcb4:  lui s3,0x8006
+8004fcb8:  addiu s3,s3,0x5026
+8004fcbc:  sw ra,0x20(sp)
+8004fcc0:  sw s1,0x14(sp)
+8004fcc4:  sw s0,0x10(sp)
+8004fcc8:  lbu v0,0x0(s3)
+8004fccc:  nop
+8004fcd0:  sltiu v0,v0,0x2
+8004fcd4:  bne v0,zero,0x8004fcfc
+8004fcd8:  _move s1,a1
+8004fcdc:  lui a0,0x8001
+8004fce0:  addiu a0,a0,0x130c
+8004fce4:  move a1,s2
+8004fce8:  lui v0,0x8006
+8004fcec:  lw v0,0x5020(v0)
+8004fcf0:  nop
+8004fcf4:  jalr v0
+8004fcf8:  _move a2,s1
+8004fcfc:  addiu s0,s1,0x1c
+8004fd00:  move a0,s0
+8004fd04:  jal 0x800506a0
+8004fd08:  _move a1,s1
+8004fd0c:  lui a0,0xff
+8004fd10:  ori a0,a0,0xffff
+8004fd14:  move a1,s0
+8004fd18:  li a2,0x40
+8004fd1c:  lui v1,0xff00
+8004fd20:  lw v0,0x1c(s1)
+8004fd24:  and a0,s2,a0
+8004fd28:  and v0,v0,v1
+8004fd2c:  lui v1,0x8006
+8004fd30:  lw v1,0x501c(v1)
+8004fd34:  or v0,v0,a0
+8004fd38:  sw v0,0x1c(s1)
+8004fd3c:  lw a0,0x18(v1)
+8004fd40:  lw v0,0x8(v1)
+8004fd44:  nop
+8004fd48:  jalr v0
+8004fd4c:  _clear a3
+8004fd50:  addiu a0,s3,0xe
+8004fd54:  move a1,s1
+8004fd58:  jal 0x80044c44
+8004fd5c:  _li a2,0x5c
+8004fd60:  lw ra,0x20(sp)
+8004fd64:  lw s3,0x1c(sp)
+8004fd68:  lw s2,0x18(sp)
+8004fd6c:  lw s1,0x14(sp)
+8004fd70:  lw s0,0x10(sp)
+8004fd74:  jr ra
+8004fd78:  _addiu sp,sp,0x28

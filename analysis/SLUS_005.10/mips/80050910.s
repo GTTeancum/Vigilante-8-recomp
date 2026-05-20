@@ -1,0 +1,9 @@
+# addr: 0x80050910  name: SYS_OBJ_170C
+80050910:  beq a1,zero,0x8005091c
+80050914:  _lui v1,0xe100
+80050918:  ori v1,v1,0x200
+8005091c:  beq a0,zero,0x80050928
+80050920:  _andi v0,a2,0x9ff
+80050924:  ori v0,v0,0x400
+80050928:  jr ra
+8005092c:  _or v0,v1,v0

@@ -1,0 +1,108 @@
+# addr: 0x80046438  name: S_M_INT_OBJ_C4
+80046438:  slt v0,t5,t1
+8004643c:  beq v0,zero,0x800463ac
+80046440:  _nop
+80046444:  lui v0,0x8006
+80046448:  lw v0,-0x11c8(v0)
+8004644c:  nop
+80046450:  bltz v0,0x80046494
+80046454:  _clear t1
+80046458:  lui a1,0x2fff
+8004645c:  ori a1,a1,0xffff
+80046460:  move a0,v0
+80046464:  lui v1,0x8006
+80046468:  lw v1,-0x11c4(v1)
+8004646c:  nop
+80046470:  lw v0,0x4(v1)
+80046474:  nop
+80046478:  bne v0,zero,0x80046484
+8004647c:  _nop
+80046480:  sw a1,0x0(v1)
+80046484:  addiu t1,t1,0x1
+80046488:  slt v0,a0,t1
+8004648c:  beq v0,zero,0x80046470
+80046490:  _addiu v1,v1,0x8
+80046494:  lui v1,0x8006
+80046498:  lw v1,-0x11c8(v1)
+8004649c:  nop
+800464a0:  bltz v1,0x80046560
+800464a4:  _clear t1
+800464a8:  lui t6,0x4000
+800464ac:  lui t4,0xfff
+800464b0:  lui t5,0x8006
+800464b4:  lw t5,-0x11c4(t5)
+800464b8:  ori t4,t4,0xffff
+800464bc:  move t2,t5
+800464c0:  lw v0,0x0(t2)
+800464c4:  nop
+800464c8:  and v0,v0,t6
+800464cc:  bne v0,zero,0x80046560
+800464d0:  _nop
+800464d4:  addiu a2,t1,0x1
+800464d8:  slt v0,v1,a2
+800464dc:  bne v0,zero,0x80046548
+800464e0:  _sll v0,a2,0x3
+800464e4:  move t0,t2
+800464e8:  lui t3,0x8006
+800464ec:  lw t3,-0x11c8(t3)
+800464f0:  addu a0,v0,t5
+800464f4:  lw a1,0x0(a0)
+800464f8:  nop
+800464fc:  and v0,a1,t6
+80046500:  bne v0,zero,0x80046548
+80046504:  _and v0,a1,t4
+80046508:  lw a3,0x0(t0)
+8004650c:  nop
+80046510:  and v1,a3,t4
+80046514:  sltu v0,v0,v1
+80046518:  beq v0,zero,0x80046538
+8004651c:  _nop
+80046520:  sw a1,0x0(t0)
+80046524:  lw v0,0x4(a0)
+80046528:  lw v1,0x4(t0)
+8004652c:  sw v0,0x4(t0)
+80046530:  sw a3,0x0(a0)
+80046534:  sw v1,0x4(a0)
+80046538:  addiu a2,a2,0x1
+8004653c:  slt v0,t3,a2
+80046540:  beq v0,zero,0x800464f4
+80046544:  _addiu a0,a0,0x8
+80046548:  lui v1,0x8006
+8004654c:  lw v1,-0x11c8(v1)
+80046550:  addiu t1,t1,0x1
+80046554:  slt v0,v1,t1
+80046558:  beq v0,zero,0x800464c0
+8004655c:  _addiu t2,t2,0x8
+80046560:  lui a1,0x8006
+80046564:  lw a1,-0x11c8(a1)
+80046568:  nop
+8004656c:  bltz a1,0x800465e4
+80046570:  _clear t1
+80046574:  lui t0,0x4000
+80046578:  lui a3,0x2fff
+8004657c:  lui a2,0x8006
+80046580:  lw a2,-0x11c4(a2)
+80046584:  ori a3,a3,0xffff
+80046588:  move a0,a2
+8004658c:  lw v1,0x0(a0)
+80046590:  nop
+80046594:  and v0,v1,t0
+80046598:  bne v0,zero,0x800465e4
+8004659c:  _nop
+800465a0:  bne v1,a3,0x800465cc
+800465a4:  _sll v0,a1,0x3
+800465a8:  addu v0,v0,a2
+800465ac:  lw v1,0x0(v0)
+800465b0:  nop
+800465b4:  sw v1,0x0(a0)
+800465b8:  lw v0,0x4(v0)
+800465bc:  lui at,0x8006
+800465c0:  sw t1,-0x11c8(at)
+800465c4:  j 0x800465e4
+800465c8:  _sw v0,0x4(a0)
+800465cc:  lui a1,0x8006
+800465d0:  lw a1,-0x11c8(a1)
+800465d4:  addiu t1,t1,0x1
+800465d8:  slt v0,a1,t1
+800465dc:  beq v0,zero,0x8004658c
+800465e0:  _addiu a0,a0,0x8

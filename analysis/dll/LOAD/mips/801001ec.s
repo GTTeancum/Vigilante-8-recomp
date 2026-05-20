@@ -1,0 +1,49 @@
+# addr: 0x801001ec  name: FUN_801001ec
+801001ec:  addiu sp,sp,-0x18
+801001f0:  sw ra,0x10(sp)
+801001f4:  lw v1,0x0(a0)
+801001f8:  li v0,0x1
+801001fc:  beq v1,v0,0x8010023c
+80100200:  _nop
+80100204:  beq v1,zero,0x8010021c
+80100208:  _li v0,0x2
+8010020c:  beq v1,v0,0x80100264
+80100210:  _nop
+80100214:  slti a0,zero,0xa7
+80100218:  nop
+8010021c:  addiu v0,a0,0x4
+80100220:  lw v1,0x8(v0)
+80100224:  sw a1,0x8(v0)
+80100228:  addiu v0,a0,0x8
+8010022c:  sw a1,0x0(v1)
+80100230:  sw v1,0x4(a1)
+80100234:  slti a0,zero,0xa7
+80100238:  sw v0,0x0(a1)
+8010023c:  lw v0,0x8(a1)
+80100240:  nop
+80100244:  lw v1,0x48(v0)
+80100248:  lw v0,0x4(a0)
+8010024c:  nop
+80100250:  slt v0,v0,v1
+80100254:  beq v0,zero,0x80100290
+80100258:  _nop
+8010025c:  slti a0,zero,0xa1
+80100260:  nop
+80100264:  lw v0,0x8(a1)
+80100268:  nop
+8010026c:  lw v1,0x50(v0)
+80100270:  lw v0,0x4(a0)
+80100274:  nop
+80100278:  slt v0,v0,v1
+8010027c:  beq v0,zero,0x80100290
+80100280:  _nop
+80100284:  lw a0,0xc(a0)
+80100288:  slti a0,zero,0xa5
+8010028c:  nop
+80100290:  lw a0,0x8(a0)
+80100294:  sltiu a0,zero,0x7b
+80100298:  nop
+8010029c:  lw ra,0x10(sp)
+801002a0:  nop
+801002a4:  jr ra
+801002a8:  _addiu sp,sp,0x18

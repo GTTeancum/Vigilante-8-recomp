@@ -1,0 +1,65 @@
+# addr: 0x80053480  name: SPRINTF_OBJ_47C
+80053480:  lw v0,0x220(sp)
+80053484:  nop
+80053488:  lw a0,0x0(v0)
+8005348c:  addiu v0,v0,0x4
+80053490:  sw v0,0x220(sp)
+80053494:  lw v1,0x210(sp)
+80053498:  nop
+8005349c:  srl v0,v1,0x5
+800534a0:  andi v0,v0,0x1
+800534a4:  beq v0,zero,0x800534b0
+800534a8:  _srl v0,v1,0x4
+800534ac:  andi a0,a0,0xffff
+800534b0:  andi v0,v0,0x1
+800534b4:  bne v0,zero,0x800534e8
+800534b8:  _srl v0,v1,0x3
+800534bc:  andi v0,v0,0x1
+800534c0:  beq v0,zero,0x800534d4
+800534c4:  _nop
+800534c8:  lw v0,0x214(sp)
+800534cc:  nop
+800534d0:  sw v0,0x218(sp)
+800534d4:  lw v0,0x218(sp)
+800534d8:  nop
+800534dc:  bgtz v0,0x800534e8
+800534e0:  _li v0,0x1
+800534e4:  sw v0,0x218(sp)
+800534e8:  beq a0,zero,0x8005350c
+800534ec:  _clear s0
+800534f0:  addiu s1,s1,-0x1
+800534f4:  andi v0,a0,0x7
+800534f8:  addiu v0,v0,0x30
+800534fc:  sb v0,0x0(s1)
+80053500:  srl a0,a0,0x3
+80053504:  bne a0,zero,0x800534f0
+80053508:  _addiu s0,s0,0x1
+8005350c:  lw v0,0x210(sp)
+80053510:  nop
+80053514:  srl v0,v0,0x2
+80053518:  andi v0,v0,0x1
+8005351c:  beq v0,zero,0x80053548
+80053520:  _nop
+80053524:  beq s0,zero,0x80053548
+80053528:  _li v1,0x30
+8005352c:  lb v0,0x0(s1)
+80053530:  nop
+80053534:  beq v0,v1,0x80053548
+80053538:  _nop
+8005353c:  addiu s1,s1,-0x1
+80053540:  sb v1,0x0(s1)
+80053544:  addiu s0,s0,0x1
+80053548:  lw v0,0x218(sp)
+8005354c:  nop
+80053550:  slt v0,s0,v0
+80053554:  beq v0,zero,0x800537a4
+80053558:  _li v1,0x30
+8005355c:  addiu s1,s1,-0x1
+80053560:  sb v1,0x0(s1)
+80053564:  lw v0,0x218(sp)
+80053568:  addiu s0,s0,0x1
+8005356c:  slt v0,s0,v0
+80053570:  bne v0,zero,0x80053560
+80053574:  _addiu s1,s1,-0x1
+80053578:  j 0x800537a4
+8005357c:  _addiu s1,s1,0x1

@@ -1,0 +1,88 @@
+# addr: 0x800506a0  name: SYS_OBJ_149C
+800506a0:  addiu sp,sp,-0x28
+800506a4:  sw s0,0x18(sp)
+800506a8:  move s0,a1
+800506ac:  sw s1,0x1c(sp)
+800506b0:  move s1,a0
+800506b4:  sw ra,0x20(sp)
+800506b8:  lh a0,0x0(s0)
+800506bc:  lh a1,0x2(s0)
+800506c0:  jal 0x80050930
+800506c4:  _nop
+800506c8:  sw v0,0x4(s1)
+800506cc:  lhu a0,0x4(s0)
+800506d0:  lhu v0,0x0(s0)
+800506d4:  lhu a1,0x2(s0)
+800506d8:  addu a0,a0,v0
+800506dc:  addiu a0,a0,-0x1
+800506e0:  sll a0,a0,0x10
+800506e4:  lhu v0,0x6(s0)
+800506e8:  sra a0,a0,0x10
+800506ec:  addu a1,a1,v0
+800506f0:  addiu a1,a1,-0x1
+800506f4:  sll a1,a1,0x10
+800506f8:  jal 0x800509c8
+800506fc:  _sra a1,a1,0x10
+80050700:  sw v0,0x8(s1)
+80050704:  lh a0,0x8(s0)
+80050708:  lh a1,0xa(s0)
+8005070c:  jal 0x80050a60
+80050710:  _nop
+80050714:  sw v0,0xc(s1)
+80050718:  lbu a0,0x17(s0)
+8005071c:  lbu a1,0x16(s0)
+80050720:  lhu a2,0x14(s0)
+80050724:  jal 0x80050910
+80050728:  _nop
+8005072c:  addiu a0,s0,0xc
+80050730:  jal 0x80050a7c
+80050734:  _sw v0,0x10(s1)
+80050738:  sw v0,0x14(s1)
+8005073c:  lui v0,0xe600
+80050740:  sw v0,0x18(s1)
+80050744:  lbu v0,0x18(s0)
+80050748:  nop
+8005074c:  beq v0,zero,0x800508f4
+80050750:  _li t0,0x7
+80050754:  lhu v0,0x0(s0)
+80050758:  nop
+8005075c:  sh v0,0x10(sp)
+80050760:  lhu v0,0x2(s0)
+80050764:  nop
+80050768:  sh v0,0x12(sp)
+8005076c:  lhu a0,0x4(s0)
+80050770:  nop
+80050774:  sh a0,0x14(sp)
+80050778:  lhu v0,0x6(s0)
+8005077c:  nop
+80050780:  sh v0,0x16(sp)
+80050784:  sll v0,a0,0x10
+80050788:  sra v1,v0,0x10
+8005078c:  bltz v1,0x800507bc
+80050790:  _clear v0
+80050794:  lui v0,0x8006
+80050798:  lh v0,0x5028(v0)
+8005079c:  nop
+800507a0:  addiu v0,v0,-0x1
+800507a4:  slt v0,v0,v1
+800507a8:  lui v1,0x8006
+800507ac:  lhu v1,0x5028(v1)
+800507b0:  bne v0,zero,0x800507bc
+800507b4:  _addiu v0,v1,-0x1
+800507b8:  move v0,a0
+800507bc:  lh v1,0x16(sp)
+800507c0:  lhu a0,0x16(sp)
+800507c4:  bltz v1,0x800507f8
+800507c8:  _sh v0,0x14(sp)
+800507cc:  lui v0,0x8006
+800507d0:  lh v0,0x502a(v0)
+800507d4:  nop
+800507d8:  addiu v0,v0,-0x1
+800507dc:  slt v0,v0,v1
+800507e0:  lui v1,0x8006
+800507e4:  lhu v1,0x502a(v1)
+800507e8:  bne v0,zero,0x800507fc
+800507ec:  _addiu v0,v1,-0x1
+800507f0:  j 0x800507fc
+800507f4:  _move v0,a0
+800507f8:  clear v0

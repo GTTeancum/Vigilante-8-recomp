@@ -1,0 +1,18 @@
+{
+  "0x80100200": {"callers":["0x8010000c"],"callees":[]},
+  "0x801003f4": {"callers":[],"callees":[]},
+  "0x801004a8": {"callers":["0x80100014"],"callees":[]},
+  "0x80100624": {"callers":[],"callees":[]},
+  "0x801006f4": {"callers":["0x8010001c","0x80100024"],"callees":[]},
+  "0x8010076c": {"callers":["0x8010076c","0x80100970"],"callees":[]},
+  "0x80100970": {"callers":["0x8010002c"],"callees":[]},
+  "0x80100ca0": {"callers":["0x801010f4"],"callees":[]},
+  "0x8010100c": {"callers":["0x801010f4"],"callees":[]},
+  "0x801010f4": {"callers":["0x8010183c"],"callees":[]},
+  "0x8010183c": {"callers":[],"callees":[]},
+  "0x80101904": {"callers":["0x80100034"],"callees":[]},
+  "0x80101acc": {"callers":["0x8010003c"],"callees":[]},
+  "0x80101c58": {"callers":["0x80100044"],"callees":[]},
+  "0x801025ec": {"callers":["0x8010004c"],"callees":[]},
+  "0x8010266c": {"callers":["0x80100054"],"callees":[]}
+}

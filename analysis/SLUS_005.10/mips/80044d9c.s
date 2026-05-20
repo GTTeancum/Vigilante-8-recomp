@@ -1,0 +1,89 @@
+# addr: 0x80044d9c  name: FUN_80044d9c
+80044d9c:  slt at,a1,a0
+80044da0:  beq at,zero,0x80044c44
+80044da4:  _move v0,a0
+80044da8:  beq a2,zero,0x80044ef4
+80044dac:  _add a0,a0,a2
+80044db0:  add a1,a1,a2
+80044db4:  andi t0,a1,0x3
+80044db8:  beq t0,zero,0x80044de0
+80044dbc:  _andi t0,a0,0x3
+80044dc0:  lbu t0,-0x1(a1)
+80044dc4:  addi a1,a1,-0x1
+80044dc8:  sb t0,-0x1(a0)
+80044dcc:  addi a2,a2,-0x1
+80044dd0:  bne a2,zero,0x80044db4
+80044dd4:  _addi a0,a0,-0x1
+80044dd8:  jr ra
+80044ddc:  _nop
+80044de0:  bne t0,zero,0x80044e60
+80044de4:  _addiu a2,a2,-0x10
+80044de8:  bltz a2,0x80044e20
+80044dec:  _nop
+80044df0:  lw t0,-0x4(a1)
+80044df4:  lw t1,-0x8(a1)
+80044df8:  lw t2,-0xc(a1)
+80044dfc:  lw t3,-0x10(a1)
+80044e00:  sw t0,-0x4(a0)
+80044e04:  sw t1,-0x8(a0)
+80044e08:  sw t2,-0xc(a0)
+80044e0c:  sw t3,-0x10(a0)
+80044e10:  addi a1,a1,-0x10
+80044e14:  addi a2,a2,-0x10
+80044e18:  bgez a2,0x80044df0
+80044e1c:  _addi a0,a0,-0x10
+80044e20:  addiu a2,a2,0xc
+80044e24:  bltz a2,0x80044e44
+80044e28:  _nop
+80044e2c:  lw t0,-0x4(a1)
+80044e30:  addi a1,a1,-0x4
+80044e34:  sw t0,-0x4(a0)
+80044e38:  addi a2,a2,-0x4
+80044e3c:  bgez a2,0x80044e2c
+80044e40:  _addi a0,a0,-0x4
+80044e44:  addiu a2,a2,0x4
+80044e48:  blez a2,0x80044ef4
+80044e4c:  _sub a1,a1,a2
+80044e50:  lwr t0,0x0(a1)
+80044e54:  sub a0,a0,a2
+80044e58:  jr ra
+80044e5c:  _swr t0,0x0(a0)
+80044e60:  bltz a2,0x80044ea8
+80044e64:  _nop
+80044e68:  lw t0,-0x4(a1)
+80044e6c:  lw t1,-0x8(a1)
+80044e70:  lw t2,-0xc(a1)
+80044e74:  lw t3,-0x10(a1)
+80044e78:  swr t0,-0x4(a0)
+80044e7c:  swl t0,-0x1(a0)
+80044e80:  swr t1,-0x8(a0)
+80044e84:  swl t1,-0x5(a0)
+80044e88:  swr t2,-0xc(a0)
+80044e8c:  swl t2,-0x9(a0)
+80044e90:  swr t3,-0x10(a0)
+80044e94:  swl t3,-0xd(a0)
+80044e98:  addi a1,a1,-0x10
+80044e9c:  addi a2,a2,-0x10
+80044ea0:  bgez a2,0x80044e68
+80044ea4:  _addi a0,a0,-0x10
+80044ea8:  addiu a2,a2,0xc
+80044eac:  bltz a2,0x80044ed0
+80044eb0:  _nop
+80044eb4:  lw t0,-0x4(a1)
+80044eb8:  addi a1,a1,-0x4
+80044ebc:  swr t0,-0x4(a0)
+80044ec0:  swl t0,-0x1(a0)
+80044ec4:  addi a2,a2,-0x4
+80044ec8:  bgez a2,0x80044eb4
+80044ecc:  _addi a0,a0,-0x4
+80044ed0:  addiu a2,a2,0x4
+80044ed4:  beq a2,zero,0x80044ef4
+80044ed8:  _nop
+80044edc:  lb t0,-0x1(a1)
+80044ee0:  addi a1,a1,-0x1
+80044ee4:  sb t0,-0x1(a0)
+80044ee8:  addi a2,a2,-0x1
+80044eec:  bne a2,zero,0x80044edc
+80044ef0:  _addi a0,a0,-0x1
+80044ef4:  jr ra
+80044ef8:  _nop

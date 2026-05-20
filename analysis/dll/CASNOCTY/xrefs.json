@@ -1,0 +1,15 @@
+{
+  "0x80100168": {"callers":["0x80100014"],"callees":[]},
+  "0x8010020c": {"callers":["0x8010001c"],"callees":[]},
+  "0x801002bc": {"callers":["0x801004e8"],"callees":[]},
+  "0x801004e8": {"callers":["0x80100024"],"callees":[]},
+  "0x801006d4": {"callers":["0x80100c88"],"callees":[]},
+  "0x80100a9c": {"callers":["0x80100bd0"],"callees":[]},
+  "0x80100bd0": {"callers":[],"callees":[]},
+  "0x80100c88": {"callers":["0x8010002c"],"callees":[]},
+  "0x80101a90": {"callers":["0x80101bb8"],"callees":[]},
+  "0x80101bb8": {"callers":[],"callees":[]},
+  "0x80101ca8": {"callers":["0x80100034"],"callees":[]},
+  "0x80101d00": {"callers":["0x8010003c"],"callees":[]},
+  "0x80101fe0": {"callers":["0x80100044","0x8010004c"],"callees":[]}
+}

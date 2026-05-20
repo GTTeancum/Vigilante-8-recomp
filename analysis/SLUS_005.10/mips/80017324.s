@@ -1,0 +1,55 @@
+# addr: 0x80017324  name: FUN_80017324
+80017324:  addiu sp,sp,-0x20
+80017328:  sw s0,0x10(sp)
+8001732c:  move s0,a0
+80017330:  sw ra,0x18(sp)
+80017334:  sw s1,0x14(sp)
+80017338:  lw a1,0x90(s0)
+8001733c:  nop
+80017340:  bgez a1,0x8001734c
+80017344:  _addiu s1,s0,0x10
+80017348:  addiu a1,a1,0x7f
+8001734c:  lw a2,0x94(s0)
+80017350:  nop
+80017354:  bgez a2,0x80017360
+80017358:  _sra a1,a1,0x7
+8001735c:  addiu a2,a2,0x7f
+80017360:  lw a3,0x98(s0)
+80017364:  nop
+80017368:  bgez a3,0x80017374
+8001736c:  _sra a2,a2,0x7
+80017370:  addiu a3,a3,0x7f
+80017374:  move a0,s1
+80017378:  jal 0x800439b8
+8001737c:  _sra a3,a3,0x7
+80017380:  lw v1,0x80(s0)
+80017384:  nop
+80017388:  bgez v1,0x80017394
+8001738c:  _nop
+80017390:  addiu v1,v1,0x7f
+80017394:  lw v0,0x24(s0)
+80017398:  lw a0,0x84(s0)
+8001739c:  sra v1,v1,0x7
+800173a0:  addu v0,v0,v1
+800173a4:  bgez a0,0x800173b0
+800173a8:  _sw v0,0x24(s0)
+800173ac:  addiu a0,a0,0x7f
+800173b0:  lw v0,0x28(s0)
+800173b4:  lw a2,0x88(s0)
+800173b8:  sra v1,a0,0x7
+800173bc:  addu v0,v0,v1
+800173c0:  bgez a2,0x800173cc
+800173c4:  _sw v0,0x28(s0)
+800173c8:  addiu a2,a2,0x7f
+800173cc:  lw v1,0x2c(s0)
+800173d0:  move a0,s1
+800173d4:  move a1,a0
+800173d8:  sra v0,a2,0x7
+800173dc:  addu v1,v1,v0
+800173e0:  jal 0x8004c934
+800173e4:  _sw v1,0x2c(s0)
+800173e8:  lw ra,0x18(sp)
+800173ec:  lw s1,0x14(sp)
+800173f0:  lw s0,0x10(sp)
+800173f4:  jr ra
+800173f8:  _addiu sp,sp,0x20

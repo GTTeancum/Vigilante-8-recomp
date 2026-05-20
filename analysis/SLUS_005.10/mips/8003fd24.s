@@ -1,0 +1,43 @@
+# addr: 0x8003fd24  name: FUN_8003fd24
+8003fd24:  addiu sp,sp,-0x20
+8003fd28:  sw s0,0x10(sp)
+8003fd2c:  move s0,a0
+8003fd30:  lui v0,0x8007
+8003fd34:  lw a0,0x37d8(v0)
+8003fd38:  andi a1,a1,0xffff
+8003fd3c:  li a2,0x80
+8003fd40:  li a3,0x8
+8003fd44:  sw ra,0x18(sp)
+8003fd48:  jal 0x8001ac44
+8003fd4c:  _sw s1,0x14(sp)
+8003fd50:  move s1,v0
+8003fd54:  li v0,0x1
+8003fd58:  sb v0,0x4(s1)
+8003fd5c:  li v0,0x34
+8003fd60:  sw v0,0x0(s1)
+8003fd64:  lw t0,0x0(s0)
+8003fd68:  lw t1,0x4(s0)
+8003fd6c:  lw t2,0x8(s0)
+8003fd70:  sw t0,0x48(s1)
+8003fd74:  sw t1,0x4c(s1)
+8003fd78:  sw t2,0x50(s1)
+8003fd7c:  lw v1,0x38(s1)
+8003fd80:  lui v0,0x8004
+8003fd84:  addiu v0,v0,-0x17f4
+8003fd88:  beq v1,zero,0x8003fdac
+8003fd8c:  _sw v0,0x64(s1)
+8003fd90:  lui v0,0x8004
+8003fd94:  addiu v0,v0,-0x184c
+8003fd98:  sw v0,0x64(v1)
+8003fd9c:  lw v1,0x34(v1)
+8003fda0:  nop
+8003fda4:  bne v1,zero,0x8003fd98
+8003fda8:  _nop
+8003fdac:  jal 0x8002036c
+8003fdb0:  _move a0,s1
+8003fdb4:  lw ra,0x18(sp)
+8003fdb8:  move v0,s1
+8003fdbc:  lw s1,0x14(sp)
+8003fdc0:  lw s0,0x10(sp)
+8003fdc4:  jr ra
+8003fdc8:  _addiu sp,sp,0x20

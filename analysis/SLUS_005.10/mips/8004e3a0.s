@@ -1,0 +1,32 @@
+# addr: 0x8004e3a0  name: DIVFT3A_OBJ_37C
+8004e3a0:  lhu t4,0xc(a1)
+8004e3a4:  lhu t5,0x8(t0)
+8004e3a8:  sll t4,t4,0x10
+8004e3ac:  addu t5,t5,t4
+8004e3b0:  lhu t4,0xe(a1)
+8004e3b4:  lhu t6,0x8(t1)
+8004e3b8:  sll t4,t4,0x10
+8004e3bc:  addu t6,t6,t4
+8004e3c0:  lhu t7,0x8(t2)
+8004e3c4:  lw t4,0x10(a1)
+8004e3c8:  sw t5,0xc(a0)
+8004e3cc:  sw t6,0x14(a0)
+8004e3d0:  sw t7,0x1c(a0)
+8004e3d4:  sw t4,0x4(a0)
+8004e3d8:  lw t4,0x10(t0)
+8004e3dc:  lw t5,0x10(t1)
+8004e3e0:  lw t6,0x10(t2)
+8004e3e4:  sw t4,0x8(a0)
+8004e3e8:  sw t5,0x10(a0)
+8004e3ec:  sw t6,0x18(a0)
+8004e3f0:  lw t4,0x14(a1)
+8004e3f4:  sll t9,a0,0x8
+8004e3f8:  srl t9,t9,0x8
+8004e3fc:  lw t8,0x0(t4)
+8004e400:  sw t9,0x0(t4)
+8004e404:  lui t6,0x700
+8004e408:  or t8,t8,t6
+8004e40c:  sw t8,0x0(a0)
+8004e410:  addiu a0,a0,0x20
+8004e414:  jr ra
+8004e418:  _nop

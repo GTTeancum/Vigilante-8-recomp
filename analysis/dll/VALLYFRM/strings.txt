@@ -1,0 +1,6 @@
+80100040	SplashS_R
+8010004c	VallyFrm
+801000a0	Windmill_1
+801000ac	silo_1
+801000d8	WWave
+801000e0	pump_1

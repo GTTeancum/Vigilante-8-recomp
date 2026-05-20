@@ -1,0 +1,20 @@
+# addr: 0x8002bd84  name: FUN_8002bd84
+8002bd84:  addiu sp,sp,-0x58
+8002bd88:  sw s0,0x50(sp)
+8002bd8c:  sw ra,0x54(sp)
+8002bd90:  jal 0x8002b940
+8002bd94:  _move s0,a0
+8002bd98:  addiu a0,sp,0x10
+8002bd9c:  lui a1,0x8006
+8002bda0:  addiu a1,a1,0x571c
+8002bda4:  jal 0x80053004
+8002bda8:  _move a2,v0
+8002bdac:  clear a0
+8002bdb0:  jal 0x800129e8
+8002bdb4:  _addiu a1,sp,0x10
+8002bdb8:  jal 0x8002bc18
+8002bdbc:  _move a0,s0
+8002bdc0:  lw ra,0x54(sp)
+8002bdc4:  lw s0,0x50(sp)
+8002bdc8:  jr ra
+8002bdcc:  _addiu sp,sp,0x58

@@ -1,0 +1,16 @@
+// addr: 0x801118c4  name: FUN_801118c4
+
+undefined4 FUN_801118c4(void)
+
+{
+  FUN_80053a24/*0x80053a24*/();
+  DAT_80113574 = FUN_80111974;
+  DAT_80113578 = &LAB_801119dc;
+  DAT_80113570 = 0;
+  DAT_8011357c = 0;
+  SysDeqIntRP/*0x80054c84*/(1,&DAT_80113570);
+  SysEnqIntRP/*0x80054c74*/(1,&DAT_80113570);
+  FUN_80053a34/*0x80053a34*/();
+  return 1;
+}
+

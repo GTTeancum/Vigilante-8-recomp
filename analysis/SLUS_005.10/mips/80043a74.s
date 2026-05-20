@@ -1,0 +1,31 @@
+# addr: 0x80043a74  name: FUN_80043a74
+80043a74:  addiu sp,sp,-0x18
+80043a78:  sw s0,0x10(sp)
+80043a7c:  lui s0,0x800a
+80043a80:  sw ra,0x14(sp)
+80043a84:  jal 0x80048ad4
+80043a88:  _addiu a0,s0,0x3090
+80043a8c:  sb v0,0x8f8(gp)
+80043a90:  andi v0,v0,0xff
+80043a94:  beq v0,zero,0x80043a84
+80043a98:  _nop
+80043a9c:  lui s0,0x800a
+80043aa0:  addiu s0,s0,0x3090
+80043aa4:  jal 0x80049534
+80043aa8:  _move a0,s0
+80043aac:  lbu a1,0x8f8(gp)
+80043ab0:  addiu a0,v0,-0x96
+80043ab4:  addiu s0,s0,0x4
+80043ab8:  sll a1,a1,0x2
+80043abc:  jal 0x80049430
+80043ac0:  _addu a1,a1,s0
+80043ac4:  lw v0,0x5ac(gp)
+80043ac8:  lbu v1,0x8f8(gp)
+80043acc:  lw ra,0x14(sp)
+80043ad0:  lw s0,0x10(sp)
+80043ad4:  sltiu v0,v0,0x3
+80043ad8:  xori v0,v0,0x1
+80043adc:  subu v1,v1,v0
+80043ae0:  sb v1,0x8f8(gp)
+80043ae4:  jr ra
+80043ae8:  _addiu sp,sp,0x18

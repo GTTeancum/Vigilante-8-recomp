@@ -1,0 +1,49 @@
+# addr: 0x8004fbe4  name: PutDrawEnv
+8004fbe4:  addiu sp,sp,-0x20
+8004fbe8:  sw s2,0x18(sp)
+8004fbec:  lui s2,0x8006
+8004fbf0:  addiu s2,s2,0x5026
+8004fbf4:  sw ra,0x1c(sp)
+8004fbf8:  sw s1,0x14(sp)
+8004fbfc:  sw s0,0x10(sp)
+8004fc00:  lbu v0,0x0(s2)
+8004fc04:  nop
+8004fc08:  sltiu v0,v0,0x2
+8004fc0c:  bne v0,zero,0x8004fc30
+8004fc10:  _move s1,a0
+8004fc14:  lui a0,0x8001
+8004fc18:  addiu a0,a0,0x12f4
+8004fc1c:  lui v0,0x8006
+8004fc20:  lw v0,0x5020(v0)
+8004fc24:  nop
+8004fc28:  jalr v0
+8004fc2c:  _move a1,s1
+8004fc30:  addiu s0,s1,0x1c
+8004fc34:  move a0,s0
+8004fc38:  jal 0x800506a0
+8004fc3c:  _move a1,s1
+8004fc40:  lui a0,0xff
+8004fc44:  ori a0,a0,0xffff
+8004fc48:  move a1,s0
+8004fc4c:  li a2,0x40
+8004fc50:  lw v0,0x1c(s1)
+8004fc54:  lui v1,0x8006
+8004fc58:  lw v1,0x501c(v1)
+8004fc5c:  or v0,v0,a0
+8004fc60:  sw v0,0x1c(s1)
+8004fc64:  lw a0,0x18(v1)
+8004fc68:  lw v0,0x8(v1)
+8004fc6c:  nop
+8004fc70:  jalr v0
+8004fc74:  _clear a3
+8004fc78:  addiu a0,s2,0xe
+8004fc7c:  move a1,s1
+8004fc80:  jal 0x80044c44
+8004fc84:  _li a2,0x5c
+8004fc88:  move v0,s1
+8004fc8c:  lw ra,0x1c(sp)
+8004fc90:  lw s2,0x18(sp)
+8004fc94:  lw s1,0x14(sp)
+8004fc98:  lw s0,0x10(sp)
+8004fc9c:  jr ra
+8004fca0:  _addiu sp,sp,0x20

@@ -1,0 +1,23 @@
+# addr: 0x80107668  name: FUN_80107668
+80107668:  addiu sp,sp,-0x18
+8010766c:  sw s0,0x10(sp)
+80107670:  move s0,a0
+80107674:  sw ra,0x14(sp)
+80107678:  lh a0,0x0(s0)
+8010767c:  lh a1,0x2(s0)
+80107680:  lh a2,0x4(s0)
+80107684:  lh a3,0x6(s0)
+80107688:  addu a2,a0,a2
+8010768c:  sltiu a0,zero,0x1d61
+80107690:  addu a3,a1,a3
+80107694:  lh a2,0x0(s0)
+80107698:  lh a0,0x4(s0)
+8010769c:  lh a3,0x2(s0)
+801076a0:  lh a1,0x6(s0)
+801076a4:  addu a0,a2,a0
+801076a8:  sltiu a0,zero,0x1d61
+801076ac:  addu a1,a3,a1
+801076b0:  lw ra,0x14(sp)
+801076b4:  lw s0,0x10(sp)
+801076b8:  jr ra
+801076bc:  _addiu sp,sp,0x18

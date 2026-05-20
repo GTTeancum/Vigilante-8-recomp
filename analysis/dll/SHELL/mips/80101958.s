@@ -1,0 +1,55 @@
+# addr: 0x80101958  name: FUN_80101958
+80101958:  addiu sp,sp,-0x30
+8010195c:  sw s1,0x24(sp)
+80101960:  clear s1
+80101964:  li a1,0x7b
+80101968:  addiu t0,sp,0x10
+8010196c:  sw ra,0x28(sp)
+80101970:  sw s0,0x20(sp)
+80101974:  sll v0,a1,0x1
+80101978:  addu v0,v0,a1
+8010197c:  sll v0,v0,0x2
+80101980:  addu a2,a0,s1
+80101984:  lbu v1,0x0(a2)
+80101988:  subu v0,v0,a1
+8010198c:  sll v0,v0,0x2
+80101990:  subu v0,v0,a1
+80101994:  addiu a1,v0,0x43
+80101998:  sltiu v1,v1,0x1a
+8010199c:  beq v1,zero,0x801019b8
+801019a0:  _addu a3,t0,s1
+801019a4:  lbu v0,0x0(a2)
+801019a8:  nop
+801019ac:  addiu v0,v0,0x41
+801019b0:  slti a0,zero,0x66f
+801019b4:  xor v0,v0,a1
+801019b8:  xori v0,a1,0x20
+801019bc:  sb v0,0x0(a3)
+801019c0:  addiu s1,s1,0x1
+801019c4:  slti v0,s1,0xe
+801019c8:  bne v0,zero,0x80101978
+801019cc:  _sll v0,a1,0x1
+801019d0:  lui a0,0x8011
+801019d4:  lbu v0,0x22bc(a0)
+801019d8:  nop
+801019dc:  beq v0,zero,0x80101a18
+801019e0:  _clear s1
+801019e4:  addiu s0,a0,0x22bc
+801019e8:  move a0,s0
+801019ec:  addiu a1,sp,0x10
+801019f0:  jal 0x80052384
+801019f4:  _li a2,0xe
+801019f8:  bne v0,zero,0x80101a08
+801019fc:  _addiu s0,s0,0xe
+80101a00:  slti a0,zero,0x687
+80101a04:  move v0,s1
+80101a08:  lbu v0,0x0(s0)
+80101a0c:  nop
+80101a10:  bne v0,zero,0x801019e8
+80101a14:  _addiu s1,s1,0x1
+80101a18:  li v0,-0x1
+80101a1c:  lw ra,0x28(sp)
+80101a20:  lw s1,0x24(sp)
+80101a24:  lw s0,0x20(sp)
+80101a28:  jr ra
+80101a2c:  _addiu sp,sp,0x30

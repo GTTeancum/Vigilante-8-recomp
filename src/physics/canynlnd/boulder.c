@@ -1,0 +1,49 @@
+/* boulder.c -- Canyonlands rolling-boulder tick.
+ *
+ * Source: CANYNLND.DLL  FUN_80100be8.
+ *
+ * The boulder rotates each tick: roll axis +0x40 increments by 0x44
+ * and yaw +0x40 (low half? the 0x10 index off the u32 array maps to
+ * byte +0x40 here -- packed pair of i16) increments by 0x5b. When
+ * `param_3` is non-zero (game requested an "object disturbed" event),
+ * a sound is spawned via FUN_8001d708 and the object switches to
+ * state 0x84 with sub-state set to the returned ID.
+ *
+ * MED confidence: increments and the 0x84 state code are recovered,
+ * but the per-state effects need cross-reference to the level-object
+ * dispatch table to confirm the semantic name.
+ */
+#include <stdint.h>
+
+extern uint8_t ImpactSparks_Spawn_R(void);    /* FUN_8001d708 -- returns id */
+
+#define BOULDER_PITCH_DELTA   0x5b
+#define BOULDER_ROLL_DELTA    0x44
+
+uint32_t Boulder_Tick(uint32_t *obj, int mode, int impulse)
+{
+    uint8_t newSub = 3;
+    if (mode != 0 && mode != 1) {
+        /* mode == anything else: fall into the "external impulse" path
+         * regardless of obj pointer -- preserve the Ghidra-observed
+         * `obj = 1` clobber as a no-op since the subsequent writes use
+         * obj+0x10 etc. which are scratchpad in the original. */
+        obj = (uint32_t *)1;
+    } else if (mode == 1) {
+        goto applyStateBump;
+    }
+
+    *(int16_t *)(obj + 0x10) = (int16_t)(*(int16_t *)(obj + 0x10) + BOULDER_PITCH_DELTA);
+    *(int16_t *)((uint8_t *)obj + 0x42) = (int16_t)(*(int16_t *)((uint8_t *)obj + 0x42)
+                                                    + BOULDER_ROLL_DELTA);
+
+    if (impulse == 0) return 0;
+
+    newSub = ImpactSparks_Spawn_R();
+    obj = (uint32_t *)1;
+
+applyStateBump:
+    *(int8_t *)((uint8_t *)obj + 4) = (int8_t)newSub;
+    *obj = 0x84;          /* state code: rolling / impulsed */
+    return 0;
+}

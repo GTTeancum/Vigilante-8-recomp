@@ -1,0 +1,32 @@
+# addr: 0x8004410c  name: FUN_8004410c
+8004410c:  lw a2,-0x5350(gp)
+80044110:  clear v1
+80044114:  lui v0,0x800a
+80044118:  addiu a3,v0,0x2ff0
+8004411c:  lui a1,0x1f80
+80044120:  ori a1,a1,0x1c00
+80044124:  lw a0,0x8fc(gp)
+80044128:  nop
+8004412c:  andi v0,a0,0x1
+80044130:  bne v0,zero,0x8004416c
+80044134:  _nop
+80044138:  lhu v0,0xc(a1)
+8004413c:  nop
+80044140:  bne v0,zero,0x8004416c
+80044144:  _addu v0,v1,a3
+80044148:  lbu v0,0x0(v0)
+8004414c:  nop
+80044150:  subu v0,a2,v0
+80044154:  andi v0,v0,0xff
+80044158:  sltiu v0,v0,0x2
+8004415c:  bne v0,zero,0x80044170
+80044160:  _addiu a1,a1,0x10
+80044164:  jr ra
+80044168:  _addiu v0,v1,0x1
+8004416c:  addiu a1,a1,0x10
+80044170:  addiu v1,v1,0x1
+80044174:  slti v0,v1,0x18
+80044178:  bne v0,zero,0x80044128
+8004417c:  _sra a0,a0,0x1
+80044180:  jr ra
+80044184:  _clear v0

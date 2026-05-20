@@ -1,0 +1,46 @@
+# addr: 0x80110fcc  name: FUN_80110fcc
+80110fcc:  addiu sp,sp,-0x18
+80110fd0:  sw ra,0x14(sp)
+80110fd4:  jal 0x80053a24
+80110fd8:  _sw s0,0x10(sp)
+80110fdc:  lui a0,0x8011
+80110fe0:  lw a0,0x3510(a0)
+80110fe4:  sltiu a0,zero,0x45c4
+80110fe8:  move s0,v0
+80110fec:  lui a0,0x8011
+80110ff0:  lw a0,0x3514(a0)
+80110ff4:  sltiu a0,zero,0x45c4
+80110ff8:  nop
+80110ffc:  lui a0,0x8011
+80111000:  lw a0,0x3518(a0)
+80111004:  sltiu a0,zero,0x45c4
+80111008:  nop
+8011100c:  lui a0,0x8011
+80111010:  lw a0,0x351c(a0)
+80111014:  sltiu a0,zero,0x45c4
+80111018:  nop
+8011101c:  lui a0,0x8011
+80111020:  lw a0,0x3520(a0)
+80111024:  sltiu a0,zero,0x45c4
+80111028:  nop
+8011102c:  lui a0,0x8011
+80111030:  lw a0,0x3524(a0)
+80111034:  sltiu a0,zero,0x45c4
+80111038:  nop
+8011103c:  lui a0,0x8011
+80111040:  lw a0,0x3528(a0)
+80111044:  sltiu a0,zero,0x45c4
+80111048:  nop
+8011104c:  lui a0,0x8011
+80111050:  lw a0,0x352c(a0)
+80111054:  sltiu a0,zero,0x45c4
+80111058:  nop
+8011105c:  li v0,0x1
+80111060:  bne s0,v0,0x80111070
+80111064:  _nop
+80111068:  jal 0x80053a34
+8011106c:  _nop
+80111070:  lw ra,0x14(sp)
+80111074:  lw s0,0x10(sp)
+80111078:  jr ra
+8011107c:  _addiu sp,sp,0x18

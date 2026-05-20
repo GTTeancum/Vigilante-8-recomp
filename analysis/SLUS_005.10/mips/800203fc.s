@@ -1,0 +1,43 @@
+# addr: 0x800203fc  name: FUN_800203fc
+800203fc:  addiu sp,sp,-0x18
+80020400:  sw s0,0x10(sp)
+80020404:  move s0,a0
+80020408:  sw ra,0x14(sp)
+8002040c:  lw v0,0x64(s0)
+80020410:  nop
+80020414:  beq v0,zero,0x80020424
+80020418:  _li a1,0x4
+8002041c:  jalr v0
+80020420:  _clear a2
+80020424:  lw v0,0x0(s0)
+80020428:  nop
+8002042c:  andi v0,v0,0x80
+80020430:  beq v0,zero,0x80020448
+80020434:  _nop
+80020438:  lui a0,0x8006
+8002043c:  addiu a0,a0,0x5a60
+80020440:  jal 0x8001fe8c
+80020444:  _move a1,s0
+80020448:  lw v0,0x0(s0)
+8002044c:  nop
+80020450:  andi v0,v0,0x4
+80020454:  beq v0,zero,0x8002046c
+80020458:  _nop
+8002045c:  lui a0,0x8006
+80020460:  addiu a0,a0,0x5a80
+80020464:  jal 0x8001fe8c
+80020468:  _move a1,s0
+8002046c:  lw v0,0x0(s0)
+80020470:  nop
+80020474:  andi v0,v0,0x1
+80020478:  beq v0,zero,0x80020490
+8002047c:  _nop
+80020480:  lui a0,0x8006
+80020484:  addiu a0,a0,0x5ac0
+80020488:  jal 0x8001fe8c
+8002048c:  _move a1,s0
+80020490:  lw ra,0x14(sp)
+80020494:  move v0,s0
+80020498:  lw s0,0x10(sp)
+8002049c:  jr ra
+800204a0:  _addiu sp,sp,0x18

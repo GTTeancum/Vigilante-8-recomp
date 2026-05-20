@@ -1,0 +1,33 @@
+# addr: 0x8004995c  name: BIOS_OBJ_3A8
+8004995c:  beq s1,zero,0x80049970
+80049960:  _li v0,0x1
+80049964:  bne s0,v0,0x80049970
+80049968:  _nop
+8004996c:  clear s1
+80049970:  beq s1,zero,0x8004997c
+80049974:  _li v1,0x1
+80049978:  li v1,0x5
+8004997c:  lui v0,0x8006
+80049980:  addiu v0,v0,0x35c
+80049984:  sb v1,0x1(v0)
+80049988:  lui v1,0x800a
+8004998c:  addiu v1,v1,0x3248
+80049990:  beq v1,zero,0x800499b8
+80049994:  _addiu a1,sp,0x18
+80049998:  li a0,0x7
+8004999c:  li a2,-0x1
+800499a0:  lbu v0,0x0(a1)
+800499a4:  addiu a1,a1,0x1
+800499a8:  addiu a0,a0,-0x1
+800499ac:  sb v0,0x0(v1)
+800499b0:  bne a0,a2,0x800499a0
+800499b4:  _addiu v1,v1,0x1
+800499b8:  lui v0,0x8006
+800499bc:  lw v0,0x344(v0)
+800499c0:  nop
+800499c4:  sb zero,0x0(v0)
+800499c8:  lui v1,0x8006
+800499cc:  lw v1,0x350(v1)
+800499d0:  li v0,0x4
+800499d4:  j 0x80049afc
+800499d8:  _sb zero,0x0(v1)

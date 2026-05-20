@@ -1,0 +1,22 @@
+# addr: 0x80019cbc  name: FUN_80019cbc
+80019cbc:  addiu sp,sp,-0x20
+80019cc0:  sw s0,0x10(sp)
+80019cc4:  move s0,a0
+80019cc8:  sw s1,0x14(sp)
+80019ccc:  move s1,a2
+80019cd0:  sw s2,0x18(sp)
+80019cd4:  move s2,a3
+80019cd8:  sw ra,0x1c(sp)
+80019cdc:  jal 0x800524f4
+80019ce0:  _addiu a0,s0,0x8
+80019ce4:  li v0,0x200
+80019ce8:  sh zero,0x2(s0)
+80019cec:  sh v0,0x0(s0)
+80019cf0:  sh s1,0x4(s0)
+80019cf4:  sh s2,0x6(s0)
+80019cf8:  lw ra,0x1c(sp)
+80019cfc:  lw s2,0x18(sp)
+80019d00:  lw s1,0x14(sp)
+80019d04:  lw s0,0x10(sp)
+80019d08:  jr ra
+80019d0c:  _addiu sp,sp,0x20

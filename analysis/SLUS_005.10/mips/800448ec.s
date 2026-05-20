@@ -1,0 +1,53 @@
+# addr: 0x800448ec  name: FUN_800448ec
+800448ec:  addiu sp,sp,-0x18
+800448f0:  sw s0,0x10(sp)
+800448f4:  sw ra,0x14(sp)
+800448f8:  jal 0x80016a20
+800448fc:  _move s0,a0
+80044900:  lui v1,0x1f
+80044904:  ori v1,v1,0xffff
+80044908:  move a0,v0
+8004490c:  slt v1,v1,a0
+80044910:  bne v1,zero,0x800449ac
+80044914:  _clear v0
+80044918:  lui v0,0x20
+8004491c:  subu v0,v0,a0
+80044920:  bgez v0,0x8004492c
+80044924:  _nop
+80044928:  addiu v0,v0,0xfff
+8004492c:  lh v1,0x8e4(gp)
+80044930:  sra v0,v0,0xc
+80044934:  mult v0,v1
+80044938:  mflo v0
+8004493c:  bgez v0,0x80044948
+80044940:  _nop
+80044944:  addiu v0,v0,0x1ff
+80044948:  beq a0,zero,0x8004496c
+8004494c:  _sra a1,v0,0x9
+80044950:  lw v0,0x0(s0)
+80044954:  nop
+80044958:  sll v0,v0,0xc
+8004495c:  div v0,a0
+80044960:  mflo a0
+80044964:  j 0x80044974
+80044968:  _li v0,0x1000
+8004496c:  clear a0
+80044970:  li v0,0x1000
+80044974:  subu v0,v0,a0
+80044978:  mult v0,a1
+8004497c:  mflo v1
+80044980:  bgez v1,0x8004498c
+80044984:  _addiu v0,a0,0x1000
+80044988:  addiu v1,v1,0x1fff
+8004498c:  mult v0,a1
+80044990:  mflo v0
+80044994:  bgez v0,0x800449a0
+80044998:  _sra v1,v1,0xd
+8004499c:  addiu v0,v0,0x1fff
+800449a0:  sra v0,v0,0xd
+800449a4:  sll v0,v0,0x10
+800449a8:  or v0,v1,v0
+800449ac:  lw ra,0x14(sp)
+800449b0:  lw s0,0x10(sp)
+800449b4:  jr ra
+800449b8:  _addiu sp,sp,0x18

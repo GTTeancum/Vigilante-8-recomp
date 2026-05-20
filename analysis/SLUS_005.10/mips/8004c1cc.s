@@ -1,0 +1,40 @@
+# addr: 0x8004c1cc  name: C_011_OBJ_778
+8004c1cc:  lui v0,0x800a
+8004c1d0:  lw v0,0x32d8(v0)
+8004c1d4:  nop
+8004c1d8:  lhu v1,0x6(v0)
+8004c1dc:  lhu v0,0x4(v0)
+8004c1e0:  addiu v1,v1,-0x1
+8004c1e4:  bne v1,v0,0x8004c28c
+8004c1e8:  _li v1,0x1
+8004c1ec:  lui v0,0x800a
+8004c1f0:  lw v0,0x32b8(v0)
+8004c1f4:  lui at,0x800a
+8004c1f8:  sw v1,0x32a4(at)
+8004c1fc:  beq v0,zero,0x8004c244
+8004c200:  _li a2,0x1f8
+8004c204:  li a3,0x1
+8004c208:  lui a1,0x800a
+8004c20c:  lw a1,0x32a8(a1)
+8004c210:  lui a0,0x800a
+8004c214:  lw a0,0x32c4(a0)
+8004c218:  sll a1,a1,0xb
+8004c21c:  addu a1,v0,a1
+8004c220:  jal 0x8004c370
+8004c224:  _addiu a1,a1,0x20
+8004c228:  lui v0,0x800a
+8004c22c:  lw v0,0x32a8(v0)
+8004c230:  nop
+8004c234:  addiu v0,v0,0x1
+8004c238:  lui at,0x800a
+8004c23c:  j 0x8004c268
+8004c240:  _sw v0,0x32a8(at)
+8004c244:  li a0,0x3
+8004c248:  clear a2
+8004c24c:  lui a1,0x800a
+8004c250:  lw a1,0x32c4(a1)
+8004c254:  li a3,0x1f8
+8004c258:  sw t0,0x10(sp)
+8004c25c:  sw v1,0x14(sp)
+8004c260:  jal 0x8004c39c
+8004c264:  _sw zero,0x18(sp)

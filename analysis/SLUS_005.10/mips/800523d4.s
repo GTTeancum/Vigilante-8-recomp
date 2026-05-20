@@ -1,0 +1,36 @@
+# addr: 0x800523d4  name: strcat
+800523d4:  addiu sp,sp,-0x20
+800523d8:  sw s1,0x14(sp)
+800523dc:  move s1,a0
+800523e0:  sw s2,0x18(sp)
+800523e4:  move s2,a1
+800523e8:  sw ra,0x1c(sp)
+800523ec:  beq s1,zero,0x8005245c
+800523f0:  _sw s0,0x10(sp)
+800523f4:  beq s2,zero,0x80052460
+800523f8:  _clear v0
+800523fc:  jal 0x80052544
+80052400:  _move a0,s1
+80052404:  move a0,s2
+80052408:  jal 0x80052544
+8005240c:  _addu s0,s1,v0
+80052410:  addu v0,s2,v0
+80052414:  beq s0,v0,0x8005245c
+80052418:  _move v1,s1
+8005241c:  lb v0,0x0(v1)
+80052420:  nop
+80052424:  beq v0,zero,0x8005243c
+80052428:  _addiu s1,v1,0x1
+8005242c:  lb v0,0x0(s1)
+80052430:  nop
+80052434:  bne v0,zero,0x8005242c
+80052438:  _addiu s1,s1,0x1
+8005243c:  addiu s1,s1,-0x1
+80052440:  lbu v0,0x0(s2)
+80052444:  addiu s2,s2,0x1
+80052448:  sb v0,0x0(s1)
+8005244c:  bne v0,zero,0x80052440
+80052450:  _addiu s1,s1,0x1
+80052454:  j 0x80052460
+80052458:  _move v0,v1
+8005245c:  clear v0

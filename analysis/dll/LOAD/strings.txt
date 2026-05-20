@@ -1,0 +1,15 @@
+80100048	Shell\Load.tbl
+80100060	Ski Resort
+8010006c	Canyonlands
+80100078	Casino City
+80100084	Valley Farms
+80100094	Hoover Dam
+801000a0	Ghost Town
+801000ac	Aircraft Graveyard
+801000c0	Oil Fields
+801000cc	Sand Factory
+801000dc	Secret Base
+801000f8	MDEC_rest:bad option(%d)\n
+80100114	MDEC_in_sync
+80100124	MDEC_out_sync
+80100134	%s timeout:\n

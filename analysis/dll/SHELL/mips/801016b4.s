@@ -1,0 +1,21 @@
+# addr: 0x801016b4  name: FUN_801016b4
+801016b4:  addiu sp,sp,-0x18
+801016b8:  sw s0,0x10(sp)
+801016bc:  sw ra,0x14(sp)
+801016c0:  sltiu a0,zero,0x534
+801016c4:  move s0,a0
+801016c8:  clear a0
+801016cc:  addu v0,s0,a0
+801016d0:  lbu v1,0x0(v0)
+801016d4:  addiu a0,a0,0x1
+801016d8:  addiu v1,v1,0x41
+801016dc:  sb v1,0x0(v0)
+801016e0:  slti v0,a0,0xe
+801016e4:  bne v0,zero,0x801016d0
+801016e8:  _addu v0,s0,a0
+801016ec:  sb zero,0xe(s0)
+801016f0:  lw ra,0x14(sp)
+801016f4:  move v0,s0
+801016f8:  lw s0,0x10(sp)
+801016fc:  jr ra
+80101700:  _addiu sp,sp,0x18

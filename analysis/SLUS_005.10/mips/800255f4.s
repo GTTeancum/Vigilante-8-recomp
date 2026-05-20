@@ -1,0 +1,22 @@
+# addr: 0x800255f4  name: FUN_800255f4
+800255f4:  lui a2,0x8009
+800255f8:  addiu a2,a2,0x1120
+800255fc:  srl v0,a1,0x16
+80025600:  sll v0,v0,0x2
+80025604:  srl v1,a0,0x16
+80025608:  sll v1,v1,0x7
+8002560c:  addu v0,v0,v1
+80025610:  addu v0,v0,a2
+80025614:  lw v0,0x80(v0)
+80025618:  srl a1,a1,0x10
+8002561c:  andi a1,a1,0x3f
+80025620:  srl a0,a0,0xa
+80025624:  andi a0,a0,0xfc0
+80025628:  addu a1,a1,a0
+8002562c:  addu v0,v0,a1
+80025630:  lbu v1,0x2000(v0)
+80025634:  lui v0,0x8009
+80025638:  addiu v0,v0,-0xfe0
+8002563c:  sll v1,v1,0x5
+80025640:  jr ra
+80025644:  _addu v0,v1,v0

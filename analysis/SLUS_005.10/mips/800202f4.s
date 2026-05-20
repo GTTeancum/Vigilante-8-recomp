@@ -1,0 +1,31 @@
+# addr: 0x800202f4  name: FUN_800202f4
+800202f4:  addiu sp,sp,-0x18
+800202f8:  sw s0,0x10(sp)
+800202fc:  move s0,a0
+80020300:  sw ra,0x14(sp)
+80020304:  lw v0,0x0(s0)
+80020308:  nop
+8002030c:  andi v0,v0,0x4
+80020310:  beq v0,zero,0x80020328
+80020314:  _nop
+80020318:  lui a0,0x8006
+8002031c:  addiu a0,a0,0x5a80
+80020320:  jal 0x8001fe50
+80020324:  _move a1,s0
+80020328:  lw v0,0x0(s0)
+8002032c:  nop
+80020330:  andi v0,v0,0x80
+80020334:  beq v0,zero,0x8002034c
+80020338:  _nop
+8002033c:  lui a0,0x8006
+80020340:  addiu a0,a0,0x5a60
+80020344:  jal 0x8001fe50
+80020348:  _move a1,s0
+8002034c:  lui a0,0x8006
+80020350:  addiu a0,a0,0x5a18
+80020354:  jal 0x8001fe50
+80020358:  _move a1,s0
+8002035c:  lw ra,0x14(sp)
+80020360:  lw s0,0x10(sp)
+80020364:  jr ra
+80020368:  _addiu sp,sp,0x18

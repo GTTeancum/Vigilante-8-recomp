@@ -1,0 +1,41 @@
+# addr: 0x80021b80  name: FUN_80021b80
+80021b80:  addiu sp,sp,-0x28
+80021b84:  sw s0,0x10(sp)
+80021b88:  move s0,a0
+80021b8c:  sw s1,0x14(sp)
+80021b90:  move s1,a1
+80021b94:  sw s3,0x1c(sp)
+80021b98:  move s3,a3
+80021b9c:  sw s2,0x18(sp)
+80021ba0:  move s2,a2
+80021ba4:  beq s0,zero,0x80021bd8
+80021ba8:  _sw ra,0x20(sp)
+80021bac:  move a0,s1
+80021bb0:  li a1,0x7
+80021bb4:  jalr s0
+80021bb8:  _andi a2,s2,0xffff
+80021bbc:  bne v0,zero,0x80021c04
+80021bc0:  _clear a0
+80021bc4:  li a1,0x6
+80021bc8:  jalr s0
+80021bcc:  _move a2,a0
+80021bd0:  bne v0,zero,0x80021bdc
+80021bd4:  _nop
+80021bd8:  li v0,0x80
+80021bdc:  bne s1,zero,0x80021bf4
+80021be0:  _move a0,s1
+80021be4:  jal 0x8001d470
+80021be8:  _move a0,v0
+80021bec:  j 0x80021c04
+80021bf0:  _nop
+80021bf4:  andi a1,s2,0xffff
+80021bf8:  move a2,v0
+80021bfc:  jal 0x8001ac44
+80021c00:  _move a3,s3
+80021c04:  lw ra,0x20(sp)
+80021c08:  lw s3,0x1c(sp)
+80021c0c:  lw s2,0x18(sp)
+80021c10:  lw s1,0x14(sp)
+80021c14:  lw s0,0x10(sp)
+80021c18:  jr ra
+80021c1c:  _addiu sp,sp,0x28

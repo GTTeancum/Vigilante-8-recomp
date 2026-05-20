@@ -1,0 +1,22 @@
+# addr: 0x801005e8  name: FUN_801005e8
+801005e8:  addiu sp,sp,-0x20
+801005ec:  sw s1,0x14(sp)
+801005f0:  move s1,a0
+801005f4:  sw s0,0x10(sp)
+801005f8:  move s0,a1
+801005fc:  sw ra,0x18(sp)
+80100600:  jal 0x800116f4
+80100604:  _move a0,s0
+80100608:  move a0,v0
+8010060c:  lui v0,0x8006
+80100610:  move a1,s1
+80100614:  move a2,s0
+80100618:  jal 0x80044c44
+8010061c:  _sw a0,0x59f0(v0)
+80100620:  lw ra,0x18(sp)
+80100624:  lw s1,0x14(sp)
+80100628:  lui v0,0x8006
+8010062c:  sw s0,0x59e8(v0)
+80100630:  lw s0,0x10(sp)
+80100634:  jr ra
+80100638:  _addiu sp,sp,0x20

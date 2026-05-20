@@ -1,0 +1,25 @@
+# addr: 0x800118b4  name: FUN_800118b4
+800118b4:  addiu sp,sp,-0x18
+800118b8:  sw s0,0x10(sp)
+800118bc:  move s0,a0
+800118c0:  sw ra,0x14(sp)
+800118c4:  jal 0x800116f4
+800118c8:  _li a0,0xc
+800118cc:  lw v1,0x4(gp)
+800118d0:  sw s0,0x8(v0)
+800118d4:  sll a0,v1,0x1
+800118d8:  addu a0,a0,v1
+800118dc:  sll a0,a0,0x2
+800118e0:  lui v1,0x8007
+800118e4:  addiu v1,v1,-0x1360
+800118e8:  addu a0,a0,v1
+800118ec:  lw v1,0x8(a0)
+800118f0:  sw v0,0x8(a0)
+800118f4:  addiu a0,a0,0x4
+800118f8:  sw v0,0x0(v1)
+800118fc:  sw v1,0x4(v0)
+80011900:  sw a0,0x0(v0)
+80011904:  lw ra,0x14(sp)
+80011908:  lw s0,0x10(sp)
+8001190c:  jr ra
+80011910:  _addiu sp,sp,0x18

@@ -1,0 +1,69 @@
+# addr: 0x80045754  name: SPU_OBJ_280
+80045754:  lui v0,0x8006
+80045758:  lw v0,-0x122c(v0)
+8004575c:  lui v1,0x8006
+80045760:  lhu v1,-0x1214(v1)
+80045764:  addiu sp,sp,-0x28
+80045768:  sw s1,0x14(sp)
+8004576c:  move s1,a1
+80045770:  sw ra,0x20(sp)
+80045774:  sw s3,0x1c(sp)
+80045778:  sw s2,0x18(sp)
+8004577c:  sw s0,0x10(sp)
+80045780:  lhu a1,0x1ae(v0)
+80045784:  move s2,a0
+80045788:  sh v1,0x1a6(v0)
+8004578c:  jal 0x80045fac
+80045790:  _andi s3,a1,0x7ff
+80045794:  beq s1,zero,0x8004587c
+80045798:  _sltiu v0,s1,0x41
+8004579c:  beq v0,zero,0x800457a8
+800457a0:  _li s0,0x40
+800457a4:  move s0,s1
+800457a8:  blez s0,0x800457d4
+800457ac:  _clear v1
+800457b0:  lui a0,0x8006
+800457b4:  lw a0,-0x122c(a0)
+800457b8:  lhu v0,0x0(s2)
+800457bc:  addiu s2,s2,0x2
+800457c0:  addiu v1,v1,0x2
+800457c4:  sh v0,0x1a8(a0)
+800457c8:  slt v0,v1,s0
+800457cc:  bne v0,zero,0x800457b8
+800457d0:  _nop
+800457d4:  lui v1,0x8006
+800457d8:  lw v1,-0x122c(v1)
+800457dc:  nop
+800457e0:  lhu a0,0x1aa(v1)
+800457e4:  nop
+800457e8:  andi v0,a0,0xffcf
+800457ec:  ori v0,v0,0x10
+800457f0:  jal 0x80045fac
+800457f4:  _sh v0,0x1aa(v1)
+800457f8:  lui v0,0x8006
+800457fc:  lw v0,-0x122c(v0)
+80045800:  nop
+80045804:  lhu v0,0x1ae(v0)
+80045808:  nop
+8004580c:  andi v0,v0,0x400
+80045810:  beq v0,zero,0x80045864
+80045814:  _clear v1
+80045818:  addiu v1,v1,0x1
+8004581c:  sltiu v0,v1,0xf01
+80045820:  bne v0,zero,0x80045844
+80045824:  _nop
+80045828:  lui a0,0x8001
+8004582c:  addiu a0,a0,0xb94
+80045830:  lui a1,0x8001
+80045834:  jal 0x80052604
+80045838:  _addiu a1,a1,0xbb4
+8004583c:  j 0x80045864
+80045840:  _nop
+80045844:  lui v0,0x8006
+80045848:  lw v0,-0x122c(v0)
+8004584c:  nop
+80045850:  lhu v0,0x1ae(v0)
+80045854:  nop
+80045858:  andi v0,v0,0x400
+8004585c:  bne v0,zero,0x8004581c
+80045860:  _addiu v1,v1,0x1

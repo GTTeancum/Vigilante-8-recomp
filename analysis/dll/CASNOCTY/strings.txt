@@ -1,0 +1,10 @@
+80100058	BurgerS_1
+80100064	palm1_1
+8010006c	Burger_sign_1
+80100088	manhole_1
+801000b4	blimp_1
+801000fc	SplashS_R
+80100108	water_1
+8010011c	PROB!
+80100124	pelicana_1
+80100130	saharan_1

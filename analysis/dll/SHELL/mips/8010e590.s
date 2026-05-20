@@ -1,0 +1,36 @@
+# addr: 0x8010e590  name: FUN_8010e590
+8010e590:  addiu sp,sp,-0x20
+8010e594:  sw s1,0x14(sp)
+8010e598:  move s1,a0
+8010e59c:  sw s0,0x10(sp)
+8010e5a0:  sw ra,0x18(sp)
+8010e5a4:  sltiu a0,zero,0x39ac
+8010e5a8:  move s0,a1
+8010e5ac:  lui v1,0x8011
+8010e5b0:  lw v1,0x24ec(v1)
+8010e5b4:  nop
+8010e5b8:  lw v0,0x0(v1)
+8010e5bc:  srl s0,s0,0x5
+8010e5c0:  ori v0,v0,0x88
+8010e5c4:  sw v0,0x0(v1)
+8010e5c8:  lui v0,0x8011
+8010e5cc:  lw v0,0x24c8(v0)
+8010e5d0:  sll s0,s0,0x10
+8010e5d4:  sw zero,0x0(v0)
+8010e5d8:  lui v0,0x8011
+8010e5dc:  lw v0,0x24c0(v0)
+8010e5e0:  ori s0,s0,0x20
+8010e5e4:  sw s1,0x0(v0)
+8010e5e8:  lui v0,0x8011
+8010e5ec:  lw v0,0x24c4(v0)
+8010e5f0:  lui v1,0x100
+8010e5f4:  sw s0,0x0(v0)
+8010e5f8:  lui v0,0x8011
+8010e5fc:  lw v0,0x24c8(v0)
+8010e600:  ori v1,v1,0x200
+8010e604:  sw v1,0x0(v0)
+8010e608:  lw ra,0x18(sp)
+8010e60c:  lw s1,0x14(sp)
+8010e610:  lw s0,0x10(sp)
+8010e614:  jr ra
+8010e618:  _addiu sp,sp,0x20

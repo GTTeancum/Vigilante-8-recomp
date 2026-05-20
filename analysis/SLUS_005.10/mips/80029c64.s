@@ -1,0 +1,21 @@
+# addr: 0x80029c64  name: FUN_80029c64
+80029c64:  lui a2,0x8009
+80029c68:  addiu a2,a2,0x1120
+80029c6c:  srl v0,a1,0x6
+80029c70:  sll v0,v0,0x2
+80029c74:  srl v1,a0,0x6
+80029c78:  sll v1,v1,0x7
+80029c7c:  addu v0,v0,v1
+80029c80:  addu v0,v0,a2
+80029c84:  lw v0,0x80(v0)
+80029c88:  andi a1,a1,0x3f
+80029c8c:  andi a0,a0,0x3f
+80029c90:  sll a0,a0,0x6
+80029c94:  addu a1,a1,a0
+80029c98:  addu v0,v0,a1
+80029c9c:  lbu v1,0x2000(v0)
+80029ca0:  lui v0,0x8009
+80029ca4:  addiu v0,v0,-0xfe0
+80029ca8:  sll v1,v1,0x5
+80029cac:  jr ra
+80029cb0:  _addu v0,v1,v0

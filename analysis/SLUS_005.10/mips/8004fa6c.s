@@ -1,0 +1,44 @@
+# addr: 0x8004fa6c  name: ClearOTagR
+8004fa6c:  lui v0,0x8006
+8004fa70:  lbu v0,0x5026(v0)
+8004fa74:  addiu sp,sp,-0x20
+8004fa78:  sw s0,0x10(sp)
+8004fa7c:  move s0,a0
+8004fa80:  sw s1,0x14(sp)
+8004fa84:  move s1,a1
+8004fa88:  sltiu v0,v0,0x2
+8004fa8c:  bne v0,zero,0x8004fab4
+8004fa90:  _sw ra,0x18(sp)
+8004fa94:  lui a0,0x8001
+8004fa98:  addiu a0,a0,0x12c8
+8004fa9c:  move a1,s0
+8004faa0:  lui v0,0x8006
+8004faa4:  lw v0,0x5020(v0)
+8004faa8:  nop
+8004faac:  jalr v0
+8004fab0:  _move a2,s1
+8004fab4:  lui v0,0x8006
+8004fab8:  lw v0,0x501c(v0)
+8004fabc:  move a0,s0
+8004fac0:  lw v0,0x2c(v0)
+8004fac4:  nop
+8004fac8:  jalr v0
+8004facc:  _move a1,s1
+8004fad0:  lui a2,0xff
+8004fad4:  ori a2,a2,0xffff
+8004fad8:  move v0,s0
+8004fadc:  lui a1,0x8006
+8004fae0:  addiu a1,a1,0x50e4
+8004fae4:  lui v1,0x8006
+8004fae8:  addiu v1,v1,0x50d0
+8004faec:  and v1,v1,a2
+8004faf0:  lui a0,0x400
+8004faf4:  or v1,v1,a0
+8004faf8:  sw v1,0x0(a1)
+8004fafc:  and a1,a1,a2
+8004fb00:  sw a1,0x0(v0)
+8004fb04:  lw ra,0x18(sp)
+8004fb08:  lw s1,0x14(sp)
+8004fb0c:  lw s0,0x10(sp)
+8004fb10:  jr ra
+8004fb14:  _addiu sp,sp,0x20

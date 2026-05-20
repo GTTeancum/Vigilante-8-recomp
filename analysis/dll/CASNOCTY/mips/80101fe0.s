@@ -1,0 +1,79 @@
+# addr: 0x80101fe0  name: FUN_80101fe0
+80101fe0:  addiu sp,sp,-0x20
+80101fe4:  sw s0,0x10(sp)
+80101fe8:  move s0,a0
+80101fec:  li v0,0x1
+80101ff0:  sw ra,0x18(sp)
+80101ff4:  beq a1,v0,0x801020d8
+80101ff8:  _sw s1,0x14(sp)
+80101ffc:  beq a1,zero,0x80102014
+80102000:  _li v0,0x2
+80102004:  beq a1,v0,0x80102060
+80102008:  _nop
+8010200c:  slti a0,zero,0x83c
+80102010:  nop
+80102014:  jal 0x800449bc
+80102018:  _addiu a0,s0,0x48
+8010201c:  beq v0,zero,0x80102038
+80102020:  _nop
+80102024:  lb a0,0x5(s0)
+80102028:  jal 0x80044574
+8010202c:  _move a1,v0
+80102030:  slti a0,zero,0x841
+80102034:  clear v0
+80102038:  jal 0x80020778
+8010203c:  _move a0,s0
+80102040:  move a0,s0
+80102044:  jal 0x80020890
+80102048:  _li a1,0x78
+8010204c:  lb a0,0x5(s0)
+80102050:  jal 0x800441c8
+80102054:  _nop
+80102058:  slti a0,zero,0x840
+8010205c:  sb zero,0x5(s0)
+80102060:  jal 0x800449bc
+80102064:  _addiu a0,s0,0x48
+80102068:  move s1,v0
+8010206c:  beq s1,zero,0x801020c4
+80102070:  _nop
+80102074:  lb v0,0x5(s0)
+80102078:  nop
+8010207c:  beq v0,zero,0x8010208c
+80102080:  _lui a0,0x8010
+80102084:  jal 0x80015368
+80102088:  _addiu a0,a0,0x11c
+8010208c:  jal 0x8004410c
+80102090:  _nop
+80102094:  lw v1,0x58(s0)
+80102098:  sb v0,0x5(s0)
+8010209c:  lw a1,0x8(v1)
+801020a0:  sll v0,v0,0x18
+801020a4:  sra a0,v0,0x18
+801020a8:  li a2,0x3
+801020ac:  jal 0x800443c8
+801020b0:  _move a3,s1
+801020b4:  jal 0x80020744
+801020b8:  _move a0,s0
+801020bc:  slti a0,zero,0x841
+801020c0:  clear v0
+801020c4:  move a0,s0
+801020c8:  jal 0x80020890
+801020cc:  _li a1,0x78
+801020d0:  slti a0,zero,0x841
+801020d4:  clear v0
+801020d8:  lbu a1,0x9(s0)
+801020dc:  move a0,s0
+801020e0:  jal 0x80020890
+801020e4:  _addiu a1,a1,0x78
+801020e8:  slti a0,zero,0x841
+801020ec:  clear v0
+801020f0:  jal 0x800223dc
+801020f4:  _move a0,s0
+801020f8:  slti a0,zero,0x841
+801020fc:  nop
+80102100:  clear v0
+80102104:  lw ra,0x18(sp)
+80102108:  lw s1,0x14(sp)
+8010210c:  lw s0,0x10(sp)
+80102110:  jr ra
+80102114:  _addiu sp,sp,0x20

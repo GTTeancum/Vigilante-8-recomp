@@ -1,0 +1,121 @@
+# addr: 0x80031454  name: FUN_80031454
+80031454:  addiu sp,sp,-0x38
+80031458:  sw s1,0x24(sp)
+8003145c:  move s1,a0
+80031460:  sw s2,0x28(sp)
+80031464:  move s2,a3
+80031468:  sw s3,0x2c(sp)
+8003146c:  move s3,a2
+80031470:  sw ra,0x30(sp)
+80031474:  beq a1,zero,0x800315c0
+80031478:  _sw s0,0x20(sp)
+8003147c:  lw a0,0x0(a1)
+80031480:  nop
+80031484:  lbu v1,0x4(a0)
+80031488:  li v0,0x3
+8003148c:  bne v1,v0,0x8003149c
+80031490:  _li v0,0x2
+80031494:  j 0x80031618
+80031498:  _clear v0
+8003149c:  bne v1,v0,0x800315c4
+800314a0:  _sll v0,s2,0x10
+800314a4:  lhu v0,0xc(s1)
+800314a8:  move s0,a0
+800314ac:  lhu v1,0xa2(s0)
+800314b0:  sll v0,v0,0xb
+800314b4:  div v0,v1
+800314b8:  mflo a1
+800314bc:  lw v0,0x88(s1)
+800314c0:  nop
+800314c4:  mult v0,a1
+800314c8:  lui v0,0xfff8
+800314cc:  mflo a0
+800314d0:  slt v0,a0,v0
+800314d4:  bne v0,zero,0x800314f8
+800314d8:  _addiu t0,sp,0x10
+800314dc:  lui v1,0x8
+800314e0:  move v0,v1
+800314e4:  slt v0,v0,a0
+800314e8:  bne v0,zero,0x800314fc
+800314ec:  _nop
+800314f0:  j 0x800314fc
+800314f4:  _move v1,a0
+800314f8:  lui v1,0xfff8
+800314fc:  sw v1,0x0(t0)
+80031500:  lw v0,0x8c(s1)
+80031504:  nop
+80031508:  mult v0,a1
+8003150c:  lui v0,0xfff8
+80031510:  mflo a0
+80031514:  slt v0,a0,v0
+80031518:  bne v0,zero,0x80031538
+8003151c:  _lui v1,0xfff8
+80031520:  lui v1,0x8
+80031524:  move v0,v1
+80031528:  slt v0,v0,a0
+8003152c:  bne v0,zero,0x80031538
+80031530:  _nop
+80031534:  move v1,a0
+80031538:  sw v1,0x4(t0)
+8003153c:  lw v0,0x90(s1)
+80031540:  nop
+80031544:  mult v0,a1
+80031548:  lui v0,0xfff8
+8003154c:  mflo v1
+80031550:  slt v0,v1,v0
+80031554:  bne v0,zero,0x80031578
+80031558:  _lui a3,0xfff8
+8003155c:  lui a3,0x8
+80031560:  move v0,a3
+80031564:  slt v0,v0,v1
+80031568:  bne v0,zero,0x8003157c
+8003156c:  _move a0,s0
+80031570:  j 0x8003157c
+80031574:  _move a3,v1
+80031578:  move a0,s0
+8003157c:  addiu a1,sp,0x10
+80031580:  addiu a2,s1,0x24
+80031584:  jal 0x800176f8
+80031588:  _sw a3,0x8(t0)
+8003158c:  lh a0,0x6(s0)
+80031590:  nop
+80031594:  bgez a0,0x800315ac
+80031598:  _nor a0,zero,a0
+8003159c:  li a1,0xff
+800315a0:  li a2,0x2
+800315a4:  jal 0x80012068
+800315a8:  _li a3,0x80
+800315ac:  lhu v0,0x11e(s0)
+800315b0:  nop
+800315b4:  beq v0,zero,0x800315c4
+800315b8:  _sll v0,s2,0x10
+800315bc:  li s2,-0x1
+800315c0:  sll v0,s2,0x10
+800315c4:  sra s0,v0,0x10
+800315c8:  bltz s0,0x800315ec
+800315cc:  _nop
+800315d0:  jal 0x8004410c
+800315d4:  _nop
+800315d8:  lw a1,0x5f8(gp)
+800315dc:  move a0,v0
+800315e0:  move a2,s0
+800315e4:  jal 0x8004483c
+800315e8:  _addiu a3,s1,0x24
+800315ec:  addiu a0,s1,0x24
+800315f0:  jal 0x8003fd24
+800315f4:  _andi a1,s3,0xffff
+800315f8:  lw v0,0x730(gp)
+800315fc:  move a0,s1
+80031600:  li a1,0x11
+80031604:  jalr v0
+80031608:  _clear a2
+8003160c:  jal 0x800205f8
+80031610:  _move a0,s1
+80031614:  li v0,-0x1
+80031618:  lw ra,0x30(sp)
+8003161c:  lw s3,0x2c(sp)
+80031620:  lw s2,0x28(sp)
+80031624:  lw s1,0x24(sp)
+80031628:  lw s0,0x20(sp)
+8003162c:  jr ra
+80031630:  _addiu sp,sp,0x38

@@ -1,0 +1,81 @@
+# addr: 0x80047204  name: S_SVA_OBJ_480
+80047204:  lui v0,0x8006
+80047208:  lw v0,-0x122c(v0)
+8004720c:  sll a0,s3,0x1
+80047210:  addu a0,a0,v0
+80047214:  lhu v0,0xa(a0)
+80047218:  nop
+8004721c:  andi v1,v0,0x3f
+80047220:  or v0,a1,a2
+80047224:  sll v0,v0,0x6
+80047228:  or v1,v1,v0
+8004722c:  sh v1,0xa(a0)
+80047230:  bne s2,zero,0x80047240
+80047234:  _andi v0,s1,0x4000
+80047238:  beq v0,zero,0x800472ac
+8004723c:  _nop
+80047240:  lhu a1,0x36(s0)
+80047244:  nop
+80047248:  sltiu v0,a1,0x20
+8004724c:  bne v0,zero,0x80047258
+80047250:  _nop
+80047254:  li a1,0x1f
+80047258:  bne s2,zero,0x8004726c
+8004725c:  _clear a2
+80047260:  andi v0,s1,0x400
+80047264:  beq v0,zero,0x80047288
+80047268:  _nop
+8004726c:  lw v1,0x2c(s0)
+80047270:  li v0,0x3
+80047274:  beq v1,v0,0x80047288
+80047278:  _li v0,0x7
+8004727c:  bne v1,v0,0x80047288
+80047280:  _nop
+80047284:  li a2,0x20
+80047288:  lui v0,0x8006
+8004728c:  lw v0,-0x122c(v0)
+80047290:  sll a0,s3,0x1
+80047294:  addu a0,a0,v0
+80047298:  lhu v0,0xa(a0)
+8004729c:  or v1,a1,a2
+800472a0:  andi v0,v0,0xffc0
+800472a4:  or v0,v0,v1
+800472a8:  sh v0,0xa(a0)
+800472ac:  bne s2,zero,0x800472bc
+800472b0:  _andi v0,s1,0x8000
+800472b4:  beq v0,zero,0x800472f8
+800472b8:  _nop
+800472bc:  lhu a1,0x38(s0)
+800472c0:  nop
+800472c4:  sltiu v0,a1,0x10
+800472c8:  bne v0,zero,0x800472d4
+800472cc:  _nop
+800472d0:  li a1,0xf
+800472d4:  lui v0,0x8006
+800472d8:  lw v0,-0x122c(v0)
+800472dc:  sll v1,s3,0x1
+800472e0:  addu v1,v1,v0
+800472e4:  lhu v0,0x8(v1)
+800472e8:  nop
+800472ec:  andi v0,v0,0xfff0
+800472f0:  or v0,v0,a1
+800472f4:  sh v0,0x8(v1)
+800472f8:  addiu s4,s4,0x1
+800472fc:  slti v0,s4,0x18
+80047300:  bne v0,zero,0x80046dbc
+80047304:  _addiu s5,s5,0x2
+80047308:  li v0,0x1
+8004730c:  sw v0,0x14(sp)
+80047310:  j 0x80047344
+80047314:  _sw zero,0x10(sp)
+80047318:  lw v1,0x14(sp)
+8004731c:  nop
+80047320:  sll v0,v1,0x1
+80047324:  addu v0,v0,v1
+80047328:  sll v0,v0,0x2
+8004732c:  addu v0,v0,v1
+80047330:  sw v0,0x14(sp)
+80047334:  lw v0,0x10(sp)
+80047338:  nop
+8004733c:  addiu v0,v0,0x1
+80047340:  sw v0,0x10(sp)

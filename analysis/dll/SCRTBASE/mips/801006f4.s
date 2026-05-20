@@ -1,0 +1,31 @@
+# addr: 0x801006f4  name: FUN_801006f4
+801006f4:  addiu sp,sp,-0x18
+801006f8:  sw s0,0x10(sp)
+801006fc:  move s0,a0
+80100700:  li v0,0x3
+80100704:  beq a1,v0,0x80100720
+80100708:  _sw ra,0x14(sp)
+8010070c:  li v0,0x8
+80100710:  beq a1,v0,0x80100734
+80100714:  _clear v0
+80100718:  slti a0,zero,0x1d7
+8010071c:  nop
+80100720:  move a0,s0
+80100724:  jal 0x8002239c
+80100728:  _move a1,a2
+8010072c:  slti a0,zero,0x1d0
+80100730:  nop
+80100734:  move a0,s0
+80100738:  jal 0x80022320
+8010073c:  _move a1,a2
+80100740:  bne v0,zero,0x80100750
+80100744:  _move a0,s0
+80100748:  slti a0,zero,0x1d7
+8010074c:  clear v0
+80100750:  sltiu a0,zero,0x189
+80100754:  ori a1,zero,0x8f80
+80100758:  li v0,-0x1
+8010075c:  lw ra,0x14(sp)
+80100760:  lw s0,0x10(sp)
+80100764:  jr ra
+80100768:  _addiu sp,sp,0x18

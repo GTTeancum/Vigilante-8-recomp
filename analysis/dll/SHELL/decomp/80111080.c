@@ -1,0 +1,24 @@
+// addr: 0x80111080  name: FUN_80111080
+
+void FUN_80111080(void)
+
+{
+  TestEvent/*0x800539d4*/(DAT_80113510);
+  TestEvent/*0x800539d4*/(DAT_80113514);
+  TestEvent/*0x800539d4*/(DAT_80113518);
+  TestEvent/*0x800539d4*/(DAT_8011351c);
+  TestEvent/*0x800539d4*/(DAT_80113520);
+  TestEvent/*0x800539d4*/(DAT_80113524);
+  TestEvent/*0x800539d4*/(DAT_80113528);
+  TestEvent/*0x800539d4*/(DAT_8011352c);
+  DAT_8011353c = 0;
+  DAT_80113538 = 0;
+  DAT_80113534 = 0;
+  DAT_80113530 = 0;
+  DAT_8011354c = 0;
+  DAT_80113548 = 0;
+  DAT_80113544 = 0;
+  DAT_80113540 = 0;
+  return;
+}
+

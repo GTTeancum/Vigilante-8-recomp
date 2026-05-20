@@ -1,0 +1,38 @@
+# addr: 0x8005532c  name: PADCMD_OBJ_698
+8005532c:  lbu v0,0xe9(a0)
+80055330:  nop
+80055334:  beq v0,zero,0x800553e4
+80055338:  _clear t0
+8005533c:  li t3,0xff
+80055340:  clear t2
+80055344:  lw a1,0x20(a0)
+80055348:  clear a3
+8005534c:  li v1,0x5
+80055350:  lbu v0,0x0(a1)
+80055354:  nop
+80055358:  bne v0,t0,0x80055364
+8005535c:  _addiu a1,a1,0x1
+80055360:  addiu a3,a3,0x1
+80055364:  addiu v1,v1,-0x1
+80055368:  bgez v1,0x80055350
+8005536c:  _nop
+80055370:  lw v0,0x4(a0)
+80055374:  nop
+80055378:  addu v0,t2,v0
+8005537c:  lbu t1,0x2(v0)
+80055380:  lw a1,0x20(a0)
+80055384:  bne t1,zero,0x80055390
+80055388:  _clear v1
+8005538c:  li t1,0x1
+80055390:  move a2,a0
+80055394:  lbu v0,0x0(a1)
+80055398:  nop
+8005539c:  bne v0,t0,0x800553c0
+800553a0:  _addiu a1,a1,0x1
+800553a4:  slt v0,a3,t1
+800553a8:  beq v0,zero,0x800553bc
+800553ac:  _nop
+800553b0:  sb t3,0x5d(a2)
+800553b4:  j 0x800553c0
+800553b8:  _addiu a3,a3,-0x1
+800553bc:  sb t0,0x5d(a2)

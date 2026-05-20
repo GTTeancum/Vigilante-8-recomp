@@ -1,0 +1,41 @@
+# addr: 0x80043408  name: FUN_80043408
+80043408:  lw t0,0x0(a0)
+8004340c:  lw t1,0x4(a0)
+80043410:  lw t2,0x8(a0)
+80043414:  lw t3,0xc(a0)
+80043418:  lw t4,0x10(a0)
+8004341c:  gte_ldR11R12 t0
+80043420:  gte_ldR13R21 t1
+80043424:  gte_ldR22R23 t2
+80043428:  gte_ldR31R32 t3
+8004342c:  gte_ldR33 t4
+80043430:  lw t0,0x0(a1)
+80043434:  lw t1,0x4(a1)
+80043438:  lw t2,0x8(a1)
+8004343c:  sra t3,t0,0xf
+80043440:  sra t4,t1,0xf
+80043444:  sra t5,t2,0xf
+80043448:  ldsv_ t3,t4,t5
+80043454:  andi t0,t0,0x7fff
+80043458:  andi t1,t1,0x7fff
+8004345c:  andi t2,t2,0x7fff
+80043460:  RTIR_SF0
+80043464:  lw t3,0x14(a0)
+80043468:  lw t4,0x18(a0)
+8004346c:  lw t5,0x1c(a0)
+80043470:  ldtr t3,t4,t5
+8004347c:  read_mt t3,t4,t5
+80043488:  ldsv_ t0,t1,t2
+80043494:  sll t3,t3,0x3
+80043498:  sll t4,t4,0x3
+8004349c:  RTIRTR
+800434a0:  sll t5,t5,0x3
+800434a4:  read_mt t0,t1,t2
+800434b0:  addu t0,t0,t3
+800434b4:  addu t1,t1,t4
+800434b8:  addu t2,t2,t5
+800434bc:  sw t0,0x0(a2)
+800434c0:  sw t1,0x4(a2)
+800434c4:  sw t2,0x8(a2)
+800434c8:  jr ra
+800434cc:  _move v0,a2

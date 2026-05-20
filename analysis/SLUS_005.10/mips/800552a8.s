@@ -1,0 +1,27 @@
+# addr: 0x800552a8  name: _padSetActAlign
+800552a8:  addiu sp,sp,-0x20
+800552ac:  sw s0,0x10(sp)
+800552b0:  move s0,a0
+800552b4:  sw s1,0x14(sp)
+800552b8:  lui v0,0x8006
+800552bc:  lw v0,0x5278(v0)
+800552c0:  sw ra,0x18(sp)
+800552c4:  jalr v0
+800552c8:  _move s1,a1
+800552cc:  bne v0,zero,0x800552fc
+800552d0:  _clear v0
+800552d4:  li v0,0x1
+800552d8:  li v1,0x1
+800552dc:  sb v1,0x46(s0)
+800552e0:  lui v1,0x8005
+800552e4:  addiu v1,v1,0x5310
+800552e8:  sw v1,0x14(s0)
+800552ec:  lui v1,0x8005
+800552f0:  addiu v1,v1,0x532c
+800552f4:  sw s1,0x20(s0)
+800552f8:  sw v1,0x18(s0)
+800552fc:  lw ra,0x18(sp)
+80055300:  lw s1,0x14(sp)
+80055304:  lw s0,0x10(sp)
+80055308:  jr ra
+8005530c:  _addiu sp,sp,0x20

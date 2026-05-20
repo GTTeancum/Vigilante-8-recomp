@@ -1,0 +1,33 @@
+# addr: 0x80050344  name: SetDrawArea
+80050344:  addiu sp,sp,-0x20
+80050348:  sw s1,0x14(sp)
+8005034c:  move s1,a0
+80050350:  sw s0,0x10(sp)
+80050354:  move s0,a1
+80050358:  li v0,0x2
+8005035c:  sw ra,0x18(sp)
+80050360:  sb v0,0x3(s1)
+80050364:  lh a0,0x0(s0)
+80050368:  lh a1,0x2(s0)
+8005036c:  jal 0x80050930
+80050370:  _nop
+80050374:  sw v0,0x4(s1)
+80050378:  lhu a0,0x0(s0)
+8005037c:  lhu v0,0x4(s0)
+80050380:  lhu a1,0x2(s0)
+80050384:  addu a0,a0,v0
+80050388:  addiu a0,a0,-0x1
+8005038c:  sll a0,a0,0x10
+80050390:  lhu v0,0x6(s0)
+80050394:  sra a0,a0,0x10
+80050398:  addu a1,a1,v0
+8005039c:  addiu a1,a1,-0x1
+800503a0:  sll a1,a1,0x10
+800503a4:  jal 0x800509c8
+800503a8:  _sra a1,a1,0x10
+800503ac:  sw v0,0x8(s1)
+800503b0:  lw ra,0x18(sp)
+800503b4:  lw s1,0x14(sp)
+800503b8:  lw s0,0x10(sp)
+800503bc:  jr ra
+800503c0:  _addiu sp,sp,0x20

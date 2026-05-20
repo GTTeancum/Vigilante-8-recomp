@@ -1,0 +1,60 @@
+# addr: 0x80054d34  name: _padRecvAtLoadInfo
+80054d34:  addiu sp,sp,-0x18
+80054d38:  sw s0,0x10(sp)
+80054d3c:  move s0,a0
+80054d40:  sw ra,0x14(sp)
+80054d44:  lbu v1,0x46(s0)
+80054d48:  li v0,0x3
+80054d4c:  beq v1,v0,0x80054dc0
+80054d50:  _slti v0,v1,0x4
+80054d54:  beq v0,zero,0x80054d6c
+80054d58:  _li v0,0x2
+80054d5c:  beq v1,v0,0x80054d80
+80054d60:  _li v0,0x1
+80054d64:  j 0x80054e70
+80054d68:  _nop
+80054d6c:  li v0,0x4
+80054d70:  beq v1,v0,0x80054de4
+80054d74:  _li v0,0x1
+80054d78:  j 0x80054e70
+80054d7c:  _nop
+80054d80:  lw v0,0x3c(s0)
+80054d84:  lw v1,0x3c(s0)
+80054d88:  lbu v0,0x3(v0)
+80054d8c:  nop
+80054d90:  sb v0,0xe3(s0)
+80054d94:  lbu v0,0x4(v1)
+80054d98:  lw v1,0x3c(s0)
+80054d9c:  sh zero,0xe6(s0)
+80054da0:  sb v0,0xe4(s0)
+80054da4:  lbu v0,0x5(v1)
+80054da8:  lw v1,0x3c(s0)
+80054dac:  sb v0,0xe9(s0)
+80054db0:  lbu v0,0x6(v1)
+80054db4:  sw zero,0xec(s0)
+80054db8:  j 0x80054e6c
+80054dbc:  _sb v0,0xea(s0)
+80054dc0:  lw v0,0x3c(s0)
+80054dc4:  nop
+80054dc8:  lbu v1,0x4(v0)
+80054dcc:  lbu v0,0x5(v0)
+80054dd0:  sb zero,0x47(s0)
+80054dd4:  sll v1,v1,0x8
+80054dd8:  addu v0,v0,v1
+80054ddc:  j 0x80054e6c
+80054de0:  _sh v0,0xe6(s0)
+80054de4:  lw a0,0xec(s0)
+80054de8:  lbu v0,0x47(s0)
+80054dec:  lw v1,0x3c(s0)
+80054df0:  addiu v0,v0,0x1
+80054df4:  lbu v1,0x4(v1)
+80054df8:  addiu a0,a0,0x8
+80054dfc:  sb v0,0x47(s0)
+80054e00:  addiu v1,v1,0x3
+80054e04:  andi v1,v1,0x1fc
+80054e08:  addu a0,a0,v1
+80054e0c:  lbu v1,0xea(s0)
+80054e10:  andi v0,v0,0xff
+80054e14:  sltu v0,v0,v1
+80054e18:  beq v0,zero,0x80054e28
+80054e1c:  _sw a0,0xec(s0)

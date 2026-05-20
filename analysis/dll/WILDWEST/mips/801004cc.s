@@ -1,0 +1,71 @@
+# addr: 0x801004cc  name: FUN_801004cc
+801004cc:  addiu sp,sp,-0x28
+801004d0:  sw s2,0x18(sp)
+801004d4:  move s2,a0
+801004d8:  sw s3,0x1c(sp)
+801004dc:  move s3,a1
+801004e0:  sw s4,0x20(sp)
+801004e4:  move s4,a2
+801004e8:  li v0,0x1
+801004ec:  sw ra,0x24(sp)
+801004f0:  sw s1,0x14(sp)
+801004f4:  beq s3,v0,0x80100510
+801004f8:  _sw s0,0x10(sp)
+801004fc:  li v0,0x3
+80100500:  beq s3,v0,0x80100594
+80100504:  _move a0,s2
+80100508:  slti a0,zero,0x16f
+8010050c:  move a1,s3
+80100510:  lui s0,0x8007
+80100514:  addiu s0,s0,0x37a0
+80100518:  lw a0,0x38(s0)
+8010051c:  li a1,0x26
+80100520:  li a2,0x80
+80100524:  jal 0x8001ac44
+80100528:  _li a3,0x8
+8010052c:  move s1,v0
+80100530:  li v0,0x3
+80100534:  jal 0x80017160
+80100538:  _sb v0,0x4(s1)
+8010053c:  lw v1,0x38(s0)
+80100540:  nop
+80100544:  lw v1,0x4(v1)
+80100548:  nop
+8010054c:  lw v1,0x0(v1)
+80100550:  nop
+80100554:  mult v0,v1
+80100558:  move a0,s2
+8010055c:  ori a1,zero,0x8000
+80100560:  mflo t0
+80100564:  sra v0,t0,0xf
+80100568:  jal 0x8001b038
+8010056c:  _sh v0,0x46(s1)
+80100570:  move a0,s2
+80100574:  move a1,v0
+80100578:  jal 0x8001b2fc
+8010057c:  _move a2,s1
+80100580:  lw v0,0x0(s2)
+80100584:  nop
+80100588:  ori v0,v0,0x4
+8010058c:  slti a0,zero,0x16d
+80100590:  sw v0,0x0(s2)
+80100594:  lw a0,0x0(s4)
+80100598:  nop
+8010059c:  lbu v1,0x4(a0)
+801005a0:  li v0,0x2
+801005a4:  bne v1,v0,0x801005b4
+801005a8:  _nop
+801005ac:  jal 0x8002c3ac
+801005b0:  _nop
+801005b4:  move a0,s2
+801005b8:  move a1,s3
+801005bc:  jal 0x800223dc
+801005c0:  _move a2,s4
+801005c4:  lw ra,0x24(sp)
+801005c8:  lw s4,0x20(sp)
+801005cc:  lw s3,0x1c(sp)
+801005d0:  lw s2,0x18(sp)
+801005d4:  lw s1,0x14(sp)
+801005d8:  lw s0,0x10(sp)
+801005dc:  jr ra
+801005e0:  _addiu sp,sp,0x28

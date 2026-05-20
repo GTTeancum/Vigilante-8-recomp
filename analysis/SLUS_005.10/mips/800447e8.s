@@ -1,0 +1,22 @@
+# addr: 0x800447e8  name: FUN_800447e8
+800447e8:  addiu sp,sp,-0x20
+800447ec:  sw s0,0x10(sp)
+800447f0:  move s0,a0
+800447f4:  sw s1,0x14(sp)
+800447f8:  move s1,a1
+800447fc:  sw s2,0x18(sp)
+80044800:  move s2,a2
+80044804:  sw ra,0x1c(sp)
+80044808:  jal 0x800446dc
+8004480c:  _move a0,a3
+80044810:  move a0,s0
+80044814:  move a1,s1
+80044818:  move a2,s2
+8004481c:  jal 0x800443c8
+80044820:  _move a3,v0
+80044824:  lw ra,0x1c(sp)
+80044828:  lw s2,0x18(sp)
+8004482c:  lw s1,0x14(sp)
+80044830:  lw s0,0x10(sp)
+80044834:  jr ra
+80044838:  _addiu sp,sp,0x20

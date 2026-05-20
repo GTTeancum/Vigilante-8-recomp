@@ -1,0 +1,26 @@
+# addr: 0x80016678  name: FUN_80016678
+80016678:  addiu sp,sp,-0x18
+8001667c:  sw s0,0x10(sp)
+80016680:  sw ra,0x14(sp)
+80016684:  jal 0x80017e0c
+80016688:  _move s0,a0
+8001668c:  jal 0x80011834
+80016690:  _nop
+80016694:  jal 0x80016024
+80016698:  _move a0,s0
+8001669c:  lui a0,0x8001
+800166a0:  sw v0,0x6bc(gp)
+800166a4:  jal 0x800480e4
+800166a8:  _addiu a0,a0,0x6364
+800166ac:  lw v1,0x6bc(gp)
+800166b0:  nop
+800166b4:  sw v0,0x5dd0(v1)
+800166b8:  lui v0,0x8007
+800166bc:  addiu v0,v0,-0xdf8
+800166c0:  li v1,0x1
+800166c4:  sb v1,0x74(v0)
+800166c8:  sb v1,0x18(v0)
+800166cc:  lw ra,0x14(sp)
+800166d0:  lw s0,0x10(sp)
+800166d4:  jr ra
+800166d8:  _addiu sp,sp,0x18

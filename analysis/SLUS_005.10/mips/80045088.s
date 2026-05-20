@@ -1,0 +1,44 @@
+# addr: 0x80045088  name: FUN_80045088
+80045088:  lui a1,0x8006
+8004508c:  lw a1,-0x12b4(a1)
+80045090:  j 0x800450b4
+80045094:  _addiu a0,a0,-0x8
+80045098:  bne t0,zero,0x800450b0
+8004509c:  _sltu t0,a1,a0
+800450a0:  bne t0,zero,0x800450d0
+800450a4:  _sltu t0,a0,a2
+800450a8:  bne t0,zero,0x800450d0
+800450ac:  _nop
+800450b0:  move a1,a2
+800450b4:  lw a2,0x0(a1)
+800450b8:  sltu at,a1,a0
+800450bc:  beq at,zero,0x80045098
+800450c0:  _sltu t0,a1,a2
+800450c4:  sltu at,a0,a2
+800450c8:  beq at,zero,0x80045098
+800450cc:  _nop
+800450d0:  lw v1,0x4(a0)
+800450d4:  nop
+800450d8:  sll t0,v1,0x3
+800450dc:  addu t0,t0,a0
+800450e0:  bne t0,a2,0x80045100
+800450e4:  _nop
+800450e8:  lw t0,0x4(a2)
+800450ec:  nop
+800450f0:  beq t0,zero,0x80045100
+800450f4:  _addu v1,v1,t0
+800450f8:  lw a2,0x0(a2)
+800450fc:  sw v1,0x4(a0)
+80045100:  lw t0,0x4(a1)
+80045104:  sw a2,0x0(a0)
+80045108:  sll t1,t0,0x3
+8004510c:  addu t1,t1,a1
+80045110:  bne t1,a0,0x80045124
+80045114:  _nop
+80045118:  addu v1,v1,t0
+8004511c:  sw v1,0x4(a1)
+80045120:  move a0,a2
+80045124:  lui at,0x8006
+80045128:  sw a1,-0x12b4(at)
+8004512c:  jr ra
+80045130:  _sw a0,0x0(a1)

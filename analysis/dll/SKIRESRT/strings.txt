@@ -1,0 +1,10 @@
+80100060	SnowFlake
+8010006c	SkiResrt
+801000c0	gondola_1
+801000f0	liftpole_1
+801000fc	liftstation_1
+8010010c	snow_mach_1
+8010013c	stairs_1
+80100154	Ball_1
+8010015c	Ball_2
+80100164	pine3_1

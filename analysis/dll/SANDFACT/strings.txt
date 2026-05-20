@@ -1,0 +1,6 @@
+80100038	SandFact
+8010008c	M2_elevator_1
+801000c4	M2_Conveyor
+801000d0	PROB!
+801000d8	factory_1
+801000e4	factory_door

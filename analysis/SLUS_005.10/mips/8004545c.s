@@ -1,0 +1,29 @@
+# addr: 0x8004545c  name: SpuStart
+8004545c:  lui v0,0x8006
+80045460:  lw v0,-0x123c(v0)
+80045464:  addiu sp,sp,-0x18
+80045468:  bne v0,zero,0x800454bc
+8004546c:  _sw ra,0x10(sp)
+80045470:  li v0,0x1
+80045474:  lui at,0x8006
+80045478:  jal 0x80053a24
+8004547c:  _sw v0,-0x123c(at)
+80045480:  lui a0,0x8004
+80045484:  jal 0x80046014
+80045488:  _addiu a0,a0,0x5914
+8004548c:  lui a0,0xf000
+80045490:  ori a0,a0,0x9
+80045494:  li a1,0x20
+80045498:  li a2,0x2000
+8004549c:  jal 0x800539c4
+800454a0:  _clear a3
+800454a4:  move a0,v0
+800454a8:  lui at,0x8006
+800454ac:  jal 0x800539e4
+800454b0:  _sw a0,-0x12a4(at)
+800454b4:  jal 0x80053a34
+800454b8:  _nop
+800454bc:  lw ra,0x10(sp)
+800454c0:  addiu sp,sp,0x18
+800454c4:  jr ra
+800454c8:  _nop

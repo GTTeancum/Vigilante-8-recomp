@@ -1,0 +1,26 @@
+# addr: 0x8004f080  name: LoadClut2
+8004f080:  addiu sp,sp,-0x28
+8004f084:  move v0,a0
+8004f088:  sw s0,0x18(sp)
+8004f08c:  move s0,a1
+8004f090:  sw s1,0x1c(sp)
+8004f094:  move s1,a2
+8004f098:  addiu a0,sp,0x10
+8004f09c:  move a1,v0
+8004f0a0:  li v0,0x10
+8004f0a4:  sh v0,0x14(sp)
+8004f0a8:  li v0,0x1
+8004f0ac:  sw ra,0x20(sp)
+8004f0b0:  sh s0,0x10(sp)
+8004f0b4:  sh s1,0x12(sp)
+8004f0b8:  jal 0x8004f82c
+8004f0bc:  _sh v0,0x16(sp)
+8004f0c0:  move a0,s0
+8004f0c4:  jal 0x80052254
+8004f0c8:  _move a1,s1
+8004f0cc:  andi v0,v0,0xffff
+8004f0d0:  lw ra,0x20(sp)
+8004f0d4:  lw s1,0x1c(sp)
+8004f0d8:  lw s0,0x18(sp)
+8004f0dc:  jr ra
+8004f0e0:  _addiu sp,sp,0x28

@@ -1,0 +1,20 @@
+# addr: 0x80048834  name: startIntrDMA
+80048834:  addiu sp,sp,-0x18
+80048838:  lui a0,0x8006
+8004883c:  addiu a0,a0,-0x38
+80048840:  sw ra,0x10(sp)
+80048844:  jal 0x80048aac
+80048848:  _li a1,0x8
+8004884c:  li a0,0x3
+80048850:  lui v0,0x8006
+80048854:  lw v0,-0x3c(v0)
+80048858:  lui a1,0x8005
+8004885c:  addiu a1,a1,-0x7780
+80048860:  jal 0x80048084
+80048864:  _sw zero,0x0(v0)
+80048868:  lui v0,0x8005
+8004886c:  addiu v0,v0,-0x7600
+80048870:  lw ra,0x10(sp)
+80048874:  addiu sp,sp,0x18
+80048878:  jr ra
+8004887c:  _nop

@@ -1,0 +1,44 @@
+# addr: 0x800128d4  name: FUN_800128d4
+800128d4:  addiu sp,sp,-0x18
+800128d8:  lui a0,0x8006
+800128dc:  sw ra,0x10(sp)
+800128e0:  jal 0x80015f80
+800128e4:  _addiu a0,a0,0x5474
+800128e8:  move v1,v0
+800128ec:  lw v0,0x0(v1)
+800128f0:  addiu t0,v1,0x4
+800128f4:  sw v1,0x608(gp)
+800128f8:  blez v0,0x80012970
+800128fc:  _clear t1
+80012900:  move a2,v1
+80012904:  addiu a3,a2,0x8
+80012908:  lw v0,0x0(a3)
+8001290c:  nop
+80012910:  addu v0,v0,a2
+80012914:  sw v0,0x0(a3)
+80012918:  lw v1,0x0(t0)
+8001291c:  nop
+80012920:  blez v1,0x80012958
+80012924:  _clear a1
+80012928:  addiu a0,v0,0x8
+8001292c:  lw v0,0x4(a0)
+80012930:  lw v1,0x0(a0)
+80012934:  addu v0,v0,a2
+80012938:  addu v1,v1,a2
+8001293c:  sw v0,0x4(a0)
+80012940:  sw v1,0x0(a0)
+80012944:  lw v0,0x0(t0)
+80012948:  addiu a1,a1,0x1
+8001294c:  slt v0,a1,v0
+80012950:  bne v0,zero,0x8001292c
+80012954:  _addiu a0,a0,0x10
+80012958:  lw v0,0x0(a2)
+8001295c:  addiu t1,t1,0x1
+80012960:  addiu a3,a3,0x8
+80012964:  slt v0,t1,v0
+80012968:  bne v0,zero,0x80012908
+8001296c:  _addiu t0,t0,0x8
+80012970:  lw ra,0x10(sp)
+80012974:  nop
+80012978:  jr ra
+8001297c:  _addiu sp,sp,0x18

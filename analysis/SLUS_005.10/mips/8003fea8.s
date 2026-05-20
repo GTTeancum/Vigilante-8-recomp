@@ -1,0 +1,33 @@
+# addr: 0x8003fea8  name: FUN_8003fea8
+8003fea8:  lw v0,0x10(gp)
+8003feac:  addiu sp,sp,-0x20
+8003feb0:  sw s1,0x14(sp)
+8003feb4:  move s1,a1
+8003feb8:  sw ra,0x18(sp)
+8003febc:  bne v0,zero,0x8003ff10
+8003fec0:  _sw s0,0x10(sp)
+8003fec4:  jal 0x8001db54
+8003fec8:  _clear a1
+8003fecc:  beq v0,zero,0x8003ff10
+8003fed0:  _nop
+8003fed4:  jal 0x8001d470
+8003fed8:  _li a0,0x80
+8003fedc:  move s0,v0
+8003fee0:  move a0,s0
+8003fee4:  li v0,0xa0
+8003fee8:  sw v0,0x0(s0)
+8003feec:  li v0,0x80
+8003fef0:  sw v0,0x2c(s0)
+8003fef4:  lui v0,0x8004
+8003fef8:  addiu v0,v0,-0x1178
+8003fefc:  sw s1,0x24(s0)
+8003ff00:  jal 0x800202f4
+8003ff04:  _sw v0,0x64(s0)
+8003ff08:  j 0x8003ff14
+8003ff0c:  _move v0,s0
+8003ff10:  clear v0
+8003ff14:  lw ra,0x18(sp)
+8003ff18:  lw s1,0x14(sp)
+8003ff1c:  lw s0,0x10(sp)
+8003ff20:  jr ra
+8003ff24:  _addiu sp,sp,0x20

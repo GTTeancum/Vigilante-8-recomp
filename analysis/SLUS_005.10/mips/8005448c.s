@@ -1,0 +1,18 @@
+# addr: 0x8005448c  name: FUN_8005448c
+8005448c:  addiu sp,sp,-0x18
+80054490:  sw ra,0x10(sp)
+80054494:  jal 0x80053a24
+80054498:  _nop
+8005449c:  li a0,0x3
+800544a0:  jal 0x80053a64
+800544a4:  _li a1,0x1
+800544a8:  lui a1,0x800a
+800544ac:  addiu a1,a1,0x4c68
+800544b0:  jal 0x80054c84
+800544b4:  _li a0,0x2
+800544b8:  jal 0x80053a34
+800544bc:  _nop
+800544c0:  lw ra,0x10(sp)
+800544c4:  addiu sp,sp,0x18
+800544c8:  jr ra
+800544cc:  _nop

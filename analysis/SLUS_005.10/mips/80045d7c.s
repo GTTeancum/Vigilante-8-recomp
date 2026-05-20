@@ -1,0 +1,26 @@
+# addr: 0x80045d7c  name: _spu_Fr
+80045d7c:  addiu sp,sp,-0x20
+80045d80:  sw s1,0x14(sp)
+80045d84:  move s1,a0
+80045d88:  sw s0,0x10(sp)
+80045d8c:  move s0,a1
+80045d90:  lui v0,0x8006
+80045d94:  lhu v0,-0x1214(v0)
+80045d98:  lui a1,0x8006
+80045d9c:  lw a1,-0x1204(a1)
+80045da0:  li a0,0x2
+80045da4:  sw ra,0x18(sp)
+80045da8:  jal 0x80045a78
+80045dac:  _sllv a1,v0,a1
+80045db0:  jal 0x80045a78
+80045db4:  _clear a0
+80045db8:  li a0,0x3
+80045dbc:  move a1,s1
+80045dc0:  jal 0x80045a78
+80045dc4:  _move a2,s0
+80045dc8:  move v0,s0
+80045dcc:  lw ra,0x18(sp)
+80045dd0:  lw s1,0x14(sp)
+80045dd4:  lw s0,0x10(sp)
+80045dd8:  jr ra
+80045ddc:  _addiu sp,sp,0x20
