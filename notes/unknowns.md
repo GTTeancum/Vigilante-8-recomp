@@ -109,24 +109,31 @@ Ghidra exposes GTE coprocessor instructions as pseudo-functions at
 0x2000xxxx VAs. Stripped from the in-scope queue; declared in
 `include/gte.h`.
 
-## DAT_80060db4 — naming offset, not table base (added 2026-05-20)
+## ~~DAT_80060db4 — naming offset, not table base~~ (RESOLVED 2026-05-20)
 
-PSY-Q's interleaved (sin, cos) LUT lives at **`0x800607b4`** in
-SLUS_005.10 (4096 entries × 2 i16). Ghidra named the highest-referenced
-spot `DAT_80060db4`, which is `+0x600` (entry 384) into the table, not
-the base.
+**Outcome:** Ghidra's `DAT_80060db4` symbol was a hex
+mis-interpretation of the signed-i32 literal `-0x7ff9f84c`, which is
+actually the unsigned address `0x800607b4` -- the correct PSY-Q
+(sin, cos) LUT base. Verified in
+`analysis/dll/CANYNLND/mips/80100940.s` @0x80100a60-0x80100a64:
 
-Cleaned files that declare `extern int16_t DAT_80060db4[]` and index
-into it:
-- `src/physics/canynlnd/spawner.c`
-- `src/physics/casnocty/spawner.c`
-- `src/physics/casnocty/manhole_tick.c`
+```
+lui   v1, 0x8006
+addiu v1, v1, 0x7b4    ; v1 = 0x800607b4  (NOT 0x80060db4)
+andi  v0, s2, 0xfff    ; aimIdx & 0xfff
+sll   v0, v0, 0x2      ; *4 bytes per (i16, i16) pair
+addu  a0, v0, v1
+lh    v1, 0x0(a0)      ; sin = base[aimIdx*2 + 0]
+```
 
-Their access pattern is `DAT_80060db4[aimIdx * 2 + 0]` with
-`aimIdx ∈ [0, 4095]`, which overruns the table by 768 entries when
-treated literally. Audit pending: either retarget those references to
-`&g_v8_sincostbl[768]` (the +0x600-into-base alias) and accept the
-33.75° phase bias is intentional, OR re-read the original MIPS to
-confirm the stride/base. Not on the per-tick vehicle integrator path;
-the bit-exact rsin/rcos path via `g_v8_sincostbl` is independent and
-verified against the EXE byte-for-byte at boot.
+The cleaned C access pattern `DAT_80060db4[aimIdx*2+0]` was bit-exact
+against the MIPS the whole time, *iff* the symbol resolves to the
+table base.  The earlier "+0x600 phase bias" hypothesis was wrong; the
++0x600 offset was a coincidence between Ghidra's hex typo (`db4` vs
+`7b4`) and an unrelated array stride.
+
+**Fix landed:** the 3 cleaned files (`canynlnd/spawner.c`,
+`casnocty/spawner.c`, `casnocty/manhole_tick.c`) now reference
+`g_v8_sincostbl` directly with the same index math.  No phase bias,
+no OOB.  No-op at runtime (those launchers don't fire during the
+current smoke), but correct from the next time they do.

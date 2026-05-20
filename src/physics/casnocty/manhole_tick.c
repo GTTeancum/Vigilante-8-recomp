@@ -20,7 +20,9 @@
 extern uint32_t V8_RandNext(void);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int size, int flags);
 extern void Object_BumpSubstate_Or_FX(int obj);  /* FUN_8001d4f0 */
-extern int16_t DAT_80060db4[];                    /* PSY-Q rsin/rcos pair table */
+/* PSY-Q (sin, cos) interleaved LUT @ 0x800607b4 -- see canynlnd/spawner.c
+ * for the Ghidra-DAT-misnaming note. */
+extern const int16_t g_v8_sincostbl[8192];
 extern uint32_t _DAT_800737d8;
 
 static uint32_t scale_4_12_signed(int32_t v, int32_t factor)
@@ -45,8 +47,8 @@ uint32_t CC_ManholeTick(int obj, uint32_t mode, int *impulse)
             uint32_t r0 = V8_RandNext();
             uint32_t aimIdx = (r0 & 0xfff);
             p[0] |= 0x410u;
-            int16_t sin = DAT_80060db4[aimIdx * 2 + 0];
-            int16_t cos = DAT_80060db4[aimIdx * 2 + 1];
+            int16_t sin = g_v8_sincostbl[aimIdx * 2 + 0];
+            int16_t cos = g_v8_sincostbl[aimIdx * 2 + 1];
             p[0x22] = scale_4_12_signed(*(int32_t *)(obj + 0x84), sin);
             p[0x24] = scale_4_12_signed(*(int32_t *)(obj + 0x84), cos);
             uint32_t r1 = V8_RandNext();

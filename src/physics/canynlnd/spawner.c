@@ -33,7 +33,14 @@ extern uint32_t V8_RandNext(void);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int flags);  /* FUN_8001ac44 */
 extern void  Object_RandomizeRotation(uint32_t *obj);   /* FUN_8001dc1c */
 extern uint32_t FUN_80100244;                            /* per-tick callback */
-extern int16_t DAT_80060db4[];                            /* PSY-Q rsin/rcos table */
+/* PSY-Q (sin, cos) interleaved LUT at SLUS:0x800607b4 -- 4096 i16 pairs.
+ * Ghidra's pseudo-C named this "DAT_80060db4" (a hex misinterpretation
+ * of the signed-i32 form -0x7ff9f84c, which is the real address
+ * 0x800607b4). The MIPS at FUN_80100940 @0x80100a60-0x80100a64 loads
+ * `lui 0x8006; addiu 0x7b4` = 0x800607b4 = table BASE, then indexes
+ * `lh @ base + (aimIdx & 0xfff)*4`, i.e. sin = base[aimIdx*2+0],
+ * cos = base[aimIdx*2+1]. */
+extern const int16_t g_v8_sincostbl[8192];
 
 static uint32_t scale_4_12(int32_t v, int32_t factor)
 {
@@ -74,8 +81,8 @@ uint32_t CL_Launcher(uint32_t *parent, uint32_t mode, uint32_t *impulse)
 
     /* Aim cone: angle = parentHeading + random[-128..127], wrap 0..0xfff. */
     int aimIdx = (((int)parentHeading + (((int)rand0 << 8) >> 15)) - 0x80) & 0xfff;
-    int16_t sin = DAT_80060db4[aimIdx * 2 + 0];
-    int16_t cos = DAT_80060db4[aimIdx * 2 + 1];
+    int16_t sin = g_v8_sincostbl[aimIdx * 2 + 0];
+    int16_t cos = g_v8_sincostbl[aimIdx * 2 + 1];
     child[0x20] = scale_4_12(sin, 0xbeb);
     child[0x22] = scale_4_12(cos, 0xbeb);
 

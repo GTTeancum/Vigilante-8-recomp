@@ -553,6 +553,7 @@ extern const int16_t g_v8_sincostbl[8192];   /* platform/psyq/sintbl.c */
 int rsin(int a) { return g_v8_sincostbl[((a) & 0xfff) * 2 + 0]; }
 int rcos(int a) { return g_v8_sincostbl[((a) & 0xfff) * 2 + 1]; }
 
+
 /* PSY-Q ratan2: q12 angle in [0, 4096) corresponding to atan2(y, x).
  * Pass-3 audit target: PSY-Q's ratan2 uses a piecewise polynomial +
  * the same sin LUT; the host's atan2 will differ by up to a few LSB.

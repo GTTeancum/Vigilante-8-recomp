@@ -25,7 +25,9 @@
 
 extern uint32_t V8_RandNext(void);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int flags);
-extern int16_t  DAT_80060db4[];                /* PSY-Q rsin/rcos pair table */
+/* PSY-Q (sin, cos) interleaved LUT @ 0x800607b4 -- see canynlnd/spawner.c
+ * for the Ghidra-DAT-misnaming note. */
+extern const int16_t g_v8_sincostbl[8192];
 extern uint8_t *Matrix_ComposeParentChain(int obj);   /* FUN_8001d624 */
 extern void     Object_RegisterInScene(uint32_t *obj);
 
@@ -50,8 +52,8 @@ uint32_t CC_RandomFire(int obj, int mode)
     uint32_t aimIdx = V8_RandNext() & 0xfff;
     child[0] |= 0x4b4u;
 
-    int16_t sin = DAT_80060db4[aimIdx * 2 + 0];
-    int16_t cos = DAT_80060db4[aimIdx * 2 + 1];
+    int16_t sin = g_v8_sincostbl[aimIdx * 2 + 0];
+    int16_t cos = g_v8_sincostbl[aimIdx * 2 + 1];
     child[0x22] = scale_4_12_signed(*(int32_t *)(obj + 0x84), sin);
     child[0x24] = scale_4_12_signed(*(int32_t *)(obj + 0x84), cos);
 
