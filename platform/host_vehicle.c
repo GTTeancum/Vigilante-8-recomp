@@ -2,17 +2,14 @@
  * with the engine's world-object linked list.
  *
  * Physics_Step (FUN_8002131c) walks the list at piRam0000075c and
- * calls each entry's +0x64 callback. We populate the list with a
- * single Vehicle whose tick reads pad bits -> ang/lin velocity, then
- * delegates to the cleaned engine integrator Object_IntegrateAndOrient.
+ * calls each entry's +0x64 callback.  We populate the list with a
+ * single Vehicle whose tick is the engine's universal Object_GeneralTick
+ * (FUN_80030c08): terrain probe + spring/drag + the cleaned bit-exact
+ * Object_IntegrateAndOrient + post-integrate damping.
  *
- * The vehicle's per-frame "drive" logic here (pad -> velocity) is a
- * thin host shim that stands in for the engine's real vehicle tick
- * (which involves suspension, terrain following, traction model, AI
- * integration). The PHYSICS (matrix orientation, position integration,
- * matrix normalization) is the engine's Object_IntegrateAndOrient
- * running on real engine data. Replace this shim with the engine's
- * actual vehicle tick when that decomp completes.
+ * The host's only job per tick is to translate pad bits into the
+ * per-tick input fields the engine reads from the object struct.
+ * Everything past that is the engine's own math.
  */
 #include <stdio.h>
 #include <stdint.h>
@@ -25,19 +22,11 @@ extern void *Heap_Alloc(uint32_t n);
 extern void    *puRam000007d0;            /* player vehicle pointer */
 extern uint32_t uRam0000062c;             /* P1 pad bits */
 
-/* Engine integrator (cleaned, src/physics/object_integrate.c). */
-extern void Object_IntegrateAndOrient(uint8_t *obj);
-
-/* Bit-exact length helper (src/physics/vec_math64.c). Referenced here
- * so the linker pulls the object into v8core.lib (currently the
- * only other call site is in unreferenced launcher code). */
-extern int32_t Vec3_Length(const int32_t *v);
-
-/* Generic engine tick (src/physics/object_general_tick.c).  Opt-in via
- * --psx-physics so we can A/B against the host shim. */
+/* Engine's universal per-tick step (src/physics/object_general_tick.c).
+ * The bit-exact PSX physics chain (terrain probe via Vec3_Length-aware
+ * Terrain_HeightAndProbe -> spring/drag -> Object_IntegrateAndOrient
+ * -> MatrixNormal -> post-integrate damping) runs inside this. */
 extern void Object_GeneralTick(uint32_t *obj);
-
-int g_v8_use_general_tick = 0;
 
 /* The Vehicle struct is allocated in the engine heap (low memory).
  *
@@ -46,89 +35,37 @@ int g_v8_use_general_tick = 0;
  * physics_shim.c invokes puRam000007d0's tick directly. */
 static uint8_t *g_vehicle = NULL;
 
-/* Vehicle tick callback. Receives (self, mode, catchupFlag). The
- * engine calls with mode==0 per frame. We read pad input, compute
- * angular + linear velocity, then run the engine's integrator. */
+/* Vehicle tick callback.  Receives (self, mode, catchupFlag); the
+ * engine calls with mode==0 per frame.  Writes the per-tick input
+ * fields the engine consumes, then delegates to Object_GeneralTick. */
 static void vehicle_tick(uint8_t *self, int mode, int catchupFlag)
 {
     (void)catchupFlag;
     if (mode != 0) return;
 
-    /* --- PSX-physics path: write the per-tick input fields the engine's
-     * Object_GeneralTick consumes, then let it run the FULL bit-exact
-     * physics chain (terrain probe + Vec3_Length + spring/drag +
-     * Object_IntegrateAndOrient + post-integrate damping).  Opt-in via
-     * --psx-physics; default keeps the legacy shim below. */
-    if (g_v8_use_general_tick) {
-        /* Long-axis thrust (forward/back) -> +0x20 paired with +0xa6 (input mul). */
-        int16_t longThrust = 0;
-        if (uRam0000062c & 0x10000000) longThrust = +0x40;
-        if (uRam0000062c & 0x40000000) longThrust = -0x40;
-        *(int16_t *)(self + 0x20) = longThrust;
-        *(int16_t *)(self + 0xa6) = 0x800;     /* thrust multiplier */
+    /* Long-axis thrust (forward/back) -> +0x20, scaled by +0xa6. */
+    int16_t longThrust = 0;
+    if (uRam0000062c & 0x10000000) longThrust = +0x40;
+    if (uRam0000062c & 0x40000000) longThrust = -0x40;
+    *(int16_t *)(self + 0x20) = longThrust;
+    *(int16_t *)(self + 0xa6) = 0x800;
 
-        /* Steering: +0x16 sign-flag (z-yaw nudge), +0xa4 -> ang_y. */
-        if (uRam0000062c & 0x80000000) {
-            *(int16_t *)(self + 0x16) = -1;    /* < 0 -> +0x200 ang_z each frame */
-            *(int16_t *)(self + 0xa4) = -0x80; /* (-0x80 << 6) = ang_y left */
-        } else if (uRam0000062c & 0x20000000) {
-            *(int16_t *)(self + 0x16) = +1;
-            *(int16_t *)(self + 0xa4) = +0x80;
-        } else {
-            *(int16_t *)(self + 0x16) = 0;
-            *(int16_t *)(self + 0xa4) = 0;
-        }
-        *(int16_t *)(self + 0x1a) = 1;         /* zero pitch trim */
-        *(int32_t *)(self + 0xd8) = 0;         /* no drag mass (else gravity term blows up) */
-
-        Object_GeneralTick((uint32_t *)self);
-        return;
+    /* Steering: +0x16 sign-flag drives the per-tick ang_z nudge,
+     * +0xa4 << 6 becomes the pre-baked ang_y. */
+    if (uRam0000062c & 0x80000000) {
+        *(int16_t *)(self + 0x16) = -1;
+        *(int16_t *)(self + 0xa4) = -0x80;
+    } else if (uRam0000062c & 0x20000000) {
+        *(int16_t *)(self + 0x16) = +1;
+        *(int16_t *)(self + 0xa4) = +0x80;
+    } else {
+        *(int16_t *)(self + 0x16) = 0;
+        *(int16_t *)(self + 0xa4) = 0;
     }
+    *(int16_t *)(self + 0x1a) = 1;    /* zero pitch trim */
+    *(int32_t *)(self + 0xd8) = 0;    /* drag-mass coefficient */
 
-    /* --- Drive shim: pad bits -> Vehicle velocity & ang-velocity --- */
-    int32_t pitchRate = 0;
-    int32_t yawRate   = 0;
-    int32_t rollRate  = 0;
-    int32_t fwdAccel  = 0;
-    int32_t fwdBrake  = 0;
-
-    if (uRam0000062c & 0x10000000) fwdAccel = 0x40000;  /* Up    -> forward accel */
-    if (uRam0000062c & 0x40000000) fwdBrake = 0x40000;  /* Down  -> reverse accel */
-    if (uRam0000062c & 0x80000000) yawRate  = -0x4000;  /* Left  -> yaw negative */
-    if (uRam0000062c & 0x20000000) yawRate  =  0x4000;  /* Right -> yaw positive */
-
-    *(int32_t *)(self + 0x90) = pitchRate;
-    *(int32_t *)(self + 0x94) = yawRate;
-    *(int32_t *)(self + 0x98) = rollRate;
-
-    /* Forward-direction acceleration: use rotation matrix col 3 (Z forward).
-     * MATRIX layout per gte.h: 3x3 i16 rotation + i16 pad + 3 i32 translation.
-     * Element layout (packed):
-     *   u32[0] = R11 | R12
-     *   u32[1] = R13 | R21
-     *   u32[2] = R22 | R23
-     *   u32[3] = R31 | R32
-     *   u32[4] = R33 | <pad>
-     * Forward (local +Z) maps to world (R13, R23, R33). Each is i16 q12. */
-    uint32_t *m = (uint32_t *)(self + 0x10);
-    int16_t r13 = (int16_t)(m[1] & 0xffff);          /* low half of u32[1] */
-    int16_t r23 = (int16_t)(m[2] & 0xffff);          /* low half of u32[2] */
-    int16_t r33 = (int16_t)(m[4] & 0xffff);          /* low half of u32[4] */
-
-    int32_t signedAccel = fwdAccel - fwdBrake;
-    if (signedAccel != 0) {
-        /* vel += accel * forward_dir / 0x1000  (q12 scaled) */
-        *(int32_t *)(self + 0x80) += (signedAccel * r13) >> 12;
-        *(int32_t *)(self + 0x84) += (signedAccel * r23) >> 12;
-        *(int32_t *)(self + 0x88) += (signedAccel * r33) >> 12;
-    }
-    /* Drag: shrink velocity by ~3% per tick so the vehicle doesn't drift forever. */
-    *(int32_t *)(self + 0x80) -= *(int32_t *)(self + 0x80) >> 5;
-    *(int32_t *)(self + 0x84) -= *(int32_t *)(self + 0x84) >> 5;
-    *(int32_t *)(self + 0x88) -= *(int32_t *)(self + 0x88) >> 5;
-
-    /* --- Real engine integrator --- */
-    Object_IntegrateAndOrient(self);
+    Object_GeneralTick((uint32_t *)self);
 }
 
 void Host_VehicleInit(void)
@@ -159,15 +96,13 @@ void Host_VehicleInit(void)
     /* Spawn inside OilField's populated tile range (chunks cx=18-19,
      * cz=13-15). Pick the centre of chunk (18,14), cell (32,32):
      *   global cell x = 18*64 + 32 = 1184  -> world x = 1184 << 16 = 0x4a00000
-     *   global cell z = 14*64 + 32 =  928  -> world z =  928 << 16 = 0x3a00000
-     * Y starts high; gravity/terrain follow not wired yet, so use the
-     * cleaned Terrain_HeightAt to seed +0x28 a few metres above ground. */
+     *   global cell z = 14*64 + 32 =  928  -> world z =  928 << 16 = 0x3a00000 */
     extern int32_t Terrain_HeightAt(uint32_t x, uint32_t z);
     int32_t spawn_x = 0x4a00000;
     int32_t spawn_z = 0x3a00000;
     int32_t ground_y = Terrain_HeightAt((uint32_t)spawn_x, (uint32_t)spawn_z);
     *(int32_t *)(g_vehicle + 0x24) = spawn_x;
-    *(int32_t *)(g_vehicle + 0x28) = ground_y + 0x40000;  /* a couple of metres above ground */
+    *(int32_t *)(g_vehicle + 0x28) = ground_y + 0x40000;
     *(int32_t *)(g_vehicle + 0x2c) = spawn_z;
 
     /* Health field (used by damage path; not relevant for driving). */
@@ -181,11 +116,6 @@ void Host_VehicleInit(void)
      * via this pointer directly. */
     puRam000007d0 = g_vehicle;
 
-    /* Force-pull vec_math64.obj into the link.  The call is intentional:
-     * it lets us log spawn-time speed (0 here, since we don't seed
-     * velocity) and exercises the bit-exact integer-sqrt path early. */
-    int32_t initSpeed = Vec3_Length((const int32_t *)(g_vehicle + 0x80));
-
-    fprintf(stderr, "v8: host_vehicle initialized at %p (size 0x200, initSpeed=%d)\n",
-            (void *)g_vehicle, initSpeed);
+    fprintf(stderr, "v8: host_vehicle initialized at %p (size 0x200)\n",
+            (void *)g_vehicle);
 }
