@@ -22,11 +22,12 @@ extern void *Heap_Alloc(uint32_t n);
 extern void    *puRam000007d0;            /* player vehicle pointer */
 extern uint32_t uRam0000062c;             /* P1 pad bits */
 
-/* Engine's universal per-tick step (src/physics/object_general_tick.c).
- * The bit-exact PSX physics chain (terrain probe via Vec3_Length-aware
- * Terrain_HeightAndProbe -> spring/drag -> Object_IntegrateAndOrient
- * -> MatrixNormal -> post-integrate damping) runs inside this. */
-extern void Object_GeneralTick(uint32_t *obj);
+/* The engine's per-frame "rolling vehicle" tick.  src/gameplay/
+ * vehicle_rolling_tick.c.  Internally calls Object_GeneralTick (the
+ * integrator) on every frame, plus damaged-state material/audio
+ * machinery when obj+6 < 0.  This is the function the engine itself
+ * installs at obj+0x64 when the vehicle enters state 12 (rolling). */
+extern int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3);
 
 /* The Vehicle struct is allocated in the engine heap (low memory).
  *
@@ -69,15 +70,17 @@ static void vehicle_tick(uint8_t *self, int mode, int catchupFlag)
         *(int16_t *)(self + 0xa4) = 0;
     }
     *(int16_t *)(self + 0x1a) = 1;
-    /* dragMass (+0xd8): the engine computes this as -*(int*)(obj+0x4c)
-     * in FUN_8002e630 (vehicle constructor), where +0x4c is a value
-     * template-copied by the pool allocator from per-character data.
-     * Without that template chain wired up, +0x4c is 0 here.
-     * Leaving dragMass = 0 means Object_GeneralTick's spring/drag
-     * term degenerates to pure gravity. */
-    *(int32_t *)(self + 0xd8) = 0;
+    /* dragMass = 20480 (0x5000) -- the engine's literal value from
+     * Vehicle_RollingTick's mode-7 spawn path.  This gives a finite
+     * spring/drag term so Object_GeneralTick produces grounded
+     * vehicle behavior (vs pure gravity when dragMass=0). */
+    *(int32_t *)(self + 0xd8) = 0x5000;
 
-    Object_GeneralTick((uint32_t *)self);
+    /* Delegate to the engine's "rolling vehicle" tick.  Mode 0 = per-
+     * frame; arg2 = catchupFlag.  Internally this calls
+     * Object_GeneralTick which calls Object_IntegrateAndOrient (the
+     * GTE-driven integrator -- bit-exact). */
+    Vehicle_RollingTick((uint32_t *)self, 0, catchupFlag, 0);
 }
 
 void Host_VehicleInit(void)
@@ -114,12 +117,33 @@ void Host_VehicleInit(void)
     int32_t spawn_z = 0x3a00000;
     int32_t ground_y = Terrain_HeightAt((uint32_t)spawn_x, (uint32_t)spawn_z);
     *(int32_t *)(g_vehicle + 0x24) = spawn_x;
-    *(int32_t *)(g_vehicle + 0x28) = ground_y + 0x40000;
+    /* PSX +Y is DOWN (confirmed by Projectile_GravityTick: gravity adds
+     * positive vy; "obj.y > terrain_y" = below ground).  To spawn ABOVE
+     * the ground we SUBTRACT from terrain_y, not add. */
+    *(int32_t *)(g_vehicle + 0x28) = ground_y - 0x40000;
     *(int32_t *)(g_vehicle + 0x2c) = spawn_z;
 
     /* Health field (used by damage path; not relevant for driving). */
     *(int16_t *)(g_vehicle + 0x0c) = 1000;         /* health */
     *(int16_t *)(g_vehicle + 0x0e) = 1000;         /* maxHealth */
+
+    /* State byte (+0xd0) = 12 ("rolling").  This is the engine's
+     * marker that triggers Vehicle_StateTransition to install
+     * Vehicle_RollingTick as the per-frame callback.  We install it
+     * directly below so the state byte is for forward-compat with
+     * any engine code that reads it. */
+    *(uint8_t *)(g_vehicle + 0xd0) = 12;
+
+    /* +0x9c..+0xa0 = per-axis inverse inertia (i16 each).
+     * Engine values read directly from the EXE template at
+     * SLUS:0x8005ec10 (+0x14..+0x19):
+     *    invInertiaX = invInertiaY = invInertiaZ = 0x40
+     * That template is what Vehicle_RollingTick's mode-7 spawn path
+     * (`lwl/lwr 0x14(s3); swl/swr 0x9c(s1)`) copies into newly-spawned
+     * sub-projectiles.  Factual, no empirical fitting. */
+    *(int16_t *)(g_vehicle + 0x9c) = 0x40;
+    *(int16_t *)(g_vehicle + 0x9e) = 0x40;
+    *(int16_t *)(g_vehicle + 0xa0) = 0x40;
 
     /* Tick callback pointer. The engine calls this every Physics_Step. */
     *(void (**)(uint8_t *, int, int))(g_vehicle + 0x64) = vehicle_tick;

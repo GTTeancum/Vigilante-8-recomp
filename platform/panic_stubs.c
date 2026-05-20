@@ -23,7 +23,7 @@ static int v8_panic_warn(const char *name) {
     return 0;
 }
 
-/* 138 unresolved symbols */
+/* 155 unresolved symbols */
 
 int  Audio_BankSelect(void) { return v8_panic_warn("Audio_BankSelect"); }
 int  Audio_ClearAll(void) { return v8_panic_warn("Audio_ClearAll"); }
@@ -43,6 +43,7 @@ uint32_t DAT_800101c8;
 uint32_t DAT_80010238;
 uint32_t DAT_80010274;
 uint32_t DAT_800102b0;
+uint32_t DAT_80055738;
 uint32_t DAT_80065520;
 uint32_t DAT_80065528;
 uint32_t DAT_800655c8;
@@ -52,6 +53,7 @@ uint32_t DAT_80065968;
 uint32_t DAT_80065978;
 uint32_t DAT_80065be0;
 uint32_t DAT_80065c08;
+uint32_t DAT_80065c28;
 uint32_t DAT_80065c30;
 uint32_t DAT_8006eef0;
 uint32_t DAT_8006eff8;
@@ -62,9 +64,24 @@ uint32_t DAT_800a3090;
 int  Demo_RecorderShutdown(void) { return v8_panic_warn("Demo_RecorderShutdown"); }
 int  Demo_ResetState(void) { return v8_panic_warn("Demo_ResetState"); }
 int  Demo_Save(void) { return v8_panic_warn("Demo_Save"); }
+int  FUN_800129e8(void) { return v8_panic_warn("FUN_800129e8"); }
 int  FUN_80015368(void) { return v8_panic_warn("FUN_80015368"); }
 int  FUN_80015610(void) { return v8_panic_warn("FUN_80015610"); }
 int  FUN_800157d4(void) { return v8_panic_warn("FUN_800157d4"); }
+int  FUN_8001ac44(void) { return v8_panic_warn("FUN_8001ac44"); }
+int  FUN_8001affc(void) { return v8_panic_warn("FUN_8001affc"); }
+int  FUN_8001b270(void) { return v8_panic_warn("FUN_8001b270"); }
+int  FUN_8001b2fc(void) { return v8_panic_warn("FUN_8001b2fc"); }
+int  FUN_8001d470(void) { return v8_panic_warn("FUN_8001d470"); }
+int  FUN_8001d4f0(void) { return v8_panic_warn("FUN_8001d4f0"); }
+int  FUN_8001d708(void) { return v8_panic_warn("FUN_8001d708"); }
+int  FUN_8002cce8(void) { return v8_panic_warn("FUN_8002cce8"); }
+int  FUN_8002d44c(void) { return v8_panic_warn("FUN_8002d44c"); }
+int  FUN_8002d494(void) { return v8_panic_warn("FUN_8002d494"); }
+int  FUN_8002d82c(void) { return v8_panic_warn("FUN_8002d82c"); }
+int  FUN_80030a88(void) { return v8_panic_warn("FUN_80030a88"); }
+int  FUN_8003e76c(void) { return v8_panic_warn("FUN_8003e76c"); }
+int  FUN_800446dc(void) { return v8_panic_warn("FUN_800446dc"); }
 int  Font_AcquireRenderer(void) { return v8_panic_warn("Font_AcquireRenderer"); }
 int  Font_AllocAtlas(void) { return v8_panic_warn("Font_AllocAtlas"); }
 int  Font_DispatchCallback(void) { return v8_panic_warn("Font_DispatchCallback"); }
@@ -162,5 +179,5 @@ uint32_t uRam000007dc;
 uint32_t uRam000008df;
 uint32_t uRam000008f0;
 uint32_t uRam000008f4;
-/* funcs: 56  data: 82  skipped: 0 */
+/* funcs: 71  data: 84  skipped: 0 */
 uint32_t uRam000008f8;
