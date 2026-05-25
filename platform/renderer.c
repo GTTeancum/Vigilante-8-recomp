@@ -25,6 +25,7 @@ static GLint  g_loc_mvp    = -1;
 static GLint  g_loc_tint   = -1;
 static GLint  g_loc_useTex = -1;
 static GLint  g_loc_tex    = -1;
+static GLint  g_loc_tex2   = -1;
 /* Vehicle mesh VAOs (loaded from VEHICLES.EXP by MeshLoader_Init). */
 extern GLuint g_mesh_vao[14];
 extern int    g_mesh_vtx[14];
@@ -53,20 +54,24 @@ static const char *VS_SRC =
     "layout(location=0) in vec3 aPos;\n"
     "layout(location=1) in vec3 aCol;\n"
     "layout(location=2) in vec2 aTex;\n"
+    "layout(location=3) in float aTexKind;\n"
     "uniform mat4 uMVP;\n"
     "out vec3 vCol;\n"
     "out vec2 vTex;\n"
-    "void main(){ vCol = aCol; vTex = aTex; gl_Position = uMVP * vec4(aPos, 1.0); }\n";
+    "out float vTexKind;\n"
+    "void main(){ vCol = aCol; vTex = aTex; vTexKind = aTexKind; gl_Position = uMVP * vec4(aPos, 1.0); }\n";
 
 static const char *FS_SRC =
     "#version 330 core\n"
     "in vec3 vCol;\n"
     "in vec2 vTex;\n"
+    "in float vTexKind;\n"
     "uniform vec3 uTint;\n"
     "uniform sampler2D uTex;\n"
+    "uniform sampler2D uTex2;\n"
     "uniform int uUseTex;\n"
     "out vec4 oCol;\n"
-    "void main(){ vec3 c = vCol; if (uUseTex != 0 && vTex.x >= 0.0) c *= texture(uTex, vTex).rgb * 1.45; oCol = vec4(c * uTint, 1.0); }\n";
+    "void main(){ vec3 c = vCol; if (uUseTex != 0 && vTex.x >= 0.0) { vec4 t = (vTexKind > 0.5) ? texture(uTex2, vTex) : texture(uTex, vTex); if (t.a < 0.10) discard; c *= t.rgb * 1.45; } oCol = vec4(c * uTint, 1.0); }\n";
 
 static GLuint compile(GLenum kind, const char *src) {
     GLuint s = glCreateShader(kind);
@@ -88,6 +93,7 @@ extern void TerrainMesh_Load(const char *exp_path,
 extern int  TerrainMesh_HeightAt(float wx, float wz, float *out_gl_y);
 extern GLuint g_terrainmesh_vao;
 extern GLuint g_terrainmesh_tex;
+extern GLuint g_terrainmesh_xbmp_tex;
 extern int    g_terrainmesh_vtx;
 extern char   g_v8_level_exp_path[128];
 extern void  *Host_HeapBase(void);
@@ -246,6 +252,7 @@ static void init_once(void) {
     g_loc_tint = glGetUniformLocation(g_prog, "uTint");
     g_loc_useTex = glGetUniformLocation(g_prog, "uUseTex");
     g_loc_tex = glGetUniformLocation(g_prog, "uTex");
+    g_loc_tex2 = glGetUniformLocation(g_prog, "uTex2");
     glDeleteShader(vs); glDeleteShader(fs);
     MeshLoader_Init();
     WheelMeshLoader_Init();
@@ -578,7 +585,8 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
     /* Draw the decoded ZONE heightmap first as a cropped diagnostic floor.
      * Placed XOBF geometry is drawn afterward so object/occluder placement is
      * not hidden by the fallback terrain surface. */
-    if (g_terr_idxCount > 0) {
+    if (g_terr_idxCount > 0 &&
+        !(V8_RENDER_XOBF_VISUALS && g_terrainmesh_vao && g_terrainmesh_vtx > 0)) {
         glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
         mat4_mul(VP, I, MVP);
         glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
@@ -608,10 +616,13 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
      * buildings, and occluders).  Vertices are already in world space. */
     if (V8_RENDER_XOBF_VISUALS && g_terrainmesh_vao && g_terrainmesh_vtx > 0) {
         glUniform3f(g_loc_tint, 1.35f, 1.35f, 1.35f);
-        if (g_terrainmesh_tex) {
+        if (g_terrainmesh_tex || g_terrainmesh_xbmp_tex) {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, g_terrainmesh_tex);
             glUniform1i(g_loc_tex, 0);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, g_terrainmesh_xbmp_tex);
+            glUniform1i(g_loc_tex2, 1);
             glUniform1i(g_loc_useTex, 1);
         }
         mat4_mul(VP, I, MVP);

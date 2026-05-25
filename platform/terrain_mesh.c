@@ -267,6 +267,7 @@ int TerrainMesh_ObstacleHeightAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
 /* ---- Public GL globals ---- */
 GLuint g_terrainmesh_vao = 0;
 GLuint g_terrainmesh_tex = 0;
+GLuint g_terrainmesh_xbmp_tex = 0;
 int    g_terrainmesh_vtx = 0;
 int    g_terrainmesh_tex_w = 0;
 int    g_terrainmesh_tex_h = 0;
@@ -320,7 +321,7 @@ static const int TM_IS_QUAD[16] = {
 #define TM_DISPLAY_Y_SCALE  (1.0f / 65536.0f)
 
 /* ---- Per-vertex GL data ---- */
-typedef struct { float x,y,z,r,g,b,u,v; } TmVert;
+typedef struct { float x,y,z,r,g,b,u,v,tex; } TmVert;
 
 typedef struct {
     const uint8_t *data;
@@ -1217,9 +1218,9 @@ static void tm_emit_flat_face(float vx[4], float vy[4], float vz[4],
         tt->pd = tnx*vx[ia] + tny*vy[ia] + tnz*vz[ia];
     }
     if (nvtx + 3 <= vcap) {
-        vbuf[nvtx++] = (TmVert){vx[ia],vy[ia],vz[ia],lr,lg,lb,-1.0f,-1.0f};
-        vbuf[nvtx++] = (TmVert){vx[ic],vy[ic],vz[ic],lr,lg,lb,-1.0f,-1.0f};
-        vbuf[nvtx++] = (TmVert){vx[ib],vy[ib],vz[ib],lr,lg,lb,-1.0f,-1.0f};
+        vbuf[nvtx++] = (TmVert){vx[ia],vy[ia],vz[ia],lr,lg,lb,-1.0f,-1.0f,0.0f};
+        vbuf[nvtx++] = (TmVert){vx[ic],vy[ic],vz[ic],lr,lg,lb,-1.0f,-1.0f,0.0f};
+        vbuf[nvtx++] = (TmVert){vx[ib],vy[ib],vz[ib],lr,lg,lb,-1.0f,-1.0f,0.0f};
     }
 
     *nvtx_io = nvtx;
@@ -1307,17 +1308,25 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                 {-1.0f, -1.0f}, {-1.0f, -1.0f},
                 {-1.0f, -1.0f}, {-1.0f, -1.0f}
             };
+            int ground0 = tm_is_render_ground_tri(vx[0], vy[0], vz[0],
+                                                  vx[1], vy[1], vz[1],
+                                                  vx[2], vy[2], vz[2], tny);
             int has_uv = 0;
+            float tex_kind = 0.0f;
 #if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
-            has_uv = V8_XobfTex_DecodePacketUv(&bank->atlas, B + po, nib,
-                                                (int)tex_base, uv);
+            if (ground0) {
+                has_uv = tm_decode_packet_uv(B, po, nib, uv);
+                tex_kind = has_uv ? 1.0f : 0.0f;
+            }
+            if (!has_uv) {
+                has_uv = V8_XobfTex_DecodePacketUv(&bank->atlas, B + po, nib,
+                                                    (int)tex_base, uv);
+                tex_kind = 0.0f;
+            }
 #else
             has_uv = tm_decode_packet_uv(B, po, nib, uv);
 #endif
 
-            int ground0 = tm_is_render_ground_tri(vx[0], vy[0], vz[0],
-                                                  vx[1], vy[1], vz[1],
-                                                  vx[2], vy[2], vz[2], tny);
             if (ground0) {
                 float gy = (vy[0] + vy[1] + vy[2]) * (1.0f / 3.0f);
                 float ht = (gy + 64.0f) / 137.0f;
@@ -1340,9 +1349,9 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                                         vx[1], vy[1], vz[1],
                                         vx[2], vy[2], vz[2], ground0)
                 && nvtx + 3 <= vcap) {
-                vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr,lg,lb, has_uv ? uv[0][0] : -1.0f, has_uv ? uv[0][1] : -1.0f};
-                vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr,lg,lb, has_uv ? uv[2][0] : -1.0f, has_uv ? uv[2][1] : -1.0f};
-                vbuf[nvtx++] = (TmVert){vx[1],vy[1],vz[1],lr,lg,lb, has_uv ? uv[1][0] : -1.0f, has_uv ? uv[1][1] : -1.0f};
+                vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr,lg,lb, has_uv ? uv[0][0] : -1.0f, has_uv ? uv[0][1] : -1.0f, tex_kind};
+                vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr,lg,lb, has_uv ? uv[2][0] : -1.0f, has_uv ? uv[2][1] : -1.0f, tex_kind};
+                vbuf[nvtx++] = (TmVert){vx[1],vy[1],vz[1],lr,lg,lb, has_uv ? uv[1][0] : -1.0f, has_uv ? uv[1][1] : -1.0f, tex_kind};
             }
 
             if (TM_IS_QUAD[nib]) {
@@ -1350,6 +1359,19 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                                                       vx[2], vy[2], vz[2],
                                                       vx[3], vy[3], vz[3], tny);
                 float lr1 = 0.34f * lit, lg1 = 0.38f * lit, lb1 = 0.36f * lit;
+                float uv1[4][2];
+                memcpy(uv1, uv, sizeof(uv1));
+                int has_uv1 = has_uv;
+                float tex_kind1 = tex_kind;
+                if (ground1) {
+                    has_uv1 = tm_decode_packet_uv(B, po, nib, uv1);
+                    tex_kind1 = has_uv1 ? 1.0f : 0.0f;
+                    if (!has_uv1) {
+                        has_uv1 = has_uv;
+                        memcpy(uv1, uv, sizeof(uv1));
+                        tex_kind1 = tex_kind;
+                    }
+                }
                 if (ground1) {
                     float gy = (vy[0] + vy[2] + vy[3]) * (1.0f / 3.0f);
                     float ht = (gy + 64.0f) / 137.0f;
@@ -1371,9 +1393,9 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                                             vx[2], vy[2], vz[2],
                                             vx[3], vy[3], vz[3], ground1)
                     && nvtx + 3 <= vcap) {
-                    vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr1,lg1,lb1, has_uv ? uv[0][0] : -1.0f, has_uv ? uv[0][1] : -1.0f};
-                    vbuf[nvtx++] = (TmVert){vx[3],vy[3],vz[3],lr1,lg1,lb1, has_uv ? uv[3][0] : -1.0f, has_uv ? uv[3][1] : -1.0f};
-                    vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr1,lg1,lb1, has_uv ? uv[2][0] : -1.0f, has_uv ? uv[2][1] : -1.0f};
+                    vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr1,lg1,lb1, has_uv1 ? uv1[0][0] : -1.0f, has_uv1 ? uv1[0][1] : -1.0f, tex_kind1};
+                    vbuf[nvtx++] = (TmVert){vx[3],vy[3],vz[3],lr1,lg1,lb1, has_uv1 ? uv1[3][0] : -1.0f, has_uv1 ? uv1[3][1] : -1.0f, tex_kind1};
+                    vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr1,lg1,lb1, has_uv1 ? uv1[2][0] : -1.0f, has_uv1 ? uv1[2][1] : -1.0f, tex_kind1};
                 }
             }
         }
@@ -2145,9 +2167,9 @@ static int tm_parse_bin(const uint8_t *B, uint32_t bsz,
                     tt->pd = tnx*vx[0] + tny*vy[0] + tnz*vz[0];
                 }
                 if (nvtx + 3 <= vcap) {
-                    vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr,lg,lb,-1.0f,-1.0f};  /* A */
-                    vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr,lg,lb,-1.0f,-1.0f};  /* C */
-                    vbuf[nvtx++] = (TmVert){vx[1],vy[1],vz[1],lr,lg,lb,-1.0f,-1.0f};  /* B */
+                    vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr,lg,lb,-1.0f,-1.0f,0.0f};  /* A */
+                    vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr,lg,lb,-1.0f,-1.0f,0.0f};  /* C */
+                    vbuf[nvtx++] = (TmVert){vx[1],vy[1],vz[1],lr,lg,lb,-1.0f,-1.0f,0.0f};  /* B */
                 }
 
                 /* --- Quad second triangle: A, D, C (CCW from above) --- */
@@ -2174,9 +2196,9 @@ static int tm_parse_bin(const uint8_t *B, uint32_t bsz,
                         tt->pd = tnx*vx[0] + tny*vy[0] + tnz*vz[0];
                     }
                     if (nvtx + 3 <= vcap) {
-                        vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr1,lg1,lb1,-1.0f,-1.0f};  /* A */
-                        vbuf[nvtx++] = (TmVert){vx[3],vy[3],vz[3],lr1,lg1,lb1,-1.0f,-1.0f};  /* D */
-                        vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr1,lg1,lb1,-1.0f,-1.0f};  /* C */
+                        vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr1,lg1,lb1,-1.0f,-1.0f,0.0f};  /* A */
+                        vbuf[nvtx++] = (TmVert){vx[3],vy[3],vz[3],lr1,lg1,lb1,-1.0f,-1.0f,0.0f};  /* D */
+                        vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr1,lg1,lb1,-1.0f,-1.0f,0.0f};  /* C */
                     }
                 }
             }
@@ -2222,7 +2244,7 @@ void TerrainMesh_Load(const char *exp_path,
     if (!raw) {
         return;
     }
-    g_terrainmesh_tex = tm_upload_xbmp_texture(raw, fsz);
+    g_terrainmesh_xbmp_tex = tm_upload_xbmp_texture(raw, fsz);
 
     /* Allocate vertex + triangle buffers (generous cap). */
     int cap    = 500000;
@@ -2299,6 +2321,9 @@ void TerrainMesh_Load(const char *exp_path,
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(TmVert),
                           (void *)offsetof(TmVert, u));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(TmVert),
+                          (void *)offsetof(TmVert, tex));
     glBindVertexArray(0);
 
     g_terrainmesh_vao = vao;
