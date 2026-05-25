@@ -12,6 +12,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern void *Object_Pool_Alloc(uint32_t size);
 extern void  Heap_Free(void *p);
 extern void  Audio_PlaySfxRelative(uint32_t bank, int sfxId, void *posXyz);  /* func_0x80044ac8 */
@@ -21,7 +22,7 @@ extern void  Object_RebindPrim(uint32_t *obj, uint32_t bank, int size, int flags
 extern int8_t *_DAT_800659fc;
 extern uint32_t _DAT_800658fc;
 extern uint32_t _DAT_800737d8;
-extern uint32_t FUN_800223dc;
+extern uint32_t FUN_800223dc(uint32_t *obj, int mode, uint32_t arg);
 
 uint32_t CC_GenericCleanup(void *obj, int mode)
 {
@@ -48,7 +49,7 @@ uint32_t CC_BurgerSignReset(uint32_t *obj, int mode)
         status = obj[0] | 0x34;
         obj[0] = status;
     }
-    obj[0x19] = status + 0x23dc;
+    Object_SetCallbackPsxSlot(obj, (uintptr_t)&FUN_800223dc);
     return 0;
 }
 

@@ -31,13 +31,18 @@ extern int32_t DAT_8006f6f8;   /* camera world y */
 extern int32_t DAT_8006f6fc;   /* camera world z */
 extern MATRIX  DAT_8006f780;   /* view projection matrix */
 
+static inline int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
 /* HIGH: true iff bounding sphere {pos, radius} is inside the view frustum. */
 int Culling_SphereInsideFrustum(const int32_t *pos, int32_t radius)
 {
     gte_SetRotMatrix(&DAT_8006f780);
-    gte_ldsv_((pos[0] - DAT_8006f6f4) >> 8,
-              (pos[1] - DAT_8006f6f8) >> 8,
-              (pos[2] - DAT_8006f6fc) >> 8);
+    gte_ldsv_(mips_subu_i32(pos[0], DAT_8006f6f4) >> 8,
+              mips_subu_i32(pos[1], DAT_8006f6f8) >> 8,
+              mips_subu_i32(pos[2], DAT_8006f6fc) >> 8);
     gte_rtir();
 
     int32_t r = radius >> 8;
@@ -45,6 +50,11 @@ int Culling_SphereInsideFrustum(const int32_t *pos, int32_t radius)
     if (gte_stIR2() >= r) return 0;
     if (gte_stIR3() >= r) return 0;
     return 1;
+}
+
+int FUN_8001db54(int32_t *pos, int radius)
+{
+    return Culling_SphereInsideFrustum(pos, radius);
 }
 
 /* ============================================================

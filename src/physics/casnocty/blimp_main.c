@@ -45,6 +45,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern int      Terrain_HeightAt(int32_t x, int32_t z);
 extern uint32_t Pool_AllocProjectile(void);
 extern void     Pool_LaunchProjectile(uint32_t h, uint32_t bin, int kind, void *pos);
@@ -80,14 +81,39 @@ static int32_t clamp_pm(int32_t v, int32_t lim) {
     return v < -lim ? -lim : v > lim ? lim : v;
 }
 
+static int32_t mips_addu_i32(int32_t a, int32_t b) {
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b) {
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh) {
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b) {
+    return (int32_t)((uint64_t)(uint32_t)a * (uint64_t)(uint32_t)b);
+}
+
+static int32_t rtz_shift_i32(int32_t v, unsigned sh, int32_t bias) {
+    if (v < 0) v = mips_addu_i32(v, bias);
+    return v >> sh;
+}
+
+static int32_t mips_abs_i32(int32_t v) {
+    return v < 0 ? mips_subu_i32(0, v) : v;
+}
+
 uint32_t CC_BlimpMain(uint32_t *self, uint32_t mode, uint32_t *imp)
 {
     switch (mode) {
     case 0:
         /* Integrate. */
-        self[0x12] += self[0x20];
-        self[0x13] += self[0x21];
-        self[0x14] += self[0x22];
+        self[0x12] = (uint32_t)mips_addu_i32((int32_t)self[0x12], (int32_t)self[0x20]);
+        self[0x13] = (uint32_t)mips_addu_i32((int32_t)self[0x13], (int32_t)self[0x21]);
+        self[0x14] = (uint32_t)mips_addu_i32((int32_t)self[0x14], (int32_t)self[0x22]);
         switch ((int)(((uint8_t)self[2] + 1) * 0x1000000) >> 24) {
         case 1: {
             int seed = Rand255();
@@ -108,13 +134,14 @@ uint32_t CC_BlimpMain(uint32_t *self, uint32_t mode, uint32_t *imp)
             }
             int yawErr = Path_DistToWaypoint(self, self + 0x25, 0x40000);
             if ((int16_t)self[0x25] < 0) *(uint8_t *)(self + 2) = 2;
-            int dy = (int)((yawErr - (uint16_t)self[0x2a]) * 0x100000) >> 20;
+            int dy = mips_sll_i32(mips_subu_i32(yawErr, (uint16_t)self[0x2a]), 20) >> 20;
             dy = clamp_pm(dy, 8);
-            int newY = (uint16_t)self[0x2a] + dy;
-            int sm  = (newY << 16) >> 16;
+            int newY = mips_addu_i32((uint16_t)self[0x2a], dy);
+            int sm  = mips_sll_i32(newY, 16) >> 16;
             *(int16_t *)(self + 0x2a) = (int16_t)newY;
             if (sm < 0) sm += 0x3f;
-            *(int16_t *)((char *)self + 0x42) += (int16_t)(sm >> 6);
+            *(int16_t *)((char *)self + 0x42) =
+                (int16_t)mips_addu_i32(*(int16_t *)((char *)self + 0x42), sm >> 6);
         } /* fall into case 0 */
         case 0:
             if ((char)self[2] < 0 && (
@@ -127,50 +154,52 @@ uint32_t CC_BlimpMain(uint32_t *self, uint32_t mode, uint32_t *imp)
                  (int)*(int16_t *)(self[0x29] + 2) + (int)*(int16_t *)(self[0x29] + 6)
                      < (int)*(int16_t *)((char *)self + 0x52))))
             {
-                *(int16_t *)((char *)self + 0x42) += 0x10;
-                self[0x20] = -self[0x20];
-                self[0x22] = -self[0x22];
+                *(int16_t *)((char *)self + 0x42) =
+                    (int16_t)mips_addu_i32(*(int16_t *)((char *)self + 0x42), 0x10);
+                self[0x20] = (uint32_t)mips_subu_i32(0, (int32_t)self[0x20]);
+                self[0x22] = (uint32_t)mips_subu_i32(0, (int32_t)self[0x22]);
             }
             Object_RefitAABB(self);
             /* Drag toward facing direction. */
-            int32_t drag5 = ((int16_t)self[5]) * 0xbeb; if (drag5 < 0) drag5 += 0xfff;
-            int32_t adj   = (drag5 >> 12) - (int32_t)self[0x20];
-            if (adj < 0) adj += 0xf;
-            self[0x20] += clamp_pm(adj >> 4, 0x40);
-            int32_t drag8 = ((int16_t)self[8]) * 0xbeb; if (drag8 < 0) drag8 += 0xfff;
-            adj = (drag8 >> 12) - (int32_t)self[0x22];
-            if (adj < 0) adj += 0xf;
-            self[0x22] += clamp_pm(adj >> 4, 0x40);
+            int32_t drag5 = mips_mult_lo_i32((int16_t)self[5], 0xbeb);
+            int32_t adj   = mips_subu_i32(rtz_shift_i32(drag5, 12, 0xfff),
+                                          (int32_t)self[0x20]);
+            self[0x20] = (uint32_t)mips_addu_i32((int32_t)self[0x20],
+                                                 clamp_pm(rtz_shift_i32(adj, 4, 0xf), 0x40));
+            int32_t drag8 = mips_mult_lo_i32((int16_t)self[8], 0xbeb);
+            adj = mips_subu_i32(rtz_shift_i32(drag8, 12, 0xfff), (int32_t)self[0x22]);
+            self[0x22] = (uint32_t)mips_addu_i32((int32_t)self[0x22],
+                                                 clamp_pm(rtz_shift_i32(adj, 4, 0xf), 0x40));
             /* Vertical hover. */
-            int ty = Terrain_HeightAt(self[0x12], self[0x14])
-                     - (self[0x13] + 0x64000);
-            if (ty < 0) ty += 0xf;
-            ty = ty >> 4;
+            int ty = mips_subu_i32(Terrain_HeightAt(self[0x12], self[0x14]),
+                                   mips_addu_i32((int32_t)self[0x13], 0x64000));
+            ty = rtz_shift_i32(ty, 4, 0xf);
             if (ty < -0x2fa) ty = -0x2fa;
-            int dvy = ty - (int32_t)self[0x21];
-            self[0x21] += clamp_pm(dvy, 0x40);
+            int dvy = mips_subu_i32(ty, (int32_t)self[0x21]);
+            self[0x21] = (uint32_t)mips_addu_i32((int32_t)self[0x21], clamp_pm(dvy, 0x40));
             /* fall through to case 3 */
         case 3: {
-            int ty = Terrain_HeightAt(self[0x12], self[0x14])
-                     - (self[0x13] + 0x5000);
-            int yawErr = (int)(((uint16_t)*(uint16_t *)(self[0x23] + 0x42)
-                              - (uint16_t)*(uint16_t *)((char *)self + 0x42))
-                              * 0x100000) >> 20;
-            int dy = yawErr - (int16_t)self[0x2a];
+            int ty = mips_subu_i32(Terrain_HeightAt(self[0x12], self[0x14]),
+                                   mips_addu_i32((int32_t)self[0x13], 0x5000));
+            int yawErr = mips_sll_i32(mips_subu_i32((uint16_t)*(uint16_t *)(self[0x23] + 0x42),
+                                                    (uint16_t)*(uint16_t *)((char *)self + 0x42)),
+                                      20) >> 20;
+            int dy = mips_subu_i32(yawErr, (int16_t)self[0x2a]);
             dy = clamp_pm(dy, 8);
-            int newY = (uint16_t)self[0x2a] + dy;
+            int newY = mips_addu_i32((uint16_t)self[0x2a], dy);
             *(int16_t *)(self + 0x2a) = (int16_t)newY;
-            int sm = (newY << 16) >> 16;
+            int sm = mips_sll_i32(newY, 16) >> 16;
             if (sm < 0) sm += 0x3f;
-            *(int16_t *)((char *)self + 0x42) += (int16_t)(sm >> 6);
-            int32_t adj = -(int32_t)self[0x20]; if (adj < 0) adj += 0xf;
-            self[0x20] += clamp_pm(adj >> 4, 0x40);
-            adj = -(int32_t)self[0x22]; if (adj < 0) adj += 0xf;
-            self[0x22] += clamp_pm(adj >> 4, 0x40);
-            int tmp = ty; if (tmp < 0) tmp += 0xf;
-            int dvy = (tmp >> 4 > 0x2fa) ? 0x2fa : tmp >> 4;
-            dvy -= (int32_t)self[0x21];
-            self[0x21] += clamp_pm(dvy, 0x40);
+            *(int16_t *)((char *)self + 0x42) =
+                (int16_t)mips_addu_i32(*(int16_t *)((char *)self + 0x42), sm >> 6);
+            int32_t adj = rtz_shift_i32(mips_subu_i32(0, (int32_t)self[0x20]), 4, 0xf);
+            self[0x20] = (uint32_t)mips_addu_i32((int32_t)self[0x20], clamp_pm(adj, 0x40));
+            adj = rtz_shift_i32(mips_subu_i32(0, (int32_t)self[0x22]), 4, 0xf);
+            self[0x22] = (uint32_t)mips_addu_i32((int32_t)self[0x22], clamp_pm(adj, 0x40));
+            int dvy = rtz_shift_i32(ty, 4, 0xf);
+            if (dvy > 0x2fa) dvy = 0x2fa;
+            dvy = mips_subu_i32(dvy, (int32_t)self[0x21]);
+            self[0x21] = (uint32_t)mips_addu_i32((int32_t)self[0x21], clamp_pm(dvy, 0x40));
             Object_RefitAABB(self);
             if (ty < 0x199 && (int16_t)self[0x2a] < 0x40) {
                 *(uint8_t *)(self + 2) = 3;
@@ -180,7 +209,7 @@ uint32_t CC_BlimpMain(uint32_t *self, uint32_t mode, uint32_t *imp)
             }
         } /* fall through */
         case 4: {
-            int16_t t = (int16_t)((char *)self)[0xaa] - 1;
+            int16_t t = (int16_t)mips_addu_i32(*(int16_t *)((char *)self + 0xaa), -1);
             *(int16_t *)((char *)self + 0xaa) = t;
             if (t == -1) {
                 *(int16_t *)((char *)self + 0xaa) = 0;
@@ -189,17 +218,51 @@ uint32_t CC_BlimpMain(uint32_t *self, uint32_t mode, uint32_t *imp)
         } /* fall through to case 5 */
         case 5:
             /* Death descent dynamics. */
-            if (-0x200 < (int16_t)self[0x10]) *(int16_t *)(self + 0x10) -= 4;
+            if ((int32_t)self[0x20] < 0) {
+                if (*(int16_t *)((char *)self + 0x4a) < *(int16_t *)self[0x29]) {
+                    self[0x22] = 0;
+                    goto blimp_death_check_x_hi;
+                }
+            } else {
+blimp_death_check_x_hi:
+                if ((int)*(int16_t *)((char *)self + 0x4a) >
+                    (int)*(int16_t *)self[0x29] + (int)((int16_t *)self[0x29])[2]) {
+                    self[0x22] = 0;
+                    self[0x20] = 0;
+                    goto blimp_death_after_bounds;
+                }
+            }
+            if ((int32_t)self[0x22] < 0) {
+                if (*(int16_t *)((char *)self + 0x52) < *(int16_t *)(self[0x29] + 2)) {
+                    self[0x22] = 0;
+                    goto blimp_death_check_z_hi;
+                }
+            } else {
+blimp_death_check_z_hi:
+                if ((int)*(int16_t *)(self[0x29] + 2) + (int)*(int16_t *)(self[0x29] + 6) <
+                    (int)*(int16_t *)((char *)self + 0x52)) {
+                    self[0x22] = 0;
+                    self[0x20] = 0;
+                }
+            }
+blimp_death_after_bounds:
+            if (-0x200 < (int16_t)self[0x10]) {
+                *(int16_t *)(self + 0x10) =
+                    (int16_t)mips_addu_i32((int16_t)self[0x10], -4);
+            }
             Object_RefitAABB(self);
-            { int32_t a = ((int16_t)self[5]) * 0xbeb; if (a<0) a+=0xfff;
-              int32_t d=(a>>12)-(int32_t)self[0x20]; if (d<0) d+=0xf;
-              self[0x20] += clamp_pm(d>>4, 0x40);
-              a = (*(int16_t *)((char *)self+0x1a)) * 0xbeb; if (a<0) a+=0xfff;
-              d=(a>>12)-(int32_t)self[0x21]; if (d<0) d+=0xf;
-              self[0x21] += clamp_pm(d>>4, 0x40);
-              a = ((int16_t)self[8]) * 0xbeb; if (a<0) a+=0xfff;
-              d=(a>>12)-(int32_t)self[0x22]; if (d<0) d+=0xf;
-              self[0x22] += clamp_pm(d>>4, 0x40); }
+            { int32_t a = mips_mult_lo_i32((int16_t)self[5], 0xbeb);
+              int32_t d=mips_subu_i32(rtz_shift_i32(a, 12, 0xfff), (int32_t)self[0x20]);
+              self[0x20] = (uint32_t)mips_addu_i32((int32_t)self[0x20],
+                                                   clamp_pm(rtz_shift_i32(d, 4, 0xf), 0x40));
+              a = mips_mult_lo_i32(*(int16_t *)((char *)self+0x1a), 0xbeb);
+              d=mips_subu_i32(rtz_shift_i32(a, 12, 0xfff), (int32_t)self[0x21]);
+              self[0x21] = (uint32_t)mips_addu_i32((int32_t)self[0x21],
+                                                   clamp_pm(rtz_shift_i32(d, 4, 0xf), 0x40));
+              a = mips_mult_lo_i32((int16_t)self[8], 0xbeb);
+              d=mips_subu_i32(rtz_shift_i32(a, 12, 0xfff), (int32_t)self[0x22]);
+              self[0x22] = (uint32_t)mips_addu_i32((int32_t)self[0x22],
+                                                   clamp_pm(rtz_shift_i32(d, 4, 0xf), 0x40)); }
             { int ty = Terrain_HeightAt(self[0x12], self[0x14]);
               if (ty < (int)self[0x13] && (*self & 0x8000) == 0) {
                   SubModel_Detach(self);
@@ -222,16 +285,18 @@ uint32_t CC_BlimpMain(uint32_t *self, uint32_t mode, uint32_t *imp)
         for (uintptr_t c = self[0xe]; c != 0; c = *(uint32_t *)(c + 0x34)) {
             int v = 1;
             if (*(int16_t *)(c + 6) == 0) {
-                v = (uint16_t)*(uint16_t *)(c + 0x44) + (intptr_t)imp;
+                v = mips_addu_i32((uint16_t)*(uint16_t *)(c + 0x44), (int32_t)(intptr_t)imp);
                 *(int16_t *)(c + 0x44) = (int16_t)v;
             }
             if (*(int16_t *)(c + 6) == v) {
                 if ((char)self[2] == 3) {
                     if (0x354 < *(int16_t *)(c + 0x40)) continue;
-                    *(int16_t *)(c + 0x40) += 0x20;
+                    *(int16_t *)(c + 0x40) =
+                        (int16_t)mips_addu_i32(*(int16_t *)(c + 0x40), 0x20);
                 }
                 if (*(int16_t *)(c + 0x40) != 0) {
-                    *(int16_t *)(c + 0x40) -= 0x20;
+                    *(int16_t *)(c + 0x40) =
+                        (int16_t)mips_addu_i32(*(int16_t *)(c + 0x40), -0x20);
                     Object_RefitAABB((uint32_t *)c);
                 }
             }
@@ -256,22 +321,29 @@ uint32_t CC_BlimpMain(uint32_t *self, uint32_t mode, uint32_t *imp)
         *self &= ~0x20u;
         /* fall to case 3 */
     case 3: {
+        uint32_t *impact = imp;
         uint32_t *p = (uint32_t *)(uintptr_t)*imp;
+        uint32_t *sourceVec = impact;
         int blimpState = (int)(char)self[2];
         if ((char)p[1] == 2 && *(int16_t *)((char *)p + 6) < 0) {
             if (blimpState == 3) {
                 int yaw = Math_Atan2_Pos(p + 4);
-                int d   = (int)((yaw - (uint16_t)*((uint16_t *)((char *)self + 0x42))) * 0x100000) >> 16;
-                if (d < 0) d = -d;
+                int d   = mips_sll_i32(mips_subu_i32(yaw,
+                                                      (uint16_t)*((uint16_t *)((char *)self + 0x42))),
+                                       20) >> 16;
+                d = mips_abs_i32(d);
                 if (d < 0x1000) {
                     uint32_t *bin = (uint32_t *)(uintptr_t)p[0x38];
                     self[0x24] = (uint32_t)(uintptr_t)p;
-                    p[0x19] = (uint32_t)(uintptr_t)&FUN_801006d4;
+                    Object_SetCallbackPsxSlot(p, (uintptr_t)&FUN_801006d4);
                     p[0x1e] = (uint32_t)(uintptr_t)self;
                     *p = (*p & 0xfffffff7u) | 0x1000020u;
-                    p[0x20] = (self[0x12] - p[9])  * 4;
-                    p[0x21] = (self[0x13] - p[10]) * 4;
-                    p[0x22] = (self[0x14] - p[0xb]) * 4;
+                    p[0x20] = (uint32_t)mips_sll_i32(mips_subu_i32((int32_t)self[0x12],
+                                                                    (int32_t)p[9]), 2);
+                    p[0x21] = (uint32_t)mips_sll_i32(mips_subu_i32((int32_t)self[0x13],
+                                                                    (int32_t)p[10]), 2);
+                    p[0x22] = (uint32_t)mips_sll_i32(mips_subu_i32((int32_t)self[0x14],
+                                                                    (int32_t)p[0xb]), 2);
                     *(int16_t *)(p + 0x29) = 0;
                     SFX_Update((int)*((char *)p + 5), 0);
                     Damage_Apply_AgainstSelf(p, (void *)(intptr_t)0x20);
@@ -279,42 +351,51 @@ uint32_t CC_BlimpMain(uint32_t *self, uint32_t mode, uint32_t *imp)
                         uint32_t *ctx = (uint32_t *)Heap_AllocOrRetry(0x30);
                         ctx[0] = bin[0x12]; ctx[1] = bin[0x13]; ctx[2] = bin[0x14];
                         ctx[3] = 0x78;
-                        ctx[4] = self[9]  + (int16_t)self[5] * -100;
-                        ctx[5] = self[10] - 0x32000;
-                        ctx[6] = self[0xb]+ (int16_t)self[8] * -100;
+                        ctx[4] = (uint32_t)mips_subu_i32((int32_t)self[9],
+                                                         mips_mult_lo_i32((int16_t)self[5], 100));
+                        ctx[5] = (uint32_t)mips_addu_i32((int32_t)self[10], -0x32000);
+                        ctx[6] = (uint32_t)mips_subu_i32((int32_t)self[0xb],
+                                                         mips_mult_lo_i32((int16_t)self[8], 100));
                         ctx[7] = 0;
                         Spawner_Promote(bin);
                         bin[0x25] = 0xfa000u;
                         *(int16_t *)((char *)self + 0xaa) = 0;
                         *(uint8_t *)(self + 2) = 0;
+                        sourceVec = bin;
                     }
                     Pool_AllocProjectile_NoArg();
                 }
             }
+        } else {
+            blimpState = (int)(char)self[2];
         }
-        if (blimpState >= 4) return 0;
-        uint8_t k = (uint8_t)p[1];
-        int target = 3;
-        if (k == 7) {
-            if (Damage_VsImpactor(self, (int)(int16_t)p[3]) == 0) return 0;
-            *(uint8_t *)(self + 2) = 4;
-            target = 0;
+        if (blimpState < 4) {
+            uint8_t k = (uint8_t)p[1];
+            if (k == 7) {
+                if (Damage_VsImpactor(self, (int)(int16_t)p[3]) == 0) return 0;
+                *(uint8_t *)(self + 2) = 4;
+            }
+            if (k == 3) return 0;
+            FX_RingFlash_Init(self, sourceVec);
+            int32_t vdot = mips_addu_i32(
+                mips_addu_i32(mips_mult_lo_i32((int32_t)self[0x20], (int16_t)sourceVec[8]),
+                              mips_mult_lo_i32((int32_t)self[0x21],
+                                               *(int16_t *)((char *)sourceVec + 0x22))),
+                mips_mult_lo_i32((int32_t)self[0x22], (int16_t)sourceVec[9]));
+            vdot = rtz_shift_i32(vdot, 11, 0x7ff);
+            if (vdot >= 0) return 0;
+            int32_t bx = rtz_shift_i32(mips_mult_lo_i32(vdot, (int16_t)sourceVec[8]), 12, 0xfff);
+            int32_t by = rtz_shift_i32(mips_mult_lo_i32(vdot, *(int16_t *)((char *)sourceVec + 0x22)), 12, 0xfff);
+            int32_t bz = rtz_shift_i32(mips_mult_lo_i32(vdot, (int16_t)sourceVec[9]), 12, 0xfff);
+            self[0x20] = (uint32_t)mips_subu_i32((int32_t)self[0x20], bx);
+            self[0x21] = (uint32_t)mips_subu_i32((int32_t)self[0x21], by);
+            self[0x22] = (uint32_t)mips_subu_i32((int32_t)self[0x22], bz);
+            uint32_t h = Pool_AllocProjectile();
+            Pool_LaunchProjectile(h, _DAT_800658fc, 7, self + 0x12);
+            return 0;
         }
-        if (k != target) return 0;
-        FX_RingFlash_Init(self, p);
-        int32_t vdot = (int32_t)self[0x20] * (int16_t)p[8]
-                     + (int32_t)self[0x21] * *(int16_t *)((char *)p + 0x22)
-                     + (int32_t)self[0x22] * (int16_t)p[9];
-        if (vdot < 0) vdot += 0x7ff;
-        vdot >>= 11;
-        if (vdot >= 0) return 0;
-        int32_t bx = vdot * (int16_t)p[8];                   if (bx < 0) bx += 0xfff;
-        int32_t by = vdot * *(int16_t *)((char *)p + 0x22);   if (by < 0) by += 0xfff;
-        int32_t bz = vdot * (int16_t)p[9];                   if (bz < 0) bz += 0xfff;
-        self[0x20] -= bx >> 12; self[0x21] -= by >> 12; self[0x22] -= bz >> 12;
-        uint32_t h = Pool_AllocProjectile();
-        Pool_LaunchProjectile(h, _DAT_800658fc, 7, self + 0x12);
-        if ((char)p[1] != 0) return 0;
+        if (blimpState >= 5) return 0;
+        if ((uint8_t)p[1] != 0) return 0;
         if (*self & 0x8000) return 0;
         SubModel_Detach(self);
         *(uint8_t *)(self + 2) = 5;

@@ -74,6 +74,11 @@ case2:
     return 0;
 }
 
+uint32_t FUN_80101464(int obj, uint32_t mode, int *impulse)
+{
+    return HD_PowerlineTick(obj, mode, impulse);
+}
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

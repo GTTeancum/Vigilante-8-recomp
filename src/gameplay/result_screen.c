@@ -29,13 +29,13 @@
 extern int  sprintf(char *dst, const char *fmt, ...);
 extern int  Util_StrLen(const char *s);
 extern char *strcat(char *dst, const char *src);
-extern void MatchScore_AppendLine(char *resultStr, int vehicle);
+extern void MatchScore_AppendLine(char *resultStr, intptr_t vehicle);
 extern uint32_t Font_LayoutWord(int font, char *s, int x, int y);
 extern void Font_DispatchCallback(uint32_t handle);
 
 extern int8_t  uRam00000015;     /* g_matchMode */
-extern int32_t iRam000007d0;     /* g_player1Vehicle */
-extern int32_t iRam000007d4;     /* g_player2Vehicle */
+extern intptr_t iRam000007d0;    /* g_player1Vehicle */
+extern intptr_t iRam000007d4;    /* g_player2Vehicle */
 extern int32_t iRam00000024;     /* p1 alive flag */
 extern int32_t iRam00000620;     /* cheats earned */
 extern int8_t  bRam0000061c;     /* unlock-cheat slot */
@@ -49,10 +49,10 @@ extern const char DAT_80065464[], DAT_80065468[];
 extern uint8_t DAT_80065c08[];   /* 14-byte unlock cheat codes */
 extern int32_t DAT_80065978[2];   /* P1/P2 win counts */
 
-void ResultScreen_Build(int fontHandle)
+int ResultScreen_Build(int fontHandle)
 {
     char buf[256];
-    int vehicle = iRam000007d0;
+    intptr_t vehicle = iRam000007d0;
     char *tail = NULL;
     const char *tailFmt = NULL;
 
@@ -100,7 +100,7 @@ void ResultScreen_Build(int fontHandle)
             winner = '2';
         }
         sprintf(buf, "\x01 ` \a`\x05PLAYER %c WINS!\n", winner);
-        int liveV = iRam000007d0;
+        intptr_t liveV = iRam000007d0;
         if (*(int16_t *)(iRam000007d0 + 0xc) == 0) liveV = iRam000007d4;
         MatchScore_AppendLine(buf, liveV);
         tail   = buf + Util_StrLen(buf);
@@ -133,6 +133,7 @@ draw: {
         uint32_t layout = Font_LayoutWord(fontHandle, buf, 0x40, 0x40);
         Font_DispatchCallback(layout);
     }
+    return 1;
 }
 
 /* ============================================================

@@ -48,21 +48,35 @@ extern void  ImpactSparks_Spawn    (void *obj);   /* FUN_8001d708 */
 #define GRAVITY_PER_TICK  0x38
 #define FORWARD_SCALAR    0x1dcd
 
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
 uint32_t AGProjectile_Tick(uint8_t *obj, int mode, int *parent)
 {
     if (mode == 0 || mode != 3) {
         /* Integrate position. */
         int32_t *p = (int32_t *)obj;
-        *(int32_t *)(obj + PROJ_POSX_OFF) += *(int32_t *)(obj + PROJ_VX_OFF);
-        *(int32_t *)(obj + PROJ_POSY_OFF) += *(int32_t *)(obj + PROJ_VY_OFF);
-        *(int32_t *)(obj + PROJ_POSZ_OFF) += *(int32_t *)(obj + PROJ_VZ_OFF);
+        *(int32_t *)(obj + PROJ_POSX_OFF) =
+            mips_addu_i32(*(int32_t *)(obj + PROJ_POSX_OFF), *(int32_t *)(obj + PROJ_VX_OFF));
+        *(int32_t *)(obj + PROJ_POSY_OFF) =
+            mips_addu_i32(*(int32_t *)(obj + PROJ_POSY_OFF), *(int32_t *)(obj + PROJ_VY_OFF));
+        *(int32_t *)(obj + PROJ_POSZ_OFF) =
+            mips_addu_i32(*(int32_t *)(obj + PROJ_POSZ_OFF), *(int32_t *)(obj + PROJ_VZ_OFF));
 
         /* Re-aim yaw to point in current direction. */
         int32_t vy = *(int32_t *)(obj + PROJ_VY_OFF);
-        *(int16_t *)(obj + PROJ_YAW_OFF) = (int16_t)-ratan2(vy, FORWARD_SCALAR);
+        *(int16_t *)(obj + PROJ_YAW_OFF) = (int16_t)mips_subu_i32(0, (int32_t)ratan2(vy, FORWARD_SCALAR));
 
         /* Apply gravity. */
-        *(int32_t *)(obj + PROJ_VY_OFF) += GRAVITY_PER_TICK;
+        *(int32_t *)(obj + PROJ_VY_OFF) =
+            mips_addu_i32(*(int32_t *)(obj + PROJ_VY_OFF), GRAVITY_PER_TICK);
 
         int32_t terrainY = Terrain_HeightAt(*(uint32_t *)(obj + PROJ_POSX_OFF),
                                             *(uint32_t *)(obj + PROJ_POSZ_OFF));
@@ -81,6 +95,11 @@ impact:
     Effects_SpawnExplosion(obj);
     Damage_Apply(obj);
     return 0xffffffffu;
+}
+
+uint32_t FUN_8010059c(uint8_t *obj, int mode, int *parent)
+{
+    return AGProjectile_Tick(obj, mode, parent);
 }
 
 /* ============================================================

@@ -28,7 +28,9 @@ extern void Pool_LaunchProjectile(uint32_t h, uint32_t bin, int kind, void *xyz)
 extern void Damage_StandardVehicle(uint32_t *self, void *imp);    /* func_0x80022320 */
 extern void Damage_Apply_AgainstSelf(void *self, void *param);
 extern void SubModel_Detach(uint32_t *self);
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t _DAT_800658fc;
+extern int LAB_8003cb64(int obj, int event, int param3);
 
 uint32_t WW_BridgeCollapse(uint32_t *self, uint32_t mode, int *arg)
 {
@@ -49,13 +51,13 @@ uint32_t WW_BridgeCollapse(uint32_t *self, uint32_t mode, int *arg)
                 *(uint32_t *)(rb + 0x90) = 0;
                 uint32_t h = Pool_AllocProjectile();
                 Pool_LaunchProjectile(h, _DAT_800658fc, 0x29, (void *)(intptr_t)(rb + 0x24));
-                *(uint32_t *)(rb + 100) = 0x8003cb64u;
+                Object_SetCallbackPsxSlot((void *)(uintptr_t)rb, (uintptr_t)&LAB_8003cb64);
             }
             Damage_StandardVehicle(self, (void *)(intptr_t)*(uint16_t *)(*imp + 0xc));
         }
         if ((*self & 1) == 0 && (uint32_t *)imp[3] != self) {
             int rb = RigidBody_Alloc();
-            *(uint32_t *)(rb + 100) = 0x8003cb64u;
+            Object_SetCallbackPsxSlot((void *)(uintptr_t)rb, (uintptr_t)&LAB_8003cb64);
             *(uint16_t *)(rb + 0xc)  = 0;
             Damage_Apply_AgainstSelf(self, (void *)(intptr_t)300);
             /* fall to case 8 */

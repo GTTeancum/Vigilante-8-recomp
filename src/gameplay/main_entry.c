@@ -67,6 +67,9 @@ int V8_Main(void)
     return 0;
 }
 
+/* Hex-name alias for V8_Main (FUN_80015098 in the EXE). */
+int FUN_80015098(void) { return V8_Main(); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

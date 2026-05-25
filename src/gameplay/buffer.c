@@ -57,18 +57,8 @@ void Buffer_FlushDeferredFree(int parity)
     DAT_8006eca0[parity * 3 + 2] = (uint32_t)&DAT_8006eca0[parity * 3 + 0];
 }
 
-/* HIGH: enqueue `payload` for free at the end of the current draw frame. */
-void Buffer_DeferFree(void *payload)
-{
-    DeferredFreeNode *n = (DeferredFreeNode *)Heap_AllocOrRetry(12);
-    n->payload = payload;
-    int parity = iRam00000004;
-    DeferredFreeNode *tail = (DeferredFreeNode *)DAT_8006eca0[parity * 3 + 2];
-    DAT_8006eca0[parity * 3 + 2] = (uint32_t)n;
-    tail->next = n;
-    n->sentinelOrPrev = tail;
-    n->next = (DeferredFreeNode *)&DAT_8006eca0[parity * 3 + 1];
-}
+/* Buffer_DeferFree -- implemented in src/gameplay/buffer_defer_free.c (FUN_800118b4) */
+extern void Buffer_DeferFree(void *payload);
 
 /* HIGH: start a new frame on `parity` -- swap OT arena, flush deferred frees. */
 void Buffer_StartOTag(int parity)

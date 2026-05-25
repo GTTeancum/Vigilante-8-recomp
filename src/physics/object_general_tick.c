@@ -52,7 +52,7 @@
  */
 #include <stdint.h>
 
-extern int     Terrain_HeightAndProbe(int self, int *posXyz, int u1, int u2);  /* FUN_8001d748 */
+extern int     Terrain_HeightAndProbe(intptr_t self, int *posXyz, void *normalOut, uintptr_t *materialOut);  /* FUN_8001d748 */
 extern int32_t Vec3_Length(const int32_t *v);                                  /* FUN_80016a20 */
 extern void    Object_IntegrateAndOrient(uint8_t *obj);                        /* FUN_80017324 */
 
@@ -61,9 +61,34 @@ extern void    Object_IntegrateAndOrient(uint8_t *obj);                        /
  *   x >>= n;
  * which is round-toward-zero for negative x (the MIPS arithmetic
  * right-shift would otherwise round toward -infinity). */
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint64_t)(uint32_t)a * (uint64_t)(uint32_t)b);
+}
+
+static int32_t mips_abs_i32(int32_t v)
+{
+    return v < 0 ? mips_subu_i32(0, v) : v;
+}
+
 static inline int32_t rsa(int32_t x, int n)
 {
-    if (x < 0) x += (1 << n) - 1;
+    if (x < 0) x = mips_addu_i32(x, (1 << n) - 1);
     return x >> n;
 }
 
@@ -74,45 +99,47 @@ void Object_GeneralTick(uint32_t *obj)
     uint8_t *b = (uint8_t *)obj;
 
     /* --- 1. Terrain probe + depth-below-ground (scaled by 1/256). --- */
-    int32_t terrainY = Terrain_HeightAndProbe((int)(intptr_t)obj, (int *)(b + 0x24), 0, 0);
-    int32_t depth256 = rsa(terrainY - *(int32_t *)(b + 0x28), 8);
+    int32_t terrainY = Terrain_HeightAndProbe((intptr_t)obj, (int *)(b + 0x24), NULL, NULL);
+    int32_t depth256 = rsa(mips_subu_i32(terrainY, *(int32_t *)(b + 0x28)), 8);
 
     /* --- 2. Cache speed = |vel| / 128 at +0x8c. --- */
     int32_t speed = Vec3_Length((const int32_t *)(b + 0x80));
     *(int32_t *)(b + 0x8c) = rsa(speed, 7);
 
     /* --- 3. Pre-bake ang_y from cache field at +0xa4. --- */
-    *(int32_t *)(b + 0x94) = (int32_t)(*(int16_t *)(b + 0xa4)) << 6;
+    *(int32_t *)(b + 0x94) = mips_sll_i32(*(int16_t *)(b + 0xa4), 6);
 
     /* Nudge ang_x by +-0x200 based on sign at +0x1a. */
     int16_t steer1a = *(int16_t *)(b + 0x1a);
-    *(int32_t *)(b + 0x90) += (steer1a < 1) ? -0x200 : 0x200;
+    *(int32_t *)(b + 0x90) =
+        mips_addu_i32(*(int32_t *)(b + 0x90), (steer1a < 1) ? -0x200 : 0x200);
 
     /* Nudge ang_z by +-0x200 based on sign at +0x16. */
     int16_t steer16 = *(int16_t *)(b + 0x16);
-    *(int32_t *)(b + 0x98) += (steer16 < 0) ? 0x200 : -0x200;
+    *(int32_t *)(b + 0x98) =
+        mips_addu_i32(*(int32_t *)(b + 0x98), (steer16 < 0) ? 0x200 : -0x200);
 
     /* --- 4. Lateral input drive: (short@0x14 * short@0xa6) / 16, RTZ. --- */
-    int32_t latProd = (int32_t)(int16_t)*(uint16_t *)(b + 0x14)
-                    * (int32_t)*(int16_t *)(b + 0xa6);
-    *(int32_t *)(b + 0x80) += rsa(latProd, 4);
+    int32_t latProd = mips_mult_lo_i32((int16_t)*(uint16_t *)(b + 0x14),
+                                       *(int16_t *)(b + 0xa6));
+    *(int32_t *)(b + 0x80) = mips_addu_i32(*(int32_t *)(b + 0x80), rsa(latProd, 4));
 
     /* Drag-style velocity contribution along Y: 0x1c00 minus a curve
      * proportional to (object mass at +0xd8) / (depth*|depth|),
      * clamped to a min divisor of 0x800.  The mult uses i32-wrap
      * semantics (matches MIPS mult-then-mflo). */
-    int32_t depthAbs  = (depth256 < 0) ? -depth256 : depth256;
-    int32_t denom     = depth256 * depthAbs;
+    int32_t depthAbs  = mips_abs_i32(depth256);
+    int32_t denom     = mips_mult_lo_i32(depth256, depthAbs);
     if (denom < 0x800) denom = 0x800;
     int32_t mass      = *(int32_t *)(b + 0xd8);
-    int32_t numerator = (int32_t)((uint32_t)mass * 0x1c00u);   /* i32-wrap */
-    *(int32_t *)(b + 0x84) = *(int32_t *)(b + 0x84) + 0x1c00
-                           - numerator / denom;
+    int32_t numerator = mips_mult_lo_i32(mass, 0x1c00);
+    *(int32_t *)(b + 0x84) =
+        mips_subu_i32(mips_addu_i32(*(int32_t *)(b + 0x84), 0x1c00), numerator / denom);
 
     /* Long-input drive along the +0x20 input pair: (short@0x20 * short@0xa6) / 16. */
-    int32_t longProd = (int32_t)(int16_t)*(uint16_t *)(b + 0x20)
-                     * (int32_t)*(int16_t *)(b + 0xa6);
-    *(int32_t *)(b + 0x88) += rsa(longProd, 4);
+    int32_t longProd = mips_mult_lo_i32((int16_t)*(uint16_t *)(b + 0x20),
+                                        *(int16_t *)(b + 0xa6));
+    *(int32_t *)(b + 0x88) = mips_addu_i32(*(int32_t *)(b + 0x88), rsa(longProd, 4));
 
     /* --- 5. Run the universal integrator (bit-exact GTE). --- */
     Object_IntegrateAndOrient(b);
@@ -123,31 +150,31 @@ void Object_GeneralTick(uint32_t *obj)
     int32_t ax = *(int32_t *)(b + 0x90);
     int32_t ay = *(int32_t *)(b + 0x94);
     int32_t az = *(int32_t *)(b + 0x98);
-    *(int32_t *)(b + 0x90) = (int32_t)((uint32_t)ax * 0xf80u) >> 12;
-    *(int32_t *)(b + 0x94) = (int32_t)((uint32_t)ay * 0xf80u) >> 12;
-    *(int32_t *)(b + 0x98) = (int32_t)((uint32_t)az * 0xf80u) >> 12;
+    *(int32_t *)(b + 0x90) = mips_mult_lo_i32(ax, 0xf80) >> 12;
+    *(int32_t *)(b + 0x94) = mips_mult_lo_i32(ay, 0xf80) >> 12;
+    *(int32_t *)(b + 0x98) = mips_mult_lo_i32(az, 0xf80) >> 12;
 
     /* Linear: subtract 1/64 of the velocity with rounded right-shift. */
     int32_t vx = *(int32_t *)(b + 0x80);
     int32_t vy = *(int32_t *)(b + 0x84);
     int32_t vz = *(int32_t *)(b + 0x88);
-    *(int32_t *)(b + 0x80) = vx - rsa(vx, 6);
-    *(int32_t *)(b + 0x84) = vy - rsa(vy, 6);
-    *(int32_t *)(b + 0x88) = vz - rsa(vz, 6);
+    *(int32_t *)(b + 0x80) = mips_subu_i32(vx, rsa(vx, 6));
+    *(int32_t *)(b + 0x84) = mips_subu_i32(vy, rsa(vy, 6));
+    *(int32_t *)(b + 0x88) = mips_subu_i32(vz, rsa(vz, 6));
 
     /* --- 7. Three-slot i32-keyed timer array at +0x110 (entries are
      * pointers; deref to access the i16 at +6 inside the target). --- */
     for (int i = 0; i < 3; i++) {
-        uint8_t *node = *(uint8_t **)(b + 0x110 + i * 4);
+        uint8_t *node = (uint8_t *)(uintptr_t)*(uint32_t *)(b + 0x110 + i * 4);
         if (node && *(int16_t *)(node + 6) != 0) {
-            *(int16_t *)(node + 6) -= 1;
+            *(int16_t *)(node + 6) = (int16_t)mips_addu_i32(*(int16_t *)(node + 6), -1);
         }
     }
 
     /* --- 8. Three-slot i16 timer array at +0x11c (3x i16 in place). --- */
     for (int i = 0; i < 3; i++) {
         int16_t *t = (int16_t *)(b + 0x11c + i * 2);
-        if (*t != 0) *t -= 1;
+        if (*t != 0) *t = (int16_t)mips_addu_i32(*t, -1);
     }
 
     /* --- 9. Previous-pos trail at +0x48..+0x50 unless flag 0x800000. --- */
@@ -165,11 +192,19 @@ void Object_GeneralTick(uint32_t *obj)
             int32_t tx = *(int32_t *)(b + 0x48);
             int32_t ty = *(int32_t *)(b + 0x4c);
             int32_t tz = *(int32_t *)(b + 0x50);
-            *(int32_t *)(b + 0x48) = tx + rsa(px - tx, 5);
-            *(int32_t *)(b + 0x4c) = ty + rsa(py - ty, 5);
-            *(int32_t *)(b + 0x50) = tz + rsa(pz - tz, 5);
+            *(int32_t *)(b + 0x48) =
+                mips_addu_i32(tx, rsa(mips_subu_i32(px, tx), 5));
+            *(int32_t *)(b + 0x4c) =
+                mips_addu_i32(ty, rsa(mips_subu_i32(py, ty), 5));
+            *(int32_t *)(b + 0x50) =
+                mips_addu_i32(tz, rsa(mips_subu_i32(pz, tz), 5));
         }
     }
+}
+
+void FUN_80030c08(uint32_t *obj)
+{
+    Object_GeneralTick(obj);
 }
 
 /* ============================================================

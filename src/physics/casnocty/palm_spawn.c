@@ -18,6 +18,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t *Object_Pool_Alloc(uint32_t size);
 extern int  Bone_AllocSlot(uint32_t parent, uint16_t slotKey);
 extern void Bone_AttachChild(uint32_t parent, int slot, uint32_t *child);
@@ -28,7 +29,7 @@ extern uint32_t _DAT_800737d8;
 void CC_PalmSpawn(uint32_t parent, uint16_t slotKey)
 {
     uint32_t *p = Object_Pool_Alloc(0x9c);
-    p[0x19] = (uintptr_t)&FUN_80100a9c;
+    Object_SetCallbackPsxSlot(p, (uintptr_t)&FUN_80100a9c);
     p[0]  |= 0xa4u;
     *(uint16_t *)((uint8_t *)p + 0x96) = 0x12;
     *(uint16_t *)((uint8_t *)p + 0x82) = 4;

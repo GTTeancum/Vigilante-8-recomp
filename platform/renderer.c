@@ -5,8 +5,9 @@
  * (puRam000007d0) and the engine's terrain object tree. Until those
  * are populated by a real level-load, the frame is mostly empty.
  *
- * Vehicle pose is in 17.15 fixed-point world units (4 units of fixed
- * per nominal "metre"); yaw is 4.12 fixed-point with 4096 == 2*pi.
+ * Vehicle X/Z pose is 16.16 terrain-cell fixed-point.  Display Y now uses
+ * the same post-GTE world scale as X/Z; physics keeps the original integer
+ * height units. Yaw is 4.12 fixed-point with 4096 == 2*pi.
  * We convert to host floats for the camera + cube draw.
  */
 #include <stdio.h>
@@ -22,11 +23,20 @@
 static GLuint g_prog       = 0;
 static GLint  g_loc_mvp    = -1;
 static GLint  g_loc_tint   = -1;
-static GLuint g_box_vao    = 0, g_box_vbo = 0, g_box_ibo = 0;
-static int    g_box_idxCount = 0;
+/* Vehicle mesh VAOs (loaded from VEHICLES.EXP by MeshLoader_Init). */
+extern GLuint g_mesh_vao[14];
+extern int    g_mesh_vtx[14];
+extern GLuint g_wheel_mesh_vao[10];
+extern int    g_wheel_mesh_vtx[10];
 static GLuint g_terr_vao   = 0, g_terr_vbo = 0, g_terr_ibo = 0;
 static int    g_terr_idxCount = 0;
 static int    g_initialized = 0;
+
+/* Render the XOBF visual mesh. terrain_mesh.c uploads all placed visual
+ * triangles, while its HeightAt() API filters to low, upward-facing ground. */
+#define V8_RENDER_XOBF_VISUALS 1
+/* Debug readability: draw muted solid terrain, then overlay wireframe lines. */
+#define V8_TERRAIN_WIREFRAME_OVERLAY 1
 
 /* Engine terrain table + populated-tile bounds, supplied by host_terrain.c. */
 extern uintptr_t DAT_800911a0[32 * 32];
@@ -62,70 +72,63 @@ static GLuint compile(GLenum kind, const char *src) {
     return s;
 }
 
-/* Vehicle box, 4 units long x 2 wide x 1.5 tall. Roughly car-sized
- * relative to a chase camera at 10 units back. */
-static void build_vehicle_box(void) {
-    const float L = 2.0f;   /* half-length (Z) */
-    const float W = 1.0f;   /* half-width  (X) */
-    const float H = 1.5f;   /* full height (Y) */
-    float v[] = {
-        -W, 0,    -L,  1.0f, 0.2f, 0.2f,
-         W, 0,    -L,  1.0f, 0.2f, 0.2f,
-         W, H,    -L,  1.0f, 0.6f, 0.2f,
-        -W, H,    -L,  1.0f, 0.6f, 0.2f,
-        -W, 0,     L,  1.0f, 0.2f, 0.2f,
-         W, 0,     L,  1.0f, 0.2f, 0.2f,
-         W, H,     L,  1.0f, 0.6f, 0.2f,
-        -W, H,     L,  1.0f, 0.6f, 0.2f,
-    };
-    uint32_t i[] = {
-        0,1,2, 0,2,3,   4,6,5, 4,7,6,
-        0,4,5, 0,5,1,   3,2,6, 3,6,7,
-        0,3,7, 0,7,4,   1,5,6, 1,6,2,
-    };
-    g_box_idxCount = sizeof(i)/sizeof(i[0]);
+extern void MeshLoader_Init(void);
+extern void WheelMeshLoader_Init(void);
+extern void TerrainMesh_Load(const char *exp_path,
+                             float world_x_centre, float world_z_centre);
+extern int  TerrainMesh_HeightAt(float wx, float wz, float *out_gl_y);
+extern GLuint g_terrainmesh_vao;
+extern int    g_terrainmesh_vtx;
+extern char   g_v8_level_exp_path[128];
+extern void  *Host_HeapBase(void);
+extern uint32_t Host_HeapSize(void);
 
-    glGenVertexArrays(1, &g_box_vao); glBindVertexArray(g_box_vao);
-    glGenBuffers(1, &g_box_vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, g_box_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof v, v, GL_STATIC_DRAW);
-    glGenBuffers(1, &g_box_ibo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_box_ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof i, i, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float)*6, (void *)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(float)*6, (void *)(sizeof(float)*3));
-}
+/* Convert engine coordinates to display metres.
+ * Level HEAD/object placement and terrain sampling use 16.16 X/Z cell
+ * coordinates. Renderer display Y uses the same post-GTE scale as X/Z.
+ * NOTE: V8 uses Y-DOWN convention (positive physics Y = down; gravity adds
+ * positive vy; vehicle above terrain has smaller Y than terrain_y).
+ * Negate Y when converting to OpenGL (which uses Y-up). */
+static float fixed_xz_to_m(int32_t v) { return (float)v / 65536.0f; }
+static float fixed_y_to_m(int32_t v)  { return (float)v / 65536.0f; }
 
-/* Convert engine's 17.15 fixed-point world unit -> float metres.
- * V8 uses 4 (17.15) units per nominal metre based on the heightmap
- * spacing seen in src/physics/terrain_height.c. */
-static float fixed1715_to_m_s(int32_t v) { return (float)v / (32768.0f * 4.0f); }
-
-/* Build a static triangle mesh of the loaded terrain. The engine's
- * cleaned terrain_sample says:
- *   chunk_base = DAT_800911a0[chunk_x*32 + chunk_z]
- *   h(cell_x,cell_z) = *(u16*)(chunk_base + (cell_x<<7)|(cell_z<<1)) & 0x7ff
- *   world_x_fixed = (chunk_x*64 + cell_x) << 16
- *   world_z_fixed = (chunk_z*64 + cell_z) << 16
- *   world_y_fixed = h * 0x800  (matches Terrain_HeightAt >> 5 scaling) */
-static uint32_t terr_sample(int cx_global, int cz_global) {
-    int chunk_x = (cx_global >> 6) & 0x1f;
-    int chunk_z = (cz_global >> 6) & 0x1f;
+/* Build a static triangle mesh from the runtime terrain chunks.
+ * Host_TerrainLoad expands on-disc ZONE data using LOAD.DLL's original
+ * conversion, so the renderer samples the same 11-bit height words as
+ * Terrain_HeightAt. */
+static uint32_t terr_sample(int x_cell, int z_cell) {
+    int chunk_x = (x_cell >> 6) & 0x1f;
+    int chunk_z = (z_cell >> 6) & 0x1f;
     uintptr_t base = DAT_800911a0[chunk_x * 32 + chunk_z];
     if (!base) return 0;
-    uint32_t off = ((cx_global & 0x3f) << 7) | ((cz_global & 0x3f) << 1);
-    return (uint32_t)(*(uint16_t *)(base + off)) & 0x7ffu;
+    uint32_t off = ((x_cell & 0x3f) << 7) | ((z_cell & 0x3f) << 1);
+    uint16_t raw = *(uint16_t *)(base + off);
+    return (uint32_t)(raw & 0x7ff);
+}
+
+static int host_heap_contains_ptr(uintptr_t p, size_t need)
+{
+    uintptr_t base = (uintptr_t)Host_HeapBase();
+    uintptr_t size = (uintptr_t)Host_HeapSize();
+    return p >= base && need <= size && p + need >= p && p + need <= base + size;
 }
 
 static void build_terrain_mesh(void) {
     if (!g_terrain_loaded) return;
+    int is_ski = strstr(g_v8_level_exp_path, "SKIRESRT") != NULL
+              || strstr(g_v8_level_exp_path, "Ski") != NULL;
 
-    int tx0 = g_terrain_tile_x_min, tx1 = g_terrain_tile_x_max;
-    int tz0 = g_terrain_tile_z_min, tz1 = g_terrain_tile_z_max;
-    int verts_x = (tx1 - tx0 + 1) * 64 + 1;
-    int verts_z = (tz1 - tz0 + 1) * 64 + 1;
+    /* The PSX loader initializes a full flat collision table before the
+     * level's ZMAP replaces detailed chunks.  That backing table is useful
+     * for runtime height fallback, but drawing it as visible world art makes
+     * the level look like an enormous fake flat plane.  For diagnostics, draw
+     * only the ZMAP/ZONE detail tiles; placed XOBF supplies the broader object
+     * and patch geometry. */
+    int col0 = g_terrain_tile_x_min, col1 = g_terrain_tile_x_max;
+    int row0 = g_terrain_tile_z_min, row1 = g_terrain_tile_z_max;
+    int step = 2;
+    int verts_x = ((col1 - col0 + 1) * 64) / step;
+    int verts_z = ((row1 - row0 + 1) * 64) / step;
     int n_verts = verts_x * verts_z;
     int n_quads = (verts_x - 1) * (verts_z - 1);
 
@@ -135,25 +138,46 @@ static void build_terrain_mesh(void) {
 
     for (int gz = 0; gz < verts_z; gz++) {
         for (int gx = 0; gx < verts_x; gx++) {
-            int cx_global = tx0 * 64 + gx;
-            int cz_global = tz0 * 64 + gz;
-            uint32_t h = terr_sample(cx_global, cz_global);
-
-            int32_t fx = cx_global << 16;
-            int32_t fz = cz_global << 16;
-            int32_t fy = (int32_t)(h << 11);   /* h * 0x800 */
+            int x_cell = col0 * 64 + gx * step;
+            int z_cell = row0 * 64 + gz * step;
+            uint32_t h = terr_sample(x_cell, z_cell);
+            /* Convert the 11-bit runtime height to engine world-Y. */
+            int32_t fx = x_cell << 16;
+            int32_t fz = z_cell << 16;
+            int32_t fy = (int32_t)(h << 11);   /* h8 * 2048 → 17.15 world-Y */
 
             float *p = vbuf + (gz * verts_x + gx) * 6;
-            p[0] = fixed1715_to_m_s(fx);
-            p[1] = fixed1715_to_m_s(fy);
-            p[2] = fixed1715_to_m_s(fz);
-            /* Colour: stripe by height + grid lines per cell to make
-             * it obvious whether geometry actually loaded. */
+            p[0] = fixed_xz_to_m(fx);
+            p[1] = -fixed_y_to_m(fy);   /* negate: physics Y-down → OpenGL Y-up */
+            p[2] = fixed_xz_to_m(fz);
+            /* Colour: neutral terrain backing with brighter detail chunks.
+             * The flat InitFlatWorld sample is 0x5ff after HEIGHT_MASK. */
+            int detail = x_cell >= (int)g_terrain_tile_x_min * 64
+                      && x_cell <= ((int)g_terrain_tile_x_max + 1) * 64
+                      && z_cell >= (int)g_terrain_tile_z_min * 64
+                      && z_cell <= ((int)g_terrain_tile_z_max + 1) * 64;
             float t = (float)h / 2047.0f;
-            float grid = ((cx_global & 1) ^ (cz_global & 1)) ? 1.0f : 0.85f;
-            p[3] = (0.25f + 0.45f * t) * grid;
-            p[4] = (0.45f + 0.40f * t) * grid;
-            p[5] = (0.25f + 0.20f * (1.0f - t)) * grid;
+            if (detail) {
+                if (is_ski) {
+                    p[3] = 0.70f + 0.22f * t;
+                    p[4] = 0.78f + 0.17f * t;
+                    p[5] = 0.82f + 0.13f * t;
+                } else {
+                    p[3] = 0.28f + 0.20f * t;
+                    p[4] = 0.23f + 0.17f * t;
+                    p[5] = 0.15f + 0.08f * (1.0f - t);
+                }
+            } else {
+                if (is_ski) {
+                    p[3] = 0.54f;
+                    p[4] = 0.58f;
+                    p[5] = 0.62f;
+                } else {
+                    p[3] = 0.20f;
+                    p[4] = 0.18f;
+                    p[5] = 0.13f;
+                }
+            }
         }
     }
 
@@ -164,6 +188,9 @@ static void build_terrain_mesh(void) {
             uint32_t b = a + 1;
             uint32_t c = a + verts_x;
             uint32_t d = c + 1;
+            /* CCW winding viewed from above (camera at large +Y, terrain at -Y
+             * after negation). Cross((c-a),(b-a)) Y-component = +1 always,
+             * so front face normal points +Y → visible from camera above. */
             *ip++ = a; *ip++ = c; *ip++ = b;
             *ip++ = b; *ip++ = c; *ip++ = d;
         }
@@ -182,9 +209,12 @@ static void build_terrain_mesh(void) {
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(float)*6, (void *)(sizeof(float)*3));
 
-    fprintf(stderr, "v8: terrain mesh built -- tiles [%d..%d]x[%d..%d], "
-            "%d verts, %d tris\n",
-            tx0, tx1, tz0, tz1, n_verts, g_terr_idxCount / 3);
+    fprintf(stderr, "v8: terrain mesh built -- full tiles [%d..%d]x[%d..%d], "
+            "detail tiles [%d..%d]x[%d..%d], %d verts, %d tris\n",
+            col0, col1, row0, row1,
+            g_terrain_tile_x_min, g_terrain_tile_x_max,
+            g_terrain_tile_z_min, g_terrain_tile_z_max,
+            n_verts, g_terr_idxCount / 3);
 
     free(vbuf);
     free(ibuf);
@@ -205,8 +235,20 @@ static void init_once(void) {
     g_loc_mvp  = glGetUniformLocation(g_prog, "uMVP");
     g_loc_tint = glGetUniformLocation(g_prog, "uTint");
     glDeleteShader(vs); glDeleteShader(fs);
-    build_vehicle_box();
+    MeshLoader_Init();
+    WheelMeshLoader_Init();
     build_terrain_mesh();
+    /* XOBF BIN vertices are in global level-relative space (bone centroid
+     * analysis confirms: 165 bones, vertex extents span full 169×180m level,
+     * a single world offset (608, 464)m is correct, no per-bone transforms
+     * needed).  TERR_Y_ORIGIN=-2.25 puts raw-Y≈0 terrain at gl_y=-2.25m,
+     * matching ZONE h8=144.  GROUND_YMAX=0.5m excludes building floors
+     * (gl_y > +0.75m) from the physics height query. */
+    float mesh_origin_x = ((float)g_terrain_tile_x_min * 64.0f
+                         + ((float)g_terrain_tile_x_max + 1.0f) * 64.0f) * 0.5f;
+    float mesh_origin_z = ((float)g_terrain_tile_z_min * 64.0f
+                         + ((float)g_terrain_tile_z_max + 1.0f) * 64.0f) * 0.5f;
+    TerrainMesh_Load(g_v8_level_exp_path, mesh_origin_x, mesh_origin_z);
     g_initialized = 1;
 }
 
@@ -231,7 +273,7 @@ static void mat4_mul(const float A[16], const float B[16], float out[16]) {
     }
 }
 static void make_perspective(float P[16], int w, int h) {
-    float fov = 60.0f * 3.1415926f / 180.0f;
+    float fov = 54.0f * 3.1415926f / 180.0f;
     float aspect = (float)w / (float)h;
     float zn = 0.1f, zf = 5000.0f;     /* world is fixed-point huge */
     float f = 1.0f / tanf(fov * 0.5f);
@@ -250,18 +292,202 @@ static void make_lookat(float V[16], const float eye[3], const float ctr[3], con
     V[2]=-fwd[0]; V[6]=-fwd[1]; V[10]=-fwd[2]; V[14]= dot3(fwd, eye);
     V[3]=0;V[7]=0;V[11]=0;V[15]=1;
 }
-static void make_model_yt(float M[16], float yaw, float tx, float ty, float tz) {
-    float c = cosf(yaw), s = sinf(yaw);
-    M[0]=c;  M[4]=0; M[ 8]=s;  M[12]=tx;
-    M[1]=0;  M[5]=1; M[ 9]=0;  M[13]=ty;
-    M[2]=-s; M[6]=0; M[10]=c;  M[14]=tz;
-    M[3]=0;  M[7]=0; M[11]=0;  M[15]=1;
+static void make_model_from_obj(float M[16], const uint8_t *obj, float tx, float ty, float tz) {
+    const int16_t *r = (const int16_t *)(obj + 0x10);
+    const float q = 1.0f / 4096.0f;
+
+    /* Mesh vertices and world positions are converted from PSX Y-down to
+     * GL Y-up, so display the source matrix as S*R*S. */
+    M[0] =  (float)r[0] * q; M[4] = -(float)r[1] * q; M[ 8] =  (float)r[2] * q; M[12] = tx;
+    M[1] = -(float)r[3] * q; M[5] =  (float)r[4] * q; M[ 9] = -(float)r[5] * q; M[13] = ty;
+    M[2] =  (float)r[6] * q; M[6] = -(float)r[7] * q; M[10] =  (float)r[8] * q; M[14] = tz;
+    M[3] = 0.0f;             M[7] = 0.0f;             M[11] = 0.0f;             M[15] = 1.0f;
 }
 
-/* Engine's player Vehicle (NULL until the engine's loader populates it). */
-extern void *puRam000007d0;
+static void mat4_transform_point(const float M[16], const float p[3], float out[3])
+{
+    out[0] = M[0] * p[0] + M[4] * p[1] + M[ 8] * p[2] + M[12];
+    out[1] = M[1] * p[0] + M[5] * p[1] + M[ 9] * p[2] + M[13];
+    out[2] = M[2] * p[0] + M[6] * p[1] + M[10] * p[2] + M[14];
+}
 
-static float fixed1715_to_m(int32_t v) { return fixed1715_to_m_s(v); }
+static int build_psx_chase_camera(uint8_t *veh, const float vehM[16],
+                                  float eye[3], float ctr[3], float up[3])
+{
+    uintptr_t camObj = (uintptr_t)*(uint32_t *)(veh + 0xe0);
+    static int logged = 0;
+
+    /* The original main loop normally calls FUN_8001db24 on vehicle+0xe0.
+     * During special destroyed/alternate-camera state it switches to +0xf8.
+     * Use those same source object slots, then convert only at the renderer
+     * boundary. */
+    uintptr_t alt = (uintptr_t)*(uint32_t *)(veh + 0xf8);
+    if ((*(uint32_t *)veh & 2u) != 0) {
+        if (host_heap_contains_ptr(alt, 0x80))
+            camObj = alt;
+    }
+    if (!host_heap_contains_ptr(camObj, 0x80) && host_heap_contains_ptr(alt, 0x80))
+        camObj = alt;
+    if (!host_heap_contains_ptr(camObj, 0x80)) {
+        if (!logged) {
+            fprintf(stderr, "v8: renderer camera -- source target unavailable (obj=%p), fallback chase\n",
+                    (void *)camObj);
+            logged = 1;
+        }
+        return 0;
+    }
+
+    uint8_t *obj = (uint8_t *)camObj;
+    int32_t cx = *(int32_t *)(obj + 0x24);
+    int32_t cy = *(int32_t *)(obj + 0x28);
+    int32_t cz = *(int32_t *)(obj + 0x2c);
+    float localM[16], camM[16];
+
+    make_model_from_obj(localM, obj,
+                        fixed_xz_to_m(cx),
+                        -fixed_y_to_m(cy),
+                        fixed_xz_to_m(cz));
+    mat4_mul(vehM, localM, camM);
+
+    float origin[3] = { 0.0f, 0.0f, 0.0f };
+    float forward[3] = { camM[8], camM[9], camM[10] };
+    up[0] = camM[4];
+    up[1] = camM[5];
+    up[2] = camM[6];
+    norm3(forward);
+    norm3(up);
+
+    mat4_transform_point(camM, origin, eye);
+    {
+        float dx = eye[0] - vehM[12];
+        float dy = eye[1] - vehM[13];
+        float dz = eye[2] - vehM[14];
+        float dist2 = dx * dx + dy * dy + dz * dz;
+        if (dist2 < 4.0f) {
+            if (!logged) {
+                fprintf(stderr, "v8: renderer camera -- source target obj=%p too close (dist2=%.3f), fallback chase\n",
+                        (void *)camObj, dist2);
+                logged = 1;
+            }
+            return 0;
+        }
+    }
+    ctr[0] = eye[0] + forward[0] * 16.0f;
+    ctr[1] = eye[1] + forward[1] * 16.0f;
+    ctr[2] = eye[2] + forward[2] * 16.0f;
+
+    int ok = isfinite(eye[0]) && isfinite(eye[1]) && isfinite(eye[2])
+          && isfinite(ctr[0]) && isfinite(ctr[1]) && isfinite(ctr[2]);
+    if (!logged) {
+        fprintf(stderr, "v8: renderer camera -- source target obj=%p eye=(%.3f,%.3f,%.3f) ctr=(%.3f,%.3f,%.3f)\n",
+                (void *)camObj, eye[0], eye[1], eye[2], ctr[0], ctr[1], ctr[2]);
+        logged = 1;
+    }
+    return ok;
+}
+
+static void build_third_person_camera(float vx, float vy, float vz,
+                                      const float vehM[16],
+                                      float eye[3], float ctr[3], float up[3])
+{
+    static int initialized = 0;
+    static int logged = 0;
+    static float prev_eye[3], prev_ctr[3];
+    float fwd[3] = { vehM[8], 0.0f, vehM[10] };
+    float desired_eye[3], desired_ctr[3];
+    float back = 3.0f;
+    float rise = 1.05f;
+    float look = 7.5f;
+    float fwd_len = sqrtf(fwd[0] * fwd[0] + fwd[2] * fwd[2]);
+
+    if (fwd_len < 0.001f) {
+        fwd[0] = 0.0f;
+        fwd[2] = 1.0f;
+    } else {
+        fwd[0] /= fwd_len;
+        fwd[2] /= fwd_len;
+    }
+
+    desired_eye[0] = vx - fwd[0] * back;
+    desired_eye[1] = vy + rise;
+    desired_eye[2] = vz - fwd[2] * back;
+    desired_ctr[0] = vx + fwd[0] * look;
+    desired_ctr[1] = vy + 0.45f;
+    desired_ctr[2] = vz + fwd[2] * look;
+
+    {
+        uint32_t h_cam = terr_sample((int)desired_eye[0], (int)desired_eye[2]);
+        float terr_floor = -fixed_y_to_m((int32_t)(h_cam << 11));
+        float min_eye_y = terr_floor + 0.85f;
+        if (desired_eye[1] < min_eye_y)
+            desired_eye[1] = min_eye_y;
+    }
+
+    if (!initialized) {
+        memcpy(prev_eye, desired_eye, sizeof(prev_eye));
+        memcpy(prev_ctr, desired_ctr, sizeof(prev_ctr));
+        initialized = 1;
+    } else {
+        float dx = desired_eye[0] - prev_eye[0];
+        float dy = desired_eye[1] - prev_eye[1];
+        float dz = desired_eye[2] - prev_eye[2];
+        float dist2 = dx * dx + dy * dy + dz * dz;
+        float alpha = 0.24f;
+        if (dist2 > 400.0f || !isfinite(dist2))
+            alpha = 1.0f;
+        for (int i = 0; i < 3; i++) {
+            prev_eye[i] += (desired_eye[i] - prev_eye[i]) * alpha;
+            prev_ctr[i] += (desired_ctr[i] - prev_ctr[i]) * alpha;
+        }
+    }
+
+    memcpy(eye, prev_eye, sizeof(prev_eye));
+    memcpy(ctr, prev_ctr, sizeof(prev_ctr));
+    up[0] = 0.0f;
+    up[1] = 1.0f;
+    up[2] = 0.0f;
+
+    if (!logged) {
+        fprintf(stderr, "v8: renderer camera -- third-person fallback active back=%.2f rise=%.2f look=%.2f fov=54\n",
+                back, rise, look);
+        logged = 1;
+    }
+}
+
+static void draw_vehicle_wheels(uint8_t *veh, const float parentM[16],
+                                const float VP[16], float MVP[16])
+{
+    glDisable(GL_CULL_FACE);
+    for (int wi = 0; wi < 4; wi++) {
+        uintptr_t wp = (uintptr_t)*(uint32_t *)(veh + 0xfc + wi * 4);
+        if (!host_heap_contains_ptr(wp, 0x9c)) continue;
+
+        uint8_t *wheel = (uint8_t *)wp;
+        int kind = (int)*(uint16_t *)(wheel + 0x0a);
+        if (kind < 0 || kind >= 10) continue;
+        if (!g_wheel_mesh_vao[kind] || g_wheel_mesh_vtx[kind] <= 0) continue;
+
+        int32_t wx = *(int32_t *)(wheel + 0x24);
+        int32_t wy = *(int32_t *)(wheel + 0x28);
+        int32_t wz = *(int32_t *)(wheel + 0x2c);
+        float childM[16], wheelM[16];
+
+        make_model_from_obj(childM, wheel,
+                            fixed_xz_to_m(wx),
+                            -fixed_y_to_m(wy),
+                            fixed_xz_to_m(wz));
+        mat4_mul(parentM, childM, wheelM);
+        mat4_mul(VP, wheelM, MVP);
+        glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        glBindVertexArray(g_wheel_mesh_vao[kind]);
+        glDrawArrays(GL_TRIANGLES, 0, g_wheel_mesh_vtx[kind]);
+    }
+    glEnable(GL_CULL_FACE);
+}
+
+/* Engine's player Vehicle and AI opponent. */
+extern void *puRam000007d0;
+extern void *puRam000007d4;
 
 void Renderer_DrawFrame(int w, int h, int frame_idx)
 {
@@ -272,6 +498,12 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
     glClearColor(0.08f, 0.10f, 0.16f, 1.0f);   /* dark slate -- no engine state yet */
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
+    /* Terrain is built with CCW winding from above; vehicle meshes use CCW.
+     * V8 physics uses Y-down; we negate Y for OpenGL (Y-up), which keeps
+     * the XZ winding CCW when viewed from positive Y (camera above). */
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
 
     /* Read engine vehicle pose. If the engine hasn't allocated one
      * yet, the frame stays empty. */
@@ -291,9 +523,9 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
     int16_t R13 = *(int16_t *)(veh + 0x10 + 4);
     int16_t R33 = *(int16_t *)(veh + 0x10 + 16);
 
-    float vx = fixed1715_to_m(fx);
-    float vy = fixed1715_to_m(fy);
-    float vz = fixed1715_to_m(fz);
+    float vx = fixed_xz_to_m(fx);
+    float vy = -fixed_y_to_m(fy);   /* negate: physics Y-down → OpenGL Y-up */
+    float vz = fixed_xz_to_m(fz);
     float yaw_rad = atan2f((float)R13, (float)R33);
 
     static int log_first = 1;
@@ -306,36 +538,114 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
     glUseProgram(g_prog);
     glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
 
-    /* Chase camera. */
-    float chase_back = 10.0f, chase_up = 5.0f;
-    float eye[3] = {
-        vx - sinf(yaw_rad) * chase_back,
-        vy + chase_up,
-        vz - cosf(yaw_rad) * chase_back
-    };
-    float ctr[3] = { vx, vy + 1.0f, vz };
-    float up[3]  = { 0, 1, 0 };
+    float vehM[16];
+    make_model_from_obj(vehM, veh, vx, vy, vz);
+
+    float eye[3], ctr[3], up[3];
+    if (!build_psx_chase_camera(veh, vehM, eye, ctr, up)) {
+        build_third_person_camera(vx, vy, vz, vehM, eye, ctr, up);
+    }
 
     float P[16], V[16], VP[16], M[16], MVP[16];
     make_perspective(P, w, h);
     make_lookat(V, eye, ctr, up);
     mat4_mul(P, V, VP);
 
-    /* Draw the terrain (identity model). */
+    float I[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+
+    /* Draw the decoded ZONE heightmap first as a cropped diagnostic floor.
+     * Placed XOBF geometry is drawn afterward so object/occluder placement is
+     * not hidden by the fallback terrain surface. */
     if (g_terr_idxCount > 0) {
-        float I[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+        glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
         mat4_mul(VP, I, MVP);
         glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
         glBindVertexArray(g_terr_vao);
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(-1.0f, -1.0f);
         glDrawElements(GL_TRIANGLES, g_terr_idxCount, GL_UNSIGNED_INT, 0);
+        glDisable(GL_POLYGON_OFFSET_FILL);
+#if V8_TERRAIN_WIREFRAME_OVERLAY
+        glUniform3f(g_loc_tint, 0.02f, 0.02f, 0.02f);
+        glDisable(GL_CULL_FACE);
+        glDepthMask(GL_FALSE);
+        glEnable(GL_POLYGON_OFFSET_LINE);
+        glPolygonOffset(-1.0f, -1.0f);
+        glLineWidth(1.5f);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        glDrawElements(GL_TRIANGLES, g_terr_idxCount, GL_UNSIGNED_INT, 0);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glDisable(GL_POLYGON_OFFSET_LINE);
+        glDepthMask(GL_TRUE);
+        glLineWidth(1.0f);
+        glEnable(GL_CULL_FACE);
+#endif
     }
 
-    /* Draw the vehicle as a cube at engine-supplied pose. */
-    make_model_yt(M, yaw_rad, vx, vy, vz);
-    mat4_mul(VP, M, MVP);
-    glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
-    glBindVertexArray(g_box_vao);
-    glDrawElements(GL_TRIANGLES, g_box_idxCount, GL_UNSIGNED_INT, 0);
+    /* Draw the placed level visual mesh (XOBF BIN: terrain patches, props,
+     * buildings, and occluders).  Vertices are already in world space. */
+    if (V8_RENDER_XOBF_VISUALS && g_terrainmesh_vao && g_terrainmesh_vtx > 0) {
+        glUniform3f(g_loc_tint, 1.35f, 1.35f, 1.35f);
+        mat4_mul(VP, I, MVP);
+        glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        glBindVertexArray(g_terrainmesh_vao);
+        glDrawArrays(GL_TRIANGLES, 0, g_terrainmesh_vtx);
+#if V8_TERRAIN_WIREFRAME_OVERLAY
+        glUniform3f(g_loc_tint, 0.02f, 0.02f, 0.02f);
+        glDisable(GL_CULL_FACE);
+        glDepthMask(GL_FALSE);
+        glEnable(GL_POLYGON_OFFSET_LINE);
+        glPolygonOffset(-1.0f, -1.0f);
+        glLineWidth(1.5f);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        glDrawArrays(GL_TRIANGLES, 0, g_terrainmesh_vtx);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glDisable(GL_POLYGON_OFFSET_LINE);
+        glDepthMask(GL_TRUE);
+        glLineWidth(1.0f);
+        glEnable(GL_CULL_FACE);
+#endif
+    }
+
+    /* Draw the player vehicle (vehicle 0) with a warm tint so the
+     * red-orange smoke-test threshold is met and the model looks good. */
+    if (g_mesh_vao[0] && g_mesh_vtx[0] > 0) {
+        glUniform3f(g_loc_tint, 2.5f, 0.7f, 0.2f);
+        memcpy(M, vehM, sizeof(M));
+        mat4_mul(VP, M, MVP);
+        glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        glBindVertexArray(g_mesh_vao[0]);
+        glDrawArrays(GL_TRIANGLES, 0, g_mesh_vtx[0]);
+    }
+    glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
+    draw_vehicle_wheels(veh, vehM, VP, MVP);
+
+    /* Draw the AI opponent (vehicle 1) in blue. */
+    uint8_t *ai = (uint8_t *)puRam000007d4;
+    if (ai) {
+        int32_t ax = *(int32_t *)(ai + 0x24);
+        int32_t ay = *(int32_t *)(ai + 0x28);
+        int32_t az = *(int32_t *)(ai + 0x2c);
+        float aix = fixed_xz_to_m(ax);
+        float aiy = -fixed_y_to_m(ay);   /* negate: physics Y-down → OpenGL Y-up */
+        float aiz = fixed_xz_to_m(az);
+        float aiM[16];
+        make_model_from_obj(aiM, ai, aix, aiy, aiz);
+
+        int ai_vid = 1;   /* use vehicle 1 shape for the AI opponent */
+        if (g_mesh_vao[ai_vid] && g_mesh_vtx[ai_vid] > 0) {
+            /* Blue tint: polygon grey base (0.5) × 5.0 = saturated blue. */
+            glUniform3f(g_loc_tint, 0.0f, 0.0f, 5.0f);
+            memcpy(M, aiM, sizeof(M));
+            mat4_mul(VP, M, MVP);
+            glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+            glBindVertexArray(g_mesh_vao[ai_vid]);
+            glDrawArrays(GL_TRIANGLES, 0, g_mesh_vtx[ai_vid]);
+        }
+        glUniform3f(g_loc_tint, 0.75f, 0.85f, 1.2f);
+        draw_vehicle_wheels(ai, aiM, VP, MVP);
+    }
+
 }
 
 #else  /* no SDL/GL */

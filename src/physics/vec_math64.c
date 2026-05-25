@@ -101,6 +101,10 @@ int32_t Vec3_Length(const int32_t *v)
 /* ============================================================
  * // GHIDRA REF (audit ground truth -- DO NOT EDIT MANUALLY)
  * ============================================================ */
+/* FUN_ aliases so callers that use the raw address name link correctly. */
+int64_t FUN_800171d4(const int32_t *a, const int32_t *b) { return Vec3_Dot64(a, b); }
+int32_t FUN_80016a20(const int32_t *v)                   { return Vec3_Length(v); }
+
 #if 0
 
 /* --- SLUS_005.10 FUN_800171d4 (MIPS, Ghidra pseudo-C empty) ---

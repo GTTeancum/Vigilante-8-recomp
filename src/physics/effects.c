@@ -22,46 +22,75 @@
 extern uint32_t Effects_PollFreeSlot(void);                /* FUN_8003fbc8 */
 extern void     Effects_BindSlot(int obj, void *bank, uint16_t slot);  /* FUN_8003fac4 */
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int flags);
-extern void *LAB_8003e80c;
+extern int LAB_8003e80c(int obj, int event, int param3); /* effect_death_ticks.c */
+extern int LAB_8003e7b4(int obj, int event, int param3);
+extern void FUN_8002036c(uint32_t *obj);
+extern uintptr_t DAT_800737d8;
 extern uint32_t _DAT_800737d8;
 extern void **_DAT_800737d8_ptr;
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+
+static inline uintptr_t obj_ptr32(uintptr_t base, uint32_t off)
+{
+    return (uintptr_t)*(uint32_t *)(base + off);
+}
+
+static inline void obj_write32(uintptr_t base, uint32_t off, uintptr_t value)
+{
+    *(uint32_t *)(base + off) = (uint32_t)value;
+}
 
 int Effects_SpawnExplosion(int obj)
 {
     uint32_t slot = Effects_PollFreeSlot();
     if (slot == 0) return 0;
-    Effects_BindSlot(obj, *(void **)(obj + 0x58), (uint16_t)slot);
+    Effects_BindSlot(obj, (void *)obj_ptr32((uintptr_t)obj, 0x58), (uint16_t)slot);
     return 1;
 }
 
 int Effects_QueueSnow(int obj)
 {
-    int *bone = *(int **)(obj + 0x58);
-    uint16_t next = *(uint16_t *)((uint8_t *)bone + *(uint16_t *)(obj + 10) * 0x1c + 0x36);
+    uintptr_t bank = obj_ptr32((uintptr_t)obj, 0x58);
+    uintptr_t bone = obj_ptr32(bank, 0);
+    uint16_t next = *(uint16_t *)(bone + *(uint16_t *)(uintptr_t)(obj + 10) * 0x1c + 0x36);
     int count = 0;
     while (next != 0xffff) {
-        int *node = (int *)((uint8_t *)bone + next * 0x1c);
-        uint16_t flags = *(uint16_t *)((uint8_t *)node + 0x1c);
+        uintptr_t node = bone + next * 0x1c;
+        uint16_t flags = *(uint16_t *)(node + 0x1c);
         if ((flags >> 8) == 0xff && flags != 0xffff) {
-            next = *(uint16_t *)((uint8_t *)node + 0x36);
+            next = *(uint16_t *)(node + 0x36);
             count++;
             continue;
         }
-        next = flags;
+        next = *(uint16_t *)(node + 0x34);
     }
     return count;
 }
 
 uint32_t *Effects_SpawnParticleAtParent(uint32_t *parent, uint16_t kind)
 {
-    uint32_t *p = Object_Pool_AllocFromBank((void *)(uintptr_t)_DAT_800737d8, kind, 0x80, 8);
+    uint32_t *p = Object_Pool_AllocFromBank((void *)DAT_800737d8, kind, 0x80, 8);
     *((int8_t *)p + 4) = 1;
     p[0] = 0x34;
     p[0x12] = parent[0];
     p[0x13] = parent[1];
     p[0x14] = parent[2];
-    p[0x19] = (uintptr_t)&LAB_8003e80c;
+    Object_SetCallbackPsxSlot(p, (uintptr_t)&LAB_8003e80c);
+    uint32_t child = p[0x0e];
+    while (child != 0) {
+        Object_SetCallbackPsxSlot((void *)(uintptr_t)child, (uintptr_t)&LAB_8003e7b4);
+        child = *(uint32_t *)(uintptr_t)(child + 0x34);
+    }
+    FUN_8002036c(p);
     return p;
+}
+
+/* Hex-name alias for Effects_SpawnExplosion. */
+int FUN_8003fc50(int obj) { return Effects_SpawnExplosion(obj); }
+int FUN_8003fc94(int obj) { return Effects_QueueSnow(obj); }
+uint32_t *FUN_8003fd24(uint32_t *parent, uint16_t kind)
+{
+    return Effects_SpawnParticleAtParent(parent, kind);
 }
 
 /* ============================================================
@@ -161,7 +190,7 @@ undefined4 * FUN_8003fd24(undefined4 *param_1,undefined2 param_2)
   puVar1[0x13] = uVar3;
   puVar1[0x14] = uVar4;
   iVar2 = puVar1[0xe];
-  puVar1[0x19] = &LAB_8003e80c;
+  *(uintptr_t *)((uint8_t *)puVar1 + 0x64) = (uintptr_t)&LAB_8003e80c;
   for (; iVar2 != 0; iVar2 = *(int *)(iVar2 + 0x34)) {
     *(undefined1 **)(iVar2 + 100) = &LAB_8003e7b4;
   }

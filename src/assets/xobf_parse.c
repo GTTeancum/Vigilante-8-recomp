@@ -84,6 +84,10 @@ void *XOBF_Parse(uint32_t remaining, int chainRegister)
     return obj;
 }
 
+/* Hex-name alias for callers using the PSX address. */
+uint32_t FUN_8002263c(uint32_t remaining, int chainRegister)
+    { return (uint32_t)(uintptr_t)XOBF_Parse(remaining, chainRegister); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

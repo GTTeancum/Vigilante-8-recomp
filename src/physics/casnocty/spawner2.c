@@ -17,38 +17,51 @@ extern uint32_t V8_RandNext(void);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int flags);
 extern void Object_RandomizeRotation(uint32_t *m);
 extern void Object_RegisterInScene(uint32_t *obj);
-extern void Object_SetSubState(int obj, int sub);
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+extern void FUN_80020890(uint32_t *obj, int sub);
 extern uint32_t SfxChannel_Acquire(void);
 extern void Audio_PlaySfxAtPosVar(uint32_t ch, uint32_t bank, int sfxId, void *pos);
 extern void Object_BumpSubstate_Or_FX(int obj);   /* FUN_8001d4f0 */
+extern void Damage_Apply(void *obj);              /* FUN_800205f8 */
+extern int LAB_8003e80c(int obj, int event, int param3);
 
 uint32_t CC_RandomScatterTick(int obj, uint32_t mode)
 {
-    if (mode == 2) return 0;
-    if (mode != 5 && mode != 0) return 0;
+    if (mode != 2) {
+        uint32_t gate = 5;
+        if ((mode < 3 && (gate = 0, mode == 0)) || mode != gate) {
+            int16_t *countdown = (int16_t *)(intptr_t)(obj + 0x80);
+            int16_t next = (int16_t)(*countdown - 1);
+            *countdown = next;
+            if (next == -1) {
+                uint32_t *child = Object_Pool_AllocFromBank(
+                    (void *)(uintptr_t)*(uint32_t *)(obj + 0x98),
+                    *(uint16_t *)(obj + 0x96), 0x80, 8);
 
-    int16_t *countdown = (int16_t *)(intptr_t)(obj + 0x80);
-    int16_t prev = *countdown;
-    *countdown = (int16_t)(prev - 1);
-    if (prev != 0) return 0;
-
-    uint32_t *child = Object_Pool_AllocFromBank(
-        (void *)(uintptr_t)*(uint32_t *)(obj + 0x98),
-        *(uint16_t *)(obj + 0x96), 0x80, 8);
-
-    int32_t r = *(int32_t *)(obj + 0x54);
-    int32_t rx = ((int)V8_RandNext() * 2 * r >> 15) - r;
-    int32_t rz = ((int)V8_RandNext() * 2 * r >> 15) - r;
-    child[0x9 + 0] = 0;    /* placeholder -- exact layout in pass 3 */
-    child[0xa]     = 0;
-    *(int32_t *)((uint8_t *)child + 0x24) = rx;
-    *(int32_t *)((uint8_t *)child + 0x28) = 0;
-    *(int32_t *)((uint8_t *)child + 0x2c) = rz;
-    *(uint32_t *)((uint8_t *)child + 100)  = 0x8003e80c;   /* main-EXE projectile tick */
-
-    Object_BumpSubstate_Or_FX(obj);
-    *countdown = *(int16_t *)(obj + 0x82);
+                int32_t r = *(int32_t *)(obj + 0x54);
+                *(int32_t *)((uint8_t *)child + 0x28) = 0;
+                *(int32_t *)((uint8_t *)child + 0x24) =
+                    ((int)V8_RandNext() * 2 * r >> 15) - r;
+                r = *(int32_t *)(obj + 0x54);
+                Object_SetCallbackPsxSlot(child, (uintptr_t)&LAB_8003e80c);
+                *(int32_t *)((uint8_t *)child + 0x2c) =
+                    ((int)V8_RandNext() * 2 * r >> 15) - r;
+                Object_BumpSubstate_Or_FX(obj);
+                *countdown = *(int16_t *)(obj + 0x82);
+            }
+            if (*(int *)(obj + 0x38) != 0)
+                return 0;
+            Damage_Apply((void *)(uintptr_t)(uint32_t)obj);
+        }
+        *(uint32_t *)(obj + 0x60) = 0;
+    }
+    *(uint16_t *)(obj + 0x80) = 0xffff;
     return 0;
+}
+
+uint32_t FUN_80101a90(int obj, uint32_t mode)
+{
+    return CC_RandomScatterTick(obj, mode);
 }
 
 uint32_t *CC_BoneSpawn(uint32_t *parentPos, uint32_t bank, uint16_t kind,
@@ -59,17 +72,23 @@ uint32_t *CC_BoneSpawn(uint32_t *parentPos, uint32_t bank, uint16_t kind,
     c[9]  = parentPos[0];
     c[10] = parentPos[1];
     c[11] = parentPos[2];
-    c[0x19] = 0;       /* tick callback set externally */
+    Object_SetCallbackPsxSlot(c, (uintptr_t)&FUN_80101a90);
     c[0x15] = 0x8000;
     c[0x26] = bank;
     *(uint16_t *)((uint8_t *)c + 0x96) = animSlot;
     c[0] |= 0xa4u;
     *(uint16_t *)((uint8_t *)c + 0x82) = spriteSlot;
     Object_RegisterInScene(c);
-    Object_SetSubState((int)(uintptr_t)c, (int)lifetime);
+    FUN_80020890(c, (int)lifetime);
     uint32_t ch = SfxChannel_Acquire();
     Audio_PlaySfxAtPosVar(ch, *(uint32_t *)(bank + 8), 1, parentPos);
     return c;
+}
+
+uint32_t *FUN_80101bb8(uint32_t *parentPos, uint32_t bank, uint16_t kind,
+                       uint16_t animSlot, uint16_t spriteSlot, uint32_t lifetime)
+{
+    return CC_BoneSpawn(parentPos, bank, kind, animSlot, spriteSlot, lifetime);
 }
 
 /* ============================================================

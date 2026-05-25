@@ -15,46 +15,135 @@
 
 extern int  Terrain_QueryAt(uint32_t *self, uint32_t *pos, int16_t *nOut, int flag);
 extern void Object_RefitAABB(uint32_t *self);
+extern void Object_OrientByAxis(uint32_t *mat, uint32_t *out, uint32_t *axis);
 extern void MatrixNormal(uint32_t *m, uint32_t *out);
 extern void Damage_StandardVehicle(uint32_t *self, uint32_t *imp);
 extern void Object_RetireDeferred(uint32_t *self);
+extern uint32_t *FUN_8003fd24(uint32_t *parent, uint16_t kind);
+extern uint32_t FUN_8004410c(void);
+extern int FUN_8004483c(uint32_t voice, uint32_t bank, int clip, const void *xyz);
+extern void FUN_800176f8(int obj, int32_t *vec, int32_t *pos);
+extern int FUN_8002c958(uint32_t *self, int impulse, const int32_t *vec, int flag);
 extern uint32_t _DAT_80065310;
+
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint64_t)(uint32_t)a * (uint64_t)(uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t rtz_shift_i32(int32_t v, unsigned sh, int32_t bias)
+{
+    if (v < 0) v = mips_addu_i32(v, bias);
+    return v >> sh;
+}
+
+static int32_t clamp_i32(int32_t v, int32_t lo, int32_t hi)
+{
+    if (hi < v) v = hi;
+    if (lo < v) return v;
+    return lo;
+}
 
 uint32_t SK_IceChunk(uint32_t *self, int mode, uint32_t *imp)
 {
     if (mode == 3) goto damage;
-    if (mode != 0) return 0;
 
     int16_t  n[3] = { 0, 0, 0 };
-    uint32_t pos[3] = { self[9], self[10], self[0xb] };
+    uint32_t pos[3] = {
+        self[9],
+        (uint32_t)mips_addu_i32((int32_t)self[10], (int32_t)self[0x15]),
+        self[0xb]
+    };
     int gy = Terrain_QueryAt(self, pos, n, 0);
     if (gy < (int)pos[1] + 0x800) {
-        int32_t vdot = (int32_t)self[0x20] * n[0]
-                     + (int32_t)self[0x21] * n[1]
-                     + (int32_t)self[0x22] * n[2];
-        if (vdot < 0) vdot += 0x7ff;
-        vdot >>= 11;
+        int32_t oldVx = (int32_t)self[0x20];
+        int32_t vdot = mips_addu_i32(
+            mips_addu_i32(mips_mult_lo_i32((int32_t)self[0x20], n[0]),
+                          mips_mult_lo_i32((int32_t)self[0x21], n[1])),
+            mips_mult_lo_i32((int32_t)self[0x22], n[2]));
+        vdot = rtz_shift_i32(vdot, 11, 0x7ff);
+        int32_t rollSeed = mips_sll_i32(n[0], 1);
         if (vdot < 0) {
-            int32_t ax = vdot * n[0]; if (ax < 0) ax += 0xfff;
-            int32_t ay = vdot * n[1]; if (ay < 0) ay += 0xfff;
-            int32_t az = vdot * n[2]; if (az < 0) az += 0xfff;
-            self[0x20] -= ax >> 12;
-            self[0x21] = ((self[0x21] - (ay >> 12)) / 2);
-            self[0x22] -= az >> 12;
+            int32_t ax = rtz_shift_i32(mips_mult_lo_i32(vdot, n[0]), 12, 0xfff);
+            int32_t ay = rtz_shift_i32(mips_mult_lo_i32(vdot, n[1]), 12, 0xfff);
+            int32_t az = rtz_shift_i32(mips_mult_lo_i32(vdot, n[2]), 12, 0xfff);
+            self[0x20] = (uint32_t)mips_subu_i32((int32_t)self[0x20], ax);
+            self[0x21] = (uint32_t)mips_subu_i32((int32_t)self[0x21], ay);
+            self[0x22] = (uint32_t)mips_subu_i32((int32_t)self[0x22], az);
+            self[0x21] = (uint32_t)rtz_shift_i32((int32_t)self[0x21], 2, 3);
+            self[10] = (uint32_t)mips_subu_i32(gy, (int32_t)self[0x15]);
+            if (vdot < 0x1c9) {
+                FUN_8003fd24(pos, 0x11);
+                uint32_t voice = FUN_8004410c();
+                FUN_8004483c(voice, *(uint32_t *)(uintptr_t)(self[0x16] + 8), 4, self + 9);
+                rollSeed = 0x72e;
+            } else {
+                goto spin_update;
+            }
         }
+        int32_t rollX = rtz_shift_i32(mips_mult_lo_i32(mips_addu_i32(rollSeed, n[0]), 0x1e), 12, 0xfff);
+        self[0x20] = (uint32_t)mips_addu_i32(oldVx, rollX);
+        int32_t fz = rtz_shift_i32(mips_mult_lo_i32(n[2], 0x5a), 12, 0xfff);
+        self[0x22] = (uint32_t)mips_addu_i32((int32_t)self[0x22], fz);
+spin_update:
+        *(int16_t *)(self + 0x23) =
+            (int16_t)rtz_shift_i32(mips_mult_lo_i32(mips_subu_i32(0, (int32_t)self[0x22]),
+                                                    (uint16_t)self[0x25]), 12, 0xfff);
+        *(int16_t *)(self + 0x24) =
+            (int16_t)rtz_shift_i32(mips_mult_lo_i32((int32_t)self[0x20], (uint16_t)self[0x25]), 12, 0xfff);
+        if ((int32_t)self[0xb] < 0x3b60000) {
+            FUN_8003fd24(self + 9, 0x11);
+            Object_RetireDeferred(self);
+            return 0;
+        }
+    } else {
+        self[0x21] = (uint32_t)mips_addu_i32((int32_t)self[0x21], 0x5a);
     }
-    self[0x21] += 0x5a;
-    self[9]  += self[0x20];
-    self[10] += self[0x21];
-    self[0xb]+= self[0x22];
-    Object_RefitAABB(self);
+    Object_OrientByAxis(self + 4, self + 4, self + 0x23);
+    self[9]  = (uint32_t)mips_addu_i32((int32_t)self[9], (int32_t)self[0x20]);
+    self[10] = (uint32_t)mips_addu_i32((int32_t)self[10], (int32_t)self[0x21]);
+    self[0xb]= (uint32_t)mips_addu_i32((int32_t)self[0xb], (int32_t)self[0x22]);
     if (((_DAT_80065310 - (uint32_t)*((uint8_t *)self + 9)) & 0xf) == 0)
         MatrixNormal(self + 4, self + 4);
-    if ((int)self[10] > 0x4b00000) Object_RetireDeferred(self);
     return 0;
 damage:
-    Damage_StandardVehicle(self, imp);
+    {
+        uint32_t impObj = *imp;
+        if (*(uint8_t *)(uintptr_t)(impObj + 4) == 2) {
+            uint32_t scale = 0x32000u / *(uint16_t *)(uintptr_t)(impObj + 0xa2);
+            int32_t vec[3];
+            vec[0] = clamp_i32(mips_mult_lo_i32((int32_t)self[0x20], (int32_t)scale), -0x100000, 0x100000);
+            vec[1] = clamp_i32(mips_mult_lo_i32((int32_t)self[0x21], (int32_t)scale), -0x100000, 0x100000);
+            vec[2] = clamp_i32(mips_mult_lo_i32((int32_t)self[0x22], (int32_t)scale), -0x100000, 0x100000);
+            FUN_800176f8((int)(uintptr_t)impObj, vec, (int32_t *)(self + 9));
+            if ((*self & 0x10000) == 0) {
+                static const int32_t iceImpulse[3] = { 0, 0, 0 };
+                *self |= 0x10000u;
+                FUN_8002c958((uint32_t *)(uintptr_t)impObj, -0xfa, iceImpulse, 1);
+            }
+        }
+    }
     return 0;
+}
+
+uint32_t FUN_80101a94(uint32_t *self, int mode, int *imp)
+{
+    return SK_IceChunk(self, mode, (uint32_t *)imp);
 }
 
 /* ============================================================

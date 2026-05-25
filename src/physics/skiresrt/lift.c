@@ -18,6 +18,7 @@
 
 extern int  Damage_FromImpulse(uint32_t *self, int *impulse);
 extern int  Damage_AccumulateOrFire(uint32_t *self, uint16_t amount);
+extern uintptr_t Object_CallbackFromPsxSlot(const void *obj);
 extern int8_t *_DAT_800659fc;
 
 uint32_t SR_LiftStation(uint32_t *self, int mode, uint32_t *impulse)
@@ -28,7 +29,7 @@ uint32_t SR_LiftStation(uint32_t *self, int mode, uint32_t *impulse)
         if (*(int8_t *)(collider + 4) == 3 && self[0x20] != 0) {
             impulse[0] = self[0x20];
             typedef int16_t (*TickFn)(uint32_t, int);
-            TickFn fn = *(TickFn *)(collider + 100);
+            TickFn fn = (TickFn)Object_CallbackFromPsxSlot((const void *)(uintptr_t)collider);
             if (fn != NULL) fn(collider, 3);
         }
         Damage_FromImpulse(self, (int *)impulse);

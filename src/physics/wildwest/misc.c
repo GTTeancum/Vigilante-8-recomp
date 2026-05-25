@@ -17,7 +17,7 @@
 #include <stdint.h>
 
 extern void Damage_Apply(void *obj);
-extern int  Collision_Circular(int obj, int impact);
+extern uint32_t FUN_80022320(uint32_t *self, uint32_t amount);
 extern int  Object_FindByIdPlusOffset(int spawnId);
 extern void Object_SetState(int obj, int state);
 extern int8_t _DAT_00000029;
@@ -34,17 +34,27 @@ handle:
     return 0;
 }
 
+uint32_t FUN_80100950(int obj, int mode)
+{
+    return WW_BonfireImpact(obj, mode);
+}
+
 uint32_t WW_HotelHit(int obj, uint32_t mode, int *impulse)
 {
-    if (mode == 3 || mode == 8) {
+    if (mode != 8) {
         if (*(int8_t *)(*impulse + 4) != 7) return 0;
         impulse = (int *)(uintptr_t)*(uint16_t *)(*impulse + 0xc);
     }
-    int hit = Collision_Circular(obj, (int)(intptr_t)impulse);
+    int hit = FUN_80022320((uint32_t *)(uintptr_t)(uint32_t)obj, (uint32_t)(uintptr_t)impulse);
     if (hit == 0) return 0;
     int paired = Object_FindByIdPlusOffset(*(int16_t *)(obj + 6));
     if (paired != 0) Object_SetState(paired + 0xc, 0x8f80);
     return 0xffffffffu;
+}
+
+uint32_t FUN_8010035c(int obj, uint32_t mode, int *impulse)
+{
+    return WW_HotelHit(obj, mode, impulse);
 }
 
 /* ============================================================

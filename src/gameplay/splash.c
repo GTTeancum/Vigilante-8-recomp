@@ -99,6 +99,17 @@ void Stream_FatalOom(const char *msg)
     for (;;) { /* hang */ }
 }
 
+/* FUN_80015368: PSX address alias for Stream_FatalOom.
+ * Called directly by cd_stream.c with a PSX string pointer (uint32_t).
+ * MIPS: jal FUN_80015164(0), jal FUN_80015288(param_1), j $self.
+ * HIGH: exact translation -- same control flow as Stream_FatalOom above. */
+void FUN_80015368(uint32_t param_1)
+{
+    Splash_InitDisplay(0);
+    Splash_DrawLine((const char *)(uintptr_t)param_1);
+    for (;;) {}
+}
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *
@@ -176,7 +187,7 @@ void FUN_80015288(undefined4 param_1)
 /* --- SLUS_005.10 FUN_80015368  (from analysis/SLUS_005.10/decomp/80015368.c) --- */
 // addr: 0x80015368  name: FUN_80015368
 
-void FUN_80015368(undefined4 param_1)
+void FUN_80015368(uint32_t param_1)
 
 {
   FUN_80015164(0);

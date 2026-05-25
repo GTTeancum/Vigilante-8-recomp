@@ -7,11 +7,9 @@
  *   2. GTE_RotateSV(srcNormal, &local_30)
  *   3. NormalColorCol(rotatedNormal, baseColor, &local_28) -- the
  *      PSY-Q libgte function that computes color = base * dot(N, L).
- *   4. Walk the light source chain at DAT_80107d90 (idle loop -- the
- *      caller doesn't actually act, but the iteration is preserved
- *      from the original).
- *   5. Clamp each output channel to [0..0xff]: if signed value is -1
- *      (= overflow), use 0xff.
+ *   4. Walk the light source chain at DAT_80107d90. Each active light
+ *      contributes attenuation * RGB / 4096 to the base color.
+ *   5. Clamp each output channel to [0..0xff].
  *
  * Used by the obj-prim per-vertex lighting at draw time.
  *
@@ -23,6 +21,7 @@
 extern VECTOR *GTE_GetCurrentPos(const SVECTOR *in, VECTOR *out);
 extern SVECTOR *GTE_RotateSV(const SVECTOR *src, SVECTOR *dst);
 extern void NormalColorCol(SVECTOR *normal, void *baseColor, void *outColor);  /* PSY-Q libgte */
+extern uint32_t Sphere_TestWithBacktrack(uintptr_t obj, int *probePos, uintptr_t probe);
 extern int **DAT_80107d90;
 
 void Light_VertexColor(int8_t outRGB[3], const void *baseColor,
@@ -30,18 +29,32 @@ void Light_VertexColor(int8_t outRGB[3], const void *baseColor,
 {
     VECTOR scratchPos;
     SVECTOR scratchNormal;
-    int8_t  computed[4];
+    uint8_t computed[4];
 
     GTE_GetCurrentPos(srcPos, &scratchPos);
     GTE_RotateSV(srcNormal, &scratchNormal);
     NormalColorCol(&scratchNormal, (void *)baseColor, computed);
 
-    /* Idle light-chain walk preserved from original (no side effects). */
-    for (int *p = (int *)DAT_80107d90[0]; p != NULL; p = (int *)*p) { /* nop */ }
+    int r = computed[0];
+    int g = computed[1];
+    int b = computed[2];
 
-    outRGB[0] = (computed[0] == -1) ? -1 : computed[0];
-    outRGB[1] = (computed[1] == -1) ? -1 : computed[1];
-    outRGB[2] = (computed[2] == -1) ? -1 : computed[2];
+    for (int **node = DAT_80107d90; node != 0 && node[0] != 0; node = (int **)node[0]) {
+        uint8_t *light = (uint8_t *)node[2];
+        uint32_t amount = Sphere_TestWithBacktrack((uintptr_t)light,
+                                                   (int *)&scratchPos,
+                                                   (uintptr_t)&scratchNormal);
+        amount &= 0xffffu;
+        if (amount != 0) {
+            r += (int)((amount * light[0x80]) >> 12);
+            g += (int)((amount * light[0x81]) >> 12);
+            b += (int)((amount * light[0x82]) >> 12);
+        }
+    }
+
+    outRGB[0] = (int8_t)((r < 0xff) ? r : 0xff);
+    outRGB[1] = (int8_t)((g < 0xff) ? g : 0xff);
+    outRGB[2] = (int8_t)((b < 0xff) ? b : 0xff);
 }
 
 /* ============================================================

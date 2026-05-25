@@ -32,53 +32,83 @@ extern void Object_RetireDeferred(int self);
 extern void FX_RingFlash_Init(int self, int *imp);
 extern uint32_t _DAT_80065310;
 
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
+static int32_t rtz_shift_i32(int32_t v, unsigned sh, int32_t bias)
+{
+    if (v < 0) v = mips_addu_i32(v, bias);
+    return v >> sh;
+}
+
 uint32_t OF_BarrelRoll(int self, int mode, int *arg)
 {
     int16_t n[3] = { 0, 0, 0 };
     if (mode == 0 || mode != 3) {
         uint32_t pos[3];
         pos[0] = *(uint32_t *)(self + 0x24);
-        pos[1] = *(uint32_t *)(self + 0x28) + *(uint32_t *)(self + 0x54);
+        pos[1] = (uint32_t)mips_addu_i32(*(int32_t *)(self + 0x28),
+                                         *(int32_t *)(self + 0x54));
         pos[2] = *(uint32_t *)(self + 0x2c);
         int gy = Terrain_QueryAt((uint32_t *)(intptr_t)self, pos, n, 0);
-        if (gy < (int)pos[1] + 0x800) {
+        if (gy < mips_addu_i32((int32_t)pos[1], 0x800)) {
             int vx = *(int *)(self + 0x80);
             int vy = *(int *)(self + 0x84);
             int vz = *(int *)(self + 0x88);
-            int vdot = vx * n[0] + vy * n[1] + vz * n[2];
-            if (vdot < 0) vdot += 0x7ff;
-            vdot >>= 11;
-            int dy = n[0] * 2;
+            int vdot = mips_addu_i32(
+                mips_addu_i32(mips_mult_lo_i32(vx, n[0]), mips_mult_lo_i32(vy, n[1])),
+                mips_mult_lo_i32(vz, n[2]));
+            vdot = rtz_shift_i32(vdot, 11, 0x7ff);
+            int dy = mips_sll_i32(n[0], 1);
             if (vdot < 0) {
-                int ax = vdot * n[0]; if (ax < 0) ax += 0xfff;
-                int ay = vdot * n[1]; if (ay < 0) ay += 0xfff;
-                int az = vdot * n[2]; if (az < 0) az += 0xfff;
-                *(int *)(self + 0x80) = vx - (ax >> 12);
-                *(int *)(self + 0x84) = ((*(int *)(self + 0x84) - (ay >> 12)) / 2);
-                *(int *)(self + 0x88) = vz - (az >> 12);
+                int ax = rtz_shift_i32(mips_mult_lo_i32(vdot, n[0]), 12, 0xfff);
+                int ay = rtz_shift_i32(mips_mult_lo_i32(vdot, n[1]), 12, 0xfff);
+                int az = rtz_shift_i32(mips_mult_lo_i32(vdot, n[2]), 12, 0xfff);
+                *(int *)(self + 0x80) = mips_subu_i32(vx, ax);
+                *(int *)(self + 0x84) =
+                    (mips_addu_i32(mips_subu_i32(*(int *)(self + 0x84), ay),
+                                   (int32_t)((uint32_t)mips_subu_i32(*(int *)(self + 0x84), ay) >> 31)) >> 1);
+                *(int *)(self + 0x88) = mips_subu_i32(vz, az);
                 *(int *)(self + 0x28) = 1;
-                dy = az >> 12;
+                dy = az;
             }
-            int rollX = (dy + n[0]) * 0x1e;
-            if (rollX < 0) rollX += 0xfff;
-            *(int *)(self + 0x80) = vx + (rollX >> 12);
-            int fz = n[2] * 0x5a; if (fz < 0) fz += 0xfff;
-            *(int *)(self + 0x88) += fz >> 12;
-            int sx = -*(int *)(self + 0x88) * (uint16_t)*(uint16_t *)(self + 0x94);
-            if (sx < 0) sx += 0xfff;
-            int sz =  *(int *)(self + 0x80) * (uint16_t)*(uint16_t *)(self + 0x94);
-            *(int16_t *)(self + 0x8c) = (int16_t)(sx >> 12);
-            if (sz < 0) sz += 0xfff;
-            *(int16_t *)(self + 0x90) = (int16_t)(sz >> 12);
+            int rollX = rtz_shift_i32(mips_mult_lo_i32(mips_addu_i32(dy, n[0]), 0x1e), 12, 0xfff);
+            *(int *)(self + 0x80) = mips_addu_i32(vx, rollX);
+            int fz = rtz_shift_i32(mips_mult_lo_i32(n[2], 0x5a), 12, 0xfff);
+            *(int *)(self + 0x88) = mips_addu_i32(*(int *)(self + 0x88), fz);
+            int sx = rtz_shift_i32(mips_mult_lo_i32(mips_subu_i32(0, *(int *)(self + 0x88)),
+                                                    (uint16_t)*(uint16_t *)(self + 0x94)), 12, 0xfff);
+            int sz = mips_mult_lo_i32(*(int *)(self + 0x80), (uint16_t)*(uint16_t *)(self + 0x94));
+            *(int16_t *)(self + 0x8c) = (int16_t)sx;
+            *(int16_t *)(self + 0x90) = (int16_t)rtz_shift_i32(sz, 12, 0xfff);
         }
-        *(int *)(self + 0x84) += 0x5a;
+        *(int *)(self + 0x84) = mips_addu_i32(*(int *)(self + 0x84), 0x5a);
         int *m = (int *)(self + 0x10);
         Object_OrientByAxis((uint32_t *)m, (uint32_t *)m, (uint32_t *)(self + 0x8c));
-        *(int *)(self + 0x24) += *(int *)(self + 0x80);
-        *(int *)(self + 0x28) += *(int *)(self + 0x84);
-        *(int *)(self + 0x2c) += *(int *)(self + 0x88);
-        if ((_DAT_80065310 - (uint32_t)*(uint8_t *)(self + 9)) & 0xf) return 0;
+        *(int *)(self + 0x24) = mips_addu_i32(*(int *)(self + 0x24), *(int *)(self + 0x80));
+        *(int *)(self + 0x28) = mips_addu_i32(*(int *)(self + 0x28), *(int *)(self + 0x84));
+        *(int *)(self + 0x2c) = mips_addu_i32(*(int *)(self + 0x2c), *(int *)(self + 0x88));
+        if ((mips_subu_i32((int32_t)_DAT_80065310, *(uint8_t *)(self + 9)) & 0xf) != 0)
+            return 0;
         MatrixNormal((uint32_t *)m, (uint32_t *)m);
+        arg = m;
     }
     int imp  = *arg;
     uint8_t k = *(uint8_t *)(imp + 4);
@@ -89,23 +119,34 @@ uint32_t OF_BarrelRoll(int self, int mode, int *arg)
         imp = 1;
     }
     if (k == want) {
+        int local_20 = mips_sll_i32(mips_subu_i32(*(int *)(imp + 0x24), *(int *)(self + 0x24)), 3);
+        int local_1c = mips_sll_i32(mips_subu_i32(*(int *)(imp + 0x28), *(int *)(self + 0x28)), 3);
+        int local_18 = mips_sll_i32(mips_subu_i32(*(int *)(imp + 0x2c), *(int *)(self + 0x2c)), 3);
+        (void)local_20;
+        (void)local_1c;
+        (void)local_18;
         SubModel_Detach(self);
         Object_RetireDeferred(self);
     }
     FX_RingFlash_Init(self, arg);
-    int vdot = *(int *)(self + 0x80) * (int16_t)arg[8]
-             + *(int *)(self + 0x84) * *(int16_t *)((char *)arg + 0x22)
-             + *(int *)(self + 0x88) * (int16_t)arg[9];
-    if (vdot < 0) vdot += 0x7ff;
-    vdot >>= 11;
+    int vdot = mips_addu_i32(
+        mips_addu_i32(mips_mult_lo_i32(*(int *)(self + 0x80), (int16_t)arg[8]),
+                      mips_mult_lo_i32(*(int *)(self + 0x84), *(int16_t *)((char *)arg + 0x22))),
+        mips_mult_lo_i32(*(int *)(self + 0x88), (int16_t)arg[9]));
+    vdot = rtz_shift_i32(vdot, 11, 0x7ff);
     if (vdot >= 0) return 0;
-    int bx = vdot * (int16_t)arg[8];                     if (bx < 0) bx += 0xfff;
-    int by = vdot * *(int16_t *)((char *)arg + 0x22);     if (by < 0) by += 0xfff;
-    int bz = vdot * (int16_t)arg[9];                     if (bz < 0) bz += 0xfff;
-    *(int *)(self + 0x80) -= bx >> 12;
-    *(int *)(self + 0x84) -= by >> 12;
-    *(int *)(self + 0x88) -= bz >> 12;
+    int bx = rtz_shift_i32(mips_mult_lo_i32(vdot, (int16_t)arg[8]), 12, 0xfff);
+    int by = rtz_shift_i32(mips_mult_lo_i32(vdot, *(int16_t *)((char *)arg + 0x22)), 12, 0xfff);
+    int bz = rtz_shift_i32(mips_mult_lo_i32(vdot, (int16_t)arg[9]), 12, 0xfff);
+    *(int *)(self + 0x80) = mips_subu_i32(*(int *)(self + 0x80), bx);
+    *(int *)(self + 0x84) = mips_subu_i32(*(int *)(self + 0x84), by);
+    *(int *)(self + 0x88) = mips_subu_i32(*(int *)(self + 0x88), bz);
     return 0;
+}
+
+uint32_t FUN_80100a30(int self, int mode, int *arg)
+{
+    return OF_BarrelRoll(self, mode, arg);
 }
 
 /* ============================================================

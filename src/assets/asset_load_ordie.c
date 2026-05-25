@@ -22,6 +22,12 @@ void *Asset_LoadFileOrDie(const char *pathArg)
     return p;
 }
 
+/* FUN_80015f80: PSX hex-name alias for Asset_LoadFileOrDie.
+ * Called by FUN_800128d4 (Quest_Load) and other sites that use the raw
+ * address name.  PSX calling convention: the path string in a0 passes
+ * through to Asset_LoadFile (FUN_80015948) unchanged. */
+void *FUN_80015f80(const char *path) { return Asset_LoadFileOrDie(path); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

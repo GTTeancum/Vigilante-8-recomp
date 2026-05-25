@@ -19,6 +19,9 @@ the per-subsystem READMEs.
 | DECOMP_PASS_3     | DONE         | TODO sweep complete (7 TODO markers resolved), Pass 3 Backlog table closed (18 entries), unknowns.md trimmed, per-subsystem READMEs refreshed. 3 residual UNKNOWNs require Ghidra interactive session and are out of the autonomous loop's reach. |
 | VERIFY            | DONE (scaffolding) | tools/verify/{state_snapshot.c, input_recorder.c, run_compare.c, Makefile} |
 | DOCUMENT          | DONE         | Per-subsystem READMEs in src/; format notes in notes/formats/ |
+| RUNNING_GAME (Phase 9) | PASS 8/9 | 60s versus match: weapons fire, damage, match-end ResultScreen triggered. Vehicle visible 12/12 frames. Audio -12.2 dBFS. HUD deferred (renderer out of scope). |
+| TERRAIN_RENDERING     | DONE     | ZONE format: even-cz cells = (H<<8)|0x07; raw>>8 is true height (142-169 for OilField). Old & 0x7ff gave scrambled 28m spikes. Fixed: stride-2 sampling, raw>>8, no boundary vertex. Flat smooth terrain + vehicle visible in terrain_h8fix.png. |
+| XOBF_VISUAL_MESH      | DONE     | terrain_mesh.c: IFF walk finds FORM XOBF → first BIN. Same bone/poly packet format as vehicles (TM_PKT_SIZE table). 165 bones, 4114 tris, 0 bad packets (OilField). Scale 1/16 m/unit. World origin (608m, 464m), GL Y = -bin_y/16 - 2.25. Flat-shaded with sun dot product. Bird's-eye confirms level geometry (ground, oil derricks, buildings) correctly placed. Normal gameplay camera occluded by derricks at spawn — expected, correct when driving. |
 
 ## Counts at a glance
 

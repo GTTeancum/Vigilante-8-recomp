@@ -25,6 +25,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern int  Conveyor_FindGrabSlot(int self, int radius);                /* FUN_8001b038 */
 extern uint32_t Pool_AllocSnare(void);                                   /* FUN_8004410c */
 extern void Pool_BindSnareToObject(uint32_t h, uint32_t bin, int slot,
@@ -36,49 +37,71 @@ extern void Damage_Apply_AgainstSelf(void *self, void *param);           /* FUN_
 extern void Damage_StandardVehicle(int self, int *imp);                  /* func_0x80022320 */
 extern uint32_t FUN_80100c6c;  /* per-segment drag tick */
 
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t avg2_i32(int32_t a, int32_t b)
+{
+    int32_t sum = mips_addu_i32(a, b);
+    if (sum < 0) sum = mips_addu_i32(sum, 1);
+    return sum >> 1;
+}
+
 uint32_t SF_ConveyorGrab(int self, int mode, int *arg)
 {
-    if (mode != 3 && mode != 8) goto fwd;
-
-    int16_t *flags = (int16_t *)(uintptr_t)arg[1];
-    uint32_t *imp  = (uint32_t *)(uintptr_t)*arg;
-    if (flags[0] == 1 && flags[1] != 0 && (char)imp[1] == 2) {
-        uint32_t *sub = (uint32_t *)(uintptr_t)imp[0x38];
-        int slot   = Conveyor_FindGrabSlot(self, 0x8000);
-        uint32_t h = Pool_AllocSnare();
-        Pool_BindSnareToObject(h, *(uint32_t *)(*(int *)(self + 0x58) + 8), 5, imp + 9);
-        SFX_Update((int)*((char *)imp + 5), 0);
-        imp[0x19] = (uint32_t)(uintptr_t)&FUN_80100c6c;
-        imp[0x20] = 0;
-        *imp |= 0x3000022u;
-        imp[0x21] = 0x1c980;
-        imp[0x22] = 0;
-        if (sub != NULL) {
-            *(uint16_t *)(sub + 0x21) = 0;
-            *sub |= 0xc0000u;
-            *(uint16_t *)((char *)sub + 0x86) = 0xfe37u;
-            *(uint16_t *)(sub + 0x22)         = 0xf415u;
+    if (mode != 8) {
+        int16_t *flags = (int16_t *)(uintptr_t)arg[1];
+        uint32_t *imp  = (uint32_t *)(uintptr_t)*arg;
+        if (flags[0] == 1 && flags[1] != 0 && *(uint8_t *)((uint8_t *)imp + 4) == 2) {
+            uint32_t *sub = (uint32_t *)(uintptr_t)imp[0x38];
+            int slot   = Conveyor_FindGrabSlot(self, 0x8000);
+            uint32_t h = Pool_AllocSnare();
+            Pool_BindSnareToObject(h, *(uint32_t *)(*(int *)(self + 0x58) + 8), 5, imp + 9);
+            SFX_Update((int)*((char *)imp + 5), 0);
+            Object_SetCallbackPsxSlot(imp, (uintptr_t)&FUN_80100c6c);
+            imp[0x20] = 0;
+            *imp |= 0x3000022u;
+            imp[0x21] = 0x1c980;
+            imp[0x22] = 0;
+            if (sub != NULL) {
+                *(uint16_t *)(sub + 0x21) = 0;
+                *sub |= 0xc0000u;
+                *(uint16_t *)((char *)sub + 0x86) = 0xfe37u;
+                *(uint16_t *)(sub + 0x22)         = 0xf415u;
+            }
+            int mid[3];
+            mid[0] = avg2_i32(*(int32_t *)(flags + 2), *(int32_t *)(flags + 8));
+            mid[1] = *(int32_t *)(flags + 10);
+            mid[2] = avg2_i32(*(int32_t *)(flags + 6), *(int32_t *)(flags + 0xc));
+            GTE_RotateLongMatTrans((uint32_t *)(uintptr_t)(self + 0x10), mid, mid);
+            imp[0x20] = (uint32_t)mips_sll_i32(mips_subu_i32(mid[0], (int32_t)imp[9]), 1);
+            imp[0x21] = (uint32_t)mips_sll_i32(mips_subu_i32(mid[1], (int32_t)imp[10]), 1);
+            imp[0x22] = (uint32_t)mips_sll_i32(mips_subu_i32(mid[2], (int32_t)imp[0xb]), 1);
+            uint8_t localFrame[64];
+            Conveyor_RebuildLocalFrame(localFrame, self, slot);
+            imp[0x12] = *(uint32_t *)(localFrame + 20);
+            imp[0x13] = *(uint32_t *)(localFrame + 24);
+            imp[0x14] = *(uint32_t *)(localFrame + 28);
+            imp[0x10] = *(uint32_t *)(uintptr_t)(slot + 0x10);
+            *(uint16_t *)(imp + 0x11) = *(uint16_t *)(uintptr_t)(slot + 0x14);
+            Damage_Apply_AgainstSelf(imp, (void *)(intptr_t)0x40);
+            arg = (int *)1;
         }
-        int mid[3];
-        mid[0] = (*(int *)(flags + 2) + *(int *)(flags + 8)) / 2;
-        mid[1] = *(int *)(flags + 10);
-        mid[2] = (*(int *)(flags + 6) + *(int *)(flags + 0xc)) / 2;
-        GTE_RotateLongMatTrans((uint32_t *)(uintptr_t)(self + 0x10), mid, mid);
-        imp[0x20] = (mid[0] - imp[9])  * 2;
-        imp[0x21] = (mid[1] - imp[10]) * 2;
-        imp[0x22] = (mid[2] - imp[0xb]) * 2;
-        uint8_t stash[20];
-        struct { uint32_t a, b, c; } lp;
-        Conveyor_RebuildLocalFrame(stash, self, slot);
-        imp[0x12] = lp.a; imp[0x13] = lp.b; imp[0x14] = lp.c;
-        imp[0x10] = *(uint32_t *)(slot + 0x10);
-        *(uint16_t *)(imp + 0x11) = *(uint16_t *)(slot + 0x14);
-        Damage_Apply_AgainstSelf(imp, (void *)(intptr_t)0x40);
-        arg = (int *)1;
+        if (*(uint8_t *)(uintptr_t)(*arg + 4) != 7) return 0;
+        arg = (int *)(uintptr_t)*(uint16_t *)(uintptr_t)(*arg + 0xc);
     }
-    if (*(char *)(*arg + 4) != 7) return 0;
-    arg = (int *)(uintptr_t)*(uint16_t *)(*arg + 0xc);
-fwd:
     Damage_StandardVehicle(self, arg);
     return 0;
 }

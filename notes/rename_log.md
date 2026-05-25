@@ -259,7 +259,7 @@ Additional hand-cleaned (HIGH/MED):
 | 0x8001db24 (main)  | FUN_8001db24 | `Camera_AttachToObject`      | src/physics/camera_apply.c   | HIGH |
 | 0x80022ba8 (main)  | FUN_80022ba8 | `Level_LoadViaShellLoadDll`  | src/gameplay/level_load.c    | HIGH |
 | 0x80029dec (main)  | FUN_80029dec | `Debris_Pool_InitFrame`      | src/gameplay/debris_pool_init.c | HIGH |
-| 0x801002ac (LOAD)  | FUN_801002ac | `Audio_LoadTrackTable`| src/assets/load_track_table.c | MED  |
+| 0x801002ac (LOAD)  | FUN_801002ac | `Terrain_LoadCols`   | src/assets/load_track_table.c | MED (COLS level setup: flat-world id, env pair, DAT_800658e8 table) |
 | 0x801016b4 (SHELL) | FUN_801016b4 | `Cheat_DecodeToAscii` | src/gameplay/cheat_decode.c   | MED  |
 | 0x8010238c (SHELL) | FUN_8010238c | `Slogan_Show`         | src/gameplay/slogan_screen.c  | HIGH-MED (slogan random pick: `(rand * 11) >> 15`) |
 | 0x8010036c (HOOVRDAM) | FUN_8010036c | `HD_TransformerCleanup`| src/physics/hoovrdam/misc.c | MED |
@@ -454,3 +454,23 @@ Total Pass 2 batch additions: **39** new hand-cleaned files
 (promoted from auto-stubs to MED-confidence). Total rename_log
 entries now span roughly **403** addresses across the main EXE
 and 12 overlays.
+
+[2026-05-24T02:47:06-04:00] LOAD 0x80102bd4 -> Terrain_BuildRouteStrip (MED): RSEG Bezier strip tessellator; samples Terrain_HeightAt and XRTP width/step.
+[2026-05-24T02:47:06-04:00] LOAD 0x801039bc -> Terrain_SplitRouteBezier (MED): binary-splits route cubic against endpoint distance threshold.
+[2026-05-24T02:47:06-04:00] LOAD 0x80104550 -> Terrain_PrepareRouteStrip (MED): builds RSEG control points from JUNC endpoints and dispatches route-strip generation.
+[2026-05-24T02:47:06-04:00] LOAD 0x80104a94 -> Terrain_LoadXrtpRouteType (MED): appends XRTP route width/step/texture descriptor and uploads optional route texture.
+[2026-05-24T02:47:06-04:00] LOAD 0x80104d1c -> Terrain_LoadJunc (HIGH): loads JUNC graph nodes and optional terrain-conformed patch meshes.
+[2026-05-24T02:47:06-04:00] LOAD 0x80105060 -> Terrain_LoadRseg (HIGH): loads RSEG route graph edge, control offsets, and endpoint links.
+[11-04:00] LOAD hidden 0x80100148 -> Terrain_LoadBspNode (HIGH): recursive BSP/kd-tree stream reader for kind 0/1/2 nodes.
+[11-04:00] LOAD 0x801001ec -> Terrain_BspInsertObject (HIGH): inserts placed type-0 object list nodes into BSP leaves via object +0x48/+0x50.
+[11-04:00] LOAD 0x801002ac -> Terrain_LoadTerrHead (HIGH): reads top-level TERR/HEAD setup, initializes flat terrain table, copies DAT_800658e8 table.
+[11-04:00] LOAD 0x801005c0 -> Terrain_LoadBsp (HIGH): loads BSP root into _DAT_80065a00/uRam000006fc.
+[11-04:00] LOAD 0x801005e8 -> Terrain_LoadAimp (HIGH): raw-copies AIMP navigation quadtree to _DAT_800659f0/_DAT_800659e8.
+[11-04:00] LOAD hidden 0x80105318 -> Terrain_LoadCols (HIGH-MED): copies 28-byte COLS color/light/fog setup words.
+[2026-05-24T07:24:12Z] SLUS 0x8002249c -> XobfStream_ReadU8 (HIGH): one-byte big-endian in-memory cursor reader.
+[2026-05-24T07:24:12Z] SLUS 0x800224b4 -> XobfStream_ReadI16 (HIGH): two-byte big-endian in-memory cursor reader.
+[2026-05-24T07:24:12Z] SLUS 0x800224ec -> XobfStream_ReadI32 (HIGH): four-byte big-endian in-memory cursor reader.
+[2026-05-24T07:24:12Z] LOAD 0x80100e98 -> Terrain_LoadObjForm (HIGH): dispatches FORM OBJ children HEAD/STRN/LGHT to object setup helpers.
+[2026-05-24T07:24:12Z] LOAD 0x801006f0 -> Terrain_LoadObjHead (HIGH): builds placed object from HEAD, attaches type-0 objects to pending static-object list.
+[2026-05-24T07:24:12Z] LOAD 0x80100d1c -> XOBF_LoadHealth/Terrain_LoadObjStrn (HIGH): STRN health/strength loader for placed object.
+[2026-05-24T07:24:12Z] LOAD 0x80100e20 -> Terrain_LoadObjLight (HIGH): LGHT loader for placed object light fields +0x80..+0x90 (RGB/pad, inner radius, outer radius, cone min/max, intensity).

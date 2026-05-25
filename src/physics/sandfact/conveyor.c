@@ -3,9 +3,8 @@
  * Source: SANDFACT.DLL  FUN_80100c6c.
  *
  * Integrates a position vector (u32[9..11] -> world x,y,z) by a
- * velocity vector (u32[0x20..0x22]) scaled by 1/128. The /128 rounding
- * uses the negative-correction trick (`+ 0x7f` before arith right
- * shift) to round toward zero.
+ * velocity vector (u32[0x20..0x22]) scaled by 1/128. Mode 2 skips
+ * the integration but still runs the release/transition tail.
  *
  * Used by the Sand Factory's slow moving conveyor and elevator
  * platforms -- velocity is shallow enough that 7-bit fractional
@@ -13,27 +12,64 @@
  *
  * Bit-exact: the +0x7f / >>7 sequence is preserved.
  *
- * HIGH-MED confidence: the integration pattern is unambiguous; the
- * function only handles modes 0 and 2 in this branch.
+ * HIGH-MED confidence: source control flow and the release tail are
+ * preserved from SANDFACT.DLL.
  */
 #include <stdint.h>
 
+extern void FUN_8001d708(uint32_t *obj);
+extern void FUN_80020890(uint32_t *obj, int timer);
+extern uint32_t FUN_8004410c(void);
+extern void FUN_800447e8(uint32_t voice, uint32_t bank, int slot, uint32_t *xyz);
+extern void gap_80031294(uint32_t *self);
+extern uint32_t _DAT_800737e8;
+
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
+static int32_t rtz_shift_i32(int32_t v, unsigned sh, int32_t bias)
+{
+    if (v < 0) v = mips_addu_i32(v, bias);
+    return v >> sh;
+}
+
 uint32_t SF_ConveyorTick(uint32_t *obj, int mode)
 {
-    if (mode != 0 && mode != 2) return 0;
+    if (mode != 2) {
+        obj[9]  = (uint32_t)mips_addu_i32((int32_t)obj[9],  rtz_shift_i32((int32_t)obj[0x20], 7, 0x7f));
+        obj[10] = (uint32_t)mips_addu_i32((int32_t)obj[10], rtz_shift_i32((int32_t)obj[0x21], 7, 0x7f));
+        obj[11] = (uint32_t)mips_addu_i32((int32_t)obj[11], rtz_shift_i32((int32_t)obj[0x22], 7, 0x7f));
+    }
 
-    int32_t vx = (int32_t)obj[0x20];
-    int32_t vy = (int32_t)obj[0x21];
-    int32_t vz = (int32_t)obj[0x22];
-
-    if (vx < 0) vx += 0x7f;
-    if (vy < 0) vy += 0x7f;
-    if (vz < 0) vz += 0x7f;
-
-    obj[9]  += (uint32_t)(vx >> 7);
-    obj[10] += (uint32_t)(vy >> 7);
-    obj[11] += (uint32_t)(vz >> 7);
+    uint32_t flags = obj[0];
+    if ((flags & 2u) != 0) {
+        obj[0] = flags & 0xfefffffdu;
+        FUN_8001d708(obj);
+        obj[0x20] = (uint32_t)rtz_shift_i32(mips_mult_lo_i32(*(int16_t *)(obj + 5), 0x4786), 5, 0x1f);
+        obj[0x21] = (uint32_t)rtz_shift_i32(mips_mult_lo_i32(*(int16_t *)((uint8_t *)obj + 0x1a), 0x4786), 5, 0x1f);
+        obj[0x22] = (uint32_t)rtz_shift_i32(mips_mult_lo_i32(*(int16_t *)(obj + 8), 0x4786), 5, 0x1f);
+        if (obj[0x38] != 0)
+            FUN_80020890((uint32_t *)(uintptr_t)obj[0x38], 0x3c);
+        FUN_80020890(obj, 0x1e);
+        uint32_t voice = FUN_8004410c();
+        FUN_800447e8(voice, *(uint32_t *)(uintptr_t)(_DAT_800737e8 + 8), 4, obj + 9);
+        flags = obj[0];
+    }
+    obj[0] = flags & 0xffffffdfu;
+    gap_80031294(obj);
     return 0;
+}
+
+uint32_t FUN_80100c6c(uint32_t *obj, int mode)
+{
+    return SF_ConveyorTick(obj, mode);
 }
 
 /* ============================================================

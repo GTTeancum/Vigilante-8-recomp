@@ -11,18 +11,27 @@
  */
 #include <stdint.h>
 
+static inline uintptr_t obj_ptr32(uintptr_t base, uint32_t off)
+{
+    return (uintptr_t)*(uint32_t *)(base + off);
+}
+
 uint32_t Bone_FindFreeSlot(int obj)
 {
-    int templateBody = **(int **)(intptr_t)(obj + 0x58);
-    uint16_t idx = *(uint16_t *)(intptr_t)(templateBody
-                                + *(uint16_t *)(intptr_t)(obj + 10) * 0x1c + 0x36);
+    uintptr_t bank = obj_ptr32((uintptr_t)obj, 0x58);
+    uintptr_t templateBody = obj_ptr32(bank, 0);
+    uint16_t idx = *(uint16_t *)(templateBody
+                                + *(uint16_t *)(uintptr_t)(obj + 10) * 0x1c + 0x36);
     while (idx != 0xffff) {
-        uint16_t kind = *(uint16_t *)(intptr_t)(templateBody + idx * 0x1c + 0x1c);
+        uint16_t kind = *(uint16_t *)(templateBody + idx * 0x1c + 0x1c);
         if ((kind >> 8) == 0xff && kind != 0xffff) return idx;
-        idx = *(uint16_t *)(intptr_t)(templateBody + idx * 0x1c + 0x34);
+        idx = *(uint16_t *)(templateBody + idx * 0x1c + 0x34);
     }
     return 0;
 }
+
+/* Hex-name alias (vehicle_kill.c, wheel_ticks.c, collision_apply.c callers). */
+uint32_t FUN_8003fbc8(int obj) { return Bone_FindFreeSlot(obj); }
 
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)

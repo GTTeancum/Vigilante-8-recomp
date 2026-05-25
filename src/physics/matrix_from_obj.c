@@ -23,6 +23,25 @@ MATRIX *Matrix_FromObjectTransform(MATRIX *out, int obj)
     return out;
 }
 
+/* ================================================================
+ * FUN_8001d6e0 -- Object_BuildRotMatrixYXZ
+ *
+ * Builds the 3×3 rotation sub-matrix of an object from its YXZ
+ * Euler angles stored at obj+0x40 into the MATRIX at obj+0x10.
+ * Used to refresh the rotation matrix in-place from the stored
+ * euler angles (e.g. after the angles have been updated externally).
+ *
+ * HIGH confidence: trivial one-liner.
+ * ================================================================ */
+void FUN_8001d6e0(int param_1)
+{
+    RotMatrixYXZ_gte((SVECTOR *)(uintptr_t)(param_1 + 0x40),
+                     (MATRIX *)(uintptr_t)(param_1 + 0x10));
+}
+
+/* Hex-name alias for Matrix_FromObjectTransform (callers reference by PSX address). */
+MATRIX *FUN_8001b07c(MATRIX *out, int obj) { return Matrix_FromObjectTransform(out, obj); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *
@@ -41,6 +60,16 @@ MATRIX * FUN_8001b07c(MATRIX *param_1,int param_2)
   RotMatrixYXZ_gte((SVECTOR *)(param_2 + 0x10),param_1);
   FUN_8004d314(param_1,param_2 + 4);
   return param_1;
+}
+
+/* --- SLUS_005.10 FUN_8001d6e0  (from analysis/SLUS_005.10/decomp/8001d6e0.c) --- */
+// addr: 0x8001d6e0  name: FUN_8001d6e0
+
+void FUN_8001d6e0(int param_1)
+
+{
+  RotMatrixYXZ_gte((SVECTOR *)(param_1 + 0x40),(MATRIX *)(param_1 + 0x10));
+  return;
 }
 
 #endif  /* GHIDRA REF */

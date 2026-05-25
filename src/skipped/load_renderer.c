@@ -6,12 +6,53 @@
  * lists and walk vertex tables. These are stubbed here for reference;
  * the rewritten renderer will provide equivalent functionality.
  *
- * Functions covered (all FUN_xxxx at the LOAD.DLL VA):
+ * Earlier pass notes misclassified several terrain-loader functions here as
+ * primitive/MDEC helpers. Source re-audit corrected those roles:
  *
- *   0x801006f0  Vertex_BuildPrimList
- *               Walks a 0x40-byte-per-entry primitive table emitting
- *               GPU commands (TRIPOLY, QUADPOLY, TEXTRIPOLY) into the
- *               output OT. Used by the splash/legal/loading screens.
+ *   0x80100148  Terrain_LoadBspNode
+ *               Recursively decodes the BSP static-object kd-tree stream.
+ *
+ *   0x801001ec  Terrain_BspInsertObject
+ *               Inserts a placed object-list node into the BSP leaf chosen by
+ *               object +0x48/+0x50.
+ *
+ *   0x801002ac  Terrain_LoadTerrHead
+ *               Reads top-level TERR/HEAD setup words and initializes the flat
+ *               terrain table before ZMAP/ZONE installation.
+ *
+ *   0x801005c0  Terrain_LoadBsp
+ *               Loads the BSP tree root into the runtime global at
+ *               _DAT_80065a00 / uRam000006fc.
+ *
+ *   0x801005e8  Terrain_LoadAimp
+ *               Raw-copies the AIMP navigation quadtree blob.
+ *
+ *   0x801006f0  Terrain_LoadObjHead
+ *               Builds placed OBJ/HEAD runtime objects from source transforms,
+ *               object templates, and XOBF slots.
+ *
+ *   0x80102bd4  Terrain_BuildRouteStrip
+ *               Tessellates a Bezier RSEG edge into a terrain-conformed
+ *               road/route strip using XRTP width/step and Terrain_HeightAt.
+ *
+ *   0x801039bc  Terrain_SplitRouteBezier
+ *               Splits an RSEG cubic until an endpoint distance constraint is
+ *               satisfied.
+ *
+ *   0x80104550  Terrain_PrepareRouteStrip
+ *               Builds RSEG control points from JUNC endpoints, adjusts
+ *               endpoint anchors against JUNC patch meshes, then dispatches
+ *               route-strip generation.
+ *
+ *   0x80104d1c  Terrain_LoadJunc
+ *               Loads JUNC graph nodes and optional terrain-conformed patch
+ *               meshes.
+ *
+ *   0x80105060  Terrain_LoadRseg
+ *               Loads RSEG graph edges and links them into both endpoint JUNC
+ *               edge arrays.
+ *
+ * Remaining renderer-adjacent functions covered (all FUN_xxxx at the LOAD.DLL VA):
  *
  *   0x8010131c  Prim_EmitWithCallback
  *               Same primitive walker but takes a callback to invoke
@@ -21,21 +62,9 @@
  *               Flat-shaded variant -- writes color into OT cells
  *               using shared color word at +0x17.
  *
- *   0x80102bd4  Prim_EmitGouraud
- *               Gouraud-shaded variant with per-vertex color words.
- *
  *   0x801036bc  Prim_FreeListCell
  *               Returns a primitive cell to the small-pool free list
  *               at _DAT_80065bd0 (8-byte head with size limit 0x100000).
- *
- *   0x801039bc  Sprite_LayoutText
- *               Walks a string + glyph-table, emitting one sprite per
- *               glyph at successive X positions; used by the LOAD
- *               progress message ("LOADING..." with the spinner).
- *
- *   0x80104550  Mdec_DecodeBlock          [MDEC video, out of scope]
- *   0x80104d1c  Mdec_QueueStream           [MDEC video, out of scope]
- *   0x80105060  Mdec_FrameAdvance          [MDEC video, out of scope]
  *
  *   0x801051c8  Scene_WalkLevelOfDetail
  *               Two-loop visitor walking _DAT_80065bd8[_DAT_80065bc4]
@@ -44,11 +73,6 @@
  *               iteration of LOD pyramid -- a stat counter / cache
  *               primer with no observable effect on physics or game
  *               state. Safe to no-op in the rewritten renderer.
- *
- *   0x801057f0  Scene_PushDrawState
- *               Sets up the active draw-state cell for the next
- *               primitive emission (texture page, semi-transparency,
- *               dither mode).
  *
  * These functions do not affect physics, gameplay state, or RNG.
  * The rewritten renderer can provide drop-in replacements for the

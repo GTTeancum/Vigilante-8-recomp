@@ -3,7 +3,7 @@
  * Source: SANDFACT.DLL  FUN_80100b34.
  *
  * Each tick:
- *   - If mode == 0 or 2 (running): if a voice was already playing,
+ *   - If mode is neither 1 nor 2 (running): if a voice was already playing,
  *     update its volume; clear back-buffer pending bit (FUN_80020778)
  *     to keep the sound aligned with the parity buffer; force sub-state
  *     0x78 (= "running"); release the voice; clear the slot.
@@ -25,7 +25,7 @@ extern void Audio_PlaySfx_inner(int ch, uint32_t bank, int sfxId, uint32_t pan);
 extern void Audio_VoiceStop(int ch);
 extern void Stream_FatalOom(const char *msg);
 extern uint32_t Object_ClearBackBufferFlag(uint32_t *obj);
-extern void Object_SetSubState(int obj, int sub);
+extern void FUN_80020890(uint32_t *obj, int sub);
 extern void Object_RegisterPostUpdate(uint32_t *obj);
 extern void Object_DefaultDispatch(int obj, int mode, uint32_t arg);
 extern char s_PROB__801000d0[];
@@ -34,11 +34,11 @@ uint32_t SF_ElevatorTick(int obj, int mode)
 {
     if (mode == 1) goto applyAnim;
 
-    if (mode == 0 || mode == 2) {
+    if (mode != 2) {
         uint32_t pan = SfxPan_For3DPos((void *)(intptr_t)(obj + 0x48));
         if (pan != 0) SPU_VoiceVolume_Set((int)*(int8_t *)(obj + 5), pan);
         Object_ClearBackBufferFlag((uint32_t *)(intptr_t)obj);
-        Object_SetSubState(obj, 0x78);
+        FUN_80020890((uint32_t *)(uintptr_t)(uint32_t)obj, 0x78);
         Audio_VoiceStop((int)*(int8_t *)(obj + 5));
         *(int8_t *)(obj + 5) = 0;
     }
@@ -52,11 +52,16 @@ uint32_t SF_ElevatorTick(int obj, int mode)
         Audio_PlaySfx_inner(ch, *(uint32_t *)(*(int *)(obj + 0x58) + 8), 0, pan2);
         Object_RegisterPostUpdate((uint32_t *)(intptr_t)obj);
     }
-    Object_SetSubState(obj, 0x78);
+    FUN_80020890((uint32_t *)(uintptr_t)(uint32_t)obj, 0x78);
 applyAnim:
-    Object_SetSubState(obj, (*(uint8_t *)(obj + 9)) + 0x78);
+    FUN_80020890((uint32_t *)(uintptr_t)(uint32_t)obj, (*(uint8_t *)(obj + 9)) + 0x78);
     Object_DefaultDispatch(obj, mode, 0);
     return 0;
+}
+
+uint32_t FUN_80100b34(int obj, int mode)
+{
+    return SF_ElevatorTick(obj, mode);
 }
 
 /* ============================================================

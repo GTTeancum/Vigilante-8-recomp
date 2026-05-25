@@ -10,6 +10,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
+
+extern int ratan2(int y, int x);
 
 static int v8_panic_warn(const char *name) {
     /* Dedupe by pointer: each stub passes its own string literal,
@@ -23,9 +26,18 @@ static int v8_panic_warn(const char *name) {
     return 0;
 }
 
-/* 155 unresolved symbols */
+/* 155 unresolved symbols (+ 3 added for vehicle_node / vehicle_scratchpad) */
 
-int  Audio_BankSelect(void) { return v8_panic_warn("Audio_BankSelect"); }
+/* cRam00000016: difficulty byte at gp+0x16 (0=hard, 1=medium, 2=easy).
+ * Used as lock-on rate modifier in Reticle_UpdateLock.  Initialise to 1
+ * (medium) so rate = (2-1)<<6 = 64 -- a safe default until real init runs. */
+int8_t cRam00000016 = 1;
+
+/* FUN_8002f9bc -- implemented in src/physics/wheel_physics.c (WheelBody_Tick) */
+
+/* FUN_800443c8: Audio_PlaySfx_inner.  Stub until audio layer is wired. */
+int  FUN_800443c8(void) { return v8_panic_warn("FUN_800443c8"); }
+
 int  Audio_ClearAll(void) { return v8_panic_warn("Audio_ClearAll"); }
 int  Audio_PlayXA(void) { return v8_panic_warn("Audio_PlayXA"); }
 int  Audio_ResetVoices(void) { return v8_panic_warn("Audio_ResetVoices"); }
@@ -48,40 +60,325 @@ uint32_t DAT_80065520;
 uint32_t DAT_80065528;
 uint32_t DAT_800655c8;
 uint32_t DAT_80065604;
-uint32_t DAT_80065674;
+uint8_t DAT_80065674[16] = {
+    0x00,0xff,0x00,0x01,0x02,0x03,0xff,0xff,
+    0x01,0x01,0x01,0x01,0x01,0x01,0x00,0x00
+};
 uint32_t DAT_80065968;
 uint32_t DAT_80065978;
+/* DAT_80065984: background colour word for spark/glow particle blending.
+ * Byte layout: [0]=R [1]=G [2]=B [3]=X (packed XBGR).
+ * Written each tick by LAB_8003ee88 (spark_tick.c); zero-init is safe. */
+uint32_t DAT_80065984 = 0;
 uint32_t DAT_80065be0;
 uint32_t DAT_80065c08;
-uint32_t DAT_80065c28;
+/* DAT_80065c28: HUD reticle slot state block (2 slots × 0x18 bytes = 0x30 bytes,
+ * plus 0x10 bytes colour override space = 0x40 bytes total).
+ * Layout per 0x18-byte slot: see hud_reticle.c header.
+ * Callers that extern as uint32_t read the first 4 bytes (= first short pair). */
+uint8_t DAT_80065c28[0x40];
+/* DAT_80065c30: lives at PSX 0x80065c28+8; kept as a separate stub for the
+ * linker until the STRUCT_PASS merges it into DAT_80065c28.  Zero-init matches. */
 uint32_t DAT_80065c30;
 uint32_t DAT_8006eef0;
 uint32_t DAT_8006eff8;
 uint32_t DAT_8006f100;
 uint32_t DAT_8006f208;
-uint32_t DAT_8008f020;
+uint8_t DAT_8008f020[0x2000];
 uint32_t DAT_800a3090;
 int  Demo_RecorderShutdown(void) { return v8_panic_warn("Demo_RecorderShutdown"); }
 int  Demo_ResetState(void) { return v8_panic_warn("Demo_ResetState"); }
 int  Demo_Save(void) { return v8_panic_warn("Demo_Save"); }
-int  FUN_800129e8(void) { return v8_panic_warn("FUN_800129e8"); }
-int  FUN_80015368(void) { return v8_panic_warn("FUN_80015368"); }
-int  FUN_80015610(void) { return v8_panic_warn("FUN_80015610"); }
-int  FUN_800157d4(void) { return v8_panic_warn("FUN_800157d4"); }
-int  FUN_8001ac44(void) { return v8_panic_warn("FUN_8001ac44"); }
-int  FUN_8001affc(void) { return v8_panic_warn("FUN_8001affc"); }
-int  FUN_8001b270(void) { return v8_panic_warn("FUN_8001b270"); }
-int  FUN_8001b2fc(void) { return v8_panic_warn("FUN_8001b2fc"); }
-int  FUN_8001d470(void) { return v8_panic_warn("FUN_8001d470"); }
-int  FUN_8001d4f0(void) { return v8_panic_warn("FUN_8001d4f0"); }
-int  FUN_8001d708(void) { return v8_panic_warn("FUN_8001d708"); }
-int  FUN_8002cce8(void) { return v8_panic_warn("FUN_8002cce8"); }
-int  FUN_8002d44c(void) { return v8_panic_warn("FUN_8002d44c"); }
-int  FUN_8002d494(void) { return v8_panic_warn("FUN_8002d494"); }
-int  FUN_8002d82c(void) { return v8_panic_warn("FUN_8002d82c"); }
-int  FUN_80030a88(void) { return v8_panic_warn("FUN_80030a88"); }
-int  FUN_8003e76c(void) { return v8_panic_warn("FUN_8003e76c"); }
-int  FUN_800446dc(void) { return v8_panic_warn("FUN_800446dc"); }
+/* FUN_800129e8 -- implemented in src/gameplay/hud_message.c (HudMsg_ShowCentred) */
+/* FUN_80015368 -- implemented in src/gameplay/splash.c (fatal-error display+halt) */
+/* FUN_80015610 -- implemented in src/assets/iso_verify.c (Iso_VerifyOriginalDisc) */
+/* FUN_800157d4 -- implemented in src/assets/iso9660.c (Iso_OpenPath forwarder) */
+/* FUN_8001ac44 -- implemented in src/gameplay/bone_alloc.c (BoneObj_BuildTree) */
+/* FUN_8001affc -- implemented in src/gameplay/bone_bank_lookup.c (BoneBank_FindByKey) */
+/* FUN_8001b270 -- implemented in src/gameplay/bone_anim.c (BoneAnim_TouchInputChan) */
+/* FUN_8001b2fc -- implemented in src/gameplay/object_bone.c (Object_SetupBone) */
+/* FUN_80016aac -- implemented in src/gameplay/vehicle_ai_input.c (Vec3_Distance) */
+/* FUN_800432d0 -- implemented in src/physics/gte_long_vec.c (GTE_RotateCurrentLongMatTrans) */
+/* FUN_8001d470 -- implemented in src/gameplay/object_alloc_small.c (Object_AllocSmall) */
+/* FUN_8001d4f0 -- implemented in src/gameplay/object_bone.c (Object_AppendChild) */
+/* FUN_8001d708 -- implemented in src/gameplay/object_bone.c (Object_InitBoneMatrix) */
+/* FUN_8002cce8 -- implemented in src/gameplay/vehicle_init_joints.c */
+/* FUN_8002d44c -- implemented in src/gameplay/vehicle_damage_sfx.c (Vehicle_PlayDamageSfx) */
+/* FUN_8002d494 -- implemented in src/gameplay/vehicle_event.c */
+
+/* FUN_8004366c -- implemented in src/physics/matrix_ops.c (LoadTransposedMatrix) */
+/* FUN_80043408 -- implemented in src/physics/matrix_ops.c (RotLong_PointTranslate) */
+/* FUN_8004352c -- implemented in src/physics/matrix_ops.c (RotLong_VecTranspose) */
+
+/* pcRam00000730: event-dispatch function pointer at PSX RAM 0x730.
+ * Call sites use 3 args: (obj, eventId, param2) and some propagate v0.
+ * eventId 0x10 = frame-end sweep, 0x11 = vehicle destroyed/match-end trigger.
+ * Minimal host stub: event 0x11 fires iRam00000624=1 (match over → ResultScreen). */
+extern int32_t iRam00000624;   /* match-end flag (set by Vehicle_Kill) */
+static int world_event_stub(uint32_t obj, int eventId, uint32_t param2)
+{
+    (void)obj; (void)param2;
+    if (eventId == 0x11) {
+        fprintf(stderr, "v8: world_event 0x11 -- vehicle destroyed, match over\n");
+        iRam00000624 = 1;
+    }
+    return 0;
+}
+int (*pcRam00000730)(uint32_t obj, int eventId, uint32_t param2) = world_event_stub;
+
+/* DAT_800607b4 / DAT_800607b6: 4096-entry interleaved sin/cos Q12 table (16 KiB).
+ * Layout: { int16_t sin, int16_t cos } × 4096 entries.
+ * Access in wheel_physics.c:
+ *   sin[i] = ((int16_t *)DAT_800607b4)[i * 2]       = (&DAT_800607b4)[i * 2]
+ *   cos[i] = ((int16_t *)DAT_800607b4)[i * 2 + 1]   = (&DAT_800607b6)[i * 2]
+ * Zero-filled stub; real values extracted from EXE binary. */
+int16_t DAT_800607b4[8192];
+
+/* DAT_800647b4: PSY-Q ratan2 first-octant lookup table (1025 int16 entries).
+ * Loaded from the PS-X EXE by Host_LoadExeDataTables. */
+int16_t DAT_800647b4[1025];
+
+/* FUN_8004410c -- Audio_AllocVoice: scan SPU for a free voice channel.
+ * Returns channel index (0-23), or 0 if all busy. */
+int  FUN_8004410c(void) { return v8_panic_warn("FUN_8004410c"); }
+
+/* FUN_800447e8 -- Audio_PlaySfx3D: compute 3D pan from position, play SFX.
+ * param1: player-channel index (event-0 boost) or allocated voice (collision). */
+void FUN_800447e8(int param1, uint32_t bank, int pitch, const void *pos)
+{ (void)param1; (void)bank; (void)pitch; (void)pos; v8_panic_warn("FUN_800447e8"); }
+/* FUN_8002d82c -- implemented in src/gameplay/vehicle_collision.c */
+
+/* ---- helpers needed by vehicle_collision.c (FUN_8002d82c) -----------
+ * Each is a panic stub until the matching subsystem is decompiled.
+ * The collision handler reads only the lower 32 bits of stub returns
+ * (panic_warn always returns 0), so all paths short-circuit safely. */
+
+/* FUN_8002c018 -- implemented in src/gameplay/vehicle_impulse.c */
+/* FUN_8002c6fc -- implemented in src/gameplay/vehicle_impulse.c */
+
+/* FUN_8001ac08 -- implemented in src/gameplay/object_slot_lookup.c (Object_InitSndSlot) */
+
+/* FUN_8001d544 -- implemented in src/gameplay/object_bone.c (Object_PrependChild) */
+
+/* FUN_800207c4 -- implemented in src/gameplay/object_list_extra.c (Object_BindFinalize) */
+
+/* FUN_8002be84 -- implemented in src/gameplay/vehicle_kill.c (Vehicle_SoftKill) */
+
+/* FUN_80020890 -- implemented in src/gameplay/object_event_queue.c (Object_SchedulePostEvent) */
+
+/* LAB_8002bdd0 -- implemented in src/gameplay/smoke_child_tick.c */
+
+/* FUN_800441c8: Audio_VoiceRelease -- stop/release an SPU voice channel.
+ * Stub until audio engine is wired. */
+int  FUN_800441c8(void) { return v8_panic_warn("FUN_800441c8"); }
+
+/* FUN_8001b49c -- implemented in src/gameplay/bone_level_alloc.c (Bone_AllocLevel) */
+
+/* DAT_800568fc / DAT_800568fe: PSX GPU primitive src/dst stride look-up tables.
+ * Extracted from SLUS_005.10 at 0x800568fc.  Callers index by byte offset
+ * (primType & 0x3c), so the useful entries are at even uint16_t indices. */
+uint16_t DAT_800568fc[32] = {
+    0x000c, 0x0014, 0x001c, 0x0028, 0x0014, 0x001c, 0x001c, 0x0028,
+    0x000c, 0x0014, 0x0014, 0x0020, 0x000c, 0x0010, 0x0014, 0x0020,
+    0x0010, 0x001c, 0x0018, 0x0028, 0x000c, 0x0000, 0x0018, 0x0028,
+    0x0014, 0x0020, 0x0014, 0x0020, 0x0000, 0x0000, 0x0014, 0x0020,
+};
+uint16_t DAT_800568fe[32] = {
+    0x0014, 0x001c, 0x0028, 0x0014, 0x001c, 0x001c, 0x0028, 0x000c,
+    0x0014, 0x0014, 0x0020, 0x000c, 0x0010, 0x0014, 0x0020, 0x0010,
+    0x001c, 0x0018, 0x0028, 0x000c, 0x0000, 0x0018, 0x0028, 0x0014,
+    0x0020, 0x0014, 0x0020, 0x0000, 0x0000, 0x0014, 0x0020, 0x0000,
+};
+
+/* uRam00000854/55/56: ambient RGB colour bytes for GPU primitive colour injection.
+ * Default to mid-grey (0x80) until game init sets the real ambient light. */
+uint8_t uRam00000854 = 0x80;
+uint8_t uRam00000855 = 0x80;
+uint8_t uRam00000856 = 0x80;
+
+/* FUN_8001b038 -- implemented in src/gameplay/bone_anim.c (Bone_FindByKindOnObj) */
+
+/* FUN_800407b4 -- implemented in src/gameplay/particle_spawn.c (Particle_SpawnFromPool) */
+
+/* LAB_8002bfb8 -- implemented in src/gameplay/smoke_child_tick.c */
+
+/* LAB_80040540 -- implemented in src/gameplay/particle_emitter_tick.c */
+/* LAB_8004042c -- implemented in src/gameplay/particle_emitter_tick.c */
+
+/* uRam00000604: game-mode flags (bit 3 = friendly-fire-off). */
+uint32_t uRam00000604;
+
+/* FUN_8002c958 -- implemented in src/gameplay/impulse_dispatch.c */
+/* FUN_80017240 -- implemented in src/physics/vec_dot_long.c */
+/* FUN_80017594 -- implemented in src/physics/angular_impulse.c */
+/* FUN_800434d0 -- implemented in src/physics/gte_long_vec.c (GTE_RotateNormalTranspose) */
+/* FUN_800435c0 -- implemented in src/physics/gte_long_vec.c (GTE_RotateWorldDelta) */
+/* FUN_8004c874 -- implemented in src/physics/matrix_ops.c (VectorNormal / MSC02_OBJ_100) */
+/* FUN_800439b8 -- implemented in src/physics/matrix_ops.c (RotMatrix_ApplyAngVel) */
+/* FUN_8004c934 -- implemented in src/physics/matrix_ops.c (MatrixNormal) */
+
+/* FUN_8004d734 -- implemented in src/physics/gte_aliases.c. */
+#include "psyq/psyq_stubs.h"
+/* FUN_800173fc -- implemented in src/physics/physics_integrate.c (Physics_IntegrateForces) */
+
+/* FUN_80012028 -- implemented in src/gameplay/hud_damage_flash.c (HudFlash_WriteSlot) */
+
+/* FUN_80012068 -- implemented in src/gameplay/hud_damage_flash.c (HudFlash_SetEntry) */
+
+/* FUN_8003fea8 -- implemented in src/gameplay/object_spawn_effect.c */
+
+/* LAB_8003ee88 -- implemented in src/gameplay/spark_tick.c */
+
+/* LAB_8003e7b4 -- implemented in src/gameplay/effect_death_ticks.c */
+
+/* LAB_8003efc8 -- implemented in src/gameplay/weapon_trail_tick.c */
+
+/* LAB_8004007c -- implemented in src/gameplay/fire_burst_tick.c */
+
+/* LAB_8002c210 -- implemented in src/gameplay/smoke_emitter_tick.c */
+/* LAB_800404c4 -- implemented in src/gameplay/smoke_emitter_tick.c */
+
+/* FUN_8004483c: Audio_PlaySfx3DPos -- play SFX at an explicit 3D point. */
+int  FUN_8004483c(void) { return v8_panic_warn("FUN_8004483c"); }
+
+/* FUN_8003ff28 -- implemented in src/gameplay/weapon_split.c
+ * (Weapon_SplitChildToProjectile). */
+
+/* FUN_80044c44: now implemented as hex alias in src/assets/mem.c (V8_MemCopy). */
+
+/* LAB_8003cb64 -- implemented in src/gameplay/weapon_projectile_split.c */
+/* LAB_8003c61c -- implemented in src/gameplay/split_child_tick.c */
+
+/* DAT_800737dc: vehicle-sound bank handle (PSX address 0x800737dc).
+ * Read by LAB_8003cb64 to determine same-bank vs cross-bank split count.
+ * Zero = no bank loaded (safe: count=14 cross-bank splits trigger instead).
+ * Host storage is native-width because several cleaned object-bank paths
+ * dereference it as a pointer. */
+uintptr_t DAT_800737dc = 0;
+
+/* FUN_8001b0c4 -- BoneAnim_SetupByWeaponType: select and apply an animation
+ * config from the weapon-type look-up table in the bone bank.
+ * Called after split-projectile allocation in LAB_8003cb64.
+ * Implemented in src/gameplay/bone_anim.c. */
+int16_t sRam000005e4 = 0;
+uint8_t bRam000006cf = 0;
+
+/* DAT_80065BB8: shared bank pointer (gp+2228 = 0x80065BB8).
+ * Written by LAB_8003c61c event-1 (spawn) with obj[0x58] (bank handle).
+ * Read by LAB_8003cb64 to pass as bank arg to FUN_80021b80.
+ * Zero until a split-projectile object has been initialised. */
+int32_t DAT_80065BB8 = 0;
+
+/* FUN_8001555c: Iso_ReadSector16 -- read ISO9660 PVD (sector 16) into dst.
+ * Stub returns dst unchanged (zero-filled buffer = never matches). */
+/* FUN_8001555c -- implemented in src/assets/iso_pvd.c (Iso_ReadPVD). */
+
+/* DAT_8006f608: saved 32-byte PVD snapshot from original disc boot.
+ * Zero-filled; Iso_VerifyOriginalDisc returns false until real boot runs. */
+uint8_t DAT_8006f608[32] = {0};
+
+/* iRam000006d8: viewport screen width  (pixels, e.g. 320 or 640). */
+int32_t iRam000006d8 = 320;
+/* iRam000006dc: viewport screen height (pixels, e.g. 240 or 480). */
+int32_t iRam000006dc = 240;
+
+/* FUN_800191e0: Font_TextWidth -- measure queued text, returns pixel width. */
+int  FUN_800191e0(void) { return v8_panic_warn("FUN_800191e0"); }
+/* FUN_80019cbc: Font_DrawQueued -- render text at (x,y) into slot. */
+void FUN_80019cbc(void) { v8_panic_warn("FUN_80019cbc"); }
+
+/* FUN_80016a20 -- implemented in src/physics/vec_math64.c (Vec3_Length) */
+
+/* iRam000006b4: root DirRecord pointer -- set by boot_init when the ISO directory
+ * is loaded.  Zero until disc is initialised; Iso_OpenPath returns NULL immediately. */
+uintptr_t iRam000006b4 = 0;
+
+/* DAT_800737d8: world-object pool handle. Used by FUN_800407b4 as the pool to
+ * allocate particle/effect objects from. Zero = no pool (safe stub). */
+uintptr_t DAT_800737d8 = 0;
+uintptr_t DAT_800737e8 = 0;
+
+/* _DAT_800737d8: effects.c uses this name with leading underscore (Ghidra
+ * convention for the raw PSX global before renaming).  Alias to the same
+ * zero-stub so the linker resolves both names. */
+uintptr_t _DAT_800737d8 = 0;
+uintptr_t _DAT_800737e8 = 0;
+
+/* Effects_PollFreeSlot (FUN_8003fbc8): walks the effect-slot free list rooted
+ * in the bone bank at DAT_800737d8.  Returns 0 when no pool is loaded (safe).
+ * Returning 0 causes Effects_SpawnExplosion to return 0, which keeps
+ * Damage_AccumulateOrFire in the "no kill" path -- safe for Phase 5. */
+uint32_t Effects_PollFreeSlot(void) { return 0; }
+
+/* Effects_BindSlot (FUN_8003fac4): installs a spawned effect slot on an object.
+ * No-op stub -- only reached when Effects_PollFreeSlot returns non-zero,
+ * which our stub never does. */
+void Effects_BindSlot(int obj, void *bank, uint16_t slot)
+{
+    (void)obj; (void)bank; (void)slot;
+}
+
+extern int FUN_8001ac44(int *bank, uint16_t slot, uint32_t size, uint32_t flags);
+uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int flags)
+{
+    if (bank == NULL)
+        return NULL;
+    return (uint32_t *)(uintptr_t)FUN_8001ac44((int *)bank, kind,
+                                               (uint32_t)u, (uint32_t)flags);
+}
+
+/* DAT_80065710: world-object position/data table (uint8_t[] accessed as uint32_t*).
+ * Passed to FUN_800407b4 as the position source. Zero-fill placeholder. */
+uint8_t  DAT_80065710[32] = {0};
+
+/* FUN_80053004 = PSX implementation of sprintf.
+ * On host, redirect to CRT vsprintf for full variadic support. */
+#include <stdarg.h>
+int FUN_80053004(char *buf, const char *fmt, ...)
+{
+    va_list ap;
+    int r;
+    va_start(ap, fmt);
+    r = vsprintf(buf, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+/* FUN_8002ee94 -- implemented in src/gameplay/vehicle_wheel_force.c */
+/* FUN_8002c59c -- implemented in src/gameplay/vehicle_enemy_wheel.c */
+/* FUN_8002d054 -- implemented in src/gameplay/vehicle_catchup.c */
+
+/* FUN_80017160 -- implemented in src/gameplay/rng.c (V8_RandNext alias) */
+
+/* Angular-impulse data embedded in EXE at 0x80065748 / 0x80065754.
+ * Zero-filled as placeholders; real values come from binary extraction. */
+int32_t DAT_80065748[3] = {0, 0, 0};
+int32_t DAT_80065754[3] = {0, 0, 0};
+
+/* DAT_800737a0: per-vehicle object/template pointer table.
+ * The PSX stores 32-bit pointers here. Host storage is native-width so
+ * VehicleExp_Load/XOBF_AppendExtra do not overlap adjacent entries on x64. */
+uintptr_t DAT_800737a0[32] = {0};
+
+/* DAT_8005ec68: gear pitch table.  Accessed as uint16_t[(gear+1)].
+ * 0x1000 = 1.0 in Q12 (neutral pitch); placeholder until EXE is parsed. */
+uint16_t DAT_8005ec68[8] = {0x1000, 0x1000, 0x1000, 0x1000,
+                             0x1000, 0x1000, 0x1000, 0x1000};
+
+/* DAT_8005ec74: damage-SFX clip-ID table, indexed by vehicle state byte
+ * (uint8_t self+0xd0).  Used by FUN_8002d44c (Vehicle_PlayDamageSfx).
+ * Zero-filled placeholder; real values come from EXE binary extraction. */
+uint8_t DAT_8005ec74[256] = {0};
+
+/* DAT_80065940: HUD damage-flash table.  Each entry is 8 bytes wide;
+ * bytes [5],[6],[7] of each entry are set by FUN_80012068 (HudFlash_SetEntry).
+ * 64 entries × 8 bytes = 512 bytes total.
+ * Zero-filled placeholder; real values come from EXE binary extraction. */
+uint8_t DAT_80065940[512] = {0};
+
+/* FUN_80030a88 -- implemented in src/gameplay/vehicle_ai_input.c (Vehicle_ApplyAILut) */
+/* FUN_8003e76c -- implemented in src/gameplay/vehicle_init_joints.c (Vehicle_RegisterInWorld) */
+/* FUN_800446dc -- implemented in src/physics/sound_position.c (SfxPan_For3DPosDelayed alias) */
 int  Font_AcquireRenderer(void) { return v8_panic_warn("Font_AcquireRenderer"); }
 int  Font_AllocAtlas(void) { return v8_panic_warn("Font_AllocAtlas"); }
 int  Font_DispatchCallback(void) { return v8_panic_warn("Font_DispatchCallback"); }
@@ -102,10 +399,10 @@ int  Iso_OpenPath_NoArg(void) { return v8_panic_warn("Iso_OpenPath_NoArg"); }
 int  LAB_80043c34(void) { return v8_panic_warn("LAB_80043c34"); }
 int  LAB_80043d94(void) { return v8_panic_warn("LAB_80043d94"); }
 int  Layout_AlignNext(void) { return v8_panic_warn("Layout_AlignNext"); }
-int  Level_Free(void) { return v8_panic_warn("Level_Free"); }
-int  Level_LoadByName(void) { return v8_panic_warn("Level_LoadByName"); }
-int  Match_End(void) { return v8_panic_warn("Match_End"); }
-int  Match_ResetState(void) { return v8_panic_warn("Match_ResetState"); }
+/* Level_Free     -- implemented in src/gameplay/level_teardown.c */
+/* Level_LoadByName -- implemented in src/gameplay/level_load.c */
+/* Match_End         -- implemented in src/gameplay/match_state.c */
+/* Match_ResetState  -- implemented in src/gameplay/match_state.c */
 int  Music_StartShell(void) { return v8_panic_warn("Music_StartShell"); }
 uint32_t PTR_s_Chassey_Blue_800567ec;
 int  Pad_Close(void) { return v8_panic_warn("Pad_Close"); }
@@ -114,7 +411,7 @@ int  Pause_Poll(void) { return v8_panic_warn("Pause_Poll"); }
 int  Render_SetTexpageMode(void) { return v8_panic_warn("Render_SetTexpageMode"); }
 int  ResultScreen_Free(void) { return v8_panic_warn("ResultScreen_Free"); }
 int  ResultScreen_Tick(void) { return v8_panic_warn("ResultScreen_Tick"); }
-int  Sched_ResetTimers(void) { return v8_panic_warn("Sched_ResetTimers"); }
+/* Sched_ResetTimers -- implemented in src/gameplay/sched_timers.c */
 int  SetDispMask(void) { return v8_panic_warn("SetDispMask"); }
 int  Shell_PostLoad(void) { return v8_panic_warn("Shell_PostLoad"); }
 int  Shell_TickDeferred(void) { return v8_panic_warn("Shell_TickDeferred"); }
@@ -122,7 +419,7 @@ int  Sound_LoadSND(void) { return v8_panic_warn("Sound_LoadSND"); }
 int  Splash_AlignNext(void) { return v8_panic_warn("Splash_AlignNext"); }
 int  Stream_CdCallback(void) { return v8_panic_warn("Stream_CdCallback"); }
 uint32_t UNK_8006567a;
-int  Vehicle_Free(void) { return v8_panic_warn("Vehicle_Free"); }
+/* Vehicle_Free -- implemented in src/gameplay/object_lifecycle_extra.c */
 uint8_t bRam00000015;
 uint8_t bRam0000061c;
 uint8_t bRam000008f8;
@@ -137,6 +434,10 @@ int32_t iRam0000000c;
 int32_t iRam00000010;
 int32_t iRam0000001c;
 int32_t iRam00000024;
+/* iRam00000030: gravity constant (Q12 downward acceleration per tick).
+ * Appears in FUN_8002f9bc as: local_f4 += iRam00000030 (added to Y force each tick).
+ * Zero stub; real value extracted from EXE binary. */
+int32_t iRam00000030 = 0;
 int32_t iRam000005ac;
 int32_t iRam00000618;
 int32_t iRam00000620;
@@ -155,6 +456,7 @@ int32_t iRam000008e8;
 int32_t iRam000008ec;
 int32_t iRamffffacb0;
 void *piRam00000684;
+uint32_t *piRam00000714;
 void *puRam000007d0;
 void *puRam000007d4;
 uint32_t uRam0000000c;
@@ -175,9 +477,661 @@ uint32_t uRam000006ac;
 uint32_t uRam000006cc;
 uint32_t uRam000006cf;
 uint32_t uRam000006f0;
+/* iRam000006fc / uRam000006fc: world kd-tree root pointer.
+ * Set by level load (level_load.c), cleared by level_teardown.c.
+ * Named both iRam (signed) and uRam (unsigned) in different source files;
+ * all aliases resolve to the same 4-byte PSX address 0x000006fc. */
+uintptr_t iRam000006fc = 0;   /* canonical definition (used by asset_evict.c) */
+uintptr_t uRam000006fc = 0;   /* same PSX address 0x6fc; separate symbol on host (STRUCT_PASS: unify) */
 uint32_t uRam000007dc;
 uint32_t uRam000008df;
 uint32_t uRam000008f0;
 uint32_t uRam000008f4;
 /* funcs: 71  data: 84  skipped: 0 */
 uint32_t uRam000008f8;
+
+/* ---- timer_tick.c globals ------------------------------------------ */
+
+/* DAT_800102f2: high byte of the 32-bit frame tick counter.
+ * Incremented by V8_TimerIRQ (60 Hz) once per vsync.
+ * On host GetRCnt returns 0, so FUN_80015010 returns this << 16. */
+uint8_t DAT_800102f2 = 0;
+
+/* ---- quadtree_nav.c globals ----------------------------------------- */
+
+/* piRam000007ec / puRam000007ec: quadtree A* node free-list head.
+ * Both aliases refer to PSX RAM address 0x7ec.
+ * piRam = int* (used in FUN_800247dc / FUN_80024888)
+ * puRam = uint32_t* (used in FUN_80024d54 init loop)
+ * STRUCT_PASS: unify with a single canonical symbol. */
+int32_t   *piRam000007ec = NULL;
+uint32_t  *puRam000007ec = NULL;
+
+/* iRam000006ec: base address of the terrain navigation quadtree.
+ * LOAD.DLL stores this pointer at PSX GP+0x6ec / 0x800659f0 while
+ * Terrain_LoadAimp also exposes the same address as _DAT_800659f0.
+ * Keep host storage pointer-width, but callers that write PSX object
+ * fields still truncate deliberately to 32-bit low-heap addresses. */
+uintptr_t iRam000006ec = 0;
+uintptr_t uRam000006ec = 0;  /* same PSX address; kept synchronized by level load */
+void *_DAT_800659f0 = NULL;
+uint32_t _DAT_800659e8 = 0;
+
+/* DAT_800738a0: A* node pool.
+ * Layout: 0x400 nodes × 7 int32s (28 bytes each) = 28 KiB.
+ * Initialised at the start of each FUN_80024d54 call. */
+uint32_t DAT_800738a0[0x400 * 7];
+
+/* uRam000003bc: radar minimap rolling counter (0..63).
+ * Incremented per active vehicle entry rendered. */
+uint32_t uRam000003bc = 0;
+
+/* ---- radar_minimap.c data (renderer-adjacent) ----------------------- */
+
+/* Radar scratch buffer: 64 entries × 16 bytes.
+ * Layout per entry: u32 hdr | u32 rgba | i16 scr_x | i16 scr_y | pad.
+ * Named UNK_800a2bb8 (base), DAT_800a2bbc (+4), DAT_800a2bc0 (+8),
+ * UNK_800a2bc2 (+10) in the EXE. Zero-filled placeholder. */
+uint8_t g_radar_scratch[64 * 16];
+
+/* ---- FUN_800116f4 -- Heap_AllocOrRetry ------------------------------ */
+/* Keep this alias on the low host heap.  Many decompiled callers still store
+ * returned PSX pointers in 32-bit fields, so malloc/high addresses are fatal.
+ */
+extern void *Heap_AllocOrRetry(uint32_t nbytes);
+void *FUN_800116f4(uint32_t size)
+{
+    return Heap_AllocOrRetry(size);
+}
+
+/* FUN_8002ad30 -- radar minimap renderer (out of scope, stub) */
+void FUN_8002ad30(uint32_t *param_1, void *param_2, int16_t param_3, int16_t param_4)
+{
+    (void)param_1; (void)param_2; (void)param_3; (void)param_4;
+}
+
+/* ---- hud_reticle.c globals ------------------------------------------------ */
+
+/* psRam00000610: pointer to current replay/record sequence entry (int16_t *).
+ * NULL until a replay sequence is installed. */
+int16_t *psRam00000610 = NULL;
+
+/* bRam00000601: target animation slot index (set by game logic).
+ * bRam00000614: current slot (chases bRam00000601, 0..7). */
+int8_t   bRam00000601 = 0;
+int8_t   bRam00000614 = 0;
+
+/* sRam0000061e: per-frame countdown for replay mode. */
+int16_t  sRam0000061e = 0;
+
+/* iRam00000634: lock-on buffer handle (0 = not allocated). */
+int32_t  iRam00000634 = 0;
+
+/* uRam000005d4: previous frame reticle state mask (for edge detection). */
+uint32_t uRam000005d4 = 0;
+
+/* uRam00000628: font handle used by HudMsg_ShowCentred (FUN_800129e8).
+ * Aliased iRam00000628 at PSX 0x628; keep separate here for the linker. */
+uint32_t uRam00000628 = 0;
+
+/* ---- quest_data.c globals ------------------------------------------------- */
+
+/* piRam00000608: pointer to loaded quest data base.
+ * NULL when quest data has not been loaded or has been freed. */
+int *piRam00000608 = NULL;
+
+/* ---- hud_reticle data tables (all zero-filled; real values from binary) --- */
+
+/* DAT_8006ecb8: targeting-reticle animation config table.
+ * 8 entries × 0x44 bytes = 544 bytes. */
+uint8_t DAT_8006ecb8[8 * 0x44] = {0};
+
+/* DAT_80065930: per-slot animation base data (uint32_t × 4 = 16 bytes).
+ * Elements 0,1 are copied into the HUD reticle slot at +0x0c per iteration. */
+uint32_t DAT_80065930[4] = {0};
+
+/* DAT_80056774 / DAT_80056778: vehicle animation data tables (byte-addressed).
+ * Accessed as uint32_t at offset (*psVar11 * 8 + iVar12); max ~92 bytes. */
+uint8_t DAT_80056774[256] = {0};
+uint8_t DAT_80056778[256] = {0};
+
+/* DAT_800567d4: animation stride look-up (uint16_t[], byte-addressed).
+ * Max index: 5*2 + 3*4 = 22 bytes.  32-entry stub. */
+uint8_t DAT_800567d4[64] = {0};
+
+/* DAT_80065c58..DAT_80065f58: colour LUT tables A..D used by HudReticle_Tick.
+ * Max index: pcVar10[n] (0..255) + iVar8 (0 or 0x400) = up to 1279.
+ * 1280-byte stubs each; real values from EXE extraction. */
+uint8_t DAT_80065c58[1280] = {0};
+uint8_t DAT_80065d58[1280] = {0};
+uint8_t DAT_80065e58[1280] = {0};
+uint8_t DAT_80065f58[1280] = {0};
+
+/* DAT_80066458: vehicle animation config table used by VehicleAnim_GetInputState.
+ * 8 entries × 0x22 bytes = 272 bytes; zero-filled stub. */
+uint8_t DAT_80066458[8 * 0x22] = {0};
+
+/* ---- renderer stubs (out of scope -- display dispatch) -------------------- */
+
+/* uRam00000168: render-active flag, set by VSync callback (FUN_80012710).
+ * uRam0000016c: draw-sync flag, set by FUN_800127f4. */
+uint32_t uRam00000168 = 0;
+uint32_t uRam0000016c = 0;
+
+/* FUN_80012710: PutDispEnv / DrawOTag / VSyncCallback dispatch.
+ * Renderer (out of scope) -- stub does nothing. */
+void FUN_80012710(void) { }
+
+/* FUN_800127f4: DrawSyncCallback / VSyncCallback setup.
+ * Renderer (out of scope) -- stub does nothing. */
+void FUN_800127f4(void) { }
+
+/* ---- renderer VRAM allocator stubs (out of scope) ------------------------ */
+/* psRam000006c4: VRAM free-block list head (psyq VRAM allocator).
+ * iRam000006c4:  same address used as int handle in FUN_80018080. */
+int16_t *psRam000006c4 = NULL;
+int32_t  iRam000006c4  = 0;
+
+/* ---- exception handler stubs (runtime, out of scope) --------------------- */
+/* FUN_80015390: PSX hardware exception handler (reads Cause/EPC/BadVAddr
+ * hardware registers, formats an error string, halts). Runtime/OS function.
+ * On host this is never called; stub is here to satisfy the symbol. */
+void FUN_80015390(void) { }
+
+/* ---- path-follow AI stubs (vehicle_weapon_tick.c callers) ---------------- */
+
+/* FUN_80042ef0, FUN_80042f98, FUN_80042e78, FUN_80024d30 --
+ * implemented in src/gameplay/ai_path.c */
+
+/* FUN_800244c4 -- implemented in src/gameplay/quadtree_nav.c */
+
+/* FUN_8001be5c: Renderer_DrawMeshRotated -- renderer function (OUT OF SCOPE).
+ * Takes: (obj_handle, rotation_matrix_ptr, draw_config).
+ * Called from FUN_8002b610 when an area-effect collision passes AABB check.
+ * Stub does nothing; renderer re-implementation will reproduce this. */
+void FUN_8001be5c(int param_1, void *param_2, int param_3)
+{
+    (void)param_1; (void)param_2; (void)param_3;
+}
+
+/* ---- weapon_spawn / weapon_event / weapon_script stubs ------------------- */
+
+/* FUN_80040c40 -- implemented in src/gameplay/particle_cluster.c
+ * (ParticleCluster_Spawn).  Signature is
+ *   uint32_t *FUN_80040c40(int *pool, uint16_t kind, MATRIX *mat,
+ *                          int *bounds, int count). */
+
+/* FUN_8002036c -- implemented in src/gameplay/object_post_update.c */
+
+/* iRam00000758: active missile-tracker count (int). */
+int32_t iRam00000758 = 0;
+
+/* DAT_8005ec84: vehicle info table. 12 int16 entries; negative = slot inactive.
+ * WeaponTarget_PickRandom checks sign of each entry to determine eligibility. */
+int16_t DAT_8005ec84[12] = {0};
+
+/* DAT_80065864: anchor point for SpawnOrbitObject (int[3] = xyz). */
+int32_t DAT_80065864[3] = {0};
+
+/* PTR_s_6789__8005ed14: SFX pointer table indexed by (*opcode >> 6 & 0x3c).
+ * Each element is a pointer to a per-category SFX-id byte table.
+ * Max index 0x3c = 60 (but only 0x00/0x04/0x08/.../0x3c used by 0x9xxx opcodes).
+ * Zero-filled stub (all pointers NULL → safe no-op in weapon_script.c). */
+uintptr_t PTR_s_6789__8005ed14[16] = {0};   /* 0x3c/4 + 1 = 16 entries */
+
+/* DAT_8005ece4: SFX opcode → sfxId map for opcodes 0x8400..0x8409 (10 entries).
+ * uint16 each, accessed as (opcode - 0x8400) * 2 byte offset. */
+uint16_t DAT_8005ece4[10] = {0};
+
+/* DAT_8005ecf8: effect-type map for opcodes 0x8800..0x8807 (8 entries × 4 bytes). */
+uint32_t DAT_8005ecf8[8] = {0};
+
+/* DAT_80065778: matrix-transform impulse vector for FUN_8003351c (missile).
+ * 3 ints (xyz) padded to 16 bytes. Zero = no impulse. */
+int32_t DAT_80065778[4] = {0};
+
+/* DAT_80065788: matrix-transform impulse vector for FUN_800346cc (guided shot). */
+int32_t DAT_80065788[4] = {0};
+
+/* DAT_800657a4: impulse vector for FUN_800354e0 (generic weapon shot). */
+int32_t DAT_800657a4[4] = {0};
+
+/* DAT_8006576c: impulse vector for FUN_80031dfc (bullet spawn). */
+int32_t DAT_8006576c[4] = {0};
+
+/* DAT_800737d4: world bone-bank handle (same structure as DAT_800737d8).
+ * Used by vehicle construction and world-object spawning. */
+uintptr_t DAT_800737d4 = 0;
+
+/* DAT_80010588: debris particle data table reference. Stored as a callback
+ * address in MissileTracker_Dispatch (FUN_8003733c) case 1.
+ * Stub as zero (no-op on dispatch). */
+uint32_t DAT_80010588 = 0;
+
+/* Tick callbacks implemented in src/gameplay/: */
+/* LAB_80031634 -- implemented in src/gameplay/bullet_tick.c */
+/* LAB_80031bbc -- implemented in src/gameplay/slow_proj_tick.c */
+/* LAB_80032aa4 -- implemented in src/gameplay/mine_rolling_tick.c */
+/* LAB_80033290 -- implemented in src/gameplay/homing_proj_tick.c */
+/* LAB_8003403c -- implemented in src/gameplay/homing_missile_tick.c */
+/* LAB_80033c74 -- implemented in src/gameplay/terrain_damage_tick.c */
+/* LAB_8003e80c -- implemented in src/gameplay/effect_death_ticks.c */
+/* LAB_8003e868 -- implemented in src/gameplay/effect_death_ticks.c */
+/* LAB_8003ed38 -- implemented in src/gameplay/bone_debris_tick.c */
+/* LAB_800372b0 -- implemented in src/gameplay/effect_death_ticks.c */
+
+/* ---- vec3_normalize.c dependencies ------------------------------------ */
+/* gte_ldLZCS / gte_stLZCR: already provided by platform/psyq/libgte.c */
+
+/* ---- level_load.c / level_teardown.c dependencies ------------------ */
+
+/* Overlay_LoadAndRelocate_Named (FUN_80011adc): load DLL overlay from disc.
+ * Stub returns 0 (NULL); safe since no disc on host. */
+int  FUN_80011adc(const char *path) { (void)path; v8_panic_warn("FUN_80011adc"); return 0; }
+void *Overlay_LoadAndRelocate_Named(const char *p)
+    { return (void *)(uintptr_t)FUN_80011adc(p); }
+
+/* ObjList_FastClear (FUN_8001fe50): clears the back-buffer pending-object list. */
+void FUN_8001fe50(void *list) { (void)list; }
+void ObjList_FastClear(void *list) { FUN_8001fe50(list); }
+
+/* FUN_8001af48 -- implemented in src/gameplay/object_freetree_quiet.c
+ * (Object_HeapFreeRecursiveQuiet, aliased as Audio_StopAllSfx). */
+
+/* FUN_800203fc -- implemented in src/gameplay/object_lifecycle_extra.c (Object_UnregisterFromScene) */
+
+/* Tree_Free (FUN_80020658): implemented in src/gameplay/object_tree.c */
+
+/* Tree_FreeTerrain (FUN_80020968): implemented in src/gameplay/object_tree.c */
+
+/* FUN_80020540 -- implemented in src/gameplay/object_lifecycle_extra.c (Object_Free) */
+
+/* BoneBank_FreeVehicle: FUN_8001aa38 */
+/* FUN_8001aa38 -- implemented in src/gameplay/object_lifecycle.c */
+/* SoundEnv_Free: FUN_8001884c */
+int  FUN_8001884c(void) { return v8_panic_warn("FUN_8001884c"); }
+
+/* Globals for level_teardown.c / level_load.c */
+uintptr_t uRam000007d8 = 0;
+uintptr_t iRam000006f8 = 0;
+/* iRam000006ec: already defined above in panic_stubs.c */
+/* iRam000006fc: already defined above in panic_stubs.c */
+uintptr_t iRam000007bc = 0;
+void     *puRam000007c4 = NULL;
+void     *puRam000007a4 = NULL;
+int32_t  *piRam0000079c = NULL;
+uint8_t   DAT_80065a18[32] = {0};
+uint8_t   DAT_80065a50[32] = {0};
+uint8_t   DAT_80065a80[32] = {0};   /* physics-active scene list head */
+uint8_t   DAT_80065aa0[32] = {0};
+uint8_t   DAT_80065ac0[32] = {0};
+uint32_t  _DAT_80065b3c = 0;        /* low-Z/fall boundary; zero until level data wires it */
+uint32_t  iRam00000734 = 0;
+uint32_t  DAT_80065a28 = 0;
+/* DAT_800737e0 / DAT_800737e4: player bone bank ptrs (defined below with match_state) */
+
+/* puRam000006f8: world object root ptr. Already declared in level_load.c */
+uint32_t *puRam000006f8 = NULL;
+uint8_t   DAT_80065a60[32] = {0};
+
+/* ---- match_state.c dependencies ------------------------------------ */
+/* GPU primitive and GfxObj helper stubs (renderer -- out of scope bodies,
+ * but the symbol references must resolve for the lib to link). */
+/* FUN_800187e4 -- implemented in platform/font_decode_stub.c for headless
+ * texture-slot initialisation. */
+int  FUN_80018c3c(void) { return v8_panic_warn("FUN_80018c3c"); }
+int  FUN_80018d64(void) { return v8_panic_warn("FUN_80018d64"); }
+int  FUN_80018bd0(void) { return v8_panic_warn("FUN_80018bd0"); }
+/* MargePrim: already provided by platform/psyq/psyq_stubs.c */
+int  FUN_800190d8(void) { return v8_panic_warn("FUN_800190d8"); }
+int  FUN_80019034(void) { return v8_panic_warn("FUN_80019034"); }
+int  FUN_8001910c(void) { return v8_panic_warn("FUN_8001910c"); }
+/* FUN_800159b4 -- implemented in src/assets/cd_stream.c (Stream_OpenByName alias) */
+/* FUN_800225d4, FUN_8002263c -- implemented in src/assets/iff_chunk_data.c, xobf_parse.c */
+
+/* Renderer hooks pulled in by XOBF_Parse.  The visible renderer remains out
+ * of scope, but these hooks are also the original object/template builder
+ * used by Vehicles.exp and level XOBF data. */
+extern uint32_t *Object_BuildFromBin(int *templateBody, void *animPtr);
+extern void      Object_RegisterInChain(int **obj);
+void *Renderer_BuildObject(void *model, void *anim)
+    { return Object_BuildFromBin((int *)model, anim); }
+void  DrawChain_Register(void *obj)
+    { Object_RegisterInChain((int **)obj); }
+/* FUN_80015bf0, FUN_80015a00 -- implemented in src/assets/cd_stream.c */
+
+/* HUD GPU primitive globals (0x800a2xxx addresses in PSX scratch RAM).
+ * Zero-filled stubs; real values come from running the game. */
+uint32_t _DAT_800a2858;
+uint8_t  DAT_800a2858, DAT_800a2859, DAT_800a285a, DAT_800a285b;
+uint32_t DAT_800a28a4, DAT_800a28ac;
+uint32_t DAT_800a2914;
+uint32_t UNK_800a2910, _UNK_800a2910;
+uint32_t DAT_800a2fb8, DAT_800a2fbc, DAT_800a2fc0, DAT_800a2fc4;
+uint32_t DAT_800a2fc8, DAT_800a2fcc, DAT_800a2fd0;
+uint32_t DAT_800a2fd4, DAT_800a2fd8, DAT_800a2fdc;
+uint32_t DAT_800a2fe0, DAT_800a2fe4, DAT_800a2fe8, DAT_800a2fec;
+uint32_t uRam000008ac;
+uint32_t DAT_800a2988, DAT_800a2990;
+uint32_t uRam0000089c;
+uint32_t UNK_800a2bb8, DAT_800a2bc4;
+uint32_t DAT_800a2a30, DAT_800a2a38, DAT_800a2ad8, DAT_800a2ae0;
+uint32_t DAT_800a2b80, DAT_800a2b84, DAT_800a2b88, DAT_800a2b8c;
+uint32_t DAT_800a2b90, DAT_800a2b94, DAT_800a2b98;
+uint32_t DAT_800a2b9c, DAT_800a2ba0, DAT_800a2ba4, DAT_800a2ba8;
+uint32_t DAT_800a2bac, DAT_800a2bb0, DAT_800a2bb4;
+uint32_t DAT_800a2828, DAT_800a2834, DAT_800a2844, DAT_800a2848;
+uint32_t DAT_800a284c, DAT_800a2850, DAT_800a2854;
+uint8_t  DAT_800a2857;
+uint32_t DAT_800a2862, DAT_800a2864;
+uint8_t  uRam0000085f;
+uint32_t uRam00000860;
+uint8_t  uRam00000867;
+uint32_t uRam00000868;
+uint8_t  uRam00000880;
+uint32_t uRam0000087c;
+uint32_t uRam000008b0;
+uint32_t DAT_80065b70;   /* HUD bone-slot array base (4 entries × 4 bytes) */
+uint32_t DAT_8005ea5c;   /* bone kind table [4] */
+uintptr_t DAT_800737e0;  /* player 1 bone bank ptr */
+uintptr_t DAT_800737e4;  /* player 2 bone bank ptr */
+
+/* ---- sched_timers.c dependencies ----------------------------------- */
+/* FUN_80040e18 -- implemented in src/gameplay/stub_misc.c. */
+void    *puRam000008cc = NULL;
+uint8_t  UNK_80065bc8[8] = {0};
+int32_t *piRam000008c4   = NULL;
+int32_t  iRam000008c0    = 0;
+int32_t  iRam000008d4    = 0;
+int32_t  iRam000008bc    = 0;
+int32_t  iRam000008d0    = 0;
+
+/* ---- match_state.c / sched_timers.c: FUN_80045088 alias ----------- */
+/* FUN_80045088 -- implemented in src/assets/heap.c. */
+
+/* FUN_8001bddc -- implemented in src/gameplay/object_lifecycle_extra.c (BoneBank_Free) */
+/* FUN_8001bda0 -- implemented in src/gameplay/object_lifecycle_extra.c (BoneBank_AllocByIndex) */
+
+/* DAT_80065675: second player slot index (byte at DAT_80065674+1) */
+uint8_t DAT_80065675 = 0;
+
+/* ---- Pre-existing unresolved symbols from other source files ------- */
+
+/* Tree_LeafApply: FUN called by Tree_Apply in object_tree.c.
+ * Stub does nothing (no tree loaded on host). */
+int  Tree_LeafApply(void) { return v8_panic_warn("Tree_LeafApply"); }
+
+/* Object list globals used by object_tree.c / list_walkers.c / object_list.c */
+int32_t *piRam00000774 = NULL;   /* object list A head */
+int32_t *piRam0000075c = NULL;   /* object list B head */
+int32_t *piRam0000077c = NULL;   /* object list C head */
+int32_t *piRam000007bc = NULL;   /* trigger-vol chain head */
+uint32_t DAT_80065a74  = 0;      /* object spatial tree sentinel */
+
+/* iRam00000004: double-buffering page index (0 or 1).
+ * Used by BoneBank_Free (FUN_8001bddc) and buffer_defer_free.c. */
+int32_t  iRam00000004  = 0;
+
+/* Object lifecycle callbacks used by list_walkers.c */
+/* Object_PreTickRecurse -- implemented in src/gameplay/object_pretick.c (FUN_8001f9cc) */
+/* Object_PreTickChildren -- implemented in src/gameplay/object_pretick.c (FUN_8001fc38) */
+/* Object_Destroy -- implemented in src/gameplay/object_lifecycle_extra.c. */
+/* Object_HeapFree -- implemented in src/gameplay/object_lifecycle_extra.c (alias for FUN_800204dc) */
+
+/* DAT_8006eca0: deferred-free buffer sentinel / control block.
+ * Accessed by buffer_defer_free.c. Zero-filled stub. */
+uint32_t DAT_8006eca0 = 0;
+
+/* ---- damage_apply.c: renamed extern aliases -------------------------
+ * damage_apply.c uses readable names; the live hex-name versions are
+ * in #if 0 GHIDRA REF blocks, so we provide stubs / forwarders here.
+ */
+
+/* ObjectList_RemoveTraverse/ObjectList_RemoveFromChain/ObjectList_RemoveFromBackbuf
+ * and FreeAfterNFrames are implemented in src/gameplay/object_list.c. */
+
+/* ---- Fix 18 link errors (session: effect_death_ticks + new files) ---- */
+
+/* piRam0000076c: free-pool node list head (ObjList_FastInsert scratch pool).
+ * PSX initialises this from the level heap during scene init; NULL safe
+ * here because ObjList_FastInsert is a stub at this stage (no scene loaded). */
+int32_t **piRam0000076c = NULL;
+
+/* DAT_80065a70: sentinel / terminator node for the dead-object list.
+ * ObjList_FastInsert stores a pointer to this when linking freed nodes. */
+uint8_t DAT_80065a70[16] = {0};
+
+/* FUN_8003fd24 -- Debris_Spawn: spawn impact/explosion particle object.
+ * Returns spawned object handle (int).  Stub: returns 0 (null handle). */
+extern int FUN_8001ac44(int *bank, uint16_t slot, uint32_t size, uint32_t flags);
+extern uint32_t FUN_8002036c(uint32_t *obj);
+extern int LAB_8003e80c(int obj, int event, int param3);
+extern int LAB_8003e7b4(int obj, int event, int param3);
+
+/* FUN_8003fd24 -- implemented in src/physics/effects.c. */
+
+/* FUN_80016da8 -- Vec3_RandomizeRotation / Object_RandomizeRotation.
+ * Sets the 3×3 rotation block at v+0x10 to a random orientation.
+ * Stub: no-op (projectile spawns with identity rotation). */
+/* FUN_80016da8 -- implemented in src/physics/matrix_identity.c. */
+
+/* FUN_8003e598 -- implemented in src/gameplay/spatial_tracker.c. */
+
+/* FUN_80016c54 -- Matrix_PitchAngle: extract pitch from a rotation matrix.
+ * Returns i16 angle. Stub returns 0. */
+/* FUN_80016c54 -- implemented in src/physics/math_helpers.c. */
+
+/* FUN_80016c88 -- Matrix_YawAngle: extract yaw from a rotation matrix.
+ * Returns i16 angle. Stub returns 0. */
+/* FUN_80016c88 -- implemented in src/physics/math_helpers.c. */
+
+/* DAT_8006f640 -- implemented in src/physics/matrix_chain.c. */
+
+/* FUN_8002cbe8 -- implemented in src/gameplay/weapon_slot.c (WeaponSlot_Attach) */
+
+/* DAT_80065aac: gp+1960 -- wtype-0 split-hit counter.  Decremented on each
+ * wtype-0 impact so the game can throttle the max simultaneous heal effects.
+ * Zero-init is safe; the check is only "did we decrement past 0". */
+int32_t DAT_80065aac = 0;
+
+/* DAT_80065a10: gp+1804 -- general split-hit counter (wtypes 2–14).
+ * Same semantics as DAT_80065aac above.  Zero-init safe. */
+int32_t DAT_80065a10 = 0;
+
+/* LAB_80031fa0 -- implemented in src/gameplay/split_child_wtype_ticks.c */
+/* LAB_8003302c -- implemented in src/gameplay/split_child_wtype_ticks.c */
+/* LAB_800336fc -- implemented in src/gameplay/split_child_wtype_ticks.c */
+
+/* LAB_80034920/LAB_8003565c -- implemented in src/gameplay/. */
+
+/* FUN_8001db54 -- implemented in src/physics/culling.c. */
+
+/* FUN_8003d188 -- implemented in src/gameplay/vehicle_init_joints.c */
+
+/* DAT_80015534: 7-entry vehicle joint-init config table (8 bytes per entry).
+ * Zero-filled stub. */
+uint16_t DAT_80015534[56] = {0};  /* 7 entries × 4 uint16 = 56 bytes */
+
+/* DAT_80064eb0: 13-entry callback jump table for Vehicle_StateToCallback.
+ * Zero-filled stub (all entries NULL). */
+uint32_t DAT_80064eb0[13] = {0};
+
+/* FUN_80044574 -- Audio_VoiceSetPan: set pan/volume for an allocated voice.
+ * Stub no-op (audio engine out of scope). */
+void FUN_80044574(int voice, uint32_t pan) { (void)voice; (void)pan; }
+
+/* DAT_8006f680 -- implemented in src/physics/camera_culling_globals.c. */
+
+/* cRam000005a8: audio output-mode flag. 0=stereo, non-zero=mono.
+ * Default 0 (stereo) is safe. */
+int8_t cRam000005a8 = 0;
+
+/* sRam000008e4: master SFX volume, int16 q12.
+ * 0x1000 = 1.0 (full volume).  Stub at 0 (muted) until audio engine runs. */
+int16_t sRam000008e4 = 0;
+
+/* FUN_8001d748 -- implemented in src/physics/terrain_probe.c. */
+
+/* FUN_8004cdc4 -- implemented in src/physics/gte_aliases.c. */
+
+/* LAB_80031AFC -- implemented in src/gameplay/bomb_attached_tick.c */
+
+/* DAT_800658FC -- bullet ricochet sound bank pointer (gp+1528).
+ * Points to the sound-bank data loaded from disc; zero until asset init. */
+uint32_t DAT_800658FC = 0;
+
+/* LAB_800321C0 -- implemented in src/gameplay/mine_dead_ticks.c */
+/* LAB_8003277C -- implemented in src/gameplay/mine_dead_ticks.c */
+
+/* FUN_80031454 -- Mine_ProximityDamage: implemented in weapon_event.c. */
+
+/* ---- Stubs for homing_missile_tick.c (LAB_8003403c) ---- */
+
+/* FUN_800170c8 -- implemented in src/physics/math_helpers.c (Math_Sqrt64) */
+/* FUN_8001d840 -- implemented in src/physics/terrain_probe.c (Object_AlignToTerrainNormal) */
+/* FUN_8003fdcc -- implemented in src/gameplay/weapon_spawn_extra.c (WeaponSpawn_TrailObject) */
+
+/* DAT_800659D0 -- trail-animation base halfword (gp+1740). Zero-init safe. */
+int16_t DAT_800659D0 = 0;
+
+/* ---- mine_dead_ticks.c (LAB_800321C0 / LAB_8003277C) stubs ----------- */
+
+/* FUN_8004779c -- Mine_NormaliseDelta: normalise a 64-bit squared-distance
+ * product to produce a per-axis steering weight for terrain evasion.
+ * (lo=uint32, hi=int, numerator, sign) → int.
+ * Stub returns 0 (no terrain-evasion steering -- safe, mine just rolls flat). */
+/* FUN_8004779c -- implemented in src/physics/divdi3.c. */
+
+/* FUN_8004ecd4 -- PSY-Q ratan2 alias; source files using the raw hex
+ * delta and a perpendicular component.  (delta_neg, delta_perp) → angle.
+ * symbol must use the same fixed-point angle path. */
+/* FUN_8004ecd4 -- implemented in src/physics/gte_aliases.c. */
+
+/* FUN_8004d154 -- PSY-Q MulMatrix2: dst = src * dst in-place. */
+/* FUN_8004d154 -- implemented in src/physics/gte_aliases.c. */
+
+/* FUN_8004d314 -- PSY-Q TransMatrix: write VECTOR translation into MATRIX. */
+/* FUN_8004d314 -- implemented in src/physics/gte_aliases.c. */
+
+/* Raw PSY-Q geometry register aliases. */
+/* FUN_8004d524/FUN_8004d544 -- implemented in src/physics/gte_aliases.c. */
+
+/* DAT_80065908 -- collision-flags word (gp+0x604 = gp+1540 = PSX 0x80065908).
+ * Bit 0x400: mine-on-armed-collision spawns trail rather than weapon hit.
+ * Zero = normal weapon hit (safe default). */
+uint32_t DAT_80065908 = 0;
+
+/* DAT_80065310 -- global frame counter low word (GP+12 = PSX 0x80065310).
+ * Read by mine_dead_ticks and other gameplay tick callbacks for frame phasing.
+ * Incremented once per tick by the game loop; zero-init safe. */
+int32_t DAT_80065310 = 0;
+uint32_t _DAT_80065310 = 0;
+
+/* ---- Batch stubs: previously-unresolved symbols discovered via link audit --- */
+
+/* FUN_80043248 -- implemented in src/physics/gte_long_vec.c. */
+
+/* MulRotMatrix0 -- PSY-Q compose rotation matrices (A × B → out).
+ * Called by collision_test.c FUN_8001e1c0 to compose relative OBB matrices.
+ * Stub: returns out unchanged (identity composition). */
+#include "psyq/psyq_stubs.h"
+/* MulRotMatrix0/FUN_800436c8 -- implemented in src/physics/gte_aliases.c. */
+#if 0
+MATRIX *MulRotMatrix0(MATRIX *m, MATRIX *out)
+{
+    int16_t *r = &m->m[0][0];
+
+    gte_ldVXY0_i((uint16_t)r[0] | ((uint32_t)(uint16_t)r[3] << 16));
+    gte_ldVZ0_i(r[6]);
+    gte_rtv0();
+    int c00 = gte_stIR1();
+    int c10 = gte_stIR2();
+    int c20 = gte_stIR3();
+
+    gte_ldVXY0_i((uint16_t)r[1] | ((uint32_t)(uint16_t)r[4] << 16));
+    gte_ldVZ0_i(r[7]);
+    gte_rtv0();
+    int c01 = gte_stIR1();
+    int c11 = gte_stIR2();
+    int c21 = gte_stIR3();
+
+    gte_ldVXY0_i((uint16_t)r[2] | ((uint32_t)(uint16_t)r[5] << 16));
+    gte_ldVZ0_i(r[8]);
+    gte_rtv0();
+
+    *(uint32_t *)((uint8_t *)out + 0x00) =
+        ((uint32_t)(uint16_t)c01 << 16) | (uint16_t)c00;
+    *(uint32_t *)((uint8_t *)out + 0x04) =
+        ((uint32_t)(uint16_t)c10 << 16) | (uint16_t)gte_stIR1();
+    *(uint32_t *)((uint8_t *)out + 0x08) =
+        ((uint32_t)(uint16_t)gte_stIR2() << 16) | (uint16_t)c11;
+    *(uint32_t *)((uint8_t *)out + 0x0c) =
+        ((uint32_t)(uint16_t)c21 << 16) | (uint16_t)c20;
+    *(int32_t *)((uint8_t *)out + 0x10) = gte_stIR3();
+    return out;
+}
+
+/* FUN_800436c8 -- GTE_LoadMatrix: load a full 4×3 MATRIX into GTE registers.
+ * Called before GTE_RotateLong to set the active rotation.
+ * Stub: no-op (GTE operations are stubs on host anyway). */
+extern uint64_t GTE_LoadMatrixPackedAbs(const uint32_t *m);
+void FUN_800436c8(MATRIX *m)
+{
+    GTE_LoadMatrixPackedAbs((const uint32_t *)m);
+}
+#endif
+
+/* FUN_800422d8 -- Terrain_Deform (zone deformation tick helper).
+ * Referenced by terrain_damage.c and terrain_damage_tick.c.
+ * Stub: no-op (terrain deformation requires a loaded level geometry). */
+/* FUN_800422d8 -- implemented in src/gameplay/proximity_dispatch.c. */
+
+/* DAT_80091120 -- terrain-damage zone table base (PSX address 0x80091120).
+ * Lies in overlay memory; zero here means no terrain-damage zones active. */
+uint32_t DAT_80091120 = 0;
+
+/* FUN_8003f4a0 -- implemented in src/gameplay/bone_link_teardown.c. */
+
+/* DAT_8006571c -- format string for vehicle death debug message (sprintf call).
+ * Needs to be a valid printf format; "dead:%d" is safe. */
+const char DAT_8006571c[] = "dead:%d";
+
+/* Object_FreeAndUnregister -- implemented in src/gameplay/object_lifecycle_extra.c. */
+
+/* FUN_80030c08 -- Object_GeneralTick: implemented in src/physics/object_general_tick.c.
+ * Stub here as a fallback so the symbol resolves even before the obj is pulled in. */
+/* FUN_80030c08 -- implemented in src/physics/object_general_tick.c. */
+
+/* gte_set_rot_matrix/gte_set_translation -- implemented in src/physics/gte_aliases.c. */
+
+/* DAT_8006f6a0 -- implemented in src/physics/camera_culling_globals.c. */
+
+/* FUN_80040a80 -- Object_RegisterChild: register a newly-spawned child object
+ * into the scene after an in-world event (wheel wheel tear-down).
+ * (ctx, kind, param_3, param_4, param_5) → object pointer.
+ * Stub: returns NULL. */
+/* FUN_80040a80 -- implemented in src/gameplay/object_register_child.c. */
+
+/* FUN_8003cb64 -- implemented in src/gameplay/weapon_projectile_split.c.
+ * Already provides LAB_8003cb64.  Stub here as fallback. */
+/* FUN_8003cb64 -- implemented in src/gameplay/weapon_projectile_split.c. */
+
+/* iRam000005f8 -- audio bank handle (PSX RAM 0x5f8 = GP+0x2f4).
+ * Distinct from DAT_800658FC (sound bank); used as a module/bank reference.
+ * Zero-init (no audio on host). */
+void *iRam000005f8 = NULL;
+
+/* gpFn_1840 -- function-pointer callback at GP+1840 (PSX GP=0x80065304,
+ * +1840 = 0x80065AF4).  Vehicle_Tick dispatches mode-11 events through it.
+ * NULL stub: no-op on host (no vehicle-event listeners wired). */
+typedef void (*GpCb1840Fn)(void *obj, int mode, void *param);
+GpCb1840Fn gpFn_1840 = NULL;
+
+/* FUN_8003f4a0 stub conflicts? No -- vehicle_kill.c says extern void FUN_8003f4a0.
+ * weapon_script.c says extern void FUN_8003f4a0(int *, uint16_t, int). Same. */
+
+/* sRam000006f0 / sRam000007dc -- screen-space projection bounds (int16).
+ * Read by ai_target.c for on-screen target filtering.
+ * Zero = no culling (safe: all targets considered). */
+int16_t sRam000006f0 = 0;
+int16_t sRam000007dc = 0;

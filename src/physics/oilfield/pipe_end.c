@@ -16,13 +16,21 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t *Object_Pool_Alloc(uint32_t size);
 extern int32_t Terrain_HeightAt(uint32_t x, uint32_t z);
+extern void FUN_800202f4(uint32_t *obj);                  /* Object_RegisterInScene */
+extern void FUN_80020890(uint32_t *obj, int timer);        /* Object_SchedulePostEvent */
+extern int FUN_8002239c(uint32_t *self, int32_t *impulse); /* Damage_FromImpulse */
+extern uint32_t FUN_80022320(uint32_t *self, uint32_t amount);
+extern int FUN_8004410c(void);
+extern void FUN_8004483c(int voice, uint32_t bank, int sfx, const void *pos);
 extern void *FUN_80100668;
+extern uint32_t _DAT_800658fc;
 extern uint8_t DAT_801000a8[];
 extern uint8_t DAT_80101148[];
 
-void OF_PipeEndSpawn(uint32_t *parent)
+static uint32_t *OF_PipeEndSpawnChild(uint32_t *parent)
 {
     uint32_t *c = Object_Pool_Alloc(0x9c);
     c[4] = parent[4];
@@ -36,13 +44,48 @@ void OF_PipeEndSpawn(uint32_t *parent)
     /* Snap to terrain. */
     c[10] = (uint32_t)Terrain_HeightAt(c[9], c[11]);
 
-    c[0x19] = (uintptr_t)&FUN_80100668;
+    Object_SetCallbackPsxSlot(c, (uintptr_t)&FUN_80100668);
     c[0x15] = 0x40000;
     *((int8_t *)c + 4) = 7;
     *((uint16_t *)c + 6) = 10;
     c[0x17] = (uintptr_t)DAT_801000a8;
     c[0x26] = (uintptr_t)DAT_80101148;
     *((uint16_t *)c + 0x41) = 4;     /* +0x82 i16 */
+    c[0x21] = 0x200;
+    c[0] |= 0x184u;
+    c[0x22] = 0xfffffa00u;
+    c[0x23] = 0;
+
+    FUN_800202f4(c);
+    FUN_80020890(c, 0x3c);
+    FUN_80020890(parent, 0x384);
+    FUN_8004483c(FUN_8004410c(), _DAT_800658fc, 0x3b, c + 9);
+    return c;
+}
+
+uint32_t FUN_80100870(uint32_t *parent, uint32_t mode, int32_t *impulse)
+{
+    if (mode != 3) {
+        if (mode == 8)
+            goto damage_amount;
+        OF_PipeEndSpawnChild(parent);
+    }
+
+    FUN_8002239c(parent, impulse);
+
+damage_amount:
+    if (FUN_80022320(parent, (uint32_t)(uintptr_t)impulse) != 0
+        && (parent[0] & 1u) == 0)
+    {
+        FUN_80020890(parent, 0xf0);
+        parent[0x1d] = 0;
+    }
+    return 0;
+}
+
+void OF_PipeEndSpawn(uint32_t *parent)
+{
+    (void)OF_PipeEndSpawnChild(parent);
 }
 
 /* ============================================================

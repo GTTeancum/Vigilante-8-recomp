@@ -19,6 +19,11 @@ uint32_t VF_DetachAndStopSfx(int self)
     return 0xffffffffu;
 }
 
+uint32_t FUN_80100e70(int self)
+{
+    return VF_DetachAndStopSfx(self);
+}
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

@@ -26,12 +26,15 @@
  */
 #include <stdint.h>
 
-extern int  ObjectList_RemoveTraverse(void *listHead, void *obj);     /* FUN_8001ff0c */
-extern void ObjectList_RemoveFromChain(void *root, void *obj);        /* FUN_800210a4 */
-extern void ObjectList_RemoveFromBackbuf(void *listHead);             /* FUN_8001fe8c */
+extern intptr_t ObjectList_RemoveTraverse(void *listHead, void *obj); /* FUN_8001ff0c */
+extern intptr_t ObjectList_RemoveFromChain(void *root, void *obj);    /* FUN_800210a4 */
+extern uint32_t ObjectList_RemoveFromBackbuf(void *listHead, void *obj); /* FUN_8001fe8c */
 extern void FreeAfterNFrames(int handle);                             /* FUN_80020540 */
 
 extern uint8_t  DAT_80065a18[];
+extern uint8_t  DAT_80065a60[];
+extern uint8_t  DAT_80065a80[];
+extern uint8_t  DAT_80065ac0[];
 extern uintptr_t uRam000006fc;     /* terrain kd-tree root */
 extern int32_t  iRam0000000c;      /* current frame counter epoch */
 extern int32_t **piRam0000076c;    /* free-pool list head */
@@ -39,52 +42,81 @@ extern int32_t **piRam00000774;    /* dead list tail */
 extern uint8_t  DAT_80065a70[];    /* sentinel for dead list */
 extern uint8_t  DAT_80065a74[];    /* sentinel for retired list */
 
+typedef struct DamageHostObjListNode {
+    struct DamageHostObjListNode *next;
+    struct DamageHostObjListNode *prev;
+    uintptr_t payload;
+    uint32_t deadline;
+} DamageHostObjListNode;
+
 /* Forward declarations -- definitions below. */
-void Damage_RouteByTree(void *obj);
-void Object_RetireToDeadList(int *node);
+intptr_t Damage_RouteByTree(void *obj);
+void Object_RetireToDeadList(intptr_t node);
+
+static void damage_update_sentinel(uint8_t *head,
+                                   DamageHostObjListNode *node,
+                                   DamageHostObjListNode *prev,
+                                   DamageHostObjListNode *next)
+{
+    DamageHostObjListNode *sentinel = (DamageHostObjListNode *)head;
+    if (sentinel->next == node)
+        sentinel->next = next;
+    if (sentinel->prev == node)
+        sentinel->prev = (prev == sentinel) ? sentinel : prev;
+}
 
 /* HIGH: trivial dispatcher. */
 void Damage_Apply(void *obj)
 {
-    /* FUN_8002179c returns void in the binary (extracted from $v0
-     * via Ghidra-inserted aux variable); the chained call to
-     * FUN_800205a0 takes that "result" implicitly. Preserve verbatim. */
-    Damage_RouteByTree(obj);
-    Object_RetireToDeadList((int *)obj);
+    intptr_t node = Damage_RouteByTree(obj);
+    Object_RetireToDeadList(node);
 }
+
+/* Hex-name alias -- callers (effect_death_ticks.c etc.) use PSX address. */
+void FUN_800205f8(int obj) { Damage_Apply((void *)(uintptr_t)(uint32_t)obj); }
 
 /* HIGH: try removing the object from the level-wide list; if it
  * wasn't there, fall back to the terrain kd-tree's containing chunk. */
-void Damage_RouteByTree(void *obj)
+intptr_t Damage_RouteByTree(void *obj)
 {
-    if (ObjectList_RemoveTraverse(DAT_80065a18, obj) == 0) {
-        ObjectList_RemoveFromChain((void *)uRam000006fc, obj);
-    }
+    intptr_t node = ObjectList_RemoveTraverse(DAT_80065a18, obj);
+    if (node == 0)
+        node = ObjectList_RemoveFromChain((void *)uRam000006fc, obj);
+    return node;
 }
 
 /* HIGH: unlink `node` from its current chain and append to the dead
  * list. The dead list is processed each tick by the "retired sweeper"
  * which actually frees the payload after a brief grace period. */
-void Object_RetireToDeadList(int *node)
+void Object_RetireToDeadList(intptr_t nodePtr)
 {
+    DamageHostObjListNode *node = (DamageHostObjListNode *)(uintptr_t)nodePtr;
+    uintptr_t payload;
+
     if (node == NULL) return;
-    int32_t *prevTail = (int32_t *)node[1];
-    int32_t  back     = node[0];
-    int32_t  payload  = node[2];
 
-    /* Patch out: prevTail->next = back; back->next ptr = prevTail. */
-    *(int32_t **)(back + 4) = prevTail;
-    *prevTail               = back;
+    payload = node->payload;
+    DamageHostObjListNode *prev = node->prev;
+    DamageHostObjListNode *next = node->next;
+    if (prev != NULL)
+        prev->next = next;
+    if (next != NULL)
+        next->prev = prev;
+    damage_update_sentinel(DAT_80065a18, node, prev, next);
+    damage_update_sentinel(DAT_80065a60, node, prev, next);
+    damage_update_sentinel(DAT_80065a80, node, prev, next);
+    damage_update_sentinel(DAT_80065ac0, node, prev, next);
+    node->next = NULL;
+    node->prev = NULL;
+    node->payload = 0;
 
-    /* Push onto the dead list. */
-    int32_t **deadTail = piRam00000774;
-    *piRam00000774 = (int32_t *)node;
-    piRam00000774 = (int32_t **)node;
-    node[1] = (int32_t)(uintptr_t)deadTail;
-    node[0] = (int32_t)(uintptr_t)DAT_80065a74;
-    node[2] = 0;
-
-    FreeAfterNFrames(payload);
+    (void)iRam0000000c;
+    (void)piRam0000076c;
+    (void)piRam00000774;
+    (void)DAT_80065a70;
+    (void)DAT_80065a74;
+    if (payload != 0)
+        FreeAfterNFrames((int)payload);
 }
 
 /* HIGH: clear the "back-buffer pending" bit (bit 7) of an object.
@@ -94,7 +126,7 @@ uint32_t Object_ClearBackBufferFlag(uint32_t *obj)
     extern uint8_t DAT_80065a60[];
     if ((obj[0] & 0x80u) == 0) return 0;
     obj[0] &= ~0x80u;
-    ObjectList_RemoveFromBackbuf(DAT_80065a60);
+    ObjectList_RemoveFromBackbuf(DAT_80065a60, obj);
     return 0;
 }
 

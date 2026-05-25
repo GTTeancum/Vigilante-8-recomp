@@ -27,6 +27,11 @@ handle:
     return 0;
 }
 
+uint32_t FUN_80100c18(int obj, int mode)
+{
+    return AG_ControlTowerImpact(obj, mode);
+}
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

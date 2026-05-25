@@ -22,6 +22,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t Object_LocalToWorldPos(int sub);                  /* FUN_8001d624 */
 extern void Util_TransposeMatRotate(uint32_t mat, int p, int *out); /* FUN_800435c0 */
 extern int  ratan2(int dz, int dx);
@@ -41,6 +42,7 @@ extern int  Damage_AccumulateOrFire(uint32_t *self, uint16_t a);    /* FUN_80020
 extern void Damage_Apply_AgainstSelf(void *self, void *param);
 extern int  *_DAT_80065a18;
 extern uint32_t FUN_8010076c;
+extern int LAB_8003e80c(int obj, int event, int param3);
 
 uint32_t SB_TurretTrack(int self, uint32_t mode, int *imp)
 {
@@ -83,12 +85,12 @@ uint32_t SB_TurretTrack(int self, uint32_t mode, int *imp)
         uint32_t *fp = (uint32_t *)(uintptr_t)fx;
         *fp = 0x84u;
         *(int16_t *)(fp + 3) = 0x32;
-        fp[0x19] = (uint32_t)(uintptr_t)&FUN_8010076c;
+        Object_SetCallbackPsxSlot(fp, (uintptr_t)&FUN_8010076c);
         *(int16_t *)((char *)fp + 0x96) = 4;
         *(int16_t *)(fp + 0x25) = 8;
         Object_BindLifecycle(fp);
         *(uint32_t *)(uintptr_t)parent_fx = 0x10u;
-        *(uint32_t *)(uintptr_t)(parent_fx + 0x19 * 4) = 0x8003e80cu;
+        *(uintptr_t *)(uintptr_t)(parent_fx + 0x19 * 4) = (uintptr_t)&LAB_8003e80c;
         Object_BindFinalize();
         uint32_t h = Pool_AllocSFX();
         Pool_BindFXOnObject(h, *(uint32_t *)(*(int *)(self + 0x58) + 8), 0, fp + 9);

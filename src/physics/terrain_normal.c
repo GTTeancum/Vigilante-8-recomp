@@ -20,6 +20,17 @@
 
 extern uintptr_t DAT_800911a0[];
 
+static uint16_t Terrain_NormalSample(uint32_t cx, uint32_t cz)
+{
+    uint32_t idx = (cx >> 6) * 32u + (cz >> 6);
+    if (idx >= 32u * 32u)
+        return 0;
+    uintptr_t chunkBase = DAT_800911a0[idx];
+    if (chunkBase == 0)
+        return 0;
+    return *(uint16_t *)(chunkBase + (cx & 0x3f) * 0x80 + (cz & 0x3f) * 2);
+}
+
 SVECTOR *Terrain_NormalAt(uint32_t x, uint32_t z, SVECTOR *out)
 {
     uint32_t cx0 = x >> 16;
@@ -27,31 +38,25 @@ SVECTOR *Terrain_NormalAt(uint32_t x, uint32_t z, SVECTOR *out)
     uint32_t fx = x & 0xffff;
     uint32_t fz = z & 0xffff;
 
-    uintptr_t chunkBase = DAT_800911a0[(cx0 >> 6) * 32 + (cz0 >> 6)];
-    uint16_t h00 = *(uint16_t *)(chunkBase + (cx0 & 0x3f) * 0x80 + (cz0 & 0x3f) * 2);
+    uint16_t h00 = Terrain_NormalSample(cx0, cz0);
     uint16_t h10, h01, h11;
 
     if (fx + fz < 0x10000) {
         /* lower-left triangle: (h00, h10, h01) */
-        h10 = *(uint16_t *)(DAT_800911a0[(((cx0 + 1) >> 6) * 32) + (cz0 >> 6)]
-                            + ((cx0 + 1) & 0x3f) * 0x80 + (cz0 & 0x3f) * 2);
-        h01 = *(uint16_t *)(DAT_800911a0[((cx0 >> 6) * 32) + ((cz0 + 1) >> 6)]
-                            + (cx0 & 0x3f) * 0x80 + ((cz0 + 1) & 0x3f) * 2);
-        out->vx = (int16_t)((int)(h00 & 0x7ff) - (int)(h10 & 0x7ff));   /* dy/dx */
-        out->vy = (int16_t)0x1000;
-        out->vz = (int16_t)((int)(h00 & 0x7ff) - (int)(h01 & 0x7ff));   /* dy/dz */
+        h10 = Terrain_NormalSample(cx0 + 1, cz0);
+        h01 = Terrain_NormalSample(cx0, cz0 + 1);
+        out->vx = (int16_t)((int)(h10 & 0x7ff) - (int)(h00 & 0x7ff));
+        out->vy = (int16_t)-0x20;
+        out->vz = (int16_t)((int)(h01 & 0x7ff) - (int)(h00 & 0x7ff));
         out->pad = 0;
     } else {
         /* upper-right triangle */
-        h11 = *(uint16_t *)(DAT_800911a0[(((cx0 + 1) >> 6) * 32) + ((cz0 + 1) >> 6)]
-                            + ((cx0 + 1) & 0x3f) * 0x80 + ((cz0 + 1) & 0x3f) * 2);
-        h10 = *(uint16_t *)(DAT_800911a0[(((cx0 + 1) >> 6) * 32) + (cz0 >> 6)]
-                            + ((cx0 + 1) & 0x3f) * 0x80 + (cz0 & 0x3f) * 2);
-        h01 = *(uint16_t *)(DAT_800911a0[((cx0 >> 6) * 32) + ((cz0 + 1) >> 6)]
-                            + (cx0 & 0x3f) * 0x80 + ((cz0 + 1) & 0x3f) * 2);
-        out->vx = (int16_t)((int)(h01 & 0x7ff) - (int)(h11 & 0x7ff));
-        out->vy = (int16_t)0x1000;
-        out->vz = (int16_t)((int)(h10 & 0x7ff) - (int)(h11 & 0x7ff));
+        h11 = Terrain_NormalSample(cx0 + 1, cz0 + 1);
+        h10 = Terrain_NormalSample(cx0 + 1, cz0);
+        h01 = Terrain_NormalSample(cx0, cz0 + 1);
+        out->vx = (int16_t)((int)(h11 & 0x7ff) - (int)(h01 & 0x7ff));
+        out->vy = (int16_t)-0x20;
+        out->vz = (int16_t)((int)(h11 & 0x7ff) - (int)(h10 & 0x7ff));
         out->pad = 0;
     }
     return out;

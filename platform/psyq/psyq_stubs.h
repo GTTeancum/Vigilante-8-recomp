@@ -67,6 +67,7 @@ void  DrawOTag      (const u_long *ot);
 void  DrawSync      (int mode);
 void  ClearImage    (const RECT *r, uint8_t r8, uint8_t g8, uint8_t b8);
 void  MargePrim     (void *a, void *b);
+void  AddPrim       (void *ot, void *prim);   /* add primitive to ordering table */
 
 /* ---- libgte (math; Phase 1 has stubs; Phase 4 needs real bodies) ---- */
 void  InitGeom      (void);
@@ -75,17 +76,23 @@ void  SetGeomScreen (int h);
 void    RotMatrix    (const SVECTOR *r, MATRIX *m);
 MATRIX *TransMatrix  (MATRIX *m, const VECTOR *t);
 long  ScaleMatrix   (MATRIX *m, const VECTOR *v);
-long  CompMatrix    (const MATRIX *m0, const MATRIX *m1, MATRIX *m2);
-long  CompMatrixLV  (const MATRIX *m0, const MATRIX *m1, MATRIX *m2);
+MATRIX *CompMatrix  (const MATRIX *m0, const MATRIX *m1, MATRIX *m2);
+MATRIX *CompMatrixLV(const MATRIX *m0, const MATRIX *m1, MATRIX *m2);
 void  MulMatrix     (const MATRIX *m0, MATRIX *m1);
-void  MulMatrix0    (const MATRIX *m0, const MATRIX *m1, MATRIX *m2);
+MATRIX *MulMatrix0  (const MATRIX *m0, const MATRIX *m1, MATRIX *m2);
 void  ReadRotMatrix (MATRIX *m);
 void  SetRotMatrix  (const MATRIX *m);
 void  SetTransMatrix(const MATRIX *m);
-void  ApplyMatrix   (const MATRIX *m, const SVECTOR *v0, VECTOR *v1);
-void  ApplyMatrixLV (const MATRIX *m, const VECTOR *v0, VECTOR *v1);
+VECTOR  *ApplyMatrix   (const MATRIX *m, const SVECTOR *v0, VECTOR *v1);
+SVECTOR *ApplyMatrixSV (const MATRIX *m, const SVECTOR *v0, SVECTOR *v1);
+VECTOR  *ApplyMatrixLV (const MATRIX *m, const VECTOR *v0, VECTOR *v1);
 void  MatrixNormal  (const MATRIX *m, MATRIX *m_out);
-void  VectorNormalSS(const VECTOR *v0, VECTOR *v1);
+long  VectorNormalSS(const SVECTOR *v0, SVECTOR *v1);
+/* Additional PSY-Q matrix ops referenced by matrix_euler.c / math_helpers.c */
+MATRIX *RotMatrixX  (int rx, MATRIX *m);
+MATRIX *RotMatrixY  (int ry, MATRIX *m);
+long    VectorNormal(VECTOR *v0, VECTOR *v1);
+MATRIX *TransposeMatrix(const MATRIX *src, MATRIX *dst);
 
 /* PSY-Q rsin/rcos: take angle in [0,4096), return q12. Real Phase 4. */
 int   rsin(int a);

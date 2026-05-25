@@ -21,9 +21,9 @@
 extern void *Heap_AllocOrRetry(uint32_t n);
 extern void  Heap_Free(void *p);
 
-#define ROOT_PREFIX "input/"
+#define ROOT_PREFIX ""
 
-/* Translate "Track\\Foo.TER" -> "input/TRACK/FOO.TER" (upper-cased)
+/* Translate "Track\\Foo.TER" -> "TRACK/FOO.TER" (upper-cased)
  * since the extracted files are upper-case on disk. */
 static void translate_path(const char *in, char *out, size_t outsz)
 {

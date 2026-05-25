@@ -2,7 +2,7 @@
  *
  * Source: CASNOCTY.DLL  FUN_801004e8.
  *
- * On mode 2 (re-trigger from a state machine), spawns a child object
+ * Spawns a child object from the source callback's mode-2 and impact paths
  * (size 0x9c) copying the parent's rotation matrix and pos, snapping
  * to the terrain. The child:
  *   - LOD radius 0x40000 (large draw distance)
@@ -21,18 +21,23 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t *Object_Pool_Alloc(uint32_t size);
 extern int32_t Terrain_HeightAt(uint32_t x, uint32_t z);
-extern void Object_RegisterInScene(uint32_t *obj);
-extern void Object_SetSubState(int obj, int sub);
-extern void Object_CleanupSpawn(uint32_t *parent);   /* FUN_8001ac08 */
+extern void FUN_800202f4(uint32_t *obj);            /* Object_RegisterInScene */
+extern void FUN_80020890(uint32_t *obj, int timer);  /* Object_SchedulePostEvent */
+extern void FUN_8001ac08(uint32_t *parent);          /* Object_InitSndSlot */
+extern void FUN_800207c4(uint32_t *obj);             /* Object_BindFinalize */
+extern void FUN_8001d708(uint32_t *obj);             /* Object_RefitAABB */
+extern void FUN_800207f8(uint32_t *obj);             /* Object_UnbindFromWorldBind */
+extern int FUN_8004410c(void);
+extern void FUN_8004483c(int voice, uint32_t bank, int sfx, const void *pos);
 extern uint32_t FUN_801002bc;
+extern uint32_t _DAT_800658fc;
 extern uint8_t  DAT_80100094[];
 
-uint32_t CC_ManholeSpawn(uint32_t *parent, uint32_t mode, int *impulse)
+static void CC_ManholeSpawnChild(uint32_t *parent, uint32_t mode)
 {
-    if (mode != 2) return 0;
-
     uint32_t *p = Object_Pool_Alloc(0x9c);
     p[4] = parent[4];
     p[5] = parent[5];
@@ -44,7 +49,7 @@ uint32_t CC_ManholeSpawn(uint32_t *parent, uint32_t mode, int *impulse)
     p[11] = parent[11];
     p[10] = (uint32_t)Terrain_HeightAt(p[9], p[11]);
 
-    p[0x19] = (uintptr_t)&FUN_801002bc;
+    Object_SetCallbackPsxSlot(p, (uintptr_t)&FUN_801002bc);
     p[0x15] = 0x40000;
     *((int8_t *)p + 4) = 7;
     p[0x17] = (uintptr_t)DAT_80100094;
@@ -55,11 +60,44 @@ uint32_t CC_ManholeSpawn(uint32_t *parent, uint32_t mode, int *impulse)
     p[0x22] = 0xfffff800u;   /* vx = -0x800 */
     p[0x23] = 0;
 
-    Object_RegisterInScene(p);
-    Object_SetSubState((int)(uintptr_t)p, 0x3c);
-    Object_CleanupSpawn(parent);
+    FUN_800202f4(p);
+    FUN_80020890(p, 0x3c);
+    FUN_8001ac08(parent);
+    FUN_800207c4(parent);
+    FUN_8004483c(FUN_8004410c(), _DAT_800658fc, 0x3b, parent + 0x12);
+}
+
+uint32_t CC_ManholeSpawn(uint32_t *parent, uint32_t mode, int *impulse)
+{
+    if (mode == 2) {
+        CC_ManholeSpawnChild(parent, mode);
+    } else {
+        if (mode < 3 && mode == 1)
+            goto reset_to_state3;
+
+        if (mode == 3 || mode != 5) {
+            if (*(int8_t *)(uintptr_t)(*(uint32_t *)impulse + 4) != 2)
+                return 0;
+            parent[0] |= 0x20u;
+            FUN_80020890(parent, 0xf);
+            CC_ManholeSpawnChild(parent, mode);
+        }
+    }
+
+    FUN_8001d708(parent);
+    parent[0] &= 0xffffffdfu;
+    FUN_800207f8(parent);
+
+reset_to_state3:
+    parent[0] = 0x100;
+    *(int8_t *)((uint8_t *)parent + 4) = 3;
     (void)impulse;
     return 0;
+}
+
+uint32_t FUN_801004e8(uint32_t *parent, uint32_t mode, int *impulse)
+{
+    return CC_ManholeSpawn(parent, mode, impulse);
 }
 
 /* ============================================================

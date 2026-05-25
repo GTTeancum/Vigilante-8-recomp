@@ -28,7 +28,7 @@ extern void  Stream_OpenByName(const char *path);
 extern void  Stream_Close(void);
 extern void *Iff_ReadChunkData(uint32_t *hdrOut, uint32_t *parentRemaining);
 extern void  Heap_Free(void *p);
-extern void *XOBF_Parse(void *body, int flags);     /* FUN_8002263c -- pass 2 promotes */
+extern void *XOBF_Parse(uint32_t remaining, int flags);     /* FUN_8002263c */
 
 /* 14 entries -- matches the V8 character roster: 10 default vehicles +
  * Y the Alien + 3 secret characters/bosses. Confirmed by VehicleExp_Free
@@ -55,7 +55,7 @@ void VehicleExp_Load(void)
         if (body != NULL && fcc_be != FOURCC_BE_XOBF) {
             Heap_Free(body);
         } else if (fcc_be == FOURCC_BE_XOBF) {
-            *out++ = XOBF_Parse(body, 0);
+            *out++ = XOBF_Parse(hdr[1], 0);
         }
     }
 

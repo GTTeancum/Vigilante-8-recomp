@@ -2,29 +2,142 @@
  *
  * Source: VALLYFRM.DLL  FUN_801005e8.
  *
- * The Windmill_1 object spins around an axis: each tick it adds 0x88
- * to its angular velocity field at +0x44 (cast as i16) and -- when
- * not impulsed (state bit 0 clear) -- also accumulates that into
- * angles at +0x48 (yaw) and +0x4c (pitch). The two destination
- * angles share the same velocity register (obj[0x22/0x23] = vx/vy at
- * +0x88/+0x8c), so the windmill blades rotate around a tilted axis.
+ * Windmill_1 spinning/falling callback. Non-mode-2/non-mode-3 events
+ * spin and steer the windmill. Mode 2 retires after hitting terrain.
+ * Mode 3 handles collision impact, impulse transfer, SFX, and delayed
+ * state transition.
  *
  * MED confidence.
  */
 #include <stdint.h>
 
+extern int FUN_800170c8(uint32_t lo, int hi);
+extern void Object_RefitAABB(uint32_t *obj);              /* FUN_8001d708 */
+extern int Terrain_HeightAt(uint32_t x, uint32_t z);
+extern uint32_t *FUN_8003fd24(uint32_t *parent, uint16_t kind);
+extern void FUN_8004483c(uint32_t voice, uint32_t bank, int kind, uint32_t *xyz);
+extern void FUN_800205f8(uint32_t *obj);
+extern void Audio_VoiceStop(int ch);
+extern void FUN_800176f8(int obj, int32_t *vec, int32_t *pos);
+extern uint32_t SfxChannel_Acquire(void);
+extern uint32_t *FUN_8003fea8(uint32_t *xyz, uint32_t color);
+extern void FUN_80020890(uint32_t *obj, int timer);
+extern uint32_t _DAT_800658fc;
+
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
+static int32_t rtz_shift_i32(int32_t v, unsigned sh, int32_t bias)
+{
+    if (v < 0) v = mips_addu_i32(v, bias);
+    return v >> sh;
+}
+
+uint32_t FUN_801005e8(uint32_t *obj, uint32_t mode, uint32_t *arg)
+{
+    if (mode == 2) {
+        uint32_t *pos = obj + 9;
+        FUN_8003fd24(pos, 0x11);
+        FUN_8004483c((uint32_t)(int)*(int8_t *)((uint8_t *)obj + 5),
+                     _DAT_800658fc, 0xc, pos);
+        FUN_800205f8(obj);
+        return 0;
+    }
+
+    if (mode == 3)
+        goto impact;
+
+    *(int16_t *)(obj + 0x11) =
+        (int16_t)mips_addu_i32(*(int16_t *)(obj + 0x11), 0x88);
+
+    if ((obj[0] & 1u) == 0) {
+        obj[0x12] = (uint32_t)mips_addu_i32((int32_t)obj[0x12], (int32_t)obj[0x22]);
+        obj[0x13] = (uint32_t)mips_addu_i32((int32_t)obj[0x13], (int32_t)obj[0x23]);
+        obj[0x14] = (uint32_t)mips_addu_i32((int32_t)obj[0x14], (int32_t)obj[0x24]);
+        obj[0x23] = (uint32_t)mips_addu_i32((int32_t)obj[0x23], 0x38);
+
+        uint32_t target = obj[0x21];
+        if (target != 0) {
+            int32_t delta[3];
+            delta[0] = mips_subu_i32(*(int32_t *)(uintptr_t)(target + 0x48),
+                                     (int32_t)obj[0x12]);
+            delta[1] = mips_subu_i32(*(int32_t *)(uintptr_t)(target + 0x4c),
+                                     (int32_t)obj[0x13]);
+            delta[2] = mips_subu_i32(*(int32_t *)(uintptr_t)(target + 0x50),
+                                     (int32_t)obj[0x14]);
+            int64_t xz = (int64_t)delta[0] * delta[0] + (int64_t)delta[2] * delta[2];
+            (void)FUN_800170c8((uint32_t)xz, (int)(uint64_t)((uint64_t)xz >> 32));
+            int64_t yterm = (int64_t)(int32_t)obj[0x23] * (int32_t)obj[0x23] +
+                            (int64_t)delta[1] * 0x70;
+            int32_t denom = FUN_800170c8((uint32_t)yterm,
+                                         (int)(uint64_t)((uint64_t)yterm >> 32));
+            denom = mips_subu_i32(denom, (int32_t)obj[0x23]);
+            if (denom != 0) {
+                int32_t vx = mips_subu_i32((mips_mult_lo_i32(delta[0], 0x38) / denom),
+                                           (int32_t)obj[0x22]);
+                obj[0x22] = (uint32_t)mips_addu_i32((int32_t)obj[0x22],
+                                                    rtz_shift_i32(vx, 4, 0xf));
+                int32_t vz = mips_subu_i32((mips_mult_lo_i32(delta[2], 0x38) / denom),
+                                           (int32_t)obj[0x24]);
+                obj[0x24] = (uint32_t)mips_addu_i32((int32_t)obj[0x24],
+                                                    rtz_shift_i32(vz, 4, 0xf));
+            }
+        }
+    }
+
+    Object_RefitAABB(obj);
+    if ((int32_t)obj[10] < Terrain_HeightAt(obj[9], obj[11]))
+        return 0;
+
+    {
+        uint32_t *pos = obj + 9;
+        FUN_8003fd24(pos, 0x11);
+        FUN_8004483c((uint32_t)(int)*(int8_t *)((uint8_t *)obj + 5),
+                     _DAT_800658fc, 0xc, pos);
+        FUN_800205f8(obj);
+        return 0;
+    }
+
+impact:
+    if (*(uint8_t *)(uintptr_t)(*arg + 4) == 1)
+        return 0;
+
+    Audio_VoiceStop((int)*(int8_t *)((uint8_t *)obj + 5));
+    uint32_t impactObj = *arg;
+    if (*(uint8_t *)(uintptr_t)(impactObj + 4) == 2) {
+        uint32_t mass = *(uint16_t *)(uintptr_t)(impactObj + 0xa2);
+        if (mass != 0) {
+            uint32_t scale = ((uint32_t)*(uint16_t *)(obj + 3) << 11) / mass;
+            int32_t impulse[3];
+            impulse[0] = mips_mult_lo_i32((int32_t)obj[0x22], (int32_t)scale);
+            impulse[1] = mips_mult_lo_i32((int32_t)obj[0x23], (int32_t)scale);
+            impulse[2] = mips_mult_lo_i32((int32_t)obj[0x24], (int32_t)scale);
+            FUN_800176f8((int)(uintptr_t)impactObj, impulse, (int32_t *)(obj + 9));
+        }
+    }
+    uint32_t voice = SfxChannel_Acquire();
+    FUN_8004483c(voice, *(uint32_t *)(uintptr_t)(obj[0x16] + 8), 0, obj + 9);
+    FUN_8003fea8(obj + 9, 0x08000040u);
+    obj[0] |= 0x20u;
+    FUN_80020890(obj, 0x1e);
+    return 0;
+}
+
 uint32_t VF_WindmillTick(uint32_t *obj, int mode)
 {
-    if (mode == 2) return 0;
-    if (mode != 0 && mode != 2 && mode != 3) return 0;
-
-    *(int16_t *)(obj + 0x11) = (int16_t)((int16_t)obj[0x11] + 0x88);
-
-    if ((obj[0] & 1) == 0) {
-        obj[0x12] += obj[0x22];
-        obj[0x13] += obj[0x23];
-    }
-    return 0;
+    return FUN_801005e8(obj, (uint32_t)mode, 0);
 }
 
 /* ============================================================

@@ -17,9 +17,10 @@ extern uint32_t Iff_ReadChunkHeader(uint32_t *hdrOut, uint32_t *parentRemaining)
 extern void    *Heap_AllocOrRetry(uint32_t n);
 extern void     Stream_Read(void *dst, uint32_t nBytes);
 
-void *Iff_ReadChunkData(uint32_t *parentRemaining)
+void *Iff_ReadChunkData(uint32_t *hdrOut, uint32_t *parentRemaining)
 {
-    uint32_t hdr[2];
+    uint32_t localHdr[2];
+    uint32_t *hdr = hdrOut != NULL ? hdrOut : localHdr;
     uint32_t sz = Iff_ReadChunkHeader(hdr, parentRemaining);
     if (sz == 0xffffffffu) return NULL;     /* it was a FORM; no payload */
 
@@ -28,6 +29,10 @@ void *Iff_ReadChunkData(uint32_t *parentRemaining)
     Stream_Read(buf, sz);
     return buf;
 }
+
+/* Hex-name alias for callers. */
+uint32_t FUN_800225d4(uint32_t *hdrOut, uint32_t *parentRemaining)
+    { return (uint32_t)(uintptr_t)Iff_ReadChunkData(hdrOut, parentRemaining); }
 
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)

@@ -23,6 +23,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern int  Terrain_HeightAt(int32_t x, int32_t z);
 extern uint8_t Pool_AllocSFX(void);
 extern void Pool_BindFXOnObject(uint8_t h, uint32_t bin, int slot, int aux);
@@ -47,6 +48,36 @@ extern uint32_t Object_AllocCloud(int rad);                              /* FUN_
 extern uint32_t _DAT_800658fc, _DAT_80065310, _DAT_800737d8;
 extern uint32_t FUN_8010100c, FUN_80100ca0;
 
+static int32_t mips_addu_i32(int32_t a, int32_t b) {
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b) {
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh) {
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b) {
+    return (int32_t)((uint64_t)(uint32_t)a * (uint64_t)(uint32_t)b);
+}
+
+static int32_t rtz_shift_i32(int32_t v, unsigned sh, int32_t bias) {
+    if (v < 0) v = mips_addu_i32(v, bias);
+    return v >> sh;
+}
+
+static int32_t mips_abs_i32(int32_t v) {
+    return v < 0 ? mips_subu_i32(0, v) : v;
+}
+
+static int32_t avg2_i32(int32_t a, int32_t b) {
+    int32_t sum = mips_addu_i32(a, b);
+    return mips_addu_i32(sum, (int32_t)((uint32_t)sum >> 31)) >> 1;
+}
+
 uint32_t SB_HomingMissile(uint32_t *self, uint32_t mode, int param3)
 {
     uint32_t *t;
@@ -56,7 +87,7 @@ uint32_t SB_HomingMissile(uint32_t *self, uint32_t mode, int param3)
         char h = (char)Pool_AllocSFX();
         *((char *)self + 5) = h;
         Pool_BindFXOnObject((uint8_t)h, *(uint32_t *)(self[0x16] + 8), 3, 0);
-        return 0;
+        goto silence;
     }
     case 2: goto fx_bind;
     case 3: goto explode;
@@ -64,36 +95,37 @@ uint32_t SB_HomingMissile(uint32_t *self, uint32_t mode, int param3)
     default: return 0;
     }
 
-    self[0x12] += self[0x22];
-    self[0x13] += self[0x23];
-    self[0x14] += self[0x24];
+    self[0x12] = (uint32_t)mips_addu_i32((int32_t)self[0x12], (int32_t)self[0x22]);
+    self[0x13] = (uint32_t)mips_addu_i32((int32_t)self[0x13], (int32_t)self[0x23]);
+    self[0x14] = (uint32_t)mips_addu_i32((int32_t)self[0x14], (int32_t)self[0x24]);
     self[9]  = self[0x12];
     self[10] = self[0x13];
     self[0xb]= self[0x14];
     if (param3 != 0) SFX_Update((int)*((char *)self + 5), SFX_PlayWorldXY(self + 0x12));
 
-    uint16_t age = (uint16_t)self[0x25] + 1;
+    uint16_t age = (uint16_t)mips_addu_i32((int16_t)self[0x25], 1);
     *(uint16_t *)(self + 0x25) = age;
     if ((age & 3) == 0) {
         uint32_t *puff = (uint32_t *)Object_SpawnFromBank(_DAT_800737d8, 0x13, 0x98, 8);
         *(uint8_t *)(puff + 1) = 4;
         *puff = 0x4b4u;
         puff[0x12] = self[0x12]; puff[0x13] = self[0x13]; puff[0x14] = self[0x14];
-        puff[0x19] = (uint32_t)(uintptr_t)&FUN_8010100c;
-        *(int16_t *)(puff + 0x11) = (int16_t)(self[0x25] * 0x60);
-        puff[0x22] = -(int)*(int16_t *)(self + 5);
-        puff[0x23] = -(int)*(int16_t *)((char *)self + 0x1a);
-        puff[0x24] = -(int)*(int16_t *)(self + 8);
+        Object_SetCallbackPsxSlot(puff, (uintptr_t)&FUN_8010100c);
+        *(int16_t *)(puff + 0x11) =
+            (int16_t)mips_mult_lo_i32((int16_t)self[0x25], 0x60);
+        puff[0x22] = (uint32_t)mips_subu_i32(0, *(int16_t *)(self + 5));
+        puff[0x23] = (uint32_t)mips_subu_i32(0, *(int16_t *)((char *)self + 0x1a));
+        puff[0x24] = (uint32_t)mips_subu_i32(0, *(int16_t *)(self + 8));
         Object_Suspend();
     }
 
     if ((int16_t)self[0x25] < 0xf0) {
-        int s5 = (int)*(int16_t *)(self + 5) * 0x1c; if (s5 < 0) s5 += 0xfff;
-        self[0x22] += s5 >> 12;
-        int s7 = (int)*(int16_t *)((char *)self + 0x1a) * 0x1c; if (s7 < 0) s7 += 0xfff;
-        self[0x23] += s7 >> 12;
-        int s8 = (int)*(int16_t *)(self + 8) * 0x1c; if (s8 < 0) s8 += 0xfff;
-        self[0x24] += s8 >> 12;
+        int s5 = rtz_shift_i32(mips_mult_lo_i32(*(int16_t *)(self + 5), 0x1c), 12, 0xfff);
+        self[0x22] = (uint32_t)mips_addu_i32((int32_t)self[0x22], s5);
+        int s7 = rtz_shift_i32(mips_mult_lo_i32(*(int16_t *)((char *)self + 0x1a), 0x1c), 12, 0xfff);
+        self[0x23] = (uint32_t)mips_addu_i32((int32_t)self[0x23], s7);
+        int s8 = rtz_shift_i32(mips_mult_lo_i32(*(int16_t *)(self + 8), 0x1c), 12, 0xfff);
+        self[0x24] = (uint32_t)mips_addu_i32((int32_t)self[0x24], s8);
     }
 
     uint32_t hitbox = self[0x17];
@@ -106,9 +138,9 @@ uint32_t SB_HomingMissile(uint32_t *self, uint32_t mode, int param3)
     }
     int *tpos = trg + 0x12;
     if ((char)self[2] != 0) Util_TransposeMatRotate((uint32_t)(intptr_t)(self + 4), tpos);
-    local[0] = tpos[0] - (int)self[0x12];
+    local[0] = mips_subu_i32(tpos[0], (int32_t)self[0x12]);
     local[1] = 0;
-    local[2] = tpos[2] - (int)self[0x14];
+    local[2] = mips_subu_i32(tpos[2], (int32_t)self[0x14]);
     GTE_RotateLongMtxLow(self + 4, local, local);
 
     int yaw = ratan2(-local[1], local[2]);
@@ -121,23 +153,22 @@ uint32_t SB_HomingMissile(uint32_t *self, uint32_t mode, int param3)
 
     /* Accelerate. */
     for (int i = 0; i < 3; i++) {
-        static const int axisOfs[3] = {5, 0x1a/4, 8};
-        int s = ((int)*(int16_t *)((char *)self + axisOfs[i] * 4) * 0x3b9a);
-        if (s < 0) s += 0xfff;
-        int d = (s >> 12) - (int)self[0x22 + i];
-        if (d < 0) d += 0xf;
-        d >>= 4;
+        static const int axisOfs[3] = {0x14, 0x1a, 0x20};
+        int s = rtz_shift_i32(
+            mips_mult_lo_i32(*(int16_t *)((char *)self + axisOfs[i]), 0x3b9a),
+            12, 0xfff);
+        int d = rtz_shift_i32(mips_subu_i32(s, (int32_t)self[0x22 + i]), 4, 0xf);
         if (d < -0x100) d = -0x100;
         if (d >  0x100) d =  0x100;
-        self[0x22 + i] += d;
+        self[0x22 + i] = (uint32_t)mips_addu_i32((int32_t)self[0x22 + i], d);
     }
 
     /* Lifetime / proximity check. */
     int hit = 0;
     if ((int16_t)self[0x25] < 0x259) {
         if ((int16_t)self[0x25] > 0x3c) {
-            int dz = local[2] < 0 ? -local[2] : local[2];
-            int dx = local[0] < 0 ? -local[0] : local[0];
+            int dz = mips_abs_i32(local[2]);
+            int dx = mips_abs_i32(local[0]);
             if (dz < dx) dz = dx;
             if (dz < 0xfa000) hit = 1;
         }
@@ -147,8 +178,8 @@ uint32_t SB_HomingMissile(uint32_t *self, uint32_t mode, int param3)
     /* Terrain hit check. */
     {
         int mid[3];
-        mid[0] = (*(int *)(hitbox + 4)  + *(int *)(hitbox + 0x10)) / 2;
-        mid[1] = (*(int *)(hitbox + 8)  + *(int *)(hitbox + 0x14)) / 2;
+        mid[0] = avg2_i32(*(int *)(hitbox + 4), *(int *)(hitbox + 0x10));
+        mid[1] = avg2_i32(*(int *)(hitbox + 8), *(int *)(hitbox + 0x14));
         mid[2] = *(int *)(hitbox + 0x18);
         GTE_RotateLongMatTrans(self + 4, mid, mid);
         int gy = Terrain_HeightAt(mid[0], mid[2]);
@@ -156,12 +187,12 @@ uint32_t SB_HomingMissile(uint32_t *self, uint32_t mode, int param3)
     }
 explode: {
         uint32_t hb = self[0x17];
-        int mid[4];
-        mid[0] = (*(int *)(hb + 4) + *(int *)(hb + 0x10)) / 2;
-        mid[1] = (*(int *)(hb + 8) + *(int *)(hb + 0x14)) / 2;
-        mid[3] = *(int *)(hb + 0x18);
+        int mid[3];
+        mid[0] = avg2_i32(*(int *)(hb + 4), *(int *)(hb + 0x10));
+        mid[1] = avg2_i32(*(int *)(hb + 8), *(int *)(hb + 0x14));
+        mid[2] = *(int *)(hb + 0x18);
         GTE_RotateLongMatTrans(self + 4, mid, mid);
-        mid[1] = Terrain_HeightAt(mid[0], mid[3]);
+        mid[1] = Terrain_HeightAt(mid[0], mid[2]);
         uint32_t *deb = Debris_PoolAlloc(mid, 0x29, 300);
         *deb |= 0x10u;
         Debris_AttachTrack(mid, 0);
@@ -171,8 +202,8 @@ explode: {
         Damage_Apply_AgainstSelf(self, (void *)(intptr_t)0xf);
         Damage_AccumulateOrFire(self, 0);
         uint32_t *cloud = (uint32_t *)Object_AllocCloud(0x1484);
-        cloud[0x19] = (uint32_t)(uintptr_t)&FUN_80100ca0;
-        cloud[0x12] = mid[0]; cloud[0x13] = mid[1]; cloud[0x14] = mid[3];
+        Object_SetCallbackPsxSlot(cloud, (uintptr_t)&FUN_80100ca0);
+        cloud[0x12] = mid[0]; cloud[0x13] = mid[1]; cloud[0x14] = mid[2];
         *cloud = 0xa0u;
         Object_Suspend();
     }
@@ -180,10 +211,20 @@ fx_bind: {
         uint8_t f2 = Pool_AllocSFX();
         Pool_LaunchProjectile(f2, _DAT_800658fc, 0x39, self + 9);
         Object_RetireDeferred(self);
+        {
+            char h = (char)Pool_AllocSFX();
+            *((char *)self + 5) = h;
+            Pool_BindFXOnObject((uint8_t)h, *(uint32_t *)(self[0x16] + 8), 3, 0);
+        }
 silence:
         SFX_StopWorld((int)*((char *)self + 5));
     }
     return 0;
+}
+
+uint32_t FUN_801010f4(uint32_t *self, uint32_t mode, int param3)
+{
+    return SB_HomingMissile(self, mode, param3);
 }
 
 /* ============================================================

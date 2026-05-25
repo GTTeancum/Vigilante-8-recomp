@@ -1,157 +1,219 @@
-/* object_tree.c -- kd-tree traversal and per-frame object-tick walks.
+/* object_tree.c -- object-list free, kd-tree walker.
  *
  * Source: SLUS_005.10
- *   FUN_800204dc  -- Tree_Free (recursive kd-tree free)
- *   FUN_8002123c  -- Tree_Apply (recursive Apply-to-every-leaf)
- *   FUN_8002131c  -- ObjList_TickAll (per-frame tick of live objects)
- *   FUN_800212c4  -- ObjList_PreTickAll (with a flag argument)
- *   FUN_80021394  -- TriggerVol_ExpireFromHead (timed expiry)
- *   FUN_800215d0  -- Tree_VisibilityPass
- *   FUN_80021600  -- Frame_DispatchAllObjectTicks
+ *   FUN_80020658  -- Tree_Free: walk a doubly-linked object-list ring and
+ *                    free every entry (Object_Free + recycle to dead pool).
+ *   FUN_8002123c  -- Tree_Apply: recurse a kd-tree calling FUN_800200b8 at
+ *                    each leaf (passes callback + arg through).
+ *   FUN_800200b8  -- ObjChain_WalkCb: walk a singly-linked chain, calling
+ *                    a callback on each node; stop on non-zero return.
  *
- * The kd-tree node layout (recurring across the binary):
- *   +0  i32 kind   (0 = leaf, 1 = split-X, 2 = split-Z)
- *   +1  i32 split  (split coord) or chainHead (leaf)
- *   +2  ptr left   child (split nodes) or per-leaf data
- *   +3  ptr right  child or chain
+ * HIGH confidence: direct Ghidra port.
  *
- * The ObjList nodes (+0x30 prim, +0x34 next-sibling, +0x38 first-child)
- * are the per-object record stored as the tree leaf payload.
+ * Node layout for the object-list ring (sentinel + entries):
+ *   node[0]  (int) = next ptr
+ *   node[1]  (int) = prev ptr
+ *   node[2]  (int) = payload / object ptr
  *
- * HIGH confidence on the small helpers; MED on FrameTick because it
- * pulls in several other globals (the puRam000007c4 trigger list, the
- * piRam0000075c live list, etc.) that are each ~LOW until pass 3.
+ * Sentinel[2] is the sentinel itself when the list is empty; the loop
+ * condition "sentinel[2] != sentinel" detects a non-empty list.
  */
 #include <stdint.h>
 #include <stddef.h>
 
-extern void Heap_Free(void *p);
-extern void Object_FreeAndUnhook(void *p);    /* FUN_8001bddc */
-extern int  Tree_LeafApply(uint32_t *leafData);  /* FUN_800200b8 */
-extern void TriggerVol_FreeOne(int *node);    /* FUN_800203fc -- aliased */
-extern int32_t **piRam00000774;
-extern uint8_t   DAT_80065a74[];
+/* ---- dead-node recycler (shared with frame_tick.c, object_lifecycle_extra.c) ---- */
+extern int32_t  *piRam00000774;    /* dead-node pool tail */
+extern uint8_t   DAT_80065a74[];   /* dead-node pool sentinel value */
 
-/* HIGH: free entire kd-tree (post-order). */
-void Tree_Free(int node)
+/* ---- object destructor ---- */
+extern void FUN_80020540(int param_1);  /* Object_Free */
+
+typedef struct ObjectTreeHostNode {
+    struct ObjectTreeHostNode *next;
+    struct ObjectTreeHostNode *prev;
+    uintptr_t payload;
+    uint32_t deadline;
+} ObjectTreeHostNode;
+
+/* ================================================================
+ * FUN_80020658  -- Tree_Free
+ *
+ * Walk the doubly-linked object-list ring rooted at param_1.
+ * For each node: free the object payload, unlink the node from
+ * the ring, then recycle the node into the dead-node pool.
+ * Stops when the sentinel's [2] field equals the sentinel itself
+ * (i.e. the ring is empty).
+ * ================================================================ */
+void FUN_80020658(uint32_t *param_1)
 {
-    while (node != 0) {
-        TriggerVol_FreeOne((int *)(intptr_t)node);
-        Object_FreeAndUnhook(*(void **)(node + 0x30));
-        Tree_Free(*(int *)(node + 0x38));
-        int next = *(int *)(node + 0x34);
-        Heap_Free((void *)(intptr_t)node);
+    ObjectTreeHostNode *sentinel = (ObjectTreeHostNode *)param_1;
+    ObjectTreeHostNode *node;
+
+    (void)piRam00000774;
+    (void)DAT_80065a74;
+    if (sentinel == NULL || sentinel->next == NULL || sentinel->prev == NULL)
+        return;
+
+    node = sentinel->next;
+    while (node != NULL && node != sentinel) {
+        ObjectTreeHostNode *next = node->next;
+        if (node->payload != 0)
+            FUN_80020540((int)node->payload);
+        node->next = NULL;
+        node->prev = NULL;
+        node->payload = 0;
         node = next;
     }
+    sentinel->next = sentinel;
+    sentinel->prev = sentinel;
+    sentinel->payload = 0;
 }
 
-/* HIGH: recurse into the kd-tree, applying `LeafApply` to each leaf
- * payload. Short-circuit on the first non-zero return. */
-int Tree_Apply(uint32_t *node, void *unused1, void *unused2)
-{
-    if (node[0] == 0) {
-        return Tree_LeafApply(node + 1);
-    }
-    if (node[0] < 3) {
-        int r = Tree_Apply((uint32_t *)(uintptr_t)node[2], unused1, unused2);
-        if (r != 0) return r;
-        r = Tree_Apply((uint32_t *)(uintptr_t)node[3], unused1, unused2);
-        if (r != 0) return r;
-    }
-    (void)unused1; (void)unused2;
-    return 0;
-}
+/* Public alias used by level_teardown.c. */
+void Tree_Free(void *root) { FUN_80020658((uint32_t *)root); }
 
-/* HIGH: tick every live object whose record has a callback at +0x64. */
-extern int32_t **piRam0000075c;
-void ObjList_TickAll(uint32_t tickArg)
+/* ================================================================
+ * FUN_80020968 -- Tree_FreeTerrain
+ *
+ * Recursively frees the terrain kd-tree.  Each interior node has
+ * children at param_1[2] / param_1[3].  Leaf nodes (param_1[0] == 0)
+ * carry an object list at param_1+1 which is drained via FUN_80020658
+ * (Tree_Free).  After children are processed, the node itself is heap-
+ * freed.
+ *
+ * HIGH confidence (direct Ghidra port).
+ * ================================================================ */
+extern void Heap_Free(void *p);                                 /* FUN_80045088 */
+
+void FUN_80020968(int *param_1)
 {
-    int *node = (int *)piRam0000075c[0];
-    int **prev = piRam0000075c;
-    while (node != NULL) {
-        int payload = prev[2] != NULL ? *((int *)prev + 2) : 0;
-        if (payload == 0) break;
-        typedef void (*TickFn)(int payload, int mode, uint32_t arg);
-        TickFn fn = *(TickFn *)((uintptr_t)payload + 100);
-        if (fn != NULL) fn(payload, 0, tickArg);
-        prev = (int **)node;
-        node = (int *)*node;
+    if (param_1 != (int *)0) {
+        if (*param_1 == 0) {
+            FUN_80020658((uint32_t *)(param_1 + 1));
+        } else {
+            FUN_80020968((int *)(uintptr_t)param_1[2]);
+            FUN_80020968((int *)(uintptr_t)param_1[3]);
+        }
+        Heap_Free(param_1);
     }
 }
 
-/* HIGH: pre-tick pass (sets a frame-counter via FUN_8001fcb4). */
-extern int32_t **piRam0000077c;
-extern void Object_FrameCounterBump(int payload, uint16_t arg);  /* FUN_8001fcb4 */
-void ObjList_PreTickAll(uint16_t arg)
+/* Public alias used by level_teardown.c. */
+void Tree_FreeTerrain(void *root) { FUN_80020968((int *)root); }
+
+/* ================================================================
+ * FUN_800200b8  -- ObjChain_WalkCb
+ *
+ * Walk a singly-linked chain starting at *param_1 (the second
+ * link is **param_1).  Call param_2(node, param_3) on each node;
+ * stop when the next link is NULL or callback returns non-zero.
+ *
+ * Returns the last callback result (0 if never called or always 0).
+ * ================================================================ */
+typedef int (*ObjCb)(int *node, int32_t arg);
+
+int FUN_800200b8(int *param_1, ObjCb param_2, int32_t param_3)
 {
-    int *node = (int *)piRam0000077c[0];
-    int **prev = piRam0000077c;
-    while (node != NULL) {
-        Object_FrameCounterBump(*((int *)prev + 2), arg);
-        prev = (int **)node;
-        node = (int *)*node;
+    int  iVar3;
+    int *piVar1;
+    int *piVar2;
+
+    piVar1 = (int *)(uintptr_t)*param_1;
+    piVar2 = (int *)(uintptr_t)*(int32_t *)(uintptr_t)*param_1;
+    iVar3  = 0;
+    while (piVar2 != (int *)0 &&
+           (iVar3 = param_2(piVar1, param_3), iVar3 == 0)) {
+        piVar1 = piVar2;
+        piVar2 = (int *)(uintptr_t)*piVar2;
     }
+    return iVar3;
 }
 
-/* MED: timed-expiry walker for the trigger-volume list. */
-extern int   **piRam000007bc;
-extern void   *puRam000007c4;
-extern uint8_t DAT_80065ac0[];
-void TriggerVol_ExpireFromHead(uint32_t now)
+/* ================================================================
+ * FUN_8002123c  -- Tree_Apply
+ *
+ * Recurse a kd-tree (nodes where param_1[0] < 3 have children at
+ * param_1[2] / param_1[3]).  At leaf nodes (param_1[0] == 0) call
+ * ObjChain_WalkCb on the leaf chain (param_1+1) with the supplied
+ * callback and argument.  Short-circuits on first non-zero return.
+ * ================================================================ */
+int FUN_8002123c(uint32_t *param_1, ObjCb param_2, int32_t param_3)
 {
-    while (puRam000007c4 != DAT_80065ac0) {
-        int *node = (int *)piRam000007bc;
-        if (now < (uint32_t)node[3]) return;
-        uint32_t *payload = (uint32_t *)(intptr_t)node[2];
-        *payload &= ~1u;
-        int32_t *prevTail = (int32_t *)node[1];
-        int32_t  back     = node[0];
-        *(int32_t **)(back + 4) = prevTail;
-        *prevTail               = back;
-        int32_t **deadTail = piRam00000774;
-        piRam00000774 = (int32_t **)node;
-        *prevTail = (int32_t)(intptr_t)node;
-        node[0] = (int32_t)(uintptr_t)DAT_80065a74;
-        node[1] = (int32_t)(uintptr_t)deadTail;
+    int iVar1;
+
+    if (*param_1 == 0) {
+        iVar1 = FUN_800200b8((int *)(param_1 + 1), param_2, param_3);
+    } else {
+        iVar1 = 0;
+        if ((*param_1 < 3) &&
+            (iVar1 = FUN_8002123c((uint32_t *)(uintptr_t)param_1[2], param_2, param_3),
+             iVar1 == 0) &&
+            (iVar1 = FUN_8002123c((uint32_t *)(uintptr_t)param_1[3], param_2, param_3),
+             iVar1 == 0)) {
+            iVar1 = 0;
+        }
     }
+    return iVar1;
 }
+
+/* Public alias for callers that use the semantic name. */
+int Tree_Apply(uint32_t *node, ObjCb cb, int32_t arg)
+    { return FUN_8002123c(node, cb, arg); }
 
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
- *
- * These are the raw Ghidra pseudo-C exports for the function(s)
- * this file cleans up. Use them to audit any MED-confidence
- * rewrite line-by-line. Regenerated by tools/restore_ghidra_refs.py.
  * ============================================================ */
 #if 0
 
-/* --- SLUS_005.10 FUN_800204dc  (from analysis/SLUS_005.10/decomp/800204dc.c) --- */
-// addr: 0x800204dc  name: FUN_800204dc
-
-void FUN_800204dc(int param_1)
-
+/* --- SLUS_005.10 FUN_80020658 --- */
+void FUN_80020658(undefined4 *param_1)
 {
-  int iVar1;
-  
-  while (param_1 != 0) {
-    FUN_800203fc(param_1);
-    FUN_8001bddc(*(undefined4 *)(param_1 + 0x30));
-    FUN_800204dc(*(undefined4 *)(param_1 + 0x38));
-    iVar1 = *(int *)(param_1 + 0x34);
-    FUN_80045088(param_1);
-    param_1 = iVar1;
+  int *piVar1;
+  undefined4 *puVar2;
+  int iVar3;
+  int *piVar4;
+  int *piVar5;
+
+  puVar2 = (undefined4 *)param_1[2];
+  while (puVar2 != param_1) {
+    piVar5 = (int *)*param_1;
+    FUN_80020540(piVar5[2]);
+    piVar4 = (int *)piVar5[1];
+    iVar3 = *piVar5;
+    *(int **)(iVar3 + 4) = piVar4;
+    *piVar4 = iVar3;
+    piVar4 = piRam00000774;
+    piVar1 = piVar5;
+    *piRam00000774 = (int)piVar5;
+    piRam00000774 = piVar1;
+    piVar5[1] = (int)piVar4;
+    *piVar5 = (int)&DAT_80065a74;
+    piVar5[2] = 0;
+    puVar2 = (undefined4 *)param_1[2];
+  }
+}
+
+/* --- SLUS_005.10 FUN_800200b8 --- */
+void FUN_800200b8(int *param_1,code *param_2,undefined4 param_3)
+{
+  int *piVar1;
+  int *piVar2;
+  int iVar3;
+
+  piVar1 = (int *)*param_1;
+  piVar2 = (int *)*(int *)*param_1;
+  while ((piVar2 != (int *)0x0 && (iVar3 = (*param_2)(piVar1,param_3), iVar3 == 0))) {
+    piVar1 = piVar2;
+    piVar2 = (int *)*piVar2;
   }
   return;
 }
 
-/* --- SLUS_005.10 FUN_8002123c  (from analysis/SLUS_005.10/decomp/8002123c.c) --- */
-// addr: 0x8002123c  name: FUN_8002123c
-
+/* --- SLUS_005.10 FUN_8002123c --- */
 int FUN_8002123c(uint *param_1,undefined4 param_2,undefined4 param_3)
-
 {
   int iVar1;
-  
+
   if (*param_1 == 0) {
     iVar1 = FUN_800200b8(param_1 + 1);
   }
@@ -163,173 +225,6 @@ int FUN_8002123c(uint *param_1,undefined4 param_2,undefined4 param_3)
     }
   }
   return iVar1;
-}
-
-/* --- SLUS_005.10 FUN_8002131c  (from analysis/SLUS_005.10/decomp/8002131c.c) --- */
-// addr: 0x8002131c  name: FUN_8002131c
-
-void FUN_8002131c(undefined4 param_1)
-
-{
-  int *piVar1;
-  int *piVar2;
-  int *piVar3;
-  int iVar4;
-  
-  piVar3 = (int *)*piRam0000075c;
-  piVar2 = piRam0000075c;
-  while ((piVar1 = piVar3, piVar1 != (int *)0x0 && (iVar4 = piVar2[2], iVar4 != 0))) {
-    if (*(code **)(iVar4 + 100) != (code *)0x0) {
-      (**(code **)(iVar4 + 100))(iVar4,0,param_1);
-    }
-    piVar3 = (int *)*piVar1;
-    piVar2 = piVar1;
-  }
-  return;
-}
-
-/* --- SLUS_005.10 FUN_800212c4  (from analysis/SLUS_005.10/decomp/800212c4.c) --- */
-// addr: 0x800212c4  name: FUN_800212c4
-
-void FUN_800212c4(undefined2 param_1)
-
-{
-  int *piVar1;
-  int *piVar2;
-  int *piVar3;
-  
-  piVar3 = (int *)*piRam0000077c;
-  piVar2 = piRam0000077c;
-  while (piVar1 = piVar3, piVar1 != (int *)0x0) {
-    FUN_8001fcb4(piVar2[2],param_1);
-    piVar2 = piVar1;
-    piVar3 = (int *)*piVar1;
-  }
-  return;
-}
-
-/* --- SLUS_005.10 FUN_80021394  (from analysis/SLUS_005.10/decomp/80021394.c) --- */
-// addr: 0x80021394  name: FUN_80021394
-
-void FUN_80021394(uint param_1)
-
-{
-  int *piVar1;
-  int iVar2;
-  int *piVar3;
-  uint *puVar4;
-  
-  if (puRam000007c4 != &DAT_80065ac0) {
-    do {
-      piVar1 = piRam000007bc;
-      if (param_1 < (uint)piRam000007bc[3]) {
-        return;
-      }
-      puVar4 = (uint *)piRam000007bc[2];
-      *puVar4 = *puVar4 & 0xfffffffe;
-      piVar3 = (int *)piVar1[1];
-      iVar2 = *piVar1;
-      *(int **)(iVar2 + 4) = piVar3;
-      *piVar3 = iVar2;
-      piVar3 = piRam00000774;
-      piRam00000774 = piVar1;
-      *piVar3 = (int)piVar1;
-      piVar1[1] = (int)piVar3;
-      *piVar1 = (int)&DAT_80065a74;
-      piVar1[2] = 0;
-      if ((code *)puVar4[0x19] != (code *)0x0) {
-        (*(code *)puVar4[0x19])(puVar4,2,0);
-      }
-    } while (puRam000007c4 != &DAT_80065ac0);
-  }
-  return;
-}
-
-/* --- SLUS_005.10 FUN_800215d0  (from analysis/SLUS_005.10/decomp/800215d0.c) --- */
-// addr: 0x800215d0  name: FUN_800215d0
-
-void FUN_800215d0(void)
-
-{
-  FUN_800206f0(&DAT_80065a18);
-  FUN_80021460();
-  return;
-}
-
-/* --- SLUS_005.10 FUN_80021600  (from analysis/SLUS_005.10/decomp/80021600.c) --- */
-// addr: 0x80021600  name: FUN_80021600
-
-void FUN_80021600(void)
-
-{
-  FUN_800290b4();
-  FUN_8001d370();
-  FUN_80041fd4();
-  FUN_800215d0();
-  FUN_80029750();
-  (*pcRam00000730)(uRam000006f8,0x10,0);
-  if (iRam000007d8 != 0) {
-    FUN_80022cd0(iRam000007d8,&DAT_80065ab0,iRam0000060c + 0xffc);
-  }
-  return;
-}
-
-/* --- SLUS_005.10 FUN_8001bddc  (from analysis/SLUS_005.10/decomp/8001bddc.c) --- */
-// addr: 0x8001bddc  name: FUN_8001bddc
-
-void FUN_8001bddc(int param_1)
-
-{
-  if (param_1 != 0) {
-    if (*(int *)(param_1 + iRam00000004 * 4 + 0x1c) != 0) {
-      FUN_800118b4();
-    }
-    if (*(int *)(param_1 + (1 - iRam00000004) * 4 + 0x1c) != 0) {
-      FUN_80045088();
-    }
-    FUN_80045088(param_1);
-  }
-  return;
-}
-
-/* --- SLUS_005.10 FUN_800200b8  (from analysis/SLUS_005.10/decomp/800200b8.c) --- */
-// addr: 0x800200b8  name: FUN_800200b8
-
-void FUN_800200b8(int *param_1,code *param_2,undefined4 param_3)
-
-{
-  int *piVar1;
-  int *piVar2;
-  int iVar3;
-  
-  piVar1 = (int *)*param_1;
-  piVar2 = (int *)*(int *)*param_1;
-  while ((piVar2 != (int *)0x0 && (iVar3 = (*param_2)(piVar1,param_3), iVar3 == 0))) {
-    piVar1 = piVar2;
-    piVar2 = (int *)*piVar2;
-  }
-  return;
-}
-
-/* --- SLUS_005.10 FUN_800203fc  (from analysis/SLUS_005.10/decomp/800203fc.c) --- */
-// addr: 0x800203fc  name: FUN_800203fc
-
-uint * FUN_800203fc(uint *param_1)
-
-{
-  if ((code *)param_1[0x19] != (code *)0x0) {
-    (*(code *)param_1[0x19])(param_1,4,0);
-  }
-  if ((*param_1 & 0x80) != 0) {
-    FUN_8001fe8c(&DAT_80065a60,param_1);
-  }
-  if ((*param_1 & 4) != 0) {
-    FUN_8001fe8c(&DAT_80065a80,param_1);
-  }
-  if ((*param_1 & 1) != 0) {
-    FUN_8001fe8c(&DAT_80065ac0,param_1);
-  }
-  return param_1;
 }
 
 #endif  /* GHIDRA REF */

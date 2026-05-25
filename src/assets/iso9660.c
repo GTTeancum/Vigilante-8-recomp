@@ -183,6 +183,10 @@ void *Iso_OpenPath(const uint8_t *path)
     }
 }
 
+/* FUN_800157d4 is the hex name callers use for Iso_OpenPath.
+ * Provide it as a thin forwarder so old call sites link without change. */
+void *FUN_800157d4(const uint8_t *path) { return Iso_OpenPath(path); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

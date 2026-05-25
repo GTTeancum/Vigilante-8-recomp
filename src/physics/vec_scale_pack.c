@@ -65,6 +65,12 @@ uint32_t *Vec5_ScaleI16(const uint32_t *pair, const int16_t *scale, uint32_t *ou
     return (uint32_t *)pair;
 }
 
+/* FUN_80043864 hex-name alias (callers in object_pretick.c reference by PSX address). */
+int *FUN_80043864(int *param_1, int16_t *param_2, uint32_t *param_3)
+{
+    return (int *)Vec5_ScaleI16((uint32_t *)param_1, param_2, param_3);
+}
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

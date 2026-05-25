@@ -40,6 +40,24 @@ void *Asset_LoadFromOpened(void)
     return Heap_Realloc(buf, fileSize);
 }
 
+/* Hex-name alias used by overlay loader (FUN_80011adc) and other callers.
+ *
+ * Note on the missing arg: Ghidra's pseudo-C dropped the implicit `path`
+ * arg that the MIPS preserves in $a0 across the chained jal sequence.
+ * The actual semantic is: Open(path) -> LoadFromOpened().  We thread
+ * the path through Asset_OpenFile (FUN_800157d4) which knows how to
+ * consume it. */
+extern void *Iso_OpenPath(const uint8_t *path);   /* FUN_800157d4 */
+
+void *FUN_80015948(const char *path)
+{
+    /* Open the path; the descriptor at the returned ptr exposes the
+     * start-sector + size that Asset_LoadFromOpened then consumes via
+     * Asset_OpenFile (which on host caches the last-opened descriptor). */
+    if (path != NULL) (void)Iso_OpenPath((const uint8_t *)path);
+    return Asset_LoadFromOpened();
+}
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

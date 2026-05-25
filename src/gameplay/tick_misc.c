@@ -46,6 +46,11 @@ void Quest_Free(void)
     }
 }
 
+/* Hex-name aliases for these helpers (callers reference by PSX address).
+ * FUN_80015010 and FUN_80012980 are defined in timer_tick.c / quest_data.c. */
+void FUN_80011a10(void)        { Buffer_StartOTagOther(); }
+void FUN_800128bc(void)        { Tick_WaitIrqAck(); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

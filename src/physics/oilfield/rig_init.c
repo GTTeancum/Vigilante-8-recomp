@@ -18,25 +18,32 @@
  */
 #include <stdint.h>
 
-extern int   Object_Pool_AllocFromBank(void *bank, int type, int u, int flags);  /* FUN_8001ac44 */
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+extern intptr_t Object_Pool_AllocFromBank(void *bank, int type, int u, int flags);  /* FUN_8001ac44 */
 extern uint32_t V8_RandNext(void);
-extern int   Bone_AllocSlot(uint32_t *obj, int slot);     /* FUN_8001b038 */
-extern void  Bone_AttachChild(uint32_t *obj, int slot, int child);  /* FUN_8001b2fc */
+extern intptr_t Bone_AllocSlot(uint32_t *obj, int slot);  /* FUN_8001b038 */
+extern void  Bone_AttachChild(uint32_t *obj, intptr_t slot, intptr_t child);  /* FUN_8001b2fc */
 extern void  SUB_800223dc(void);
 extern void  Object_DefaultDispatch(uint32_t *obj, int mode, uint32_t arg);  /* func_0x800223dc */
 
 extern void **_DAT_800737d8;
 
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
 void OF_RigInit(uint32_t *obj, int mode, uint32_t arg)
 {
     if (mode == 1) {
-        int child = Object_Pool_AllocFromBank(_DAT_800737d8, 0x24, 0x80, 8);
+        intptr_t child = Object_Pool_AllocFromBank(_DAT_800737d8, 0x24, 0x80, 8);
         *(int *)(child + 0x5c) = 0;
         int extent = **(int **)((uintptr_t)_DAT_800737d8 + 4);
-        *(int16_t *)(child + 0x46) = (int16_t)((int)V8_RandNext() * extent >> 15);
-        int slot = Bone_AllocSlot(obj, 0x8000);
+        *(int16_t *)(child + 0x46) =
+            (int16_t)(mips_mult_lo_i32((int32_t)V8_RandNext(), extent) >> 15);
+        intptr_t slot = Bone_AllocSlot(obj, 0x8000);
         Bone_AttachChild(obj, slot, child);
-        obj[0x19] = (uintptr_t)SUB_800223dc;
+        Object_SetCallbackPsxSlot(obj, (uintptr_t)SUB_800223dc);
         obj[0]  |= 4u;
     }
     Object_DefaultDispatch(obj, mode, arg);

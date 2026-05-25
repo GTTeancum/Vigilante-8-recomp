@@ -48,6 +48,8 @@
  * for-line.
  */
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 extern uint8_t *Terrain_MaterialAt(uint32_t x, uint32_t z);   /* FUN_800255f4 */
 extern void     FUN_800441c8(uint32_t arg);                    /* audio voice-stop */
@@ -56,11 +58,11 @@ extern void     FUN_80044574(int8_t voice, uint32_t pan);
 extern void     FUN_800447e8(int8_t voiceId, void *bank, int kind, int32_t *pos);
 extern void     FUN_80020890(uint32_t *obj, int mode);         /* post-tick */
 extern void     FUN_80023940(uint32_t *obj);                   /* alt tick */
-extern void     FUN_8002d054(uint32_t *obj);                   /* catchup step */
+extern void     FUN_8002d054(uint32_t *obj, uint32_t caller_s1); /* catchup step */
 extern void     FUN_8002d44c(uint32_t *obj);
 extern void     FUN_8002d494(uint32_t *obj, void *lut);        /* heavy phys A */
-extern void     FUN_8002d82c(uint32_t *obj, int arg);          /* mode-3 entry */
-extern void     FUN_8002efe0(uint32_t *obj, void *lut);        /* heavy phys B */
+extern void     FUN_8002d82c(uint32_t *obj, intptr_t arg);     /* mode-3 entry */
+extern void     FUN_8002efe0(uint32_t *obj, const uint8_t *lut); /* heavy phys B */
 extern void     FUN_8002f998(uint32_t *obj);                   /* mode-2 entry */
 extern void     FUN_80042f5c(void *p);                          /* mode-4 entry */
 extern int      FUN_800129e8(int displayMode, const char *msg);
@@ -70,15 +72,29 @@ extern int      sprintf(char *buf, const char *fmt, ...);
  * Ghidra exports). */
 extern void   *iRam00000010;            /* gp[16]    (a display-mode flag) */
 extern void   *iRam000005f8;            /* gp[1528]  (audio bank handle) */
-typedef void (*GpCb1840Fn)(uint32_t *, int, void *);
-extern GpCb1840Fn gpFn_1840;            /* gp[1840] -- callback table entry */
+extern int (*pcRam00000730)(uint32_t obj, int eventId, uint32_t param2);
 extern const char DAT_80055738[];        /* sprintf format string @0x80055738 */
 extern const uint8_t DAT_80065c28[];     /* per-status lookup table @0x80065c28 */
 
 /* Forward decl for clarity. */
-int Vehicle_Tick(uint32_t *self, int mode, int arg2, int arg3);
+int Vehicle_Tick(uint32_t *self, int mode, intptr_t arg2, intptr_t arg3);
 
-int Vehicle_Tick(uint32_t *self, int mode, int arg2, int arg3)
+static int vehicle_tick_trace_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *env = getenv("V8_TRACE_VEHICLE_TICK");
+        cached = (env != 0 && env[0] != 0 && env[0] != '0');
+    }
+    return cached;
+}
+
+static inline int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+int Vehicle_Tick(uint32_t *self, int mode, intptr_t arg2, intptr_t arg3)
 {
     (void)arg3;
     uint8_t *s = (uint8_t *)self;
@@ -116,9 +132,9 @@ int Vehicle_Tick(uint32_t *self, int mode, int arg2, int arg3)
         /* Material attribute 7 -> bounce: invert all 3 vel components. */
         int16_t mat_attr_lo = *(int16_t *)(material + 0x16);
         if (mat_attr_lo == 7) {
-            *(int32_t *)(s + 0x80) = -*(int32_t *)(s + 0x80);
-            *(int32_t *)(s + 0x84) = -*(int32_t *)(s + 0x84);
-            *(int32_t *)(s + 0x88) = -*(int32_t *)(s + 0x88);
+            *(int32_t *)(s + 0x80) = mips_subu_i32(0, *(int32_t *)(s + 0x80));
+            *(int32_t *)(s + 0x84) = mips_subu_i32(0, *(int32_t *)(s + 0x84));
+            *(int32_t *)(s + 0x88) = mips_subu_i32(0, *(int32_t *)(s + 0x88));
         }
 
         /* Audio state-tracking via material attribute switch. */
@@ -132,9 +148,11 @@ int Vehicle_Tick(uint32_t *self, int mode, int arg2, int arg3)
                 uint8_t new_attr = *(uint8_t *)(material + 0x18);
                 *(uint8_t *)(s + 0xd2) = new_attr;
                 if (new_attr != 0) {
-                    gpFn_1840(self, 11, (void *)material);
-                    /* Return value lands in obj+0xd3 (new voice id). */
-                    *(uint8_t *)(s + 0xd3) = (uint8_t)0;  /* MIPS stores v0 result; place-holder */
+                    int voice = 0;
+                    if (pcRam00000730)
+                        voice = pcRam00000730((uint32_t)(uintptr_t)self, 11,
+                                              (uint32_t)(uintptr_t)material);
+                    *(uint8_t *)(s + 0xd3) = (uint8_t)voice;
                 } else {
                     *(uint8_t *)(s + 0xd3) = 0;
                 }
@@ -149,10 +167,46 @@ int Vehicle_Tick(uint32_t *self, int mode, int arg2, int arg3)
             }
         }
 
+        if (vehicle_tick_trace_enabled()) {
+            fprintf(stderr,
+                    "v8: vehicle_tick pre self=%p status=%d flags=0x%x lut=0x%x "
+                    "vel=(%d,%d,%d) ang=(%d,%d,%d) m18=%d\n",
+                    (void *)self, (int)status, (unsigned)self[0],
+                    (unsigned)*(uint32_t *)(s3 + 8),
+                    *(int32_t *)(s + 0x80), *(int32_t *)(s + 0x84),
+                    *(int32_t *)(s + 0x88), *(int32_t *)(s + 0x90),
+                    *(int32_t *)(s + 0x94), *(int32_t *)(s + 0x98),
+                    (int)*(int16_t *)(s + 0x18));
+        }
+
         /* Heavy per-tick physics for damaged-state objects. */
-        FUN_8002efe0(self, (void *)(uintptr_t)s3);
+        FUN_8002efe0(self, s3);
+        if (vehicle_tick_trace_enabled()) {
+            fprintf(stderr,
+                    "v8: vehicle_tick after efe0 self=%p vel=(%d,%d,%d) "
+                    "ang=(%d,%d,%d) sub=(%d,%d,%u,%d) m18=%d\n",
+                    (void *)self,
+                    *(int32_t *)(s + 0x80), *(int32_t *)(s + 0x84),
+                    *(int32_t *)(s + 0x88), *(int32_t *)(s + 0x90),
+                    *(int32_t *)(s + 0x94), *(int32_t *)(s + 0x98),
+                    (int)*(int16_t *)(s + 0xa4),
+                    (int)*(int16_t *)(s + 0xa6),
+                    (unsigned)*(uint16_t *)(s + 0xac),
+                    (int)*(int8_t *)(s + 0xb2),
+                    (int)*(int16_t *)(s + 0x18));
+        }
         FUN_8002d494(self, (void *)(uintptr_t)s3);
-        if (arg2 != 0) FUN_8002d054(self);
+        if (vehicle_tick_trace_enabled()) {
+            fprintf(stderr,
+                    "v8: vehicle_tick after d494 self=%p vel=(%d,%d,%d) "
+                    "ang=(%d,%d,%d) flags=0x%x m18=%d\n",
+                    (void *)self,
+                    *(int32_t *)(s + 0x80), *(int32_t *)(s + 0x84),
+                    *(int32_t *)(s + 0x88), *(int32_t *)(s + 0x90),
+                    *(int32_t *)(s + 0x94), *(int32_t *)(s + 0x98),
+                    (unsigned)self[0], (int)*(int16_t *)(s + 0x18));
+        }
+        if (arg2 != 0) FUN_8002d054(self, (uint32_t)(uintptr_t)material);
     } else {
         /* ---- Normal-state path: tick down +0xb0 sound-event counter. ---- */
         uint16_t cnt = *(uint16_t *)(s + 0xb0);
@@ -220,7 +274,7 @@ int Vehicle_Tick(uint32_t *self, int mode, int arg2, int arg3)
 }
 
 /* Legacy alias for the JAL site. */
-int LAB_8002e2bc(uint32_t *self, int mode, int arg2, int arg3)
+int LAB_8002e2bc(uint32_t *self, int mode, intptr_t arg2, intptr_t arg3)
 {
     return Vehicle_Tick(self, mode, arg2, arg3);
 }

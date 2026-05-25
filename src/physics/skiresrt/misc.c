@@ -17,8 +17,9 @@
 #include <stdint.h>
 
 extern void SUB_800223dc(void);
-extern int  Collision_AgainstTerrain(int obj, int impact);
-extern int  Collision_Circular(int obj, int impact);
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+extern int  FUN_8002239c(uint32_t *self, int32_t *impulse);
+extern uint32_t FUN_80022320(uint32_t *self, uint32_t amount);
 extern int  Effects_QueueSnow(int obj);    /* FUN_8003fc94 */
 extern void *Object_Pool_Alloc2(void);     /* func_0x80022c54 */
 extern int   Object_BroadcastEvent2(int eventId, int eventArg);  /* func_0x80021924 */
@@ -29,7 +30,13 @@ extern int32_t  DAT_80102154;
 
 void SR_InstallDefaultTick(int obj, int mode)
 {
-    if (mode == 1) *(void **)(obj + 100) = SUB_800223dc;
+    if (mode == 1) Object_SetCallbackPsxSlot((void *)(uintptr_t)obj, (uintptr_t)&SUB_800223dc);
+}
+
+uint32_t FUN_80101424(int obj, int mode)
+{
+    SR_InstallDefaultTick(obj, mode);
+    return 0;
 }
 
 void SR_InsertSortedByY(int obj)
@@ -54,10 +61,16 @@ void SR_InsertSortedByY(int obj)
     newNode[1] = (uintptr_t)next;
 }
 
+void FUN_80101390(int obj)
+{
+    SR_InsertSortedByY(obj);
+}
+
 uint32_t SR_SnowMachineHit(int obj, uint32_t mode, void *impact)
 {
-    if (mode == 3 || mode == 8) Collision_AgainstTerrain(obj, (int)(intptr_t)impact);
-    int hit = Collision_Circular(obj, (int)(intptr_t)impact);
+    if (mode != 8)
+        FUN_8002239c((uint32_t *)(uintptr_t)(uint32_t)obj, (int32_t *)impact);
+    int hit = FUN_80022320((uint32_t *)(uintptr_t)(uint32_t)obj, (uint32_t)(uintptr_t)impact);
     if (hit == 0) return 0;
     if (Effects_QueueSnow(obj) != 0) return 0;
     DAT_80102154++;
@@ -65,6 +78,11 @@ uint32_t SR_SnowMachineHit(int obj, uint32_t mode, void *impact)
     int evt = ((_DAT_80065b34 + _DAT_80065b38) >> 1u < (uint32_t)*(int32_t *)(obj + 0x48))
               ? 0x201 : 0x200;
     return (uint32_t)Object_BroadcastEvent2(9, evt);
+}
+
+uint32_t FUN_80102094(int obj, uint32_t mode, void *impact)
+{
+    return SR_SnowMachineHit(obj, mode, impact);
 }
 
 /* ============================================================

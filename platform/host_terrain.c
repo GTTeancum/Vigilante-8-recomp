@@ -23,14 +23,12 @@
  * So we need to point each DAT_800911a0[i] entry at the right ZONE
  * chunk's body, indexed by the ZMAP lookup.
  *
- * ZONE size mystery: 0x4000 vs the engine's 0x2000 expectation. Two
- * possibilities -- (a) each ZONE holds 2 sub-chunks of 0x2000 (the
- * engine reads only the first 0x2000), or (b) the per-cell layout is
- * actually 4 bytes wide.  The cleaned terrain_height.c uses cell
- * stride 2 bytes and row stride 0x80, so 64*64*2 = 0x2000 -- if the
- * ZONE is 0x4000 then half of it is "below" data (attributes? a
- * second layer?). We treat the first 0x2000 of each ZONE as a chunk
- * for now and refine when we see how the data looks.
+ * On disc, a ZONE is 0x4000 bytes: 64x64 cells, 4 bytes per source
+ * cell. LOAD.DLL expands each one into the engine's 0x3000-byte runtime
+ * chunk:
+ *   [0x0000..0x1fff] 64x64 u16 heights
+ *   [0x2000..0x2fff] 64x64 u8 material ids
+ * The conversion is preserved below from LOAD.DLL @ 0x801057f0.
  */
 #include <stdio.h>
 #include <stdint.h>
@@ -39,6 +37,12 @@
 
 extern void *Asset_LoadFile(const char *path);
 extern void *Heap_Alloc(uint32_t n);
+extern void *Heap_AllocOrRetry(uint32_t n);
+extern uintptr_t iRam000006ec;
+extern uintptr_t uRam000006ec;
+extern void *_DAT_800659f0;
+extern uint32_t _DAT_800659e8;
+extern uint8_t DAT_8008f020[0x2000];
 
 /* Engine globals we'll populate. The cleaned terrain_height.c declares
  * this extern; we provide the actual storage. 1024 entries, each a
@@ -50,10 +54,20 @@ int      g_terrain_loaded = 0;
 uint8_t  g_terrain_tile_x_min = 0, g_terrain_tile_x_max = 0;
 uint8_t  g_terrain_tile_z_min = 0, g_terrain_tile_z_max = 0;
 
+/* Original LOAD.DLL calls Terrain_InitFlatWorld before it loads any ZONE
+ * chunks. That routine fills every DAT_800911a0 slot with a valid 0x3000-byte
+ * flat chunk, then the level ZMAP replaces only detailed chunks. Keep the
+ * same behavior on host: non-ZMAP terrain is still solid, renderable ground. */
+static uint8_t g_flat_terrain_chunk[0x3000];
+static uint8_t *g_zone_runtime_chunks[512];
+
 /* IFF helpers -- big-endian u32 size. */
 static uint32_t be32(const uint8_t *p) {
     return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16
          | (uint32_t)p[2] <<  8 | (uint32_t)p[3];
+}
+static uint16_t be16(const uint8_t *p) {
+    return (uint16_t)((uint16_t)p[0] << 8) | (uint16_t)p[1];
 }
 static int is_form_tag(const uint8_t *p) {
     return p[0]=='F' && p[1]=='O' && p[2]=='R' && p[3]=='M';
@@ -111,12 +125,69 @@ static int collect_chunks(const uint8_t *data, uint32_t size,
     return count;
 }
 
+/* HIGH: LOAD.DLL FUN_801057f0 ZONE expansion.
+ * Source cell layout is 4 bytes. The runtime chunk layout is the same
+ * DAT_800911a0 format consumed by Terrain_HeightAt/Terrain_MaterialAt. */
+static uint8_t *convert_zone_to_runtime_chunk(const uint8_t *zone, uint32_t zone_size)
+{
+    if (zone_size < 0x4000) return NULL;
+    uint8_t *dst = (uint8_t *)malloc(0x3000);
+    if (!dst) return NULL;
+    for (int row = 0; row < 64; row++) {
+        for (int col = 0; col < 64; col++) {
+            int src_off = (row * 64 + col) * 4;
+            uint16_t src = (uint16_t)zone[src_off + 0]
+                         | (uint16_t)((uint16_t)zone[src_off + 1] << 8);
+            uint16_t h = (uint16_t)(((src >> 8) | (src << 8)) - 0x0200);
+            h = (uint16_t)(h | (uint16_t)((zone[src_off + 2] >> 3) << 11));
+            *(uint16_t *)(dst + row * 0x80 + col * 2) = h;
+            dst[0x2000 + row * 0x40 + col] = zone[src_off + 3];
+        }
+    }
+    return dst;
+}
+
+/* HIGH-MED: LOAD.DLL FUN_80105550 TINF material table, physics subset.
+ * Runtime DAT_8008f020 is 256 records * 0x20.  The first half of each record
+ * is renderer texture/color state; driving physics consumes the seven swapped
+ * halfwords copied to record +0x10..+0x1c. */
+static void load_tinf_materials(const uint8_t *tinf, uint32_t tinf_size)
+{
+    memset(DAT_8008f020, 0, 0x2000);
+    uint32_t n = tinf_size / 0x28u;
+    if (n > 256u)
+        n = 256u;
+    for (uint32_t i = 0; i < n; i++) {
+        const uint8_t *src = tinf + i * 0x28u;
+        uint8_t *dst = DAT_8008f020 + i * 0x20u;
+        for (uint32_t j = 0; j < 7; j++) {
+            uint16_t v = be16(src + (4u + j) * 2u);
+            *(uint16_t *)(dst + 0x10u + j * 2u) = v;
+        }
+        *(uint16_t *)(dst + 0x1eu) = (uint16_t)((be16(src + 6) >> 11) & 1u);
+    }
+    fprintf(stderr, "v8: TINF materials loaded -- %u records\n", (unsigned)n);
+}
+
 /* Public: load + parse + wire-up. Path is a V8-style "TRACK\\Foo.TER";
  * we map it to the real input/TERRAIN/Foo.EXP via Asset_LoadFile's
  * translation table once we add one, but for now feed the EXP path
  * directly. Returns 0 on success, -1 on error. */
 int Host_TerrainLoad(const char *exp_path)
 {
+    for (int i = 0; i < 512; i++) {
+        free(g_zone_runtime_chunks[i]);
+        g_zone_runtime_chunks[i] = NULL;
+    }
+
+    for (int i = 0; i < 0x2000; i += 2) {
+        g_flat_terrain_chunk[i + 0] = 0xff;
+        g_flat_terrain_chunk[i + 1] = 0x45;
+    }
+    memset(g_flat_terrain_chunk + 0x2000, 0, 0x1000);
+    for (int i = 0; i < 32 * 32; i++)
+        DAT_800911a0[i] = (uintptr_t)g_flat_terrain_chunk;
+
     void *blob = Asset_LoadFile(exp_path);
     if (!blob) {
         fprintf(stderr, "v8: Host_TerrainLoad(%s) -- load failed\n", exp_path);
@@ -142,35 +213,71 @@ int Host_TerrainLoad(const char *exp_path)
         return -1;
     }
 
+    uint32_t tinf_size = 0;
+    const uint8_t *tinf = find_chunk(form_body, form_inner_size, "TINF", &tinf_size);
+    if (tinf && tinf_size >= 0x28) {
+        load_tinf_materials(tinf, tinf_size);
+    } else {
+        memset(DAT_8008f020, 0, 0x2000);
+        fprintf(stderr, "v8: TINF materials not found\n");
+    }
+
+    /* LOAD.DLL FUN_801005e8 raw-copies AIMP and exposes it via the
+     * GP+0x6ec quadtree-root alias used by FUN_800244c4/FUN_80024d54. */
+    uint32_t aimp_size = 0;
+    const uint8_t *aimp = find_chunk(form_body, form_inner_size, "AIMP", &aimp_size);
+    if (aimp && aimp_size >= 10) {
+        _DAT_800659f0 = Heap_AllocOrRetry(aimp_size);
+        memcpy(_DAT_800659f0, aimp, aimp_size);
+        _DAT_800659e8 = aimp_size;
+        iRam000006ec = (uintptr_t)_DAT_800659f0;
+        uRam000006ec = iRam000006ec;
+        fprintf(stderr, "v8: AIMP navigation loaded -- %u bytes at %p\n",
+                (unsigned)_DAT_800659e8, _DAT_800659f0);
+    } else {
+        iRam000006ec = 0;
+        uRam000006ec = 0;
+        _DAT_800659f0 = NULL;
+        _DAT_800659e8 = 0;
+        fprintf(stderr, "v8: AIMP navigation not found\n");
+    }
+
     /* Collect ZONE chunks (heightmaps). */
-    const uint8_t *zones[64];
-    uint32_t       zone_sizes[64];
+    const uint8_t *zones[512];
+    uint32_t       zone_sizes[512];
     int n_zones = collect_chunks(form_body, form_inner_size, "ZONE",
-                                 zones, zone_sizes, 64);
+                                 zones, zone_sizes, 512);
     if (n_zones == 0) {
         fprintf(stderr, "v8: no ZONE chunks found\n");
         return -1;
     }
-    fprintf(stderr, "v8: terrain '%s' -- ZMAP @%p, %d ZONE chunk%s\n",
-            exp_path, (const void *)zmap, n_zones, n_zones == 1 ? "" : "s");
     for (int i = 0; i < n_zones; i++) {
-        fprintf(stderr, "v8:   ZONE[%d] @%p size 0x%x\n",
-                i, (const void *)zones[i], zone_sizes[i]);
+        g_zone_runtime_chunks[i] = convert_zone_to_runtime_chunk(zones[i], zone_sizes[i]);
+        if (!g_zone_runtime_chunks[i]) {
+            fprintf(stderr, "v8: ZONE[%d] conversion failed\n", i);
+            return -1;
+        }
     }
 
     /* Populate DAT_800911a0 from the ZMAP. ZMAP cells are BIG-ENDIAN
-     * u16 indices: 0 = empty/sky, N >= 1 = ZONE[N-1]. */
+     * u16 indices: 0 = empty/sky, N >= 1 = ZONE[N-1].
+     *
+     * File rows map to engine chunk-Z and file columns map to engine chunk-X.
+     * LOAD.DLL copies HEAD +0x08 into object posX and +0x10 into posZ, and
+     * JUNC calls Terrain_HeightAt(first_i32, second_i32). Keeping ZMAP in the
+     * same X/Z convention prevents the level from being transposed. */
     int populated = 0;
     uint8_t cx_min = 0xff, cx_max = 0, cz_min = 0xff, cz_max = 0;
-    for (int cx = 0; cx < 32; cx++) {
-        for (int cz = 0; cz < 32; cz++) {
-            uint32_t idx = ((uint32_t)zmap[(cx * 32 + cz) * 2 + 0] << 8)
-                          | (uint32_t)zmap[(cx * 32 + cz) * 2 + 1];
+    for (int file_row = 0; file_row < 32; file_row++) {
+        for (int file_col = 0; file_col < 32; file_col++) {
+            uint32_t idx = ((uint32_t)zmap[(file_row * 32 + file_col) * 2 + 0] << 8)
+                          | (uint32_t)zmap[(file_row * 32 + file_col) * 2 + 1];
             if (idx == 0 || (int)idx > n_zones) {
-                DAT_800911a0[cx * 32 + cz] = 0;
                 continue;
             }
-            DAT_800911a0[cx * 32 + cz] = (uintptr_t)zones[idx - 1];
+            int cx = file_col;
+            int cz = file_row;
+            DAT_800911a0[cx * 32 + cz] = (uintptr_t)g_zone_runtime_chunks[idx - 1];
             populated++;
             if (cx < cx_min) cx_min = (uint8_t)cx;
             if (cx > cx_max) cx_max = (uint8_t)cx;

@@ -21,6 +21,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern void Object_RefitAABB(int sub);
 extern void Damage_FromImpulse(int self, int *imp);
 extern int  Damage_StandardVehicle(int self, int *imp);
@@ -79,7 +80,7 @@ uint32_t VF_SiloRotate(int self, int mode, int param3)
         *(uint8_t *)(p + 1) = 7;
         *p = 0x80u;
         *(int16_t *)(p + 3) = 100;
-        p[0x19] = (uint32_t)(uintptr_t)&FUN_801005e8;
+        Object_SetCallbackPsxSlot(p, (uintptr_t)&FUN_801005e8);
         Object_BindLifecycle(p);
         p[0x22] = (int)*(int16_t *)(p + 5) << 1;
         p[0x23] = (int)*(int16_t *)((char *)p + 0x1a) << 1;

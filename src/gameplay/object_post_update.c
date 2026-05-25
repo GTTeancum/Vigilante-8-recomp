@@ -26,57 +26,272 @@
  * HIGH-MED.
  */
 #include <stdint.h>
+#include <stdio.h>
 
 extern int32_t **piRam0000076c;
 extern uint8_t  DAT_80065a70[];
 extern uint8_t  DAT_80065a60[];
 extern void Object_ApplyAngularVelocity(uint32_t *m, int pitchRate, int yawRate, int rollRate);  /* FUN_800439b8 */
-extern int  Terrain_HeightAndProbe(int self, int *posXyz, int u1, int u2);    /* FUN_8001d748 */
+extern int  Terrain_HeightAndProbe(intptr_t self, int *posXyz, void *normalOut, uintptr_t *materialOut);    /* FUN_8001d748 */
+extern void *FUN_8001f5a0(intptr_t self, intptr_t query);   /* SAT_SelectAxis */
+extern void  FUN_800176f8(intptr_t obj, int32_t *vec, int32_t *pos); /* Object_ApplyImpulseAtPoint */
+extern void  FUN_80012068(int idx, int a, int b, int c);    /* HudFlash_SetEntry */
+extern void  FUN_800205f8(int obj);                         /* Damage_Apply */
+
+static inline int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static inline int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
+static inline int32_t mips_sll_i32(int32_t value, unsigned shift)
+{
+    return (int32_t)((uint32_t)value << (shift & 31));
+}
 
 /* HIGH: head-insert `payload` into `listSentinel`'s chain. */
-void ObjList_FastInsert(int listSentinel, int payload)
-{
-    int32_t *node = *piRam0000076c;
-    int32_t  scratchHead = (int32_t)(uintptr_t)node;
-    *(int32_t **)(scratchHead + 4) = (int32_t *)DAT_80065a70;
-    piRam0000076c = (int32_t **)node;
-    node[2] = payload;
+typedef struct HostObjListNode {
+    struct HostObjListNode *next;
+    struct HostObjListNode *prev;
+    uintptr_t payload;
+    uint32_t deadline;
+} HostObjListNode;
 
-    int32_t **chainTail = *(int32_t ***)(listSentinel + 8);
-    *(int32_t ***)(listSentinel + 8) = (int32_t **)scratchHead;
-    *chainTail = (int32_t *)scratchHead;
-    *(int32_t **)(scratchHead + 4) = (int32_t *)chainTail;
-    *(int32_t *)scratchHead       = listSentinel + 4;
+static HostObjListNode s_host_obj_nodes[4096];
+static uint32_t s_host_obj_node_next;
+
+void ObjList_HostResetPool(void)
+{
+    s_host_obj_node_next = 0;
+    for (uint32_t i = 0; i < (uint32_t)(sizeof s_host_obj_nodes / sizeof s_host_obj_nodes[0]); i++) {
+        s_host_obj_nodes[i].next = NULL;
+        s_host_obj_nodes[i].prev = NULL;
+        s_host_obj_nodes[i].payload = 0;
+        s_host_obj_nodes[i].deadline = 0;
+    }
+}
+
+static HostObjListNode *host_list_node_alloc(void)
+{
+    if (s_host_obj_node_next >= (uint32_t)(sizeof s_host_obj_nodes / sizeof s_host_obj_nodes[0]))
+        return NULL;
+    return &s_host_obj_nodes[s_host_obj_node_next++];
+}
+
+void ObjList_FastInsert(uintptr_t listSentinel, uintptr_t payload)
+{
+    HostObjListNode *sentinel = (HostObjListNode *)listSentinel;
+    HostObjListNode *node = NULL;
+
+    if (piRam0000076c != NULL && *piRam0000076c != NULL) {
+        node = (HostObjListNode *)*piRam0000076c;
+        piRam0000076c = (int32_t **)node;
+    } else {
+        node = host_list_node_alloc();
+    }
+    if (node == NULL)
+        return;
+
+    if (sentinel->prev == NULL) {
+        sentinel->next = NULL;
+        sentinel->prev = sentinel;
+        sentinel->payload = 0;
+    }
+
+    node->payload = payload;
+    node->next = NULL;
+    node->prev = sentinel->prev;
+    if (node->prev == sentinel) {
+        sentinel->next = node;
+    } else {
+        node->prev->next = node;
+    }
+    sentinel->prev = node;
 }
 
 void Object_RegisterPostUpdate(uint32_t *obj)
 {
     obj[0] |= 0x80u;
-    ObjList_FastInsert((int)(uintptr_t)DAT_80065a60, (int)(uintptr_t)obj);
+    ObjList_FastInsert((uintptr_t)DAT_80065a60, (uintptr_t)obj);
 }
 
-/* HIGH-MED: gravity + rotation + terrain-collide per-tick. */
-uint32_t Projectile_GravityTick(uint8_t *obj, int mode, int *unused)
+/* HIGH: gravity, terrain bounce, and collision response per tick. */
+uint32_t Projectile_GravityTick(uint8_t *obj, int mode, intptr_t arg)
 {
-    if (mode != 0) return 0xffffffffu;
+    if (mode == 0) {
+        *(int32_t *)(obj + 0x24) = mips_addu_i32(*(int32_t *)(obj + 0x24),
+                                                 *(int32_t *)(obj + 0x88));
+        *(int32_t *)(obj + 0x28) = mips_addu_i32(*(int32_t *)(obj + 0x28),
+                                                 *(int32_t *)(obj + 0x8c));
+        *(int32_t *)(obj + 0x2c) = mips_addu_i32(*(int32_t *)(obj + 0x2c),
+                                                 *(int32_t *)(obj + 0x90));
 
-    *(int32_t *)(obj + 0x24) += *(int32_t *)(obj + 0x88);
-    *(int32_t *)(obj + 0x28) += *(int32_t *)(obj + 0x8c);
-    *(int32_t *)(obj + 0x2c) += *(int32_t *)(obj + 0x90);
+        Object_ApplyAngularVelocity((uint32_t *)(obj + 0x10),
+                                    (int)*(int16_t *)(obj + 0x80),
+                                    (int)*(int16_t *)(obj + 0x82),
+                                    (int)*(int16_t *)(obj + 0x84));
 
-    Object_ApplyAngularVelocity((uint32_t *)(obj + 0x10),
-                                (int)*(int16_t *)(obj + 0x80),
-                                (int)*(int16_t *)(obj + 0x82),
-                                (int)*(int16_t *)(obj + 0x84));
+        int32_t vy = mips_addu_i32(*(int32_t *)(obj + 0x8c), 0x5a);
+        *(int32_t *)(obj + 0x8c) = vy;
+        if (vy > 0) {
+            int32_t terrainY = Terrain_HeightAndProbe((intptr_t)obj, (int *)(obj + 0x24),
+                                                      NULL, NULL);
+            if (*(int32_t *)(obj + 0x28) <= terrainY) return 0;
 
-    int32_t vy = *(int32_t *)(obj + 0x8c) + 0x5a;
-    *(int32_t *)(obj + 0x8c) = vy;
-    if (vy > 0) {
-        int32_t terrainY = Terrain_HeightAndProbe((int)(intptr_t)obj, (int *)(obj + 0x24), 0, 0);
-        if (*(int32_t *)(obj + 0x28) > terrainY) return 0;   /* below ground = despawn */
+            *(int32_t *)(obj + 0x28) = terrainY;
+            int8_t bounceCount = (int8_t)(*(int8_t *)(obj + 0x87) - 1);
+            *(int8_t *)(obj + 0x87) = bounceCount;
+            *(int32_t *)(obj + 0x8c) = mips_subu_i32(0, *(int32_t *)(obj + 0x8c)) / 2;
+            if (bounceCount == 0) {
+                FUN_800205f8((int)(uintptr_t)obj);
+                return 0xffffffffu;
+            }
+        }
+        return 0;
     }
-    (void)unused;
-    return 0xffffffffu;
+
+    if (mode != 3) return 0;
+
+    uint32_t *query = (uint32_t *)(uintptr_t)arg;
+    intptr_t hitObj = (intptr_t)query[0];
+    if (*(int8_t *)(uintptr_t)(hitObj + 4) != 2) {
+        return 0;
+    }
+
+    FUN_8001f5a0((intptr_t)obj, (intptr_t)query);
+    int32_t dot = mips_addu_i32(
+        mips_addu_i32(mips_mult_lo_i32(*(int32_t *)(obj + 0x88),
+                                       (int32_t)*(int16_t *)(query + 8)),
+                      mips_mult_lo_i32(*(int32_t *)(obj + 0x8c),
+                                       (int32_t)*(int16_t *)((uint8_t *)query + 0x22))),
+        mips_mult_lo_i32(*(int32_t *)(obj + 0x90),
+                         (int32_t)*(int16_t *)(query + 9)));
+    if (dot < 0) dot = mips_addu_i32(dot, 0x7ff);
+    dot >>= 11;
+    if (dot >= 0) return 0;
+
+    int32_t impulse[3];
+    impulse[0] = mips_sll_i32(*(int32_t *)(obj + 0x88), 7);
+    impulse[1] = mips_sll_i32(*(int32_t *)(obj + 0x8c), 7);
+    impulse[2] = mips_sll_i32(*(int32_t *)(obj + 0x90), 7);
+    FUN_800176f8(hitObj, impulse, (int32_t *)(obj + 0x24));
+
+    if (*(int16_t *)(uintptr_t)(hitObj + 6) < 0) {
+        FUN_80012068(~(int)*(int16_t *)(uintptr_t)(hitObj + 6), 0xff, 2, 0x80);
+    }
+
+    int32_t adjust = mips_mult_lo_i32(dot, (int32_t)*(int16_t *)(query + 8));
+    if (adjust < 0) adjust = mips_addu_i32(adjust, 0xfff);
+    *(int32_t *)(obj + 0x88) = mips_subu_i32(*(int32_t *)(obj + 0x88), adjust >> 12);
+
+    adjust = mips_mult_lo_i32(dot, (int32_t)*(int16_t *)((uint8_t *)query + 0x22));
+    if (adjust < 0) adjust = mips_addu_i32(adjust, 0xfff);
+    *(int32_t *)(obj + 0x8c) = mips_subu_i32(*(int32_t *)(obj + 0x8c), adjust >> 12);
+
+    adjust = mips_mult_lo_i32(dot, (int32_t)*(int16_t *)(query + 9));
+    if (adjust < 0) adjust = mips_addu_i32(adjust, 0xfff);
+    *(int32_t *)(obj + 0x90) = mips_subu_i32(*(int32_t *)(obj + 0x90), adjust >> 12);
+    return 0;
+}
+
+/* FUN_8003eab0 -- hex alias; weapon_split.c stores this as the tick callback ptr. */
+uint32_t FUN_8003eab0(uint8_t *obj, int mode, intptr_t arg)
+{
+    return Projectile_GravityTick(obj, mode, arg);
+}
+
+/* ================================================================
+ * FUN_8001dc1c -- Object_RecomputeBoundingRadius
+ *
+ * Walk the child hierarchy (sibling chain via +0x34) computing the
+ * max of (child_self_radius + Vec3_Length(child->pos_at+0x24)) across
+ * all children, then store the result at obj+0x54.
+ *
+ * The "self" radius starts from obj->boneBank[+0x24] shifted left by
+ * (0x10 - boneBank[+0x26]) bits (i.e., a 4.12 fixed-point bank-local
+ * size scaled into world coords).
+ *
+ * HIGH confidence (direct Ghidra port).
+ * ================================================================ */
+extern int FUN_80016a20(const int32_t *v);   /* Vec3_Length */
+int FUN_8001dc1c(int param_1)
+{
+    int iVar1;
+    int iVar2;
+    int iVar3;
+    int iVar4;
+    int iVar5;
+
+    iVar3 = *(int *)(uintptr_t)(param_1 + 0x30);
+    iVar5 = 0;
+    if (iVar3 != 0) {
+        iVar5 = (int)((uint32_t)*(uint16_t *)(uintptr_t)(iVar3 + 0x24)
+                      << (0x10 - *(uint16_t *)(uintptr_t)(iVar3 + 0x26) & 0x1f));
+    }
+    for (iVar3 = *(int *)(uintptr_t)(param_1 + 0x38);
+         iVar3 != 0;
+         iVar3 = *(int *)(uintptr_t)(iVar3 + 0x34))
+    {
+        iVar1 = FUN_8001dc1c(iVar3);
+        iVar2 = FUN_80016a20((const int32_t *)(uintptr_t)(iVar3 + 0x24));
+        iVar4 = iVar1 + iVar2;
+        if (iVar1 + iVar2 < iVar5) {
+            iVar4 = iVar5;
+        }
+        iVar5 = iVar4;
+    }
+    *(int *)(uintptr_t)(param_1 + 0x54) = iVar5;
+    return iVar5;
+}
+
+/* ================================================================
+ * FUN_8002036c -- Object_PostUpdate2
+ *
+ * Post-update hook: rebuild bone matrix, recompute bounding radius,
+ * dispatch event 1 to the per-object callback. If the callback returns
+ * non-negative AND the object has flag bit 3 with no current binding,
+ * attach scenery via FUN_8003e730. Finally re-register the object in
+ * all active scene lists.
+ * ================================================================ */
+extern void  FUN_8001d708(intptr_t obj);            /* BuildBoneMatrix */
+extern void  FUN_8003e730(uint32_t *obj);           /* SceneryAttach */
+extern void  FUN_800202f4(uint32_t *obj);           /* Object_RegisterInScene */
+extern uintptr_t Object_CallbackFromPsxSlot(const void *obj);
+uint32_t FUN_8002036c(uint32_t *param_1);
+
+uint32_t FUN_8002036c(uint32_t *param_1)
+{
+    int      iVar1;
+    uint32_t uVar2;
+
+    /* Ghidra: FUN_8001d708() with no args -- $a0 still holds param_1. */
+    FUN_8001d708((intptr_t)param_1);
+    FUN_8001dc1c((int)(uintptr_t)param_1);
+    uintptr_t callback = Object_CallbackFromPsxSlot(param_1);
+    if (callback == 0) {
+        iVar1 = 0;
+    } else {
+        typedef int (*EventFn)(uint32_t *, int, intptr_t);
+        iVar1 = ((EventFn)callback)(param_1, 1, 0);
+    }
+    uVar2 = 0;
+    if (-1 < iVar1) {
+        if (((*param_1 & 8u) != 0) && (param_1[0x1c] == 0)) {
+            FUN_8003e730(param_1);
+        }
+        FUN_800202f4(param_1);
+        uVar2 = 0;  /* FUN_800202f4 is void; return propagates 0 via $v0 */
+    }
+    return uVar2;
 }
 
 /* ============================================================

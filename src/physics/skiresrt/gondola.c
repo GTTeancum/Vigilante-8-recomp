@@ -2,10 +2,11 @@
  *
  * Source: SKIRESRT.DLL  FUN_80101050.
  *
- * Variant of HD_DamLeverTick: when bit 0 of obj's status flag is set,
- * integrate position by velocity / 128 (same +0x7f sign-correction).
- * When that bit is clear, the gondola is stationary and the function
- * essentially no-ops (uVar3 = 0x10000 is dead code in that path).
+ * Variant of HD_DamLeverTick: every non-mode-2 tick syncs this carrier
+ * from its linked gondola/chair object at +0x78, optionally integrating
+ * local velocity first. When the linked chair reaches its detach window,
+ * the callback releases the carrier, schedules the linked chair, and
+ * bumps the global ski-lift cooldown.
  *
  * Used by gondola_1, liftpole_1, liftstation_1, Ball_1/2 (the
  * spinning lift wheels).
@@ -14,22 +15,81 @@
  */
 #include <stdint.h>
 
+extern void FUN_80020890(uint32_t *obj, int timer);
+extern void gap_80031294(uint32_t *self);
+extern uint8_t DAT_80065c28[];
+extern uint32_t _DAT_800659fc;
+
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t rtz_shift_i32(int32_t v, unsigned sh, int32_t bias)
+{
+    if (v < 0) v = mips_addu_i32(v, bias);
+    return v >> sh;
+}
+
+uint32_t FUN_80101050(uint32_t *obj, int mode)
+{
+    if (mode != 2) {
+        uint32_t zStep = 0x10000;
+        if ((obj[0] & 1u) != 0) {
+            obj[9] = (uint32_t)mips_addu_i32((int32_t)obj[9],
+                rtz_shift_i32((int32_t)obj[0x20], 7, 0x7f));
+            obj[10] = (uint32_t)mips_addu_i32((int32_t)obj[10],
+                rtz_shift_i32((int32_t)obj[0x21], 7, 0x7f));
+            zStep = (uint32_t)rtz_shift_i32((int32_t)obj[0x22], 7, 0x7f);
+            obj[11] = (uint32_t)mips_addu_i32((int32_t)obj[11], (int32_t)zStep);
+        }
+
+        uint32_t *linked = (uint32_t *)(uintptr_t)obj[0x1e];
+        uint16_t linkedT = *(uint16_t *)((uint8_t *)linked + 0x46);
+        obj[4] = linked[4];
+        obj[5] = linked[5];
+        obj[6] = linked[6];
+        obj[7] = linked[7];
+        obj[8] = linked[8];
+        obj[9] = linked[9];
+        obj[10] = linked[10];
+        obj[11] = linked[11];
+        obj[0x12] = linked[9];
+        obj[0x13] = linked[10];
+        obj[0x14] = linked[11];
+        obj[10] = (uint32_t)mips_addu_i32((int32_t)obj[10], (int32_t)(zStep | 0x5000u));
+
+        if (*(uint16_t *)((uint8_t *)linked + 0x0a) == 0x2c &&
+            (int16_t)linkedT < 0x6001 &&
+            linkedT < 0xe001) {
+            int status = (int16_t)*(uint16_t *)((uint8_t *)obj + 6);
+            uint32_t flags = *(uint32_t *)(DAT_80065c28 + ((~status) * 0x18) + 8);
+            if ((flags & 0x1000000u) == 0)
+                return 0;
+            if (linkedT < 0x1001)
+                return 0;
+            if ((int16_t)linkedT < -0x6fff)
+                return 0;
+        }
+
+        linked[0x20] = 0;
+        linked[0] |= 0x20u;
+        FUN_80020890(linked, 0x78);
+        gap_80031294(obj);
+        obj[0x20] = 0;
+        obj[0] = (obj[0] & 0xfeffffddu) | 8u;
+        obj[0x21] = 0x5f5;
+        obj[0x22] = 0x47800;
+    }
+
+    obj[0] |= 2u;
+    *(uint16_t *)(uintptr_t)(_DAT_800659fc + 0xa2) = 0x3c;
+    return 0;
+}
+
 uint32_t SR_GondolaTick(uint32_t *obj, int mode)
 {
-    if (mode != 0 && mode != 2) return 0;
-    if ((obj[0] & 1) == 0) return 0;          /* moving flag */
-
-    int32_t vx = (int32_t)obj[0x20];
-    int32_t vy = (int32_t)obj[0x21];
-    int32_t vz = (int32_t)obj[0x22];
-    if (vx < 0) vx += 0x7f;
-    if (vy < 0) vy += 0x7f;
-    if (vz < 0) vz += 0x7f;
-
-    obj[9]  += (uint32_t)(vx >> 7);
-    obj[10] += (uint32_t)(vy >> 7);
-    obj[11] += (uint32_t)(vz >> 7);
-    return 0;
+    return FUN_80101050(obj, mode);
 }
 
 /* ============================================================

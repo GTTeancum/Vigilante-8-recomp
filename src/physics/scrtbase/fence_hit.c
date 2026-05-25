@@ -17,11 +17,11 @@
  */
 #include <stdint.h>
 
-extern int  Damage_FromImpulse(uint32_t *self, int *impulse);
-extern int  Damage_AccumulateOrFire(uint32_t *self, uint16_t amount);
+extern int  FUN_8002239c(uint32_t *self, int32_t *impulse);
+extern uint32_t FUN_80022320(uint32_t *self, uint32_t amount);
 extern uint32_t Object_FindByPairedSpawnId(uint32_t sid);   /* func_0x80021808 */
 extern int  Object_FrameCounterBump(int payload, uint16_t arg);
-extern void Object_SetSubState(int obj, int sub);
+extern void FUN_80020890(uint32_t *obj, int sub);
 extern uint32_t SfxChannel_Acquire(void);
 extern void Audio_PlaySfxAtPosVar(uint32_t ch, uint32_t bank, int sfxId, void *pos);
 extern void FX_Teardown(int obj);   /* func_0x80020844 */
@@ -30,32 +30,36 @@ extern uint32_t _DAT_800658fc;
 uint32_t SB_FenceHit(int self, uint32_t mode, int *impulse)
 {
     uint32_t *paired = NULL;
+    int damageObj = self;
     if (mode == 2) goto clearBit;
     if (mode < 3 && mode == 1) goto applyState;
-    if (mode != 3 && mode != 8) goto applyState;
+    if (mode == 3 || mode != 8) {
+        paired = (uint32_t *)(uintptr_t)impulse[3];
+        int impulser = *impulse;
+        if ((uint8_t)paired[1] == mode
+            && *(int8_t *)(impulser + 4) == 2)
+        {
+            uint32_t sid = (*(int32_t *)(impulser + 0x80) < 0) ? 0x75 : 0x74;
+            uint32_t *pairedObj = (uint32_t *)(uintptr_t)Object_FindByPairedSpawnId(sid);
+            Object_FrameCounterBump((int)(uintptr_t)pairedObj,
+                                    *(uint16_t *)(uintptr_t)pairedObj[0x18]);
+            *(int8_t *)(pairedObj + 2) = 1;
+            FUN_80020890(pairedObj, 600);
+            FUN_80020890((uint32_t *)(uintptr_t)(uint32_t)self, 600);
+            paired[0] |= 0x20u;
 
-    paired = (uint32_t *)(uintptr_t)impulse[3];
-    int impulser = *impulse;
-    if ((uint8_t)((uintptr_t)paired >> 8) == mode
-        && *(int8_t *)(impulser + 4) == 2)
-    {
-        uint32_t sid = (*(int32_t *)(impulser + 0x80) < 0) ? 0x74 : 0x75;
-        uint32_t pairedObj = Object_FindByPairedSpawnId(sid);
-        Object_FrameCounterBump((int)pairedObj, *(uint16_t *)(*(int *)(pairedObj + 0x60)));
-        *(int8_t *)(pairedObj + 8) = 1;
-        Object_SetSubState((int)pairedObj, 600);
-        Object_SetSubState(self, 600);
-        paired[0] |= 0x20u;
-
-        uint32_t ch = SfxChannel_Acquire();
-        Audio_PlaySfxAtPosVar(ch, _DAT_800658fc, 0x14, (void *)(intptr_t)(impulser + 0x24));
-        self = 1;
+            uint32_t ch = SfxChannel_Acquire();
+            Audio_PlaySfxAtPosVar(ch, _DAT_800658fc, 0x14, (void *)(intptr_t)(impulser + 0x24));
+            damageObj = 1;
+        }
+        FUN_8002239c((uint32_t *)(uintptr_t)(uint32_t)damageObj, (int32_t *)impulse);
+        damageObj = 1;
     }
-    Damage_FromImpulse((uint32_t *)(intptr_t)self, impulse);
-    self = 1;
 
-applyState: {
-        int killed = Damage_AccumulateOrFire((uint32_t *)(intptr_t)self, (uint16_t)(uintptr_t)impulse);
+applyState:
+    {
+        int killed = (int)FUN_80022320((uint32_t *)(uintptr_t)(uint32_t)damageObj,
+                                       (uint32_t)(uintptr_t)impulse);
         if (killed == 0) return 0;
         FX_Teardown(self);
     }
@@ -67,6 +71,11 @@ clearBit: {
         }
     }
     return 0;
+}
+
+uint32_t FUN_80101acc(int self, uint32_t mode, int *impulse)
+{
+    return SB_FenceHit(self, mode, impulse);
 }
 
 /* ============================================================

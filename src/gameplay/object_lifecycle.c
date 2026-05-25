@@ -25,10 +25,11 @@
 extern void *Heap_AllocOrRetry(uint32_t n);
 extern void *Heap_Realloc(void *p, uint32_t n);
 extern void  Heap_Free(void *p);
-extern void  Font_BuildTexture(void *tim);     /* FUN_8001884c -- uploads via LoadImage */
 extern void  Audio_FreeSND(void *bank);         /* FUN_80044394 */
 extern void  Object_FreeAndUnhook(void *p);
-extern void  Object_BoneTouchUp(int *parent, uint16_t idx);  /* FUN_8001b3d4 */
+extern int  *FUN_8001b3d4(int *param_1, uint param_2);  /* BoneAnim_TouchSlot */
+extern uint16_t DAT_800568fc[];
+extern int   FUN_8001884c(int slot);   /* VRAM_FreeTexSlot (renderer stub) */
 
 /* HIGH: build the in-memory Object struct from a parsed
  * { template[], stride 0xc, count obj[4] } pair. */
@@ -38,11 +39,91 @@ uint32_t *Object_BuildFromBin(int *templateBody, void *animPtr)
     obj[0] = (uintptr_t)templateBody;
     obj[1] = (uintptr_t)animPtr;
     obj[2] = 0;
-    /* Convert the in-template offset at +1 from relative to absolute. */
+
     templateBody[1] = (int)(uintptr_t)templateBody + templateBody[1];
-    /* The original then loops per-prim copying defaults; omitted for the
-     * pass-2 summary view. Pass 3 finishes the body. */
+    for (int groupIdx = 0; groupIdx < templateBody[0]; groupIdx++) {
+        int *groupTable = (int *)(uintptr_t)templateBody[1];
+        int group = (int)(uintptr_t)groupTable + groupTable[groupIdx];
+        groupTable[groupIdx] = group;
+
+        *(int *)(uintptr_t)(group + 0x04) = group + *(int *)(uintptr_t)(group + 0x04);
+        *(int *)(uintptr_t)(group + 0x0c) = group + *(int *)(uintptr_t)(group + 0x0c);
+        int packet = group + *(int *)(uintptr_t)(group + 0x14);
+        *(int *)(uintptr_t)(group + 0x14) = packet;
+
+        uint16_t primCount = *(uint16_t *)(uintptr_t)(group + 0x10);
+        for (uint16_t prim = 0; prim < primCount; prim++) {
+            uint8_t *pkt = (uint8_t *)(uintptr_t)packet;
+            uint8_t rawType = pkt[3];
+            uint32_t normType = (uint32_t)(rawType & 0x0f) << 2;
+            if ((rawType & 0x80) != 0) normType |= 0x40;
+            if ((rawType & 0x10) != 0) normType |= 0x02;
+            if ((rawType & 0x40) != 0) normType |= 0x80;
+            pkt[3] = (uint8_t)normType;
+
+            *(uint16_t *)(pkt + 0x04) = (uint16_t)(*(uint16_t *)(pkt + 0x04) << 3);
+            *(uint16_t *)(pkt + 0x06) = (uint16_t)(*(uint16_t *)(pkt + 0x06) << 3);
+            *(uint16_t *)(pkt + 0x08) = (uint16_t)(*(uint16_t *)(pkt + 0x08) << 3);
+
+            int strideBase = packet;
+            switch ((normType >> 2) & 0x0f) {
+            case 1:
+            case 3:
+                pkt[0x1b] = 0x34;
+                pkt[0x17] = 0x34;
+                break;
+            case 2:
+                pkt[0x13] = 0x30;
+                pkt[0x0f] = 0x30;
+                break;
+            case 4:
+            case 5:
+            case 7:
+                *(uint16_t *)(pkt + 0x0a) = (uint16_t)(*(uint16_t *)(pkt + 0x0a) << 3);
+                break;
+            case 8:
+            case 9:
+            case 0x0b:
+            case 0x0c:
+                *(uint16_t *)(pkt + 0x0a) = (uint16_t)(*(uint16_t *)(pkt + 0x0a) << 3);
+                *(uint16_t *)(pkt + 0x0c) = (uint16_t)(*(uint16_t *)(pkt + 0x0c) << 3);
+                *(uint16_t *)(pkt + 0x0e) = (uint16_t)(*(uint16_t *)(pkt + 0x0e) << 3);
+                break;
+            case 0x0a:
+                strideBase = packet + (uint32_t)*(uint16_t *)(pkt + 0x0a) * 4u;
+                break;
+            case 0x0d:
+            case 0x0f:
+                pkt[3] |= 1;
+                break;
+            default:
+                break;
+            }
+
+            packet = strideBase
+                   + *(uint16_t *)((uint8_t *)DAT_800568fc + (pkt[3] & 0x3c));
+        }
+    }
+
+    templateBody[3] = (int)(uintptr_t)templateBody + templateBody[3];
+    for (int i = 0; i < templateBody[2]; i++) {
+        int *table = (int *)(uintptr_t)templateBody[3];
+        table[i] = (int)(uintptr_t)table + table[i];
+    }
+
+    templateBody[5] = (int)(uintptr_t)templateBody + templateBody[5];
+    for (int i = 0; i < templateBody[4]; i++) {
+        int *table = (int *)(uintptr_t)templateBody[5];
+        table[i] = (int)(uintptr_t)table + table[i];
+        *(uint16_t *)((uint8_t *)obj + 0x0c + i * 0x0c) = 0;
+    }
+
     return obj;
+}
+
+uint32_t *FUN_8001a640(int *templateBody, void *animPtr)
+{
+    return Object_BuildFromBin(templateBody, animPtr);
 }
 
 /* HIGH: walk the object's prim list, uploading each TIM atlas. */
@@ -52,7 +133,7 @@ void Object_FinishBuild(int **obj)
     int n = *(int *)((uintptr_t)obj[0] + 0x10);
     if (n <= 0) return;
     for (int i = 0, off = 0xc; i < n; i++, off += 0xc) {
-        Font_BuildTexture((uint8_t *)obj + off);
+        FUN_8001884c((int)(uintptr_t)obj + off);
     }
 }
 
@@ -62,7 +143,7 @@ void Object_RegisterInChain(int **obj)
     int *hdr = (int *)obj[0];
     uint32_t n = (uint32_t)hdr[0x10 / 4];
     for (uint32_t i = 0; i < n; i++) {
-        Object_BoneTouchUp(obj, (uint16_t)i);
+        FUN_8001b3d4((int *)obj, (uint)(uint16_t)i);
     }
     /* Trim the allocation to its actual size. */
     int trimSize = hdr[0x14 / 4] - (int)(uintptr_t)hdr;
@@ -82,6 +163,64 @@ void Object_FreeAndChildren(int *obj)
     if (obj[1] != 0) Heap_Free((void *)(intptr_t)obj[1]);
     if (obj[2] != 0) Audio_FreeSND((void *)(intptr_t)obj[2]);
     Object_FreeWithoutSound(obj);
+}
+
+/* ================================================================
+ * FUN_8001a994 -- Object_FinishBuild / FreeVRAMSlots
+ *
+ * Walks the per-prim slot list (param_1[3..3+N*3] each 12 bytes apart)
+ * for the bone bank at *param_1, calling FUN_8001884c (VRAM TIM free)
+ * on each. The count is at (*param_1)[+0x10].
+ *
+ * FUN_8001884c is the renderer-side VRAM allocator's free fn; the
+ * stub in panic_stubs.c is acceptable while renderer remains stubbed.
+ * HIGH confidence (direct Ghidra port).
+ * ================================================================ */
+extern void Heap_Free(void *p);       /* FUN_80045088 */
+
+void FUN_8001a994(int *param_1)
+{
+    int iVar1;
+    int iVar2;
+
+    if ((*param_1 != 0) && (iVar1 = 0, 0 < *(int *)(uintptr_t)(*param_1 + 0x10))) {
+        iVar2 = 0xc;
+        do {
+            FUN_8001884c((int)(uintptr_t)param_1 + iVar2);
+            iVar1 = iVar1 + 1;
+            iVar2 = iVar2 + 0xc;
+        } while (iVar1 < *(int *)(uintptr_t)(*param_1 + 0x10));
+    }
+}
+
+/* ================================================================
+ * FUN_8001aa0c -- BoneBank_FinalFree
+ *   FreeVRAMSlots(self), then heap-free self.
+ * HIGH confidence.
+ * ================================================================ */
+void FUN_8001aa0c(int *param_1)
+{
+    FUN_8001a994(param_1);
+    Heap_Free(param_1);
+}
+
+/* ================================================================
+ * FUN_8001aa38 -- Object_FreeAndChildren
+ *
+ * Frees the 3 sub-pointer slots of a heap-resident object record
+ * (param_1[0]=model, param_1[1]=anim, param_1[2]=audio bank descr),
+ * then calls BoneBank_FinalFree to free per-prim VRAM and the
+ * record itself.
+ * HIGH confidence.
+ * ================================================================ */
+extern void FUN_80044394(int audioBank);   /* SfxBank_Free (audio stub) */
+
+void FUN_8001aa38(int *param_1)
+{
+    if (*param_1    != 0) Heap_Free((void *)(uintptr_t)*param_1);
+    if (param_1[1]  != 0) Heap_Free((void *)(uintptr_t)param_1[1]);
+    if (param_1[2]  != 0) FUN_80044394(param_1[2]);
+    FUN_8001aa0c(param_1);
 }
 
 /* ============================================================

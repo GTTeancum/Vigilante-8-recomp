@@ -31,6 +31,7 @@ extern void CompMatrixLV(uint32_t mat, uint32_t a, uint8_t *b);    /* FUN_8004cf
 extern uint32_t Object_SpawnFromBank(uint32_t bin, int kind, int prio, int flag);
 extern void RotMatrixYXZ_gte(int *yawXyz, uint32_t *outMat);
 extern void Object_BumpSubstate_Or_FX(uint32_t *self);
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern void Damage_FromImpulse(uint32_t *self, int *imp);
 extern int  Damage_StandardVehicle(uint32_t *self, int *imp);
 extern int  Damage_AccumulateOrFire(uint32_t *self, uint16_t a);
@@ -40,6 +41,7 @@ extern void Pool_BindSnareFx(uint8_t h, uint32_t bin, int slot, int aux);
 extern uint8_t SFX_PlayWorld(uint32_t *pos);
 extern void SFX_Update(int h, int posVoxel);
 extern uint32_t _DAT_800737d8;
+extern int LAB_8004042c(int obj, int event, int param3);
 
 uint32_t SK_SnowPulse(uint32_t *self, int mode, int param3)
 {
@@ -51,7 +53,7 @@ uint32_t SK_SnowPulse(uint32_t *self, int mode, int param3)
             uint32_t ch = self[0xe];
             int speed = ((Rand255() << 8) >> 15) + 0x1000;
             uint32_t wp = PathPiece_Find(ch, 0x8000);
-            uint8_t  loc[20];
+            uint8_t  loc[28];
             uint32_t nrm = Pathfinder_BuildNormal(loc, wp);
             CompMatrixLV(ch + 0x10, nrm, loc);
             uint32_t *puff = (uint32_t *)Object_SpawnFromBank(_DAT_800737d8, 0x20, 0xa0, 8);
@@ -70,7 +72,7 @@ uint32_t SK_SnowPulse(uint32_t *self, int mode, int param3)
             puff[9]  = *(uint32_t *)(loc + 16);  /* spawn pos copy */
             puff[10] = *(uint32_t *)(loc + 20);
             puff[0xb]= *(uint32_t *)(loc + 24);
-            puff[0x19] = 0x8004042cu;
+            Object_SetCallbackPsxSlot(puff, (uintptr_t)&LAB_8004042c);
             Object_BumpSubstate_Or_FX(self);
             *(uint8_t *)(self + 2) = 8;
         }

@@ -38,22 +38,41 @@ extern void     FX_RingFlash(void *self, int dy, void *params, int n); /* FUN_80
 extern uint32_t _DAT_80065ad4;   /* live target vehicle */
 extern uint8_t  DAT_80100044, DAT_80100050;
 
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
 uint32_t AG_TrackerDish(uint32_t *self, int mode, int *arg)
 {
     uint32_t modelH = self[0xe];
     int      sub    = *(int *)(modelH + 0x38);
 
     if (mode == 1) goto ground_align;
-    if (mode == 0 || mode == 8) {
-        if (mode == 0) {
+    if (mode != 3 && mode != 8) {
             /* Advance reload-cycle: pos += rate; if not yet firing, */
             /* tick rate by +0x10e per frame.                        */
             int pos  = *(int *)(sub + 0x28);
             int rate = *(int *)(sub + 0x48);
-            pos += rate;
+            pos = mips_addu_i32(pos, rate);
             *(int *)(sub + 0x28) = pos;
             if (*(char *)(sub + 8) == 0) {
-                *(int *)(sub + 0x48) = rate + 0x10e;
+                *(int *)(sub + 0x48) = mips_addu_i32(rate, 0x10e);
                 if (*(int *)(sub + 0x50) < pos) {
                     /* Reached fire-position: shoot. */
                     *(int *)(sub + 0x28) = *(int *)(sub + 0x50);
@@ -62,9 +81,14 @@ uint32_t AG_TrackerDish(uint32_t *self, int mode, int *arg)
                     uint8_t  stageMax= (uint8_t)self[2];
                     uint8_t  nFrames = (uint8_t)self[3];
                     *(char *)(sub + 8) = 1;
-                    *(int *)(sub + 0x48) =
-                        (int)(((uint32_t)hp * (curStage - 1) + nFrames) * -0x17d7)
-                        / (int)((uint32_t)hp * (stageMax - 1));
+                    {
+                        int numer = mips_addu_i32(
+                            mips_mult_lo_i32((int32_t)hp, mips_addu_i32(curStage, -1)),
+                            nFrames);
+                        numer = mips_mult_lo_i32(numer, -0x17d7);
+                        *(int *)(sub + 0x48) =
+                            numer / mips_mult_lo_i32((int32_t)hp, mips_addu_i32(stageMax, -1));
+                    }
                     int spawnAddr   = Object_LocalToWorldPos();
                     uint32_t projH  = Pool_AllocProjectile();
                     arg = NULL;
@@ -82,19 +106,19 @@ uint32_t AG_TrackerDish(uint32_t *self, int mode, int *arg)
             }
             if ((int16_t)self[3] == 0) return 0;
             if ((*self & 0x4000) == 0)  return 0;
-            int aimYaw = ratan2(*(int *)(_DAT_80065ad4 + 0x48) - (int)self[0x12],
-                                *(int *)(_DAT_80065ad4 + 0x50) - (int)self[0x14]);
+            int aimYaw = ratan2(mips_subu_i32(*(int *)(_DAT_80065ad4 + 0x48), (int)self[0x12]),
+                                mips_subu_i32(*(int *)(_DAT_80065ad4 + 0x50), (int)self[0x14]));
             uint16_t *yawCell = (uint16_t *)(modelH + 0x42);
-            int delta = aimYaw - (int)*(uint16_t *)((char *)self + 0x42)
-                              - (*yawCell - 0x800);
-            *yawCell += (int16_t)(int8_t)((delta * 0x100000) >> 24);
+            int delta = mips_subu_i32(
+                mips_subu_i32(aimYaw, (int)*(uint16_t *)((char *)self + 0x42)),
+                mips_subu_i32((int)*yawCell, 0x800));
+            *yawCell = (uint16_t)mips_addu_i32(
+                *yawCell, (int8_t)(mips_sll_i32(delta, 20) >> 24));
             Object_RefitAABB(self);
-        }
-        /* fall-through into damage handling for mode==0 wasn't taken;
-         * mode==8 lands here directly.                              */
+            return 0;
     }
-    if (mode == 3 || mode == 8 || mode == 0) {
-        if (mode == 3 || mode == 0) {
+    if (mode == 3 || mode == 8) {
+        if (mode == 3) {
             int    imp = *arg;
             if (*(uint8_t *)(imp + 4) == 2) {
                 if (((int *)arg)[3] != *(int *)(self[0xe] + 0x38)) return 0;
@@ -105,7 +129,7 @@ uint32_t AG_TrackerDish(uint32_t *self, int mode, int *arg)
             }
             arg = (int *)(uintptr_t)*(uint16_t *)(imp + 0xc);
         }
-        int16_t newHp = (int16_t)((uint16_t)self[3] - (int)(intptr_t)arg);
+        int16_t newHp = (int16_t)mips_subu_i32((uint16_t)self[3], (int)(intptr_t)arg);
         if ((int)(uint16_t)self[3] < (int)(intptr_t)arg) {
             /* Stage transition or final break. */
             int subAddr = *(int *)(self[0xe] + 0x38);
@@ -117,7 +141,7 @@ uint32_t AG_TrackerDish(uint32_t *self, int mode, int *arg)
             SubModel_Detach(self[0xe]);
             int next = *(int *)(self[0xe] + 0x38);
             int8_t   stage = *(char *)(self[0xe] + 8);
-            *(char *)(self[0xe] + 8) = (char)(stage - 1);
+            *(char *)(self[0xe] + 8) = (char)mips_addu_i32(stage, -1);
             if (next != 0 && stage != 1) {
                 *(uint8_t  *)(next + 8)    = state;
                 *(uint32_t *)(next + 0x28) = pos;
@@ -136,10 +160,11 @@ ground_align: {
         int      wp    = Object_LocalToWorldPos();
         int      grd   = Terrain_HeightAt(*(int32_t *)(wp + 0x14),
                                           *(int32_t *)(wp + 0x1c));
-        *(int *)(sub2 + 0x50) = (grd - *(int *)(wp + 0x18)) + *(int *)(sub2 + 0x4c);
+        *(int *)(sub2 + 0x50) = mips_addu_i32(
+            mips_subu_i32(grd, *(int *)(wp + 0x18)), *(int *)(sub2 + 0x4c));
         char     stage = SubModel_PickInitialStage(mh);
         *(char *)(mh + 8)        = stage;
-        *(char *)((char *)self + 8) = stage + 1;
+        *(char *)((char *)self + 8) = (char)mips_addu_i32(stage, 1);
         *self = (*self & 0xfffffffb) | 0x80;
     }
     return 0;

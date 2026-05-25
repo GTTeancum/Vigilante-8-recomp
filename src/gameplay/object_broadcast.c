@@ -52,6 +52,11 @@ void Object_AppendToScratchList(int payload)
     node[2] = payload;
 }
 
+/* Hex-name aliases. */
+void FUN_80022c54(int param_1) { Object_AppendToScratchList(param_1); }
+void FUN_8002185c(uint32_t event, uint32_t arg) { Object_BroadcastToTree(event, arg); }
+void FUN_80021924(uint32_t event, uint32_t arg) { Object_BroadcastWorldOrTree(event, arg); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

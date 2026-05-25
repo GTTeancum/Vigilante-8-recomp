@@ -19,46 +19,98 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int size, int flags);
-extern int Bone_AllocSlot(int parent, uint16_t slotKey);
+extern intptr_t Bone_AllocSlot(int parent, uint16_t slotKey);
 extern void Object_PostUpdate2(uint32_t obj);
+extern void GTE_RotateLongMatTrans(uint32_t *mat, int32_t *src, uint32_t *dst);
+extern uint32_t *FUN_80040234(uint32_t *param_1);
+extern uint32_t FUN_8004410c(void);
+extern void FUN_8004483c(uint32_t voice, uint32_t bank, int sfx, uint32_t *xyz);
+extern uint32_t *FUN_8003fea8(uint32_t *xyz, uint32_t color);
+extern void FUN_80012050(int param_1, uint8_t param_2);
+extern void FUN_800205f8(uint32_t *obj);
+extern uint32_t _DAT_800658fc;
+
+static int16_t mips_addiu_i16(int16_t a, int16_t b)
+{
+    return (int16_t)((uint16_t)a + (uint16_t)b);
+}
+
+uint32_t FUN_8010076c(uint32_t *self, uint32_t mode, int *impulse);
 
 uint32_t SB_MissileChain(uint32_t *self, uint32_t mode, int *impulse)
 {
-    if (mode == 3) goto bypass;
-    if (mode != 0 && mode != 5) goto bypass;
+    if (mode == 5)
+        goto retire;
 
-    int16_t *cd = (int16_t *)((uint8_t *)self + 0x96);
-    int16_t prev = *cd;
-    *cd = (int16_t)(prev - 1);
-    if (prev != 1) return 0;
-    if (*(int16_t *)(self + 0x25) == 0) return 0;
+    if (mode != 3) {
+        if (mode != 0)
+            goto done;
 
-    /* Spawn next stage. */
-    uint32_t *child = Object_Pool_AllocFromBank(
-        (void *)(uintptr_t)self[0x16], 0x1e1, 0x98, 8);
-    int slot = Bone_AllocSlot((int)(uintptr_t)self, 0x8000);
-    (void)slot;
+        int16_t *cd = (int16_t *)((uint8_t *)self + 0x96);
+        int16_t prev = *cd;
+        *cd = mips_addiu_i16(prev, -1);
+        if (prev != 1) return 0;
+        if (*(int16_t *)(self + 0x25) == 0) return 0;
 
-    *((int8_t *)child + 4) = 7;
-    child[0]    = 0x84;
-    *((uint16_t *)child + 6) = *(uint16_t *)((uint8_t *)self + 6);
-    *(int16_t *)(child + 3)   = (int16_t)self[3];
-    child[0x19] = (uintptr_t)SB_MissileChain;       /* recursive */
+        /* Spawn next stage. */
+        uint32_t *child = Object_Pool_AllocFromBank(
+            (void *)(uintptr_t)self[0x16], 0x1e1, 0x98, 8);
+        intptr_t slot = Bone_AllocSlot((int)(uintptr_t)self, 0x8000);
 
-    Object_PostUpdate2((uint32_t)(uintptr_t)child);
+        *((int8_t *)child + 4) = 7;
+        child[0]    = 0x84;
+        *((uint16_t *)child + 6) = *(uint16_t *)((uint8_t *)self + 6);
+        *(int16_t *)(child + 3)   = (int16_t)self[3];
+        Object_SetCallbackPsxSlot(child, (uintptr_t)FUN_8010076c);       /* recursive */
 
-    *(int16_t *)((uint8_t *)child + 0x96) = 4;
-    *(int16_t *)(child + 0x25) = (int16_t)(self[0x25] - 1);
+        Object_PostUpdate2((uint32_t)(uintptr_t)child);
 
-    /* Carry velocity + pos. */
-    child[0x22] = self[0x22];
-    child[0x23] = self[0x23];
-    child[0x24] = self[0x24];
+        *(int16_t *)((uint8_t *)child + 0x96) = 4;
+        *(int16_t *)(child + 0x25) = mips_addiu_i16((int16_t)self[0x25], -1);
 
-bypass:
-    (void)impulse;
+        child[0x22] = self[0x22];
+        child[0x23] = self[0x23];
+        child[0x24] = self[0x24];
+
+        child[4] = self[4];
+        child[5] = self[5];
+        child[6] = self[6];
+        child[7] = self[7];
+        child[8] = self[8];
+        child[9] = self[9];
+        child[10] = self[10];
+        child[11] = self[11];
+        if (slot != 0)
+            GTE_RotateLongMatTrans(self + 4, (int32_t *)(slot + 4), child + 9);
+    }
+
+    FUN_80040234(self + 0x12);
+    self[0] |= 0x20u;
+    FUN_8004483c(FUN_8004410c(), _DAT_800658fc, 0x41, self + 9);
+    FUN_8003fea8(self + 9, 0x08c0c000u);
+
+    if (impulse != NULL) {
+        int impObj = *impulse;
+        if (*(uint8_t *)(uintptr_t)(impObj + 4) == 2) {
+            int16_t status = *(int16_t *)(uintptr_t)(impObj + 6);
+            if (status < 0)
+                FUN_80012050(~(int)status, 0x14);
+        }
+    }
+
+done:
     return 0;
+
+retire:
+    FUN_800205f8(self);
+    return 0;
+}
+
+uint32_t FUN_8010076c(uint32_t *self, uint32_t mode, int *impulse)
+{
+    return SB_MissileChain(self, mode, impulse);
 }
 
 /* ============================================================

@@ -25,27 +25,37 @@
 extern void Object_ApplyAngularVelocity(uint32_t *m, int pitchRate, int yawRate, int rollRate);
 extern void MatrixNormal(MATRIX *m, MATRIX *out);
 
+static inline int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
 /* PSY-Q's round-toward-zero arithmetic right-shift. */
 static inline int32_t rsa(int32_t x, int n)
 {
-    if (x < 0) x += (1 << n) - 1;
+    if (x < 0) x = mips_addu_i32(x, (1 << n) - 1);
     return x >> n;
 }
 
 void Object_ApplyImpulseAndIntegrate(uint8_t *obj, int32_t *force, int32_t *torque)
 {
     /* 1. Linear impulse: vel += force (full precision, no scaling). */
-    *(int32_t *)(obj + 0x80) += force[0];
-    *(int32_t *)(obj + 0x84) += force[1];
-    *(int32_t *)(obj + 0x88) += force[2];
+    *(int32_t *)(obj + 0x80) = mips_addu_i32(*(int32_t *)(obj + 0x80), force[0]);
+    *(int32_t *)(obj + 0x84) = mips_addu_i32(*(int32_t *)(obj + 0x84), force[1]);
+    *(int32_t *)(obj + 0x88) = mips_addu_i32(*(int32_t *)(obj + 0x88), force[2]);
 
     /* 2. Angular impulse: angvel += (torque[i] * inertia[i]) / 64. */
-    int32_t ax = torque[0] * (int32_t)*(int16_t *)(obj + 0x9c);
-    *(int32_t *)(obj + 0x90) += rsa(ax, 6);
-    int32_t ay = torque[1] * (int32_t)*(int16_t *)(obj + 0x9e);
-    *(int32_t *)(obj + 0x94) += rsa(ay, 6);
-    int32_t az = torque[2] * (int32_t)*(int16_t *)(obj + 0xa0);
-    *(int32_t *)(obj + 0x98) += rsa(az, 6);
+    int32_t ax = mips_mult_lo_i32(torque[0], (int32_t)*(int16_t *)(obj + 0x9c));
+    *(int32_t *)(obj + 0x90) = mips_addu_i32(*(int32_t *)(obj + 0x90), rsa(ax, 6));
+    int32_t ay = mips_mult_lo_i32(torque[1], (int32_t)*(int16_t *)(obj + 0x9e));
+    *(int32_t *)(obj + 0x94) = mips_addu_i32(*(int32_t *)(obj + 0x94), rsa(ay, 6));
+    int32_t az = mips_mult_lo_i32(torque[2], (int32_t)*(int16_t *)(obj + 0xa0));
+    *(int32_t *)(obj + 0x98) = mips_addu_i32(*(int32_t *)(obj + 0x98), rsa(az, 6));
 
     /* 3. Standard integrator body (matches Object_IntegrateAndOrient). */
     MATRIX *m = (MATRIX *)(obj + 0x10);
@@ -57,15 +67,11 @@ void Object_ApplyImpulseAndIntegrate(uint8_t *obj, int32_t *force, int32_t *torq
     int32_t vx = *(int32_t *)(obj + 0x80);
     int32_t vy = *(int32_t *)(obj + 0x84);
     int32_t vz = *(int32_t *)(obj + 0x88);
-    *(int32_t *)(obj + 0x24) += rsa(vx, 7);
-    *(int32_t *)(obj + 0x28) += rsa(vy, 7);
-    *(int32_t *)(obj + 0x2c) += rsa(vz, 7);
+    *(int32_t *)(obj + 0x24) = mips_addu_i32(*(int32_t *)(obj + 0x24), rsa(vx, 7));
+    *(int32_t *)(obj + 0x28) = mips_addu_i32(*(int32_t *)(obj + 0x28), rsa(vy, 7));
+    *(int32_t *)(obj + 0x2c) = mips_addu_i32(*(int32_t *)(obj + 0x2c), rsa(vz, 7));
 
     MatrixNormal(m, m);
 }
 
-/* Legacy FUN_ alias for direct MIPS-derived call sites. */
-void FUN_800173fc(int obj_int, int32_t *force, int32_t *torque)
-{
-    Object_ApplyImpulseAndIntegrate((uint8_t *)(intptr_t)obj_int, force, torque);
-}
+/* FUN_800173fc -- implemented in src/physics/physics_integrate.c (Physics_IntegrateForces) */

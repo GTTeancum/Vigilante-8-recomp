@@ -16,6 +16,10 @@
 extern uint32_t V8_RandNext(void);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int size, int flags);
 extern void Object_RandomizeRotation(uint32_t *obj);
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+extern void FUN_8001d708(uint32_t *obj);
+extern void FUN_800202f4(uint32_t *obj);
+extern uint32_t FUN_80101a94(uint32_t *self, int mode, int *arg);
 extern int8_t *_DAT_800659fc;
 
 uint32_t SR_SnowEmit(uint32_t *self, int mode, int eventId)
@@ -38,7 +42,16 @@ uint32_t SR_SnowEmit(uint32_t *self, int mode, int eventId)
         p[0x12] = self[0x12];
         p[0x13] = self[0x13];
         p[0x14] = self[0x14];
+        Object_SetCallbackPsxSlot(p, (uintptr_t)&FUN_80101a94);
+        p[0x21] = 0xfffff415u;
+        int32_t scale = (int32_t)p[0x15] * 0x3243;
+        if (scale < 0) scale += 0xfff;
+        *(int16_t *)(p + 0x25) = (int16_t)(0x1000000 / (scale >> 12));
+        FUN_8001d708(p);
+        FUN_800202f4(p);
+        *(int32_t *)((uintptr_t)_DAT_800659fc + 0x94) += 1;
     }
+    *self |= 0x22u;
     return 0;
 }
 

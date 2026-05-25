@@ -37,8 +37,8 @@
 
 extern void GTE_RotateLongMatTrans(const uint32_t *m, const int32_t *v, int32_t *out);     /* FUN_80043408 */
 extern void GTE_RotateLongMatTranspose(uint32_t *m, const int32_t *v, int32_t *out);       /* FUN_8004352c */
-extern int  Terrain_HeightAndProbe(int obj, int *posXyz, SVECTOR *normalOut, uint32_t *materialOut);
-extern void Object_ApplyImpulseAndIntegrate(uint8_t *obj, int32_t *force, int32_t *torque);
+extern int  Terrain_HeightAndProbe(intptr_t obj, int *posXyz, SVECTOR *normalOut, uintptr_t *materialOut);
+extern void FUN_800173fc(uint8_t *obj, int32_t *force, int32_t *torque);
 
 extern void gte_ldR11R12(uint32_t v);
 extern void gte_ldR22R23(uint32_t v);
@@ -49,9 +49,29 @@ extern int32_t gte_stMAC1(void);
 extern int32_t gte_stMAC2(void);
 extern int32_t gte_stMAC3(void);
 
+static inline int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static inline int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static inline int32_t mips_sll_i32(int32_t a, unsigned n)
+{
+    return (int32_t)((uint32_t)a << (n & 31));
+}
+
+static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
 static inline int32_t rsa(int32_t x, int n)
 {
-    if (x < 0) x += (1 << n) - 1;
+    if (x < 0) x = mips_addu_i32(x, (1 << n) - 1);
     return x >> n;
 }
 
@@ -83,17 +103,17 @@ void Object_OBBSuspension(uint8_t *obj, const int32_t *aabb_minmax)
         GTE_RotateLongMatTrans((const uint32_t *)(obj + 0x10), corner_local, corner_world);
 
         /* Terrain probe at this world XYZ (no normal, no material). */
-        int32_t terrain_y = Terrain_HeightAndProbe((int)(intptr_t)obj, corner_world, NULL, NULL);
+        int32_t terrain_y = Terrain_HeightAndProbe((intptr_t)obj, corner_world, NULL, NULL);
 
         /* Depth below ground (PSX convention: +Y is down). */
-        int32_t depth = corner_world[1] - terrain_y;
+        int32_t depth = mips_subu_i32(corner_world[1], terrain_y);
         if (depth <= 0) continue;                /* corner above ground */
 
         /* X-axis damping: -velX / 4, clamped to [-0xb40, +0xb40].
          * MIPS subtracts vel into a register, RTZ-shifts by 2. */
         {
             int32_t vx = *(int32_t *)(obj + 0x80);
-            int32_t d  = rsa(-vx, 2);
+            int32_t d  = rsa(mips_subu_i32(0, vx), 2);
             if (d >  0xb40) d =  0xb40;
             if (d < -0xb40) d = -0xb40;
             restoring[0] = d;
@@ -102,7 +122,7 @@ void Object_OBBSuspension(uint8_t *obj, const int32_t *aabb_minmax)
         /* Z-axis damping: -velZ / 4, clamped. */
         {
             int32_t vz = *(int32_t *)(obj + 0x88);
-            int32_t d  = rsa(-vz, 2);
+            int32_t d  = rsa(mips_subu_i32(0, vz), 2);
             if (d >  0xb40) d =  0xb40;
             if (d < -0xb40) d = -0xb40;
             restoring[2] = d;
@@ -112,9 +132,9 @@ void Object_OBBSuspension(uint8_t *obj, const int32_t *aabb_minmax)
          * (negative because force pushes object up against +Y-down).
          * When velY > 0 (moving deeper), subtract velY/8 (extra damping). */
         {
-            int32_t y_force = -depth;                          /* spring */
+            int32_t y_force = mips_subu_i32(0, depth);          /* spring */
             int32_t vy = *(int32_t *)(obj + 0x84);
-            if (vy > 0) y_force -= rsa(vy, 3);
+            if (vy > 0) y_force = mips_subu_i32(y_force, rsa(vy, 3));
             restoring[1] = y_force;
         }
 
@@ -122,32 +142,33 @@ void Object_OBBSuspension(uint8_t *obj, const int32_t *aabb_minmax)
          * rotation-matrix DIAGONAL slots (RT11, RT22, RT33) so the
          * subsequent OP can compute (arm x force). */
         {
-            int32_t arm_x = (corner_world[0] - *(int32_t *)(obj + 0x24)) >> 4;
-            int32_t arm_y = (corner_world[1] - *(int32_t *)(obj + 0x28)) >> 4;
-            int32_t arm_z = (corner_world[2] - *(int32_t *)(obj + 0x2c)) >> 4;
+            int32_t arm_x = mips_subu_i32(corner_world[0], *(int32_t *)(obj + 0x24)) >> 4;
+            int32_t arm_y = mips_subu_i32(corner_world[1], *(int32_t *)(obj + 0x28)) >> 4;
+            int32_t arm_z = mips_subu_i32(corner_world[2], *(int32_t *)(obj + 0x2c)) >> 4;
             gte_ldR11R12((uint32_t)arm_x);
             gte_ldR22R23((uint32_t)arm_y);
             gte_ldR33   ((uint32_t)arm_z);
         }
 
         /* Force into IR, also scaled down by 8 (so the OP result lands
-         * in i32 range despite the q24 product of arm*force). */
-        gte_ldsv_(rsa(restoring[0], 3),
-                  rsa(restoring[1], 3),
-                  rsa(restoring[2], 3));
+         * in i32 range despite the q24 product of arm*force).  The MIPS
+         * uses raw arithmetic sra here, not the RTZ-biased helper. */
+        gte_ldsv_(restoring[0] >> 3,
+                  restoring[1] >> 3,
+                  restoring[2] >> 3);
         gte_op12();   /* MAC1..3 = arm x force, after sf=1 shift */
 
         /* Accumulate linear force (raw values; suspension impulse adds
          * directly to vel via Object_ApplyImpulseAndIntegrate). */
-        force[0] += restoring[0];
-        force[1] += restoring[1];
-        force[2] += restoring[2];
+        force[0] = mips_addu_i32(force[0], restoring[0]);
+        force[1] = mips_addu_i32(force[1], restoring[1]);
+        force[2] = mips_addu_i32(force[2], restoring[2]);
 
         /* Accumulate torque: cross product * 2 (compensates the >>3+>>4
          * down-shifts done to keep the GTE accumulator in i32 range). */
-        torque[0] += gte_stMAC1() << 1;
-        torque[1] += gte_stMAC2() << 1;
-        torque[2] += gte_stMAC3() << 1;
+        torque[0] = mips_addu_i32(torque[0], mips_sll_i32(gte_stMAC1(), 1));
+        torque[1] = mips_addu_i32(torque[1], mips_sll_i32(gte_stMAC2(), 1));
+        torque[2] = mips_addu_i32(torque[2], mips_sll_i32(gte_stMAC3(), 1));
         (void)probe_scratch;
     }
 
@@ -155,20 +176,17 @@ void Object_OBBSuspension(uint8_t *obj, const int32_t *aabb_minmax)
     GTE_RotateLongMatTranspose((uint32_t *)(obj + 0x10), torque, torque);
 
     /* Apply linear + angular impulses + integrate one tick. */
-    Object_ApplyImpulseAndIntegrate(obj, force, torque);
+    FUN_800173fc(obj, force, torque);
 
     /* Post-integrate angular damping (matches Object_GeneralTick): the
      * MIPS uses i32-wrap multiply then arithmetic shift right by 12. */
-    *(int32_t *)(obj + 0x90) =
-        (int32_t)((uint32_t)*(int32_t *)(obj + 0x90) * 0xf80u) >> 12;
-    *(int32_t *)(obj + 0x94) =
-        (int32_t)((uint32_t)*(int32_t *)(obj + 0x94) * 0xf80u) >> 12;
-    *(int32_t *)(obj + 0x98) =
-        (int32_t)((uint32_t)*(int32_t *)(obj + 0x98) * 0xf80u) >> 12;
+    *(int32_t *)(obj + 0x90) = mips_mult_lo_i32(*(int32_t *)(obj + 0x90), 0xf80) >> 12;
+    *(int32_t *)(obj + 0x94) = mips_mult_lo_i32(*(int32_t *)(obj + 0x94), 0xf80) >> 12;
+    *(int32_t *)(obj + 0x98) = mips_mult_lo_i32(*(int32_t *)(obj + 0x98), 0xf80) >> 12;
 }
 
 /* Legacy FUN_ alias. */
-void FUN_8001787c(int obj_int, const int32_t *aabb_minmax)
+void FUN_8001787c(intptr_t obj_int, const int32_t *aabb_minmax)
 {
     Object_OBBSuspension((uint8_t *)(intptr_t)obj_int, aabb_minmax);
 }

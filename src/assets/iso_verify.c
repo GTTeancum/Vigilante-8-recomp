@@ -25,6 +25,9 @@ int Iso_VerifyOriginalDisc(void)
     return Util_MemEq(p, DAT_8006f608, 32) == 0;
 }
 
+/* FUN_80015610 is the binary name for Iso_VerifyOriginalDisc. */
+int FUN_80015610(void) { return Iso_VerifyOriginalDisc(); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

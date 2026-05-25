@@ -39,6 +39,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern int  Terrain_HeightAt(int32_t x, int32_t z);                  /* FUN_80025400 */
 extern void Object_RefitAABB(void *self);                            /* FUN_8001d708 */
 extern void FX_TrailPuff(void *self, void *src);                     /* FUN_8001787c */
@@ -76,52 +77,106 @@ extern void Object_BindTexAndModel(void *self, uint32_t tex);        /* func_0x8
 extern void FX_RingFlash_Init(void *self, int kind, int dy, int unused); /* FUN_8001f5a0 */
 extern int  AG_Rand255(void);                                         /* FUN_80017160 */
 
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
+static int32_t rtz12(int32_t v)
+{
+    if (v < 0) v = mips_addu_i32(v, 0xfff);
+    return v >> 12;
+}
+
+static int32_t scale_sin_3b9a(int16_t v)
+{
+    int32_t t = mips_sll_i32(v, 2);
+    t = mips_addu_i32(t, v);
+    t = mips_sll_i32(t, 5);
+    t = mips_subu_i32(t, v);
+    t = mips_sll_i32(t, 4);
+    t = mips_subu_i32(t, v);
+    t = mips_sll_i32(t, 2);
+    t = mips_subu_i32(t, mips_subu_i32(t >> 2, 0)); /* net *6 on previous term */
+    t = mips_sll_i32(t, 1);
+    return rtz12(t);
+}
+
+static int32_t scale_sin_beb(int16_t v)
+{
+    int32_t t = mips_sll_i32(v, 1);
+    t = mips_addu_i32(t, v);
+    t = mips_sll_i32(t, 6);
+    t = mips_subu_i32(t, v);
+    t = mips_sll_i32(t, 2);
+    t = mips_subu_i32(t, v);
+    t = mips_sll_i32(t, 2);
+    t = mips_subu_i32(t, v);
+    return rtz12(t);
+}
+
 uint32_t AG_CruiseMissile(uint32_t *self, int mode, int *arg)
 {
     if (mode == 0) {
         if ((char)self[2] >= 0) {
             /* Apply integration. */
-            self[0x12] += self[0x20];
-            self[0x13] += self[0x21];
-            self[0x14] += self[0x22];
+            self[0x12] = (uint32_t)mips_addu_i32((int32_t)self[0x12], (int32_t)self[0x20]);
+            self[0x13] = (uint32_t)mips_addu_i32((int32_t)self[0x13], (int32_t)self[0x21]);
+            self[0x14] = (uint32_t)mips_addu_i32((int32_t)self[0x14], (int32_t)self[0x22]);
             self[9]    = self[0x12];
             self[10]   = self[0x13];
             self[0xb]  = self[0x14];
         }
-        int stage = (int)(int8_t)(((uint8_t)self[2] + 1));
+        int stage = (int)(int8_t)((uint8_t)mips_addu_i32((uint8_t)self[2], 1));
 
         /* Run all stages from `stage` upward (fall-through). */
         if (stage <= 1) {
             FX_TrailPuff(self, (void *)(self[0x17] + 4));
-            if (((_DAT_80065310 - (uint32_t)*((uint8_t *)self + 9)) & 3) == 0) {
+            if (((uint32_t)mips_subu_i32((int32_t)_DAT_80065310,
+                                         (int32_t)*((uint8_t *)self + 9)) & 3) == 0) {
                 uint32_t *puff = (uint32_t *)Object_SpawnFromBank(_DAT_800737d8, 0x21, 0x80, 8);
                 *puff |= 0x4b4u;
                 puff[0x12] = self[9];
                 puff[0x13] = self[10];
                 puff[0x14] = self[0xb];
-                *(int16_t *)(puff + 0x11) = (int16_t)(_DAT_80065310 * 0x60);
-                puff[0x19] = (uint32_t)(uintptr_t)&FUN_80100c18;
+                *(int16_t *)(puff + 0x11) = (int16_t)mips_mult_lo_i32((int32_t)_DAT_80065310, 0x60);
+                Object_SetCallbackPsxSlot(puff, (uintptr_t)&FUN_80100c18);
                 Object_Suspend(self);
             }
             if (stage == 0) {
-                uint32_t v = self[0x20] + 0x20;
+                uint32_t v = (uint32_t)mips_addu_i32((int32_t)self[0x20], 0x20);
                 self[0x20] = v;
                 if ((int)v > 0x3b9a) *(uint8_t *)(self + 2) = 1;
             }
         }
         if (stage <= 2) {  /* case 2 fall-through target */
-            *(int16_t *)(self + 0x11) = (int16_t)((int16_t)self[0x11] + 1);
-            *(int16_t *)((char *)self + 0x42) += 1;
+            *(int16_t *)(self + 0x11) = (int16_t)mips_addu_i32((int16_t)self[0x11], 1);
+            *(int16_t *)((char *)self + 0x42) =
+                (int16_t)mips_addu_i32(*(int16_t *)((char *)self + 0x42), 1);
             Object_RefitAABB(self);
-            if ((int)self[0x21] > -0x7bf) self[0x21] -= 6;
-            int s5 = ((int16_t)self[5]) * 0x3b9a; if (s5 < 0) s5 += 0xfff;
-            self[0x20] = s5 >> 12;
-            int s8 = ((int16_t)self[8]) * 0x3b9a; if (s8 < 0) s8 += 0xfff;
-            self[0x22] = s8 >> 12;
+            if ((int)self[0x21] > -0x7bf)
+                self[0x21] = (uint32_t)mips_addu_i32((int32_t)self[0x21], -6);
+            self[0x20] = (uint32_t)scale_sin_3b9a((int16_t)self[5]);
+            self[0x22] = (uint32_t)scale_sin_3b9a((int16_t)self[8]);
             if ((int16_t)self[0x11] > 0x155) *(uint8_t *)(self + 2) = 2;
         }
         if (stage <= 3) {
-            if (_DAT_80065b38 + 0x400000u < self[0x12]) {
+            if ((uint32_t)mips_addu_i32((int32_t)_DAT_80065b38, 0x400000) < self[0x12]) {
                 *(uint16_t *)(self + 0x10)              = 0;
                 *(uint16_t *)((char *)self + 0x42)     = 0xfc00;
                 *(uint16_t *)(self + 0x11)              = 0;
@@ -131,7 +186,8 @@ uint32_t AG_CruiseMissile(uint32_t *self, int mode, int *arg)
                 self[0x12] = 0x4d30968;
                 int gy = Terrain_HeightAt(0x4018000, 0x3c50000);
                 self[0x14] = 0x3c50000;
-                self[0x13] = gy + (int32_t)self[0x21] * -900;
+                self[0x13] = (uint32_t)mips_subu_i32(gy,
+                                                     mips_mult_lo_i32((int32_t)self[0x21], 900));
                 *(uint8_t *)(self + 2) = 3;
                 Object_RefitAABB(self);
             }
@@ -141,7 +197,7 @@ uint32_t AG_CruiseMissile(uint32_t *self, int mode, int *arg)
             if (gy <= (int32_t)self[0x13]) { self[0x21] = 0; *(uint8_t *)(self + 2) = 4; }
         }
         if (stage <= 5) {
-            uint32_t v = self[0x20] + 0x18;
+            uint32_t v = (uint32_t)mips_addu_i32((int32_t)self[0x20], 0x18);
             self[0x20] = v;
             if ((int)v > -0xbec) *(uint8_t *)(self + 2) = 5;
         }
@@ -149,24 +205,22 @@ uint32_t AG_CruiseMissile(uint32_t *self, int mode, int *arg)
             if ((int32_t)self[0x12] < 0x3a44b29) *(uint8_t *)(self + 2) = 6;
         }
         if (stage <= 7) {
-            *(int16_t *)((char *)self + 0x42) -= 8;
+            *(int16_t *)((char *)self + 0x42) =
+                (int16_t)mips_addu_i32(*(int16_t *)((char *)self + 0x42), -8);
             Object_RefitAABB(self);
-            int s5 = ((int16_t)self[5]) * 0xbeb; if (s5 < 0) s5 += 0xfff;
-            self[0x20] = s5 >> 12;
-            int s8 = ((int16_t)self[8]) * 0xbeb; if (s8 < 0) s8 += 0xfff;
-            self[0x22] = s8 >> 12;
+            self[0x20] = (uint32_t)scale_sin_beb((int16_t)self[5]);
+            self[0x22] = (uint32_t)scale_sin_beb((int16_t)self[8]);
             if (*(int16_t *)((char *)self + 0x42) < -0x7ff) *(uint8_t *)(self + 2) = 7;
         }
         if (stage <= 8) {
             if ((int32_t)self[0x14] < 0x39acb29) *(uint8_t *)(self + 2) = 8;
         }
         if (stage <= 9) {
-            *(int16_t *)((char *)self + 0x42) -= 8;
+            *(int16_t *)((char *)self + 0x42) =
+                (int16_t)mips_addu_i32(*(int16_t *)((char *)self + 0x42), -8);
             Object_RefitAABB(self);
-            int s5 = ((int16_t)self[5]) * 0xbeb; if (s5 < 0) s5 += 0xfff;
-            self[0x20] = s5 >> 12;
-            int s8 = ((int16_t)self[8]) * 0xbeb; if (s8 < 0) s8 += 0xfff;
-            self[0x22] = s8 >> 12;
+            self[0x20] = (uint32_t)scale_sin_beb((int16_t)self[5]);
+            self[0x22] = (uint32_t)scale_sin_beb((int16_t)self[8]);
             if (*(int16_t *)((char *)self + 0x42) < -0xbff) *(uint8_t *)(self + 2) = 0;
         }
 
@@ -174,7 +228,9 @@ uint32_t AG_CruiseMissile(uint32_t *self, int mode, int *arg)
         if (arg == NULL) return 0;
         for (uintptr_t c = self[0xe]; c != 0; c = *(uint32_t *)(c + 0x34)) {
             if (*(int16_t *)(c + 6) == 0) {
-                *(int16_t *)(c + 0x44) += (int16_t)((intptr_t)arg * 0x100);
+                *(int16_t *)(c + 0x44) =
+                    (int16_t)mips_addu_i32(*(int16_t *)(c + 0x44),
+                                           mips_sll_i32((int32_t)(intptr_t)arg, 8));
                 Object_RefitAABB((void *)c);
             }
         }
@@ -220,14 +276,14 @@ explode_check: {
         int dmg = Damage_VsImpactor((void *)self, arg);
         if (dmg == 0) return 0;
         *(uint8_t *)(self + 2) = 0xff;
-        self[0x20] <<= 7;
-        self[0x21] <<= 7;
-        self[0x22] <<= 7;
+        self[0x20] = (uint32_t)mips_sll_i32((int32_t)self[0x20], 7);
+        self[0x21] = (uint32_t)mips_sll_i32((int32_t)self[0x21], 7);
+        self[0x22] = (uint32_t)mips_sll_i32((int32_t)self[0x22], 7);
         Damage_Apply_AgainstSelf(self, (void *)(intptr_t)300);
         for (int i = 0; i < 3; i++) {
-            int jx = (AG_Rand255() * 0xbeb >> 15) - 0x5f5;
+            int jx = mips_addu_i32(mips_mult_lo_i32(AG_Rand255(), 0xbeb) >> 15, -0x5f5);
             int jy = 0xffffee1f;
-            int jz = (AG_Rand255() * 0xbeb >> 15) - 0x5f5;
+            int jz = mips_addu_i32(mips_mult_lo_i32(AG_Rand255(), 0xbeb) >> 15, -0x5f5);
             int jit[3] = { jx, jy, jz };
             Damage_Pool_DropParticles(0x7f780000u, (int32_t *)(self + 0x12), jit);
         }
@@ -245,7 +301,7 @@ bind_callback:
         *(uint16_t *)(self + 0x28) = 0x40;
         uint32_t *retire = self;
         if ((char)self[2] != 0) {
-            self[0x19] = (uint32_t)(uintptr_t)&FUN_8010068c;
+            Object_SetCallbackPsxSlot(self, (uintptr_t)&FUN_8010068c);
             *(uint8_t *)(self + 2) = 0;
             *self |= 0x12au;
             Damage_Apply_AgainstSelf(self, (void *)(intptr_t)0x3c);

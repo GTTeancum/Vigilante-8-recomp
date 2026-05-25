@@ -28,6 +28,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint8_t  Pool_AllocSFX(void);                                 /* FUN_8004410c */
 extern void Pool_BindFXOnObject(uint32_t h, uint32_t bin, int slot, int aux); /* FUN_800443c8 */
 extern void Pool_BindSnareToObject(uint32_t h, uint32_t bin, int slot, uint32_t *xyz); /* FUN_800447e8 */
@@ -41,6 +42,26 @@ extern void Damage_FromImpulse(uint32_t *self, uint32_t *imp);       /* func_0x8
 extern void Damage_StandardVehicle(void *self, uint32_t *imp);       /* func_0x80022320 */
 extern uint32_t _DAT_1f80000c;
 extern uint32_t FUN_801006cc;
+
+static inline int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static inline int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static inline int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static inline int32_t mips_abs_i32(int32_t v)
+{
+    return (v < 0) ? mips_subu_i32(0, v) : v;
+}
 
 uint32_t HD_SpillwayGrab(uint32_t *self, uint32_t mode, uint32_t *arg)
 {
@@ -58,13 +79,13 @@ uint32_t HD_SpillwayGrab(uint32_t *self, uint32_t mode, uint32_t *arg)
             uint8_t h = Pool_AllocSFX();
             Pool_BindSnareToObject(h, *(uint32_t *)(self[0x16] + 8), 4, vic + 9);
             SFX_Update((int)*((char *)vic + 5), 0);
-            vic[0x19] = (uint32_t)(uintptr_t)&FUN_801006cc;
+            Object_SetCallbackPsxSlot(vic, (uintptr_t)&FUN_801006cc);
             *(uint8_t *)(vic + 2) = 8;
             *vic = (*vic & ~2u) | 0x3000020u;
             uint8_t pick;
             do {
                 int r = Rand255();
-                pick  = (uint8_t)(((r << 2) >> 15) + 0x3c);
+                pick  = (uint8_t)mips_addu_i32(mips_sll_i32(r, 2) >> 15, 0x3c);
                 *((char *)vic + 0xd2) = pick;
             } while (pick == (uint8_t)*(int16_t *)((char *)self + 6));
             Damage_Apply_AgainstSelf(vic, (void *)(intptr_t)0x3c);
@@ -79,9 +100,9 @@ uint32_t HD_SpillwayGrab(uint32_t *self, uint32_t mode, uint32_t *arg)
             desc[6] = 0x5210000;
             desc[7] = 0xf0;
             desc[8] = *(uint32_t *)(path + 0x48);
-            desc[9] = *(int *)(path + 0x4c) - 0x12000;
+            desc[9] = (uint32_t)mips_subu_i32(*(int *)(path + 0x4c), 0x12000);
             int dz  = *(int *)(path + 0x50) < 0x5210000 ? 0x50000 : -0x50000;
-            desc[10] = *(int *)(path + 0x50) + dz;
+            desc[10] = (uint32_t)mips_addu_i32(*(int *)(path + 0x50), dz);
             desc[11] = 0;
             Spawner_Promote((uint32_t)(uintptr_t)bin);
         }
@@ -92,16 +113,19 @@ uint32_t HD_SpillwayGrab(uint32_t *self, uint32_t mode, uint32_t *arg)
         int stick = *(int *)(_DAT_1f80000c + 0x80);
         uint32_t side = 0x50000;
         if (*(int16_t *)((char *)self + 0x42) != 0) {
-            stick = -stick;
+            stick = mips_subu_i32(0, stick);
             side = (uint32_t)(0x5f580 < stick);
             if (side == 0) goto disarm_then_pass;
         }
         if ((int)(side | 0xf580u) < stick) {
-            int dy = (*(int *)(_DAT_1f80000c + 0x28) + 0x12000) - (int)self[0x13];
-            if (dy < 0) dy = -dy;
+            int dy = mips_subu_i32(mips_addu_i32(*(int *)(_DAT_1f80000c + 0x28),
+                                                 0x12000),
+                                   (int)self[0x13]);
+            dy = mips_abs_i32(dy);
             if (dy < 0x10000) {
-                int dz = *(int *)(_DAT_1f80000c + 0x2c) - (int)self[0x14];
-                if (dz < 0) dz = -dz;
+                int dz = mips_subu_i32(*(int *)(_DAT_1f80000c + 0x2c),
+                                       (int)self[0x14]);
+                dz = mips_abs_i32(dz);
                 if (dz < 0xa000) {
                     *self |= 0x10000u;
                     Damage_Apply_AgainstSelf(self, NULL);

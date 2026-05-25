@@ -19,10 +19,16 @@
 
 static int      g_initialized = 0;
 static int      g_width = 640, g_height = 480;
+static int      g_hidden = 0;
 #if defined(V8_HAVE_SDL)
 static SDL_Window   *g_window   = NULL;
 static SDL_GLContext g_glctx    = NULL;
 #endif
+
+void Platform_SetHidden(int hidden)
+{
+    g_hidden = hidden != 0;
+}
 
 int Platform_Init(int width, int height, const char *title)
 {
@@ -42,10 +48,11 @@ int Platform_Init(int width, int height, const char *title)
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
+    Uint32 flags = SDL_WINDOW_OPENGL | (g_hidden ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN);
     g_window = SDL_CreateWindow(title,
                                 SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                                 width, height,
-                                SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+                                flags);
     if (!g_window) {
         fprintf(stderr, "v8: SDL_CreateWindow failed: %s\n", SDL_GetError());
         SDL_Quit();
@@ -101,20 +108,44 @@ void Platform_FrameTick(void)
 {
 #if defined(V8_HAVE_SDL)
     if (!g_initialized) return;
+    extern int g_v8_frame_count;
+    static int s_phase_log_frame = 0;
 
     SDL_Event e;
+    if (g_v8_frame_count >= s_phase_log_frame) {
+        fprintf(stderr, "v8: frame phase @%d poll\n", g_v8_frame_count);
+        s_phase_log_frame = g_v8_frame_count + 300;
+    }
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) {
             fprintf(stderr, "v8: SDL_QUIT received\n");
             exit(0);
         }
+        if (e.type == SDL_KEYDOWN &&
+            e.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
+            fprintf(stderr, "v8: Escape; exit\n");
+            exit(0);
+        }
     }
   #if defined(V8_HAVE_GL)
     extern void Renderer_DrawFrame(int w, int h, int frame_idx);
-    extern int  g_v8_frame_count;
+    if ((g_v8_frame_count % 300) == 0)
+        fprintf(stderr, "v8: frame phase @%d render-begin\n", g_v8_frame_count);
     Renderer_DrawFrame(g_width, g_height, g_v8_frame_count);
+    if ((g_v8_frame_count % 300) == 0)
+        fprintf(stderr, "v8: frame phase @%d render-end\n", g_v8_frame_count);
   #endif
     SDL_GL_SwapWindow(g_window);
+    if ((g_v8_frame_count % 300) == 0)
+        fprintf(stderr, "v8: frame phase @%d swap-end\n", g_v8_frame_count);
+
+    /* 60 Hz cap: sleep the unused portion of the 16ms frame budget. */
+    static Uint32 s_last = 0;
+    Uint32 now = SDL_GetTicks();
+    if (s_last == 0) s_last = now;
+    Uint32 elapsed = now - s_last;
+    if (elapsed < 16) SDL_Delay(16 - elapsed);
+    s_last = SDL_GetTicks();
 #endif
 }
 

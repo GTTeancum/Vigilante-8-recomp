@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include "structs.h"
 
 /* Forward decls -- real impls in v8core / platform. */
 extern uint32_t V8_RandNext(void);
@@ -24,6 +25,7 @@ extern int      ratan2(int y, int x);
 extern int      rsin(int a);
 extern int      rcos(int a);
 extern long     SquareRoot0(long n);
+extern long     VectorNormalSS(const SVECTOR *v0, SVECTOR *v1);
 
 int Smoke_RunSelfTest(void)
 {
@@ -132,26 +134,41 @@ int Smoke_RunSelfTest(void)
                     ratan2(0, -0x1000));
             fails++;
         }
-        if (ratan2(-0x1000, 0) != 0xc00) {
-            fprintf(stderr, "selftest: ratan2(-,0) = %d (expect 0xc00 = 270deg)\n",
+        if (ratan2(-0x1000, 0) != -0x400) {
+            fprintf(stderr, "selftest: ratan2(-,0) = %d (expect -0x400 = source signed -90deg)\n",
                     ratan2(-0x1000, 0));
             fails++;
         }
         if (fails == prev) printf("selftest: ratan2 ok (worst %d LSB across 4096 angles)\n", worst);
     }
 
-    /* Test 4: SquareRoot0 -- PSY-Q BIOS integer sqrt, floor(sqrt(n)).
-     * Spot-check perfect squares and a few off-by-one boundaries. */
+    /* Test 4: VectorNormalSS -- source returns squared magnitude, not sqrt. */
+    {
+        int prev = fails;
+        SVECTOR in = {0x1000, 0, 0, 0};
+        SVECTOR out = {0, 0, 0, 0};
+        long ret = VectorNormalSS(&in, &out);
+        if (ret != 0x01000000L || out.vx != 0x1000 || out.vy != 0 || out.vz != 0) {
+            fprintf(stderr,
+                    "selftest: VectorNormalSS axis ret=%ld out=(%d,%d,%d), expected ret=0x01000000 out=(4096,0,0)\n",
+                    ret, out.vx, out.vy, out.vz);
+            fails++;
+        }
+        if (fails == prev) printf("selftest: VectorNormalSS ok\n");
+    }
+
+    /* Test 5: SquareRoot0 -- V8's EXE-backed PSY-Q table routine.
+     * It is close to sqrt but not floor(sqrt(n)) at large magnitudes. */
     {
         int prev = fails;
         struct { long n; long want; } cases[] = {
             {0, 0}, {1, 1}, {2, 1}, {3, 1}, {4, 2},
             {8, 2}, {9, 3}, {15, 3}, {16, 4},
             {99, 9}, {100, 10}, {101, 10},
-            {0xffffff, 4095},       /* sqrt(0xffffff) = 4095.998... -> 4095 */
+            {0xffffff, 4087},
             {0x1000000, 0x1000},
             {0x40000000, 0x8000},
-            {0x7fffffff, 46340},
+            {0x7fffffff, 46152},
         };
         for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
             long got = SquareRoot0(cases[i].n);

@@ -15,10 +15,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
-int16_t *Bone_FindByKind(int template, uint16_t headIdx, int16_t targetKind)
+int16_t *Bone_FindByKind(intptr_t template, uint16_t headIdx, int16_t targetKind)
 {
     while (headIdx != 0xffff) {
-        int16_t *rec = (int16_t *)(intptr_t)(template + headIdx * 0x1c + 0x1c);
+        int16_t *rec = (int16_t *)(uintptr_t)(template + headIdx * 0x1c + 0x1c);
         if (rec[0] == targetKind) return rec;
         headIdx = (uint16_t)rec[12];
     }

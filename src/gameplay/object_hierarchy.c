@@ -24,28 +24,53 @@
 
 void Object_DetachFromParent(int self)
 {
-    int parent = *(int *)(self + 0x3c);
-    int sibling = *(int *)(self + 0x34);
-    if (*(int *)(parent + 0x38) == self) {
-        *(int *)(parent + 0x38) = sibling;
+    int parent  = *(int *)(uintptr_t)(self + 0x3c);
+    int sibling = *(int *)(uintptr_t)(self + 0x34);
+    if (*(int *)(uintptr_t)(parent + 0x38) == self) {
+        *(int *)(uintptr_t)(parent + 0x38) = sibling;
     } else {
-        *(int *)(parent + 0x34) = sibling;
+        *(int *)(uintptr_t)(parent + 0x34) = sibling;
     }
     if (sibling != 0) {
-        *(int *)(sibling + 0x3c) = parent;
+        *(int *)(uintptr_t)(sibling + 0x3c) = parent;
     }
-    *(int *)(self + 0x34) = 0;
+    *(int *)(uintptr_t)(self + 0x34) = 0;
+    *(int *)(uintptr_t)(self + 0x3c) = 0;   /* original clears parent ptr too; was missing */
 }
 
 int Object_Parent(int self)
 {
-    int parent = *(int *)(self + 0x3c);
-    while (parent != 0 && *(int *)(parent + 0x38) != self) {
-        self   = *(int *)(self + 0x3c);
-        parent = *(int *)(self + 0x3c);
+    int parent = *(int *)(uintptr_t)(self + 0x3c);
+    while (parent != 0 && *(int *)(uintptr_t)(parent + 0x38) != self) {
+        self   = *(int *)(uintptr_t)(self + 0x3c);
+        parent = *(int *)(uintptr_t)(self + 0x3c);
     }
     return parent;
 }
+
+/* Hex-name aliases (callers use PSX addresses). */
+int FUN_8001d564(int self)  { Object_DetachFromParent(self); return self; }
+int FUN_8001d5a0(int self)  { return Object_Parent(self); }
+
+/* ================================================================
+ * FUN_8001d5e0 -- Object_FindRoot
+ *
+ * Walk up the parent chain via Object_Parent until we reach a node
+ * whose parent pointer (+0x3c) is NULL.  Returns that root node.
+ *
+ * HIGH confidence (direct Ghidra port).
+ * ================================================================ */
+int FUN_8001d5e0(int param_1)
+{
+    int iVar1 = *(int *)(uintptr_t)(param_1 + 0x3c);
+    while (iVar1 != 0) {
+        param_1 = FUN_8001d5a0(param_1);
+        iVar1   = *(int *)(uintptr_t)(param_1 + 0x3c);
+    }
+    return param_1;
+}
+
+int Object_FindRoot(int self) { return FUN_8001d5e0(self); }
 
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)

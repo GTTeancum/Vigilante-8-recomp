@@ -2,16 +2,12 @@
  *
  * Source: SANDFACT.DLL  FUN_80100854.
  *
- * Larger sibling to SF_ElevatorTick (src/physics/sandfact/elevator.c)
- * but with full state machine including:
- *   - Up/down direction handling (param_1[2] flag)
- *   - 0x393 unit movement per tick along Z axis
- *   - Limit clamping at obj[0xe]+0x4c (max-Z) and -0x7fff (min-Z)
- *   - 3D SFX pan refresh every frame (via SfxPan_For3DPos at
- *     obj+0x14 inside obj[0xe])
- *   - Hit cue SFX 1 on direction-toggle
- *   - Counter at obj+9 advanced by param_3; on overflow (>0x31)
- *     toggles direction and plays sfx 2.
+ * Full elevator state machine:
+ *   - mode 0 moves the car body along Z, refreshes active loop volume,
+ *     plays the end-stop cue, toggles the direction byte, and may
+ *     fall through into the source impact path.
+ *   - modes 2 and 4 are deferred SFX/state transitions.
+ *   - modes 3 and 8 share the damage/occupancy path.
  *
  * Used by all SandFact elevators including the central material lift.
  *
@@ -26,46 +22,120 @@ extern void Audio_PlaySfxAtPosVar(uint32_t ch, uint32_t bank, int sfxId, void *p
 extern void SPU_VoiceVolume_Set(int ch, uint32_t lr);
 extern void Audio_VoiceStop(int ch);
 extern void Object_RegisterPostUpdate(uint32_t *obj);
+extern uint32_t Object_ClearBackBufferFlag(uint32_t *obj);
+extern void FUN_80020890(uint32_t *obj, int timer);
+extern uint32_t FUN_80022320(uint32_t *self, uint32_t amount);
 extern void *Matrix_ComposeParentChain(int obj);   /* FUN_8001d624 */
 
-uint32_t SF_ElevatorFullTick(uint32_t *self, int mode, int delta)
+static int32_t mips_addu_i32(int32_t a, int32_t b)
 {
-    if (mode != 0 && mode != 2) return 0;
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
 
-    uint32_t carBody = self[0xe];
-    if (delta != 0) {
-        uint8_t *carMatrix = Matrix_ComposeParentChain((int)(uintptr_t)carBody);
-        uint32_t pan = SfxPan_For3DPos(carMatrix + 0x14);
-        SPU_VoiceVolume_Set((int)*(int8_t *)((uintptr_t)self + 5), pan);
-    }
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
 
-    int8_t  dirByte = *(int8_t *)((uintptr_t)self + 8);
-    int32_t *carZ = (int32_t *)(uintptr_t)(carBody + 0x28);
-    if (dirByte != 0) {
-        *carZ -= 0x393;
-        if (*carZ <= *(int32_t *)(uintptr_t)(carBody + 0x4c)) return 0;   /* hit lower limit */
-    } else {
-        *carZ += 0x393;
-        if (*carZ < -0x7fff) return 0;
-        uint8_t *carMatrix2 = Matrix_ComposeParentChain((int)(uintptr_t)carBody);
-        uint32_t ch = SfxChannel_Acquire();
-        Audio_PlaySfxAtPosVar(ch, *(uint32_t *)(self[0x16] + 8), 1, carMatrix2 + 0x14);
-        *(int8_t *)((uintptr_t)self + 5) = 0;
-        Audio_VoiceStop((int)*(int8_t *)((uintptr_t)self + 5));
-        if (((int8_t)self[2] == 0) && self[0xe] != 0 && (self[0] & 0x80u) == 0) {
-            uint8_t newCounter = (uint8_t)(*(uint8_t *)((uintptr_t)self + 9) + delta);
-            *(uint8_t *)((uintptr_t)self + 9) = newCounter;
-            if (newCounter > 0x31) {
-                *(uint8_t *)((uintptr_t)self + 9) = 0;
-                Object_RegisterPostUpdate(self);
-                int8_t ch2 = (int8_t)SfxChannel_Acquire();
-                *(int8_t *)((uintptr_t)self + 5) = ch2;
-                Audio_PlaySfx_inner(ch2, *(uint32_t *)(self[0x16] + 8), 2, 0);
-                Audio_VoiceStop((int)ch2);
-            }
+uint32_t SF_ElevatorFullTick(uint32_t *self, int mode, uintptr_t arg)
+{
+    uint32_t bank = *(uint32_t *)(uintptr_t)(self[0x16] + 8);
+
+    switch (mode) {
+    case 0: {
+        uint32_t carBody = self[0xe];
+
+        if (arg != 0) {
+            uint8_t *carMatrix = Matrix_ComposeParentChain((int)(uintptr_t)carBody);
+            uint32_t pan = SfxPan_For3DPos(carMatrix + 0x14);
+            SPU_VoiceVolume_Set((int)*(int8_t *)((uint8_t *)self + 5), pan);
         }
+
+        int32_t *carZ = (int32_t *)(uintptr_t)(carBody + 0x28);
+        if (*(int8_t *)((uint8_t *)self + 8) != 0) {
+            int32_t z = mips_addu_i32(*carZ, -0x393);
+            *carZ = z;
+            if (z >= *(int32_t *)(uintptr_t)(carBody + 0x4c))
+                return 0;
+        }
+
+        int32_t z = mips_addu_i32(*carZ, 0x393);
+        *carZ = z;
+        if (z < -0x7fff)
+            return 0;
+
+        uint8_t *carMatrix = Matrix_ComposeParentChain((int)(uintptr_t)carBody);
+        Audio_PlaySfxAtPosVar((uint32_t)(int)*(int8_t *)((uint8_t *)self + 5),
+                              bank, 1, carMatrix + 0x14);
+        *(int8_t *)((uint8_t *)self + 5) = 0;
+        Object_ClearBackBufferFlag(self);
+
+        uint8_t newDir = (uint8_t)mips_subu_i32(1, *(uint8_t *)((uint8_t *)self + 8));
+        *(uint8_t *)((uint8_t *)self + 8) = newDir;
+        if ((int8_t)newDir == 0)
+            return 0;
+        FUN_80020890(self, 300);
+        /* Source falls into the mode-3 impact branch. */
     }
-    return 0;
+        /* fall through */
+    case 3: {
+        uint32_t impactObj = *(uint32_t *)(uintptr_t)arg;
+        uint8_t kind = *(uint8_t *)(uintptr_t)(impactObj + 4);
+
+        if (kind == 2 &&
+            *(uint32_t *)(uintptr_t)(arg + 0xc) == self[0xe] &&
+            *(int8_t *)((uint8_t *)self + 8) == 0 &&
+            (self[0] & 0x80u) != 0) {
+            uint8_t *carMatrix = Matrix_ComposeParentChain((int)(uintptr_t)self[0xe]);
+            Audio_PlaySfxAtPosVar((uint32_t)(int)*(int8_t *)((uint8_t *)self + 5),
+                                  bank, 1, carMatrix + 0x14);
+            *(int8_t *)((uint8_t *)self + 5) = 0;
+            Object_ClearBackBufferFlag(self);
+            *(int8_t *)((uint8_t *)self + 8) = 1;
+            FUN_80020890(self, 0x1e);
+            kind = *(uint8_t *)(uintptr_t)(impactObj + 4);
+        }
+        if (kind != 7)
+            return 0;
+        arg = *(uint16_t *)(uintptr_t)(impactObj + 0xc);
+    }
+        /* fall through */
+    case 8:
+        if (FUN_80022320(self, (uint32_t)arg) != 0) {
+            *(int8_t *)((uint8_t *)self + 8) = -1;
+            if ((self[0] & 0x80u) != 0)
+                Object_ClearBackBufferFlag(self);
+            Audio_VoiceStop((int)*(int8_t *)((uint8_t *)self + 5));
+            *(int8_t *)((uint8_t *)self + 5) = 0;
+        }
+        if (*(int8_t *)((uint8_t *)self + 8) != 0)
+            return 0;
+        {
+            uint8_t counter = (uint8_t)mips_addu_i32(*(uint8_t *)((uint8_t *)self + 9),
+                                                     (int32_t)arg);
+            *(uint8_t *)((uint8_t *)self + 9) = counter;
+            if (counter < 0x32)
+                return 0;
+        }
+        *(uint8_t *)((uint8_t *)self + 9) = 0;
+        /* fall through */
+    case 2:
+        if (self[0xe] != 0 && (self[0] & 0x80u) == 0) {
+            Object_RegisterPostUpdate(self);
+            uint32_t cueVoice = SfxChannel_Acquire();
+            uint8_t *carMatrix = Matrix_ComposeParentChain((int)(uintptr_t)self[0xe]);
+            Audio_PlaySfxAtPosVar(cueVoice, bank, 1, carMatrix + 0x14);
+            int8_t loopVoice = (int8_t)SfxChannel_Acquire();
+            *(int8_t *)((uint8_t *)self + 5) = loopVoice;
+            Audio_PlaySfx_inner((int)loopVoice, bank, 2, 0);
+            /* fall through */
+    case 4:
+            Audio_VoiceStop((int)*(int8_t *)((uint8_t *)self + 5));
+        }
+        return 0;
+    default:
+        return 0;
+    }
 }
 
 /* ============================================================

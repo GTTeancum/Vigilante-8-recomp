@@ -130,9 +130,8 @@ typedef enum {
  *   +0x11e i16       timer1            HIGH
  *   +0x120 i16       timer2_snapFlag   HIGH  doubles as snap-vs-lerp flag for prev-pos trail
  *
- * Size: at least 0x122 bytes (+0x120 + i16); typical alloc 0x200 in host
- * shim.  Actual engine alloc size: not yet located (Ghidra-interactive
- * task, see notes/unknowns.md "Item 4").
+ * Size: 0x124 bytes.  Confirmed by Vehicle_Construct (SLUS 0x8002e630),
+ * which allocates exactly 0x124 bytes through FUN_8001ac44.
  */
 typedef struct Vehicle {
     uint32_t inputFlags;            /* HIGH @0x00 */

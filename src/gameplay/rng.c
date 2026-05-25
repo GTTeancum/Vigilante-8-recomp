@@ -61,6 +61,9 @@ uint32_t V8_RandNext(void)
     return (uint32_t)g_rngSeed & 0x7fffu;
 }
 
+/* FUN_ aliases so callers that use the raw address name link correctly. */
+uint32_t FUN_80017160(void) { return V8_RandNext(); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

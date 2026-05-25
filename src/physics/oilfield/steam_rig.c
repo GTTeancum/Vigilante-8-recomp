@@ -28,6 +28,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern void *Generic_PoolAlloc(uint32_t bank);                   /* func_0x80040378 */
 extern int   Rand255(void);                                      /* FUN_80017160 */
 extern void  Object_BumpSubstate_Or_FX(int obj);                 /* FUN_8001d4f0 */
@@ -35,30 +36,31 @@ extern void  Object_RetireDeferred(int self);                    /* FUN_800205f8
 extern void  FX_RingFlash(int imp, void *p, int spawnXyz);       /* FUN_800176f8 */
 extern void  Damage_TouchImpactor(int imp);                      /* FUN_8002c3ac */
 extern uint8_t DAT_80100090;
+extern const int16_t g_v8_sincostbl[8192];
+extern int LAB_8004042c(int obj, int event, int param3);
 
 uint32_t OF_SteamRig(int self, uint32_t mode, int *arg)
 {
     uint32_t hit = 2;
     if (mode == 2) goto seal;
-    if (mode == 0 || mode == 3) {
-        if (mode == 0) {
+    if (mode != 3) {
             int16_t cd = *(int16_t *)(self + 0x80) - 1;
             *(int16_t *)(self + 0x80) = cd;
             if (cd == -1) {
                 uint32_t *puff = (uint32_t *)Generic_PoolAlloc(*(uint32_t *)(self + 0x98));
                 if (puff != NULL) {
-                    int r = (Rand255() & 0xfff) * 4;
+                    int aimIdx = Rand255() & 0xfff;
                     *puff |= 0x410u;
-                    int sx = *(int *)(self + 0x84) * (int)*(int16_t *)(r - 0x7ff9f84c);
+                    int sx = *(int *)(self + 0x84) * g_v8_sincostbl[aimIdx * 2 + 0];
                     if (sx < 0) sx += 0xfff;
                     puff[0x22] = sx >> 12;
-                    int sz = *(int *)(self + 0x84) * (int)*(int16_t *)(r - 0x7ff9f84a);
+                    int sz = *(int *)(self + 0x84) * g_v8_sincostbl[aimIdx * 2 + 1];
                     if (sz < 0) sz += 0xfff;
                     puff[0x24] = sz >> 12;
                     int r2 = Rand255();
                     int v  = *(int *)(self + 0x88);
                     puff[9] = puff[10] = puff[0xb] = 0;
-                    puff[0x19] = 0x80040470u;
+                    Object_SetCallbackPsxSlot(puff, (uintptr_t)&LAB_8004042c);
                     puff[0x23] = v + ((r2 * v) >> 15);
                     Object_BumpSubstate_Or_FX(self);
                 }
@@ -71,15 +73,20 @@ uint32_t OF_SteamRig(int self, uint32_t mode, int *arg)
             }
             Object_RetireDeferred(self);
             hit = 0;
-        }
-        int imp = *arg;
-        if (*(uint8_t *)(imp + 4) != hit) return 0;
-        FX_RingFlash(imp, &DAT_80100090, self + 0x48);
-        Damage_TouchImpactor(imp);
     }
+    if (arg == NULL) return 0;
+    int imp = *arg;
+    if (*(uint8_t *)(imp + 4) != hit) return 0;
+    FX_RingFlash(imp, &DAT_80100090, self + 0x48);
+    Damage_TouchImpactor(imp);
 seal:
     *(uint16_t *)(self + 0x80) = 0xffff;
     return 0;
+}
+
+uint32_t FUN_80100668(int self, uint32_t mode, int *arg)
+{
+    return OF_SteamRig(self, mode, arg);
 }
 
 /* ============================================================

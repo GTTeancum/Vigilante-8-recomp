@@ -28,6 +28,12 @@ void *Iso_ReadPVD(void *dst)
     return dst;
 }
 
+/* Hex-name alias used by iso_verify.c and cd_audio.c (they reference the
+ * PSX address directly).  The original returns the original `dst` value
+ * (Ghidra showed it as `uint param_1` because the MIPS `a0` is preserved
+ * and surfaced as `v0` at return). */
+void *FUN_8001555c(void *dst) { return Iso_ReadPVD(dst); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

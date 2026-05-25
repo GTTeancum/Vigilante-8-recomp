@@ -30,6 +30,7 @@ extern void Damage_Apply_AgainstSelf(void *self, void *param);        /* FUN_800
 extern void *Heap_AllocOrRetry(uint32_t n);                           /* FUN_800116f4 */
 extern void Spawner_Promote(uint32_t target);                         /* func_0x8003dbb0 */
 extern void Damage_ImpulsePropagate(int self, uint32_t mode, uint32_t **arg); /* func_0x800223dc */
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t _DAT_800659fc;
 extern uint32_t FUN_80101050;
 
@@ -46,7 +47,7 @@ void SK_LiftChairGrab(int self, uint32_t mode, uint32_t **arg)
         if (*(int16_t *)(_DAT_800659fc + 0xa0) != 0) side ^= 1u;
         uint32_t chair = *(uint32_t *)(_DAT_800659fc + side * 4 + 0x98);
         *(uint32_t **)(chair + 0x80) = vic;
-        vic[0x19] = (uint32_t)(uintptr_t)&FUN_80101050;
+        Object_SetCallbackPsxSlot(vic, (uintptr_t)&FUN_80101050);
         vic[0x1e] = chair;
         *vic = (*vic & ~8u) | 0x1000020u;
         vic[0x20] = (*(int *)(chair + 0x24) - vic[9])              * 4;

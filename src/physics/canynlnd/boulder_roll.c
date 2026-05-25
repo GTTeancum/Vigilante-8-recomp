@@ -42,50 +42,79 @@ extern uint8_t  DAT_80100044, DAT_801012a0;
 extern int8_t   DAT_801012ac, _DAT_000012ad;
 extern uint32_t _DAT_80065310;
 
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
+static int32_t rtz_shift_i32(int32_t v, unsigned sh, int32_t bias)
+{
+    if (v < 0) v = mips_addu_i32(v, bias);
+    return v >> sh;
+}
+
+static int32_t mips_abs_i32(int32_t v)
+{
+    return (v < 0) ? mips_subu_i32(0, v) : v;
+}
+
 uint32_t CL_RollingBoulder(uint32_t *self, uint32_t mode, uint32_t *arg)
 {
     uint32_t hit = 2;
     int16_t  n[3] = { 0, 0, 0 };
 
     if (mode == 2) goto retire;
-    if (mode == 0) {
-        uint32_t pos[3] = { self[9], self[10] + self[0x15], self[0xb] };
+    if (mode != 3) {
+        uint32_t pos[3] = { self[9], (uint32_t)mips_addu_i32((int32_t)self[10], (int32_t)self[0x15]), self[0xb] };
         int gy = Terrain_QueryAt(self, pos, n, 0);
-        if (gy < (int)pos[1] + 0x800) {
-            int32_t vdot = (int32_t)self[0x20] * n[0]
-                         + (int32_t)self[0x21] * n[1]
-                         + (int32_t)self[0x22] * n[2];
-            if (vdot < 0) vdot += 0x7ff;
-            vdot >>= 11;
-            int32_t vy2 = (int32_t)self[0x21] * 2;
+        if (gy < mips_addu_i32((int32_t)pos[1], 0x800)) {
+            int32_t vdot = mips_addu_i32(
+                mips_addu_i32(mips_mult_lo_i32((int32_t)self[0x20], n[0]),
+                              mips_mult_lo_i32((int32_t)self[0x21], n[1])),
+                mips_mult_lo_i32((int32_t)self[0x22], n[2]));
+            vdot = rtz_shift_i32(vdot, 11, 0x7ff);
+            int32_t vy2 = mips_sll_i32((int32_t)self[0x21], 1);
             if (vdot < 0) {
-                int32_t ax = vdot * n[0]; if (ax < 0) ax += 0xfff;
-                int32_t ay = vdot * n[1]; if (ay < 0) ay += 0xfff;
-                int32_t az = vdot * n[2]; if (az < 0) az += 0xfff;
-                self[0x20] -= ax >> 12;
-                self[0x21] -= ay >> 12;
-                self[0x22] -= az >> 12;
-                vy2          = (int32_t)self[0x21] / 2;
+                int32_t ax = rtz_shift_i32(mips_mult_lo_i32(vdot, n[0]), 12, 0xfff);
+                int32_t ay = rtz_shift_i32(mips_mult_lo_i32(vdot, n[1]), 12, 0xfff);
+                int32_t az = rtz_shift_i32(mips_mult_lo_i32(vdot, n[2]), 12, 0xfff);
+                self[0x20] = (uint32_t)mips_subu_i32((int32_t)self[0x20], ax);
+                self[0x21] = (uint32_t)mips_subu_i32((int32_t)self[0x21], ay);
+                self[0x22] = (uint32_t)mips_subu_i32((int32_t)self[0x22], az);
+                vy2 = (int32_t)self[0x21] / 2;
                 self[0x21]   = vy2;
-                self[10]     = gy - self[0x15];
+                self[10]     = (uint32_t)mips_subu_i32(gy, (int32_t)self[0x15]);
             }
-            int32_t rollX = (vy2 + (int32_t)self[0x20]) * 0x1e;
-            if (rollX < 0) rollX += 0xfff;
-            self[0x20] += rollX >> 12;
-            int32_t fz = n[2] * 0x5a; if (fz < 0) fz += 0xfff;
-            self[0x22] += fz >> 12;
-            int32_t sx = -(int32_t)self[0x22] * (uint16_t)self[0x25];
-            if (sx < 0) sx += 0xfff;
-            int32_t sz =  (int32_t)self[0x20] * (uint16_t)self[0x25];
-            *(int16_t *)(self + 0x23) = (int16_t)(sx >> 12);
-            if (sz < 0) sz += 0xfff;
-            *(int16_t *)(self + 0x24) = (int16_t)(sz >> 12);
+            int32_t rollX = rtz_shift_i32(mips_mult_lo_i32(mips_addu_i32(vy2, (int32_t)self[0x20]), 0x1e), 12, 0xfff);
+            self[0x20] = (uint32_t)mips_addu_i32((int32_t)self[0x20], rollX);
+            int32_t fz = rtz_shift_i32(mips_mult_lo_i32(n[2], 0x5a), 12, 0xfff);
+            self[0x22] = (uint32_t)mips_addu_i32((int32_t)self[0x22], fz);
+            int32_t sx = rtz_shift_i32(mips_mult_lo_i32(mips_subu_i32(0, (int32_t)self[0x22]),
+                                                        (uint16_t)self[0x25]), 12, 0xfff);
+            int32_t sz = rtz_shift_i32(mips_mult_lo_i32((int32_t)self[0x20], (uint16_t)self[0x25]), 12, 0xfff);
+            *(int16_t *)(self + 0x23) = (int16_t)sx;
+            *(int16_t *)(self + 0x24) = (int16_t)sz;
             uint32_t hard = (vdot < -0x1c9);
             if (n[1] < -0xe66) {
-                uint32_t ax = (int32_t)self[0x21] < 0 ? -self[0x21] : self[0x21];
-                uint32_t bx = (int32_t)self[0x20] < 0 ? -self[0x20] : self[0x20];
+                uint32_t ax = (uint32_t)mips_abs_i32((int32_t)self[0x21]);
+                uint32_t bx = (uint32_t)mips_abs_i32((int32_t)self[0x20]);
                 if (ax < bx) ax = bx;
-                uint32_t cx = (int32_t)self[0x22] < 0 ? -self[0x22] : self[0x22];
+                uint32_t cx = (uint32_t)mips_abs_i32((int32_t)self[0x22]);
                 if (cx < ax) cx = ax;
                 if (cx < 0x42c) { hard = (uint32_t)Damage_AccumulateOrFire(self, 0); hit = 1; }
             }
@@ -96,14 +125,15 @@ uint32_t CL_RollingBoulder(uint32_t *self, uint32_t mode, uint32_t *arg)
             }
         } else {
 post_gravity:
-            self[0x21] += 0x5a;
+            self[0x21] = (uint32_t)mips_addu_i32((int32_t)self[0x21], 0x5a);
         }
         arg = self + 4;
         Object_OrientByAxis(arg, arg, self + 0x23);
-        self[9]  += self[0x20];
-        self[10] += self[0x21];
-        self[0xb]+= self[0x22];
-        if ((_DAT_80065310 - (uint32_t)*((uint8_t *)self + 9)) & 0xf) return 0;
+        self[9]  = (uint32_t)mips_addu_i32((int32_t)self[9], (int32_t)self[0x20]);
+        self[10] = (uint32_t)mips_addu_i32((int32_t)self[10], (int32_t)self[0x21]);
+        self[0xb]= (uint32_t)mips_addu_i32((int32_t)self[0xb], (int32_t)self[0x22]);
+        if ((mips_subu_i32((int32_t)_DAT_80065310, *((uint8_t *)self + 9)) & 0xf) != 0)
+            return 0;
         MatrixNormal(arg, arg);
     }
     /* Damage / impactor handling. */
@@ -114,12 +144,13 @@ post_gravity:
         uint32_t g = self[0x15];
         if (g == 0) goto retire;
         uint32_t debris = self[0x1c];
-        if ((int)g < 0) g += 0xf;
+        if ((int)g < 0) g = (uint32_t)mips_addu_i32((int32_t)g, 0xf);
         *(int32_t *)(debris + 0x28) = (int32_t)g >> 4;
         *(int32_t *)(debris + 0x24) = (int32_t)g >> 4;
-        int32_t sc = (int)self[0x15] * 0x93c; if (sc < 0) sc += 0xfff;
-        self[0x15] = sc >> 12;
-        int32_t inv = (sc >> 12) * 0x3243; if (inv < 0) inv += 0xfff;
+        int32_t sc = rtz_shift_i32(mips_mult_lo_i32((int32_t)self[0x15], 0x93c), 12, 0xfff);
+        self[0x15] = (uint32_t)sc;
+        int32_t inv = mips_mult_lo_i32(sc, 0x3243);
+        if (inv < 0) inv = mips_addu_i32(inv, 0xfff);
         *(int16_t *)(self + 0x25) = (int16_t)(0x1000000 / (inv >> 12));
         if ((*self & 0x80) != 0) return 0;
         Damage_RetireSelf(self);
@@ -129,9 +160,9 @@ post_gravity:
         uint32_t scale = 0x10000 / *(uint16_t *)(imp + 0xa2);
         int64_t inSide = GTE_Dot32x16(self + 0x20, (uint32_t *)(imp + 0x80));
         if (inSide > 0) return 0;
-        int32_t ix = (int32_t)(self[0x20] * scale);
-        int32_t iy = (int32_t)(self[0x21] * scale);
-        int32_t iz = (int32_t)(self[0x22] * scale);
+        int32_t ix = mips_mult_lo_i32((int32_t)self[0x20], (int32_t)scale);
+        int32_t iy = mips_mult_lo_i32((int32_t)self[0x21], (int32_t)scale);
+        int32_t iz = mips_mult_lo_i32((int32_t)self[0x22], (int32_t)scale);
         int32_t c[3];
         c[0] = (ix < -0x100000) ? -0x100000 : (ix > 0x100000) ? 0x100000 : ix;
         c[1] = (iy < -0x100000) ? -0x100000 : (iy > 0x100000) ? 0x100000 : iy;
@@ -140,23 +171,28 @@ post_gravity:
         Damage_VsImpactorAlt(*arg, -100, &DAT_80100044, 1);
     }
     FX_RingFlash_Init(self, (void *)(uintptr_t)imp);
-    int32_t vdot = (int32_t)self[0x20] * (int16_t)*(uint32_t *)(imp + 0x20)
-                 + (int32_t)self[0x21] * *(int16_t *)(imp + 0x22)
-                 + (int32_t)self[0x22] * (int16_t)*(uint32_t *)(imp + 0x24);
-    if (vdot < 0) vdot += 0x7ff;
-    vdot >>= 11;
+    int32_t vdot = mips_addu_i32(
+        mips_addu_i32(mips_mult_lo_i32((int32_t)self[0x20], (int16_t)*(uint32_t *)(imp + 0x20)),
+                      mips_mult_lo_i32((int32_t)self[0x21], *(int16_t *)(imp + 0x22))),
+        mips_mult_lo_i32((int32_t)self[0x22], (int16_t)*(uint32_t *)(imp + 0x24)));
+    vdot = rtz_shift_i32(vdot, 11, 0x7ff);
     if (vdot >= 0) return 0;
-    int32_t bx = vdot * (int16_t)*(uint32_t *)(imp + 0x20); if (bx < 0) bx += 0xfff;
-    int32_t by = vdot * *(int16_t *)(imp + 0x22);            if (by < 0) by += 0xfff;
-    int32_t bz = vdot * (int16_t)*(uint32_t *)(imp + 0x24); if (bz < 0) bz += 0xfff;
-    self[0x20] -= bx >> 12;
-    self[0x21] -= by >> 12;
-    self[0x22] -= bz >> 12;
+    int32_t bx = rtz_shift_i32(mips_mult_lo_i32(vdot, (int16_t)*(uint32_t *)(imp + 0x20)), 12, 0xfff);
+    int32_t by = rtz_shift_i32(mips_mult_lo_i32(vdot, *(int16_t *)(imp + 0x22)), 12, 0xfff);
+    int32_t bz = rtz_shift_i32(mips_mult_lo_i32(vdot, (int16_t)*(uint32_t *)(imp + 0x24)), 12, 0xfff);
+    self[0x20] = (uint32_t)mips_subu_i32((int32_t)self[0x20], bx);
+    self[0x21] = (uint32_t)mips_subu_i32((int32_t)self[0x21], by);
+    self[0x22] = (uint32_t)mips_subu_i32((int32_t)self[0x22], bz);
 retire:
     Object_RubbleSpawn(&DAT_801012a0, self);
     Object_RetireDeferred(self);
-    _DAT_000012ad = (int8_t)(DAT_801012ac - 1);
+    _DAT_000012ad = (int8_t)mips_addu_i32(DAT_801012ac, -1);
     return 0;
+}
+
+uint32_t FUN_80100244(uint32_t *self, uint32_t mode, uint32_t *arg)
+{
+    return CL_RollingBoulder(self, mode, arg);
 }
 
 /* ============================================================

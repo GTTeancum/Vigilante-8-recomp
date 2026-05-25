@@ -2,82 +2,211 @@
  *
  * Source: WILDWEST.DLL  FUN_8010178c.
  *
- * Multi-piece destructible western-town facade. Each panel piece is
- * a child at self+0xe linked via +0x34. Damage propagates left to
- * right: a hit triggers the immediate piece + the two adjacent ones,
- * spawning splinter debris (object id 0x2bb) at the joint locations.
+ * Heavy loose saloon panel/chunk callback. The active host code used
+ * to model this as a facade crumble shortcut, but the original overlay
+ * is the same rolling/destructible physics idiom as barrels/boulders:
+ * terrain bounce, spin-axis integration, impact impulse, parent detach,
+ * and radius/period shrink when the piece is finalized.
  *
- * Per-tick walks chain bumping piece anim phases. On vehicle hit
- * (kind==7) crumbles via Damage_StandardVehicle; on death detaches
- * pieces and retires.
- *
- * mode: 0=tick, 1=spawn-finalize, 2=retire, 3=impact, 4=silence FX.
- *
- * MED. Same crumble idiom as wildwest/bridge_collapse.c but multi-
- * piece chain.
+ * mode: 0=tick, 1/6=shrink/finalize, 2=detach-if-parented, 3=impact.
  */
 #include <stdint.h>
 
-extern void Damage_StandardVehicle(uint32_t *self, void *imp);
-extern int  Damage_AccumulateOrFire(uint32_t *self, uint16_t a);
-extern void SubModel_Detach(uint32_t *self);
-extern void Object_RetireDeferred(uint32_t *self);
+extern int  Terrain_QueryAt(uint32_t *self, uint32_t *pos, int16_t *nOut, int flag);
+extern void Object_OrientByAxis(uint32_t *mat, uint32_t *out, uint32_t *axis);
+extern void MatrixNormal(uint32_t *m, uint32_t *out);
 extern void Object_RefitAABB(uint32_t *self);
-extern uint32_t Object_SpawnFromBank(uint32_t bin, int kind, int prio, int flag);
-extern void Object_Suspend(void);
-extern int  Rand255(void);
-extern uint8_t Pool_AllocSFX(void);
-extern void Pool_BindFXOnObject(uint8_t h, uint32_t bin, int slot, int aux);
-extern void SFX_StopWorld(int h);
-extern uint8_t SFX_PlayWorldXY(uint32_t *xyz);
-extern void SFX_Update(int h, int posVoxel);
-extern uint32_t _DAT_80065310;
+extern void Audio_PlaySfxRelative(uint32_t bank, int sfxId, void *pos);
+extern void FUN_8004366c(uint32_t *m);
+extern int *FUN_80043248(int32_t *v, int32_t *out);
+extern void FUN_8004cdc4(uint32_t *matA, uint32_t *matB);
+extern int FUN_8001fe8c(void *listHead, uint32_t *obj);
+extern void FUN_8001d4f0(uint32_t *parent, uint32_t *child);
+extern uint32_t FUN_80017160(void);
+extern void FUN_80020890(uint32_t *obj, int timer);
+extern void FX_RingFlash_Init(uint32_t *self, void *p);
+extern int FUN_8001d5a0(int self);
+extern uint32_t *FUN_8001d624(int obj);
+extern int FUN_8001d564(int self);
+extern void FUN_8001fe50(void *listHead, void *obj);
+extern uint8_t DAT_80065a18[];
+extern uint32_t _DAT_80065310, _DAT_80065b3c;
+
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
+static int32_t rtz_shift_i32(int32_t v, unsigned sh, int32_t bias)
+{
+    if (v < 0) v = mips_addu_i32(v, bias);
+    return v >> sh;
+}
+
+static void saloon_scale_radius(uint32_t *self)
+{
+    int32_t h = rtz_shift_i32(mips_mult_lo_i32((int32_t)self[0x15], 0x93c), 12, 0xfff);
+    *self |= 0x80u;
+    self[0x15] = (uint32_t)h;
+    int32_t den = rtz_shift_i32(mips_mult_lo_i32(h, 0x3243), 12, 0xfff);
+    if (den != 0)
+        *(int16_t *)(self + 0x25) = (int16_t)(0x1000000 / den);
+}
+
+static void saloon_detach_parented(uint32_t *self)
+{
+    if (self[0xf] == 0) return;
+
+    int parent = FUN_8001d5a0((int)(uintptr_t)self);
+    if (parent != 0) {
+        int32_t v = *(int32_t *)(uintptr_t)(parent + 0xdc);
+        *(int32_t *)(uintptr_t)(parent + 0xdc) = rtz_shift_i32(v, 2, 3);
+    }
+
+    uint32_t *world = FUN_8001d624((int)(uintptr_t)self);
+    for (int i = 0; i < 8; i++)
+        self[4 + i] = world[i];
+
+    int detached = FUN_8001d564((int)(uintptr_t)self);
+    FUN_8001fe50(DAT_80065a18, (void *)(uintptr_t)detached);
+    FUN_80020890(self, 0x78);
+    saloon_scale_radius(self);
+}
 
 uint32_t WW_SaloonDestruct(uint32_t *self, uint32_t mode, int *imp)
 {
     switch (mode) {
     case 0: {
-        /* Per-tick: animate each piece's phase. */
-        for (uintptr_t c = self[0xe]; c != 0; c = *(uint32_t *)(c + 0x34))
-            if (*(int16_t *)(c + 6) == 0)
-                *(int16_t *)(c + 0x40) += 0x10;
-        if ((_DAT_80065310 & 0xf) == 0)
-            for (uintptr_t c = self[0xe]; c != 0; c = *(uint32_t *)(c + 0x34))
-                Object_RefitAABB((uint32_t *)c);
-        SFX_Update((int)*((char *)self + 5), SFX_PlayWorldXY(self + 9));
-        return 0;
-    }
-    case 1: {
-        uint8_t h = Pool_AllocSFX();
-        *((char *)self + 5) = (char)h;
-        Pool_BindFXOnObject(h, *(uint32_t *)(self[0x16] + 8), 4, 0);
-        return 0;
-    }
-    case 2:
-        SubModel_Detach(self);
-        Object_RetireDeferred(self);
-        return 0;
-    case 3: {
-        int impObj = *imp;
-        if (*(uint8_t *)(impObj + 4) != 7) return 0;
-        Damage_StandardVehicle(self, (void *)(intptr_t)*(uint16_t *)(impObj + 0xc));
-        if (Damage_AccumulateOrFire(self, 0)) {
-            /* Spawn splinter debris at random child piece. */
-            uint32_t bin = self[0x16];
-            uint32_t *deb = (uint32_t *)Object_SpawnFromBank(bin, 0x2bb, 0x80, 8);
-            *deb = 0x34u;
-            int r = Rand255();
-            deb[0x12] = self[9]  + (r * 0x4000 >> 15) - 0x2000;
-            deb[0x13] = self[10];
-            deb[0x14] = self[0xb] + (r * 0x4000 >> 15) - 0x2000;
-            deb[0x19] = 0x8003e80cu;
-            Object_Suspend();
+        if (self[0xf] != 0) return 0;
+
+        int16_t n[3] = { 0, 0, 0 };
+        uint32_t pos[3] = {
+            self[9],
+            (uint32_t)mips_addu_i32((int32_t)self[10], (int32_t)self[0x15]),
+            self[0xb]
+        };
+        int gy = Terrain_QueryAt(self, pos, n, 0);
+        if (gy < mips_addu_i32((int32_t)pos[1], 0x800)) {
+            int32_t oldVx = (int32_t)self[0x20];
+            int32_t vdot = mips_addu_i32(
+                mips_addu_i32(mips_mult_lo_i32((int32_t)self[0x20], n[0]),
+                              mips_mult_lo_i32((int32_t)self[0x21], n[1])),
+                mips_mult_lo_i32((int32_t)self[0x22], n[2]));
+            vdot = rtz_shift_i32(vdot, 11, 0x7ff);
+            int32_t rollSeed = mips_sll_i32(n[0], 1);
+            if (vdot < 0) {
+                int32_t ax = rtz_shift_i32(mips_mult_lo_i32(vdot, n[0]), 12, 0xfff);
+                int32_t ay = rtz_shift_i32(mips_mult_lo_i32(vdot, n[1]), 12, 0xfff);
+                int32_t az = rtz_shift_i32(mips_mult_lo_i32(vdot, n[2]), 12, 0xfff);
+                self[0x20] = (uint32_t)mips_subu_i32((int32_t)self[0x20], ax);
+                int32_t vy = mips_mult_lo_i32(mips_subu_i32((int32_t)self[0x21], ay), 3);
+                self[0x21] = (uint32_t)rtz_shift_i32(vy, 2, 3);
+                self[0x22] = (uint32_t)mips_subu_i32((int32_t)self[0x22], az);
+                self[10] = (uint32_t)mips_subu_i32(gy, (int32_t)self[0x15]);
+                if (vdot < -0x1c9) {
+                    Audio_PlaySfxRelative(*(uint32_t *)(uintptr_t)(self[0x16] + 8), 3, self + 9);
+                    rollSeed = 0x66e;
+                } else {
+                    goto tick_damping;
+                }
+            }
+            int32_t rollX = rtz_shift_i32(mips_mult_lo_i32(mips_addu_i32(rollSeed, n[0]), 0x1e), 12, 0xfff);
+            self[0x20] = (uint32_t)mips_addu_i32(oldVx, rollX);
+            int32_t fz = rtz_shift_i32(mips_mult_lo_i32(n[2], 0x5a), 12, 0xfff);
+            self[0x22] = (uint32_t)mips_addu_i32((int32_t)self[0x22], fz);
+tick_damping:
+            *(int16_t *)(self + 0x23) =
+                (int16_t)rtz_shift_i32(mips_mult_lo_i32(mips_subu_i32(0, (int32_t)self[0x22]),
+                                                        (uint16_t)self[0x25]), 12, 0xfff);
+            *(int16_t *)(self + 0x24) =
+                (int16_t)rtz_shift_i32(mips_mult_lo_i32((int32_t)self[0x20],
+                                                        (uint16_t)self[0x25]), 12, 0xfff);
+            self[0x20] = (uint32_t)rtz_shift_i32(mips_mult_lo_i32((int32_t)self[0x20], 0xf), 4, 0xf);
+            self[0x21] = (uint32_t)rtz_shift_i32(mips_mult_lo_i32((int32_t)self[0x21], 0xf), 4, 0xf);
+        }
+        self[0x21] = (uint32_t)mips_addu_i32((int32_t)self[0x21], 0x5a);
+        self[0x20] = (uint32_t)rtz_shift_i32(mips_mult_lo_i32((int32_t)self[0x20], 0x1f), 5, 0x1f);
+        self[0x21] = (uint32_t)rtz_shift_i32(mips_mult_lo_i32((int32_t)self[0x21], 0x1f), 5, 0x1f);
+        self[0x22] = (uint32_t)rtz_shift_i32(mips_mult_lo_i32((int32_t)self[0x22], 0x1f), 5, 0x1f);
+        Object_OrientByAxis(self + 4, self + 4, self + 0x23);
+        self[9] = (uint32_t)mips_addu_i32((int32_t)self[9], (int32_t)self[0x20]);
+        self[10] = (uint32_t)mips_addu_i32((int32_t)self[10], (int32_t)self[0x21]);
+        self[0xb] = (uint32_t)mips_addu_i32((int32_t)self[0xb], (int32_t)self[0x22]);
+        self[0x22] = (uint32_t)mips_addu_i32((int32_t)self[0x22], -0x80);
+        if ((mips_subu_i32((int32_t)_DAT_80065310, *((uint8_t *)self + 9)) & 0xf) == 0)
+            MatrixNormal(self + 4, self + 4);
+        if ((uint32_t)self[0xb] < _DAT_80065b3c) {
+            Object_RefitAABB(self);
+            self[0x20] = 0;
+            self[0x21] = 0;
+            self[0x22] = 0;
+            *(int16_t *)(self + 0x23) = 0;
+            *(int16_t *)((uint8_t *)self + 0x8e) = 0;
+            *(int16_t *)(self + 0x24) = 0;
         }
         return 0;
     }
-    case 4:
-        SFX_StopWorld((int)*((char *)self + 5));
+    case 1:
+    case 6:
+        saloon_scale_radius(self);
         return 0;
+    case 2:
+        saloon_detach_parented(self);
+        return 0;
+    case 3: {
+        uint32_t impObj = (uint32_t)*imp;
+        uint32_t *ringSelf = self;
+        if (*(uint8_t *)(uintptr_t)(impObj + 4) == 2 && ((*self & 1) == 0)) {
+            int32_t local[3] = {
+                mips_subu_i32((int32_t)self[9], *(int32_t *)(uintptr_t)(impObj + 0x24)),
+                mips_subu_i32((int32_t)self[10], *(int32_t *)(uintptr_t)(impObj + 0x28)),
+                mips_subu_i32((int32_t)self[0xb], *(int32_t *)(uintptr_t)(impObj + 0x2c))
+            };
+            FUN_8004366c((uint32_t *)(uintptr_t)(impObj + 0x10));
+            FUN_80043248(local, (int32_t *)(self + 9));
+            FUN_8004cdc4(self + 4, self + 4);
+            FUN_8001fe8c(DAT_80065a18, self);
+            FUN_8001d4f0((uint32_t *)(uintptr_t)impObj, self);
+            *(int32_t *)(uintptr_t)(impObj + 0xdc) =
+                mips_sll_i32(*(int32_t *)(uintptr_t)(impObj + 0xdc), 2);
+            int32_t r = (int32_t)FUN_80017160();
+            int32_t delay = (int32_t)((mips_mult_lo_i32(r, 0x168) >> 15) + 0x168);
+            FUN_80020890(self, delay);
+            ringSelf = (uint32_t *)1;
+        }
+        FX_RingFlash_Init(ringSelf, imp);
+        int32_t vdot = mips_addu_i32(
+            mips_addu_i32(mips_mult_lo_i32((int32_t)self[0x20], *(int16_t *)(imp + 8)),
+                          mips_mult_lo_i32((int32_t)self[0x21], *(int16_t *)((uint8_t *)imp + 0x22))),
+            mips_mult_lo_i32((int32_t)self[0x22], *(int16_t *)(imp + 9)));
+        vdot = rtz_shift_i32(vdot, 11, 0x7ff);
+        if (vdot < 0) {
+            int32_t nx = (int32_t)*(int16_t *)(imp + 8) + ((int32_t)FUN_80017160() & 0xff);
+            int32_t bx = rtz_shift_i32(mips_mult_lo_i32(vdot, nx), 12, 0xfff);
+            int32_t by = rtz_shift_i32(mips_mult_lo_i32(vdot, *(int16_t *)((uint8_t *)imp + 0x22)), 12, 0xfff);
+            int32_t bz = rtz_shift_i32(mips_mult_lo_i32(vdot, *(int16_t *)(imp + 9)), 12, 0xfff);
+            self[0x20] = (uint32_t)mips_subu_i32((int32_t)self[0x20], bx);
+            self[0x21] = (uint32_t)mips_subu_i32((int32_t)self[0x21], by);
+            self[0x22] = (uint32_t)mips_subu_i32((int32_t)self[0x22], bz);
+        }
+        saloon_detach_parented(self);
+        return 0;
+    }
     default: return 0;
     }
 }

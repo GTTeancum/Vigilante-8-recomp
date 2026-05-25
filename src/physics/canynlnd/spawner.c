@@ -29,6 +29,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t V8_RandNext(void);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int flags);  /* FUN_8001ac44 */
 extern void  Object_RandomizeRotation(uint32_t *obj);   /* FUN_8001dc1c */
@@ -76,7 +77,7 @@ uint32_t CL_Launcher(uint32_t *parent, uint32_t mode, uint32_t *impulse)
     child[0x12] = parent[0x12];   /* posX */
     child[0x13] = parent[0x13];   /* posY */
     child[0x14] = parent[0x14];   /* posZ */
-    child[0x19] = (uintptr_t)&FUN_80100244;
+    Object_SetCallbackPsxSlot(child, (uintptr_t)&FUN_80100244);
     child[0x21] = 0xfffff415u;    /* vy = -0xbeb (upward) */
 
     /* Aim cone: angle = parentHeading + random[-128..127], wrap 0..0xfff. */

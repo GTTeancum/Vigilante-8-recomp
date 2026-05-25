@@ -35,6 +35,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern int  Rand255(void);                                          /* FUN_80017160 */
 extern uint32_t Path_Pick(uint32_t bank, int seed);                 /* FUN_8001ffd4 */
 extern int  Path_AttachToObj(uint32_t flag, uint32_t path);          /* func_0x8003d080 */
@@ -59,7 +60,8 @@ extern void Heap_Free(uint32_t p);                                   /* FUN_8004
 extern uint8_t  DAT_8008f660, DAT_80100098;
 extern uint32_t DAT_80101b88;
 extern uint32_t _DAT_800659fc, _DAT_800737e8, _DAT_80065a10;
-extern uint32_t FUN_801006cc, FUN_8003e80c;
+extern uint32_t FUN_801006cc;
+extern int FUN_8003e80c(int obj, int event, int param3);
 
 uint32_t HD_SirenStrobe(uint32_t *self, uint32_t mode, uint32_t *arg)
 {
@@ -123,7 +125,7 @@ uint32_t HD_SirenStrobe(uint32_t *self, uint32_t mode, uint32_t *arg)
             }
             Pool_BindFXOnObject(sfx, *(uint32_t *)(_DAT_800737e8 + 8), 3, 0);
             SFX_Update((int)*((char *)vic + 5), 0);
-            vic[0x19] = (uint32_t)(uintptr_t)&FUN_801006cc;
+            Object_SetCallbackPsxSlot(vic, (uintptr_t)&FUN_801006cc);
             *(uint8_t *)(vic + 2) = 0;
             *vic = (*vic & ~2u) | 0x3000020u;
             int r = Rand255();
@@ -166,7 +168,7 @@ uint32_t HD_SirenStrobe(uint32_t *self, uint32_t mode, uint32_t *arg)
         *(uint8_t  *)(self + 1)  = 1;
         *self = 0x24u;
         self[0x12] = arg[0]; self[0x13] = arg[1]; self[0x14] = arg[2];
-        self[0x19] = (uint32_t)(uintptr_t)&FUN_8003e80c;
+        Object_SetCallbackPsxSlot(self, (uintptr_t)&FUN_8003e80c);
         Object_Suspend();
     }
     /* fall through */

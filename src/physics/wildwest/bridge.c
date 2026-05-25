@@ -21,8 +21,8 @@
  */
 #include <stdint.h>
 
-extern int  Collision_AgainstTerrain(int obj, int impact);    /* func_0x8002239c */
-extern int  Collision_Circular     (int obj, int impact);    /* func_0x80022320 */
+extern int  FUN_8002239c(uint32_t *self, int32_t *impulse);
+extern uint32_t FUN_80022320(uint32_t *self, uint32_t amount);
 extern void *Effects_QueueParticles(int posXyzAddr, int);    /* func_0x80042cdc */
 
 uint32_t WW_BridgeDestroyTick(int obj, uint32_t mode, void *impactCtx)
@@ -31,18 +31,18 @@ uint32_t WW_BridgeDestroyTick(int obj, uint32_t mode, void *impactCtx)
     int  hit;
 
     if (mode == 3) {
-        hit = Collision_AgainstTerrain(obj, (int)(intptr_t)impactCtx);
+        hit = FUN_8002239c((uint32_t *)(uintptr_t)(uint32_t)obj, (int32_t *)impactCtx);
         collisionPosAddr = obj + 0x48;
         if (hit != 0) goto fired;
-        hit = Collision_Circular(obj, (int)(intptr_t)impactCtx);
+        hit = FUN_80022320((uint32_t *)(uintptr_t)(uint32_t)obj, (uint32_t)(uintptr_t)impactCtx);
         if (hit != 0) goto fired;
     } else if (mode > 3 || mode == 1) {
         if (mode != 8) {
-            hit = Collision_AgainstTerrain(obj, (int)(intptr_t)impactCtx);
+            hit = FUN_8002239c((uint32_t *)(uintptr_t)(uint32_t)obj, (int32_t *)impactCtx);
             collisionPosAddr = obj + 0x48;
             if (hit != 0) goto fired;
         }
-        hit = Collision_Circular(obj, (int)(intptr_t)impactCtx);
+        hit = FUN_80022320((uint32_t *)(uintptr_t)(uint32_t)obj, (uint32_t)(uintptr_t)impactCtx);
         collisionPosAddr = obj + 0x48;
         if (hit != 0) goto fired;
     }
@@ -54,6 +54,11 @@ fired: {
     *(uint16_t *)((uint8_t *)fx + 8) = 0xffff;
     }
     return 0;
+}
+
+uint32_t FUN_801003ec(int obj, uint32_t mode, void *impactCtx)
+{
+    return WW_BridgeDestroyTick(obj, mode, impactCtx);
 }
 
 /* ============================================================

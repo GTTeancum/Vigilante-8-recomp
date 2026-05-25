@@ -114,6 +114,12 @@ void Heap_Free(void *ptr)
     g_heapFreeList->next = b;
 }
 
+/* HIGH: raw PSY-Q free3 alias used by decompiled callers. */
+void FUN_80045088(int ptr)
+{
+    Heap_Free((void *)(uintptr_t)(uint32_t)ptr);
+}
+
 /* HIGH: realloc, shrinking/growing in-place when possible, else
  * malloc+memcpy+free. */
 void *Heap_Realloc(void *ptr, uint32_t nbytes)

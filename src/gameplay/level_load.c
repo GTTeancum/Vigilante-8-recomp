@@ -22,8 +22,17 @@ extern void (*pcRam00000730)(void *obj, int mode, int unused);   /* world update
 extern uint32_t *puRam000006f8;                                  /* world object root */
 extern uint8_t   DAT_80065a60[];
 
-void Level_LoadViaShellLoadDll(uint32_t a0, uint32_t a1, uint32_t a2)
+/* FUN_80022ba8 -- Level_LoadByName (called by main_loop.c).
+ * Three args passed through to Load.dll entry point (param_1..param_3 in Ghidra).
+ *
+ * PHASE 2 STUB: loading LOAD.DLL requires the PSX CD filesystem (Iso_OpenPath /
+ * iRam000006b4 directory root).  Terrain and vehicle are pre-loaded in main.c
+ * via Host_TerrainLoad / Host_VehicleInit before V8_MainLoop is entered.
+ * Full DLL-load path is re-enabled in Phase 4+ once CD-fs is backed by host fopen.
+ */
+void Level_LoadByName(uint32_t a0, uint32_t a1, uint32_t a2)
 {
+#if 0  /* Phase 2 stub -- full DLL-loader body disabled until Phase 4 */
     void *image = Overlay_LoadAndRelocate_Named("Shell\\Load.dll");
     typedef void (*EntryFn)(uint32_t, uint32_t, uint32_t);
     EntryFn entry = *(EntryFn *)((uint8_t *)image + 4);
@@ -34,6 +43,10 @@ void Level_LoadViaShellLoadDll(uint32_t a0, uint32_t a1, uint32_t a2)
     if ((*puRam000006f8 & 0x80u) != 0) {
         ObjList_FastClear(DAT_80065a60);
     }
+#else
+    (void)a0; (void)a1; (void)a2;
+    /* no-op for Phase 2 */
+#endif
 }
 
 /* ============================================================

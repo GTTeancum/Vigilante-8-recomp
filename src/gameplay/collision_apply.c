@@ -31,12 +31,16 @@
  * Pass 3 should rename Vehicle.statusFlags accordingly.
  */
 #include <stdint.h>
+#include <stdio.h>
 
 extern int  Effects_SpawnExplosion(int obj);                /* FUN_8003fc50 */
 extern void (*pcRam00000730)(void *self, int eventId, int);  /* world callback */
 
 int Damage_AccumulateOrFire(uint32_t *self, uint16_t amount)
 {
+    fprintf(stderr, "v8: Damage_AccumulateOrFire(self=%p, amount=%u, hp=%u)\n",
+            (void *)self, (unsigned)amount,
+            (unsigned)((uint16_t *)self)[6]);
     if ((self[0] & 0x8000u) != 0) return 0;
 
     uint16_t hp = ((uint16_t *)self)[6];        /* +0xc, lo u16 of self[3] */
@@ -59,6 +63,12 @@ int Damage_FromImpulse(uint32_t *self, int *impulse)
     uint16_t weaponStrength = *(uint16_t *)(*impulse + 0xc);
     return Damage_AccumulateOrFire(self, weaponStrength);
 }
+
+/* Hex-name aliases. */
+uint32_t FUN_80022320(uint32_t *self, uint32_t amount)
+    { return (uint32_t)Damage_AccumulateOrFire(self, (uint16_t)amount); }
+int FUN_8002239c(uint32_t *self, int32_t *impulse)
+    { return Damage_FromImpulse(self, impulse); }
 
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)

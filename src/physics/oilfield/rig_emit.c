@@ -15,19 +15,25 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t *Generic_PoolAlloc(uint32_t bank);  /* func_0x80040378 */
 extern uint32_t V8_RandNext(void);
 extern void Object_BumpSubstate_Or_FX(int obj);
 extern void Damage_Apply(void *obj);
+extern void FUN_80043358(uint32_t *mat, int32_t *src, int32_t *out);
+extern void FUN_800176f8(int obj, int32_t *vec, int32_t *pos);
+extern void Damage_TouchImpactor(int imp);                      /* FUN_8002c3ac */
+extern int32_t DAT_80100054[3];
+extern int LAB_8004042c(int obj, int event, int param3);
 
 uint32_t OF_RigEmit(int self, uint32_t mode, int *impulse)
 {
-    if (mode != 2 && mode != 3 && mode != 0) goto end;
-    if (mode == 3 || mode == 0) {
+    if (mode == 2) goto seal;
+    if (mode != 3) {
         int16_t *cd = (int16_t *)(intptr_t)(self + 0x80);
-        int16_t prev = *cd;
-        *cd = (int16_t)(prev - 1);
-        if (prev == 0) {
+        int16_t next = (int16_t)(*cd - 1);
+        *cd = next;
+        if (next == -1) {
             uint32_t bank = *(uint32_t *)(self + 0x98);
             uint32_t *puff = Generic_PoolAlloc(bank);
             if (puff != NULL) {
@@ -37,13 +43,12 @@ uint32_t OF_RigEmit(int self, uint32_t mode, int *impulse)
                 int r = (int)V8_RandNext();
                 int32_t vy = *(int32_t *)(self + 0x8c);
                 puff[11] = 0; puff[10] = 0; puff[9] = 0;
-                puff[0x19] = 0x80040470;
+                Object_SetCallbackPsxSlot(puff, (uintptr_t)&LAB_8004042c);
                 puff[0x24] = (uint32_t)(vy + ((r * vy) >> 15));
                 Object_BumpSubstate_Or_FX(self);
             }
             *cd = *(int16_t *)(self + 0x82);
         }
-        /* Walk children. */
         for (int c = *(int *)(self + 0x38); c != 0; c = *(int *)(c + 0x34)) {
             *(int *)(c + 0x24) += *(int *)(c + 0x88);
             *(int *)(c + 0x28) += *(int *)(c + 0x8c);
@@ -53,9 +58,20 @@ uint32_t OF_RigEmit(int self, uint32_t mode, int *impulse)
         }
         Damage_Apply((void *)(intptr_t)self);
     }
-end:
-    (void)impulse;
+
+    if (impulse == NULL || *(uint8_t *)(*impulse + 4) != 2) return 0;
+    int32_t local[3];
+    FUN_80043358((uint32_t *)(intptr_t)(self + 0x10), DAT_80100054, local);
+    FUN_800176f8(*impulse, local, (int32_t *)(intptr_t)(self + 0x48));
+    Damage_TouchImpactor(*impulse);
+seal:
+    *(uint16_t *)(self + 0x80) = 0xffff;
     return 0;
+}
+
+uint32_t FUN_801002b0(int self, uint32_t mode, int *impulse)
+{
+    return OF_RigEmit(self, mode, impulse);
 }
 
 /* ============================================================

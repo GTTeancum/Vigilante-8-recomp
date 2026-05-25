@@ -20,18 +20,20 @@
  */
 #include <stdint.h>
 
-extern int32_t XobfStream_ReadI32(void *stream);   /* func_0x800224ec */
+extern int32_t XobfStream_ReadI32(void *streamRef);   /* func_0x800224ec */
 extern int32_t DAT_8006531a;                        /* g_difficulty */
 
-void XOBF_LoadHealth(int obj, void *stream, int payloadSize)
+void XOBF_LoadHealth(int obj, void *payload, int payloadSize)
 {
-    int32_t health    = XobfStream_ReadI32(stream);
+    uint8_t *o = (uint8_t *)(uintptr_t)obj;
+    uint8_t *cursor = (uint8_t *)payload;
+    int32_t health    = XobfStream_ReadI32(&cursor);
     int32_t maxHealth = health;
     if (payloadSize > 4) {
-        maxHealth = XobfStream_ReadI32(stream);
+        maxHealth = XobfStream_ReadI32(&cursor);
     }
 
-    if (*(int8_t *)(obj + 4) == 5 && *(int16_t *)(obj + 6) >= 0) {
+    if (*(int8_t *)(o + 4) == 5 && *(int16_t *)(o + 6) >= 0) {
         int32_t difficulty = DAT_8006531a + 2;
         int32_t v0 = health * difficulty;
         if (v0 < 0) v0 += 3;
@@ -43,11 +45,13 @@ void XOBF_LoadHealth(int obj, void *stream, int payloadSize)
         maxHealth = v1;
     }
 
-    *(int16_t *)(obj + 0xc) = (int16_t)health;
-    *(int16_t *)(obj + 0xe) = (int16_t)maxHealth;
+    *(int16_t *)(o + 0xc) = (int16_t)health;
+    *(int16_t *)(o + 0xe) = (int16_t)maxHealth;
 
     /* Propagate to any child whose own health is still 0. */
-    for (int child = *(int *)(obj + 0x38); child != 0; child = *(int *)(child + 0x34)) {
+    for (uint8_t *child = *(uint8_t **)(o + 0x38);
+         child != NULL;
+         child = *(uint8_t **)(child + 0x34)) {
         if (*(int16_t *)(child + 0xc) == 0) {
             *(int16_t *)(child + 0xc) = (int16_t)health;
         }

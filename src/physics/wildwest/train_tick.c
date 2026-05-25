@@ -24,45 +24,87 @@ extern int  Path_Sample(int waypoint, int t, uint32_t *posInOut, int32_t *deltaO
 extern int16_t *VectorNormalS(int32_t *in, int16_t *out);  /* PSY-Q */
 extern long SquareRoot0(int n);
 extern int  Path_NextWaypoint(int waypoint, uint32_t *direction);  /* func_0x80042698 */
+extern void FUN_8001787c(intptr_t obj, const int32_t *aabb_minmax);
+extern void FUN_80020890(uint32_t *obj, int mode);
+
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint64_t)(uint32_t)a * (uint64_t)(uint32_t)b);
+}
+
+static int32_t rtz_shift_i32(int32_t v, unsigned sh)
+{
+    if (v < 0)
+        v = mips_addu_i32(v, (int32_t)((1u << sh) - 1u));
+    return v >> sh;
+}
 
 uint32_t WW_TrainTick(uint32_t *self)
 {
-    if (self[0x29] == 0) return 0;
+    if (self[0x29] != 0) {
+        /* Decelerate near the end of segment. */
+        if ((self[0] & 0x10000u) != 0) {
+            int32_t vel = mips_subu_i32((int32_t)self[0x2a], 0xe);
+            self[0x2a] = (vel > 0) ? (uint32_t)vel : 0u;
+        }
 
-    /* Decelerate near the end of segment. */
-    if ((self[0] & 0x10000u) != 0) {
-        int32_t vel = (int32_t)self[0x2a] - 0xe;
-        if (vel < 0) vel = 0;
-        self[0x2a] = (uint32_t)vel;
+        /* Sample path. */
+        uint32_t t = self[0x2c];
+        if ((int32_t)t < 0)
+            t = (uint32_t)mips_addu_i32((int32_t)t, 0xffff);
+        int32_t delta[4];
+        Path_Sample((int)self[0x29], (int32_t)t >> 16, self + 9, delta);
+        delta[1] = 0;
+        if (self[0x2b] == 0) {
+            delta[0] = mips_subu_i32(0, delta[0]);
+            delta[2] = mips_subu_i32(0, delta[2]);
+        }
+        int16_t dirS[4];
+        VectorNormalS(delta, dirS);
+
+        /* Write into rotation matrix columns exactly like the source local_18/local_14 stores. */
+        *(int16_t *)(self + 4) = dirS[2];        /* +0x10 */
+        *(int16_t *)(self + 8) = dirS[2];        /* +0x20 */
+        *(int16_t *)((uint8_t *)self + 0x14) = dirS[0];
+        *(int16_t *)((uint8_t *)self + 0x1c) = (int16_t)mips_subu_i32(0, dirS[0]);
+
+        int32_t mag = (int32_t)SquareRoot0(
+            mips_addu_i32(mips_mult_lo_i32(delta[0], delta[0]),
+                          mips_mult_lo_i32(delta[2], delta[2])));
+        if (self[0x2b] != 0)
+            mag = 1;
+        uint32_t advance = (uint32_t)mips_addu_i32(
+            (int32_t)self[0x2c],
+            mips_mult_lo_i32((int32_t)self[0x2a], -0x10000) / mag);
+        self[0x2c] = advance;
+        if (advance >= 0x10000001u) {
+            /* Overshoot -- pick next waypoint and rebuild path velocity. */
+            uint32_t next = (uint32_t)Path_NextWaypoint((int)self[0x29], &self[0x2b]);
+            self[0x29] = next;
+            if (next != 0) {
+                self[0x2c] = (uint32_t)(mips_subu_i32(0, (self[0x2b] == 0) ? 1 : 0) & 0x10000000);
+            }
+            int32_t vx = mips_mult_lo_i32((int32_t)(int16_t)self[5], (int32_t)self[0x2a]);
+            self[0] &= 0xfffffeffu;
+            self[0x20] = (uint32_t)rtz_shift_i32(vx, 5);
+            self[0x21] = 0;
+            int32_t vz = mips_mult_lo_i32((int32_t)(int16_t)self[8], (int32_t)self[0x2a]);
+            self[0x22] = (uint32_t)rtz_shift_i32(vz, 5);
+            FUN_80020890(self, 0x78);
+        }
     }
 
-    /* Sample path. */
-    uint32_t t = self[0x2c];
-    if ((int32_t)t < 0) t += 0xffff;
-    int32_t delta[4];
-    Path_Sample((int)self[0x29], (int)t >> 16, self + 9, delta);
-    delta[1] = 0;
-    if (self[0x2b] == 0) {
-        delta[0] = -delta[0];
-        delta[2] = -delta[2];
-    }
-    int16_t dirS[4];
-    VectorNormalS(delta, dirS);
-
-    /* Write into rotation matrix columns. */
-    *(int16_t *)(self + 4) = 0;        /* +0x10 */
-    *(int16_t *)(self + 8) = 0;        /* +0x20 */
-    *(int16_t *)((uint8_t *)self + 0x14) = dirS[0];
-    *(int16_t *)((uint8_t *)self + 0x1c) = -dirS[0];
-
-    int32_t mag = (int32_t)SquareRoot0(delta[0] * delta[0] + delta[2] * delta[2]);
-    if (self[0x2b] != 0) mag = 1;
-    uint32_t advance = self[0x2c] + (uint32_t)((int32_t)self[0x2a] * -0x10000 / mag);
-    self[0x2c] = advance;
-    if (advance < 0x10000001u) return 0;
-
-    /* Overshoot -- pick next waypoint. */
-    self[0x29] = (uint32_t)Path_NextWaypoint((int)self[0x29], &self[0x2b]);
+    FUN_8001787c((intptr_t)self, (const int32_t *)(uintptr_t)mips_addu_i32((int32_t)self[0x17], 4));
     return 0;
 }
 

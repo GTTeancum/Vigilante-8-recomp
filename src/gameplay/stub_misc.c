@@ -16,6 +16,7 @@ extern int32_t iRam00000010;   /* g_splitScreenMode */
 void Bootstrap_C_Init(void) { /* deliberately empty -- matches binary */ }
 
 void FreeHelper_80040e18(void *p) { Heap_Free(p); }
+void FUN_80040e18(void *p) { Heap_Free(p); }
 
 void ScreenHalf_Configure(uint8_t *obj)
 {

@@ -20,12 +20,16 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern int  Damage_FromImpulse(uint32_t *self, int *impulse);
 extern int  Damage_AccumulateOrFire(uint32_t *self, uint16_t amount);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int size, int flags);
 extern void Object_CopyMatrixFromBone(void *outMatrix, int parent, int bonePtr);   /* FUN_8001d68c */
 extern void Object_RandomizeRotation(uint32_t *obj);   /* FUN_8001dc1c */
 extern void Object_RegisterDebris(uint32_t *obj);      /* FUN_8003e76c */
+extern void Object_RegisterInScene(uint32_t *obj);      /* FUN_800202f4 */
+extern void Object_DefaultDispatch(uint32_t *obj, int mode, uint32_t arg);  /* SUB_800223dc */
+extern uint32_t FUN_80100a30(int self, int mode, int *arg);
 
 static uint32_t scale_4_12(int32_t v, int32_t factor)
 {
@@ -36,7 +40,7 @@ static uint32_t scale_4_12(int32_t v, int32_t factor)
 
 void OF_DebrisThrow(int self, uint32_t mode, void *impactCtx)
 {
-    int size = 0;
+    int size = (int)(intptr_t)impactCtx;
     int hit = 0;
 
     if (mode == 3 || (mode != 8 && (mode > 3 || mode == 1 || mode == 6))) {
@@ -60,7 +64,7 @@ spawn:
         Object_RandomizeRotation(child);
         child[0x15] = scale_4_12((int32_t)child[0x15], 0xc00);
         *(uint16_t *)((uint8_t *)child + 6) = 1000;
-        child[0x19] = (uintptr_t)0;     /* tick = FUN_80100a30 (level local) */
+        Object_SetCallbackPsxSlot(child, (uintptr_t)&FUN_80100a30);
         child[0x21] = 0xfffff415u;       /* vy = -0xbeb (upward) */
 
         int32_t r = (int32_t)child[0x15] * 0x3243;
@@ -75,7 +79,14 @@ spawn:
         child[0] |= 0x88u;
 
         Object_RegisterDebris(child);
+        Object_RegisterInScene(child);
+        Object_SetCallbackPsxSlot((void *)(intptr_t)self, (uintptr_t)&Object_DefaultDispatch);
     }
+}
+
+void FUN_80100e78(int self, uint32_t mode, void *impactCtx)
+{
+    OF_DebrisThrow(self, mode, impactCtx);
 }
 
 /* ============================================================

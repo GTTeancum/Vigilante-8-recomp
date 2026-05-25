@@ -21,45 +21,139 @@
  * machine branches (cases 1, 8 and the matched case = pass-3 work).
  */
 #include <stdint.h>
+#include <string.h>
 
 extern uint32_t SoundEmit_FromBlob(void *posXyz);            /* FUN_800446dc */
-extern void     SoundChannel_Apply(uint8_t slot);            /* FUN_80044574 */
+extern void     SoundChannel_Apply(uint8_t slot, uint32_t pan); /* FUN_80044574 */
+extern int      FUN_80021888(int pathId);
+extern intptr_t FUN_8001b038(int obj, uint16_t kind);
+extern void     FUN_8001d68c(void *out, int obj, intptr_t bone);
+extern void     FUN_80020890(uint32_t *obj, int timer);
+extern uint32_t SfxChannel_Acquire(void);
+extern void     FUN_800447e8(uint32_t voice, uint32_t bank, int slot, uint32_t *xyz);
+extern void     Audio_VoiceStop(int ch);
+extern void     gap_80031294(uint32_t *self);
+extern uintptr_t _DAT_800737e8;
+
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
+static int32_t rtz_shift_i32(int32_t v, unsigned sh, int32_t bias)
+{
+    if (v < 0) v = mips_addu_i32(v, bias);
+    return v >> sh;
+}
 
 uint32_t HD_DamLeverTick(uint32_t *obj, int mode, int impulse)
 {
-    if (mode != 0 && mode != 2) goto stateMachine;
+    int stateMatch = mode;
 
-    int32_t vx = (int32_t)obj[0x20];
-    int32_t vy = (int32_t)obj[0x21];
-    int32_t vz = (int32_t)obj[0x22];
+    if (mode != 2) {
+        obj[9] = (uint32_t)mips_addu_i32((int32_t)obj[9],
+            rtz_shift_i32((int32_t)obj[0x20], 7, 0x7f));
+        obj[10] = (uint32_t)mips_addu_i32((int32_t)obj[10],
+            rtz_shift_i32((int32_t)obj[0x21], 7, 0x7f));
+        obj[11] = (uint32_t)mips_addu_i32((int32_t)obj[11],
+            rtz_shift_i32((int32_t)obj[0x22], 7, 0x7f));
 
-    if (vx < 0) vx += 0x7f;
-    if (vy < 0) vy += 0x7f;
-    if (vz < 0) vz += 0x7f;
+        if (impulse == 0) return 0;
 
-    obj[9]  += (uint32_t)(vx >> 7);
-    obj[10] += (uint32_t)(vy >> 7);
-    obj[11] += (uint32_t)(vz >> 7);
-
-    if (impulse == 0) return 0;
-
-    uint32_t soundId = SoundEmit_FromBlob(obj + 9);
-    SoundChannel_Apply(((uint8_t *)obj)[0xd3]);
-    (void)soundId;
-
-stateMachine:
-    {
-        int8_t  *frameCounter = (int8_t *)(obj + 2);
-        int      cur = *frameCounter;
-        *frameCounter = (int8_t)(cur + 1);
-        /* States 0, 1, 8 and the impulse-triggered "case" transition
-         * for the lever open/close arc are handled by the central
-         * level dispatcher in spillway_grab.c (FUN_80101734), which
-         * owns the arm/disarm flag bit 0x10000 used to gate this
-         * handler's sub-states. */
-        (void)cur;
+        uint32_t pan = SoundEmit_FromBlob(obj + 9);
+        SoundChannel_Apply(((uint8_t *)obj)[0xd3], pan);
+        stateMatch = (int)pan;
     }
+
+    {
+        uint8_t oldCounter = ((uint8_t *)obj)[8];
+        ((uint8_t *)obj)[8] = (uint8_t)(oldCounter + 1);
+        int cur = (int)(int8_t)oldCounter;
+
+        if (cur == 1)
+            goto release;
+        if (cur < 2) {
+            if (cur != 0)
+                goto compareState;
+        } else {
+compareState:
+            if (cur == stateMatch)
+                goto resetState;
+            if (cur != 8)
+                return 0;
+        }
+
+        int shift = 7;
+        int source = FUN_80021888(((uint8_t *)obj)[0xd2]);
+        if ((int8_t)((uint8_t *)obj)[8] == 1)
+            shift = 8;
+        intptr_t bone = FUN_8001b038(source, 0x8000);
+        ((uint8_t *)obj)[8] = 1;
+
+        uint8_t local[0x30];
+        memset(local, 0, sizeof local);
+        FUN_8001d68c(local, source, bone);
+        memcpy((uint8_t *)obj + 0x10, local, 0x10);
+        *(uint16_t *)((uint8_t *)obj + 0x20) = *(uint16_t *)(local + 0x10);
+
+        obj[0] |= 2u;
+        for (uint32_t node = obj[0xe]; node != 0; node = *(uint32_t *)(uintptr_t)(node + 0x34)) {
+            uint32_t child = *(uint32_t *)(uintptr_t)(node + 0x30);
+            *(uint16_t *)(uintptr_t)(child + 0x28) = 0;
+        }
+        if (obj[0x1a] != 0)
+            *(uint16_t *)(uintptr_t)(obj[0x1a] + 0x28) = 0;
+
+        obj[0x20] = (uint32_t)(mips_sll_i32(
+            mips_subu_i32(*(int32_t *)(local + 0x14), (int32_t)obj[9]), 7) >> shift);
+        obj[0x21] = (uint32_t)(mips_sll_i32(
+            mips_subu_i32(*(int32_t *)(local + 0x18), (int32_t)obj[10]), 7) >> shift);
+        obj[0x22] = (uint32_t)(mips_sll_i32(
+            mips_subu_i32(*(int32_t *)(local + 0x1c), (int32_t)obj[11]), 7) >> shift);
+        obj[0x24] = 0;
+        obj[0x25] = 0;
+        obj[0x26] = 0;
+        FUN_80020890(obj, 1 << shift);
+    }
+
+release:
+    FUN_800447e8((uint32_t)((uint8_t *)obj)[0xd3],
+                 *(uint32_t *)(uintptr_t)(_DAT_800737e8 + 8), 5, obj + 9);
+    ((uint8_t *)obj)[0xd3] = 0;
+    obj[0] &= 0xfefffffdu;
+    obj[0x20] = (uint32_t)rtz_shift_i32(
+        mips_mult_lo_i32(*(int16_t *)(obj + 5), 0x23c3), 5, 0x1f);
+    obj[0x21] = (uint32_t)rtz_shift_i32(
+        mips_mult_lo_i32(*(int16_t *)((uint8_t *)obj + 0x1a), 0x23c3), 5, 0x1f);
+    obj[0x22] = (uint32_t)rtz_shift_i32(
+        mips_mult_lo_i32(*(int16_t *)(obj + 8), 0x23c3), 5, 0x1f);
+    FUN_80020890(obj, 0x1e);
+
+resetState:
+    ((uint8_t *)obj)[8] = 0;
+    obj[0] &= 0xffffffdfu;
+    gap_80031294(obj);
     return 0;
+}
+
+uint32_t FUN_801006cc(uint32_t *obj, int mode, int impulse)
+{
+    return HD_DamLeverTick(obj, mode, impulse);
 }
 
 /* ============================================================

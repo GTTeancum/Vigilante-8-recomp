@@ -48,6 +48,11 @@ applyStateBump:
     return 0;
 }
 
+uint32_t FUN_80100be8(uint32_t *obj, int mode, int impulse)
+{
+    return Boulder_Tick(obj, mode, impulse);
+}
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

@@ -30,12 +30,12 @@
  */
 #include <stdint.h>
 
-extern void Heap_Free(void *p);
-extern void Audio_StopAllSfx(void *bank);                /* FUN_8001af48 */
-extern void *Pool_GetProjectileHandle(void);             /* FUN_800203fc */
-extern void Tree_Free(void *root);                       /* FUN_80020658 */
+extern void      Heap_Free(void *p);
+extern void      Audio_StopAllSfx(void *bank);               /* FUN_8001af48 */
+extern uint32_t *FUN_800203fc(uint32_t *param_1);            /* Object_UnregisterFromScene */
+extern void      Tree_Free(void *root);                      /* FUN_80020658 */
 extern void Tree_FreeTerrain(void *root);                /* FUN_80020968 */
-extern void TriggerVol_FreeOne(void *node);              /* FUN_80020540 */
+extern void FUN_80020540(uint32_t *param_1);              /* Object_Free */
 
 extern uintptr_t uRam000007d8;
 extern uintptr_t iRam000006f8;
@@ -44,18 +44,20 @@ extern uintptr_t iRam000006fc;
 extern uintptr_t iRam000007bc;
 extern void     *puRam000007c4;
 extern void     *puRam000007a4;
-extern int32_t  *piRam0000079c;
+extern uintptr_t *piRam0000079c;
 extern uint8_t   DAT_80065a18[];
 extern uint8_t   DAT_80065a50[];
 extern uint8_t   DAT_80065aa0[];
 extern uint8_t   DAT_80065ac0[];
 
-void Level_Teardown(void)
+/* FUN_80022a1c -- Level_Free (renamed from Level_Teardown to match main_loop.c callers) */
+void Level_Free(void)
 {
     Audio_StopAllSfx((void *)uRam000007d8);
 
     if (iRam000006f8 != 0) {
-        Heap_Free(Pool_GetProjectileHandle());
+        /* Unregister from scene lists then free; FUN_800203fc returns param_1. */
+        Heap_Free(FUN_800203fc((uint32_t *)(uintptr_t)iRam000006f8));
     }
     if (iRam000006ec != 0) {
         Heap_Free((void *)iRam000006ec);
@@ -66,13 +68,17 @@ void Level_Teardown(void)
     Tree_FreeTerrain((void *)iRam000006fc);
     iRam000006fc = 0;
 
-    while (puRam000007c4 != DAT_80065ac0) {
-        TriggerVol_FreeOne(*(void **)(iRam000007bc + 8));
+    while (puRam000007c4 != NULL &&
+           puRam000007c4 != DAT_80065ac0 &&
+           iRam000007bc != 0) {
+        FUN_80020540((uint32_t *)(uintptr_t)*(uint32_t *)(iRam000007bc + 8));
     }
 
-    while (puRam000007a4 != DAT_80065aa0) {
-        piRam0000079c = (int32_t *)piRam0000079c[0];
-        piRam0000079c[1] = (int32_t)DAT_80065aa0;
+    while (puRam000007a4 != NULL &&
+           puRam000007a4 != DAT_80065aa0 &&
+           piRam0000079c != NULL) {
+        piRam0000079c = (uintptr_t *)piRam0000079c[0];
+        piRam0000079c[1] = (uintptr_t)DAT_80065aa0;
         /* The original continues with a few more chain detaches and
          * a final draw-env reset; those calls are renderer-adjacent
          * (DrawEnv / OT chain) and belong to the rewritten renderer

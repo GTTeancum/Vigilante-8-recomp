@@ -30,32 +30,50 @@
 #include "structs.h"   /* MATRIX comes from here via gte.h */
 
 extern uint32_t Terrain_HeightAt(int32_t x, int32_t z);                    /* FUN_80025400 */
-extern int      Object_FindObstacleAt(int chain, uint32_t terrainY,
+extern int      Object_FindObstacleAt(int *chain, uint32_t terrainY,
                                       int *posXyz, int16_t *normalOut);    /* FUN_8001f51c */
 extern void     Terrain_NormalAt(int32_t x, int32_t z, int16_t *out);      /* FUN_80025800 */
 extern void     Util_EulerToMatrix(int *eulerXyz, int *order, MATRIX *out);/* FUN_80043754 */
 extern void     MulMatrix0(MATRIX *a, MATRIX *b, MATRIX *out);
 
-void Camera_BuildMatrix(int self)
+static int32_t mips_subu_i32(int32_t a, int32_t b)
 {
-    uint32_t *out = *(uint32_t **)(self + 0x70);
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int16_t slope_q12(int16_t n, int16_t ny, int allowZeroFallback)
+{
+    int32_t neg = mips_subu_i32(0, (int32_t)n);
+    if (ny == 0 && allowZeroFallback)
+        return (int16_t)mips_sll_i32(neg, 4);
+    return (int16_t)(mips_sll_i32(neg, 12) / (int32_t)ny);
+}
+
+void Camera_BuildMatrix(intptr_t self)
+{
+    uint32_t *out = (uint32_t *)(uintptr_t)*(uint32_t *)(self + 0x70);
     uint32_t terrainY = Terrain_HeightAt(*(int32_t *)(self + 0x24),
                                         *(int32_t *)(self + 0x2c));
 
     out[6] = *(uint32_t *)(self + 0x24);
     out[8] = *(uint32_t *)(self + 0x2c);
 
-    int16_t nx, ny, nz;
+    int16_t normal[3];
     int     usedObstacle = 0;
 
-    if (*(int *)(self + 0x74) != 0) {
-        int yOverride = Object_FindObstacleAt(*(int *)(self + 0x74),
+    if (*(uint32_t *)(self + 0x74) != 0) {
+        int yOverride = Object_FindObstacleAt((int *)(uintptr_t)*(uint32_t *)(self + 0x74),
                                               terrainY,
-                                              (int *)(self + 0x24), &nx);
-        if (yOverride == 0 && *(int *)(self + 0x78) != 0) {
-            yOverride = Object_FindObstacleAt(*(int *)(self + 0x78),
+                                              (int *)(self + 0x24), normal);
+        if (yOverride == 0 && *(uint32_t *)(self + 0x78) != 0) {
+            yOverride = Object_FindObstacleAt((int *)(uintptr_t)*(uint32_t *)(self + 0x78),
                                               terrainY,
-                                              (int *)(self + 0x24), &nx);
+                                              (int *)(self + 0x24), normal);
         }
         if (yOverride != 0) {
             out[7] = (uint32_t)yOverride;
@@ -65,13 +83,15 @@ void Camera_BuildMatrix(int self)
     if (!usedObstacle) {
         out[7] = terrainY;
         Terrain_NormalAt(*(int32_t *)(self + 0x24),
-                         *(int32_t *)(self + 0x2c), &nx);
+                         *(int32_t *)(self + 0x2c), normal);
     }
-    (void)ny; (void)nz;  /* loaded from stack slots adjacent to nx */
 
     int16_t *outMat = (int16_t *)(out + 1);
 
-    if ((*(uint16_t *)out & 0x8) == 0) {
+    uint32_t flagsPtr = out[0];
+    uint16_t flags = flagsPtr ? *(uint16_t *)(uintptr_t)flagsPtr : 0;
+
+    if ((flags & 0x8) == 0) {
         MATRIX tilt, parentRot;
         tilt.m[0][0] = 0x1000;
         tilt.m[0][1] = 0;
@@ -80,18 +100,16 @@ void Camera_BuildMatrix(int self)
         tilt.m[2][0] = 0;
         tilt.m[2][1] = 0;
         tilt.m[2][2] = 0x1000;
-        /* nx and nz read at &nx + {1,2}; identical to local_6e/local_6c */
-        int16_t l70 = *(&nx + 0);
-        int16_t l6e = *(&nx + 1);
-        int16_t l6c = *(&nx + 2);
-        tilt.m[1][0] = (l6e == 0) ? (int16_t)(l70 * -0x10)
-                                  : (int16_t)((l70 * -0x1000) / l6e);
-        tilt.m[1][2] = (l6e == 0) ? (int16_t)(l6c * -0x10)
-                                  : (int16_t)((l6c * -0x1000) / l6e);
+        int16_t l70 = normal[0];
+        int16_t l6e = normal[1];
+        int16_t l6c = normal[2];
+        tilt.m[1][0] = slope_q12(l70, l6e, 1);
+        tilt.m[1][2] = slope_q12(l6c, l6e, 1);
 
         int euler[3];
         euler[0] = (int32_t)out[9];
-        if (*(int16_t *)(self + 0x18) < 1) euler[0] = -euler[0];
+        if (*(int16_t *)(self + 0x18) < 1)
+            euler[0] = mips_subu_i32(0, euler[0]);
         euler[1] = 0;
         euler[2] = (int32_t)out[10];
 
@@ -107,12 +125,17 @@ void Camera_BuildMatrix(int self)
         outMat[6] = 0;             /* m[2][0] */
         outMat[7] = 0;             /* m[2][1] (one offset, but original sets) */
         outMat[8] = 0x1000;        /* m[2][2] */
-        int16_t l70 = *(&nx + 0);
-        int16_t l6e = *(&nx + 1);
-        int16_t l6c = *(&nx + 2);
-        outMat[3] = (int16_t)((l70 * -0x1000) / l6e);
-        outMat[5] = (int16_t)((l6c * -0x1000) / l6e);
+        int16_t l70 = normal[0];
+        int16_t l6e = normal[1];
+        int16_t l6c = normal[2];
+        outMat[3] = slope_q12(l70, l6e, 0);
+        outMat[5] = slope_q12(l6c, l6e, 0);
     }
+}
+
+void FUN_8003e2fc(intptr_t self)
+{
+    Camera_BuildMatrix(self);
 }
 
 /* ============================================================

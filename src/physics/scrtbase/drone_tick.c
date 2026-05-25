@@ -33,6 +33,11 @@ uint32_t SB_DroneTick(int obj, int mode)
     return 0xffffffffu;
 }
 
+uint32_t FUN_8010100c(int obj, int mode)
+{
+    return SB_DroneTick(obj, mode);
+}
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

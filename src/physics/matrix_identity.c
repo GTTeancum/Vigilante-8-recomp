@@ -33,6 +33,11 @@ void Matrix_PackedIdentity(uint32_t *m)
     m[7] = 0;
 }
 
+void FUN_80016da8(uint32_t *param_1)
+{
+    Matrix_PackedIdentity(param_1);
+}
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

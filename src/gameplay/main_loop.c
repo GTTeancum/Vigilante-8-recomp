@@ -73,7 +73,9 @@ extern void     Audio_ResetVoices(uint32_t mask);       /* FUN_800251fc */
 extern uintptr_t Overlay_Open(const char *path);        /* FUN_80011adc -- returns ptr-as-int on PSX */
 extern void      Overlay_Close(uintptr_t handle);       /* FUN_80045088 */
 extern void     Audio_StreamReset(void);                /* FUN_80029dec */
-extern void     Audio_BankSelect(uint32_t mask);        /* FUN_800227a4 */
+extern void     FUN_800227a4(uint32_t mask);
+extern void     Host_VehicleInit(void);
+extern void     Host_AIVehicleInit(void);
 extern uint32_t Sound_LoadSND(const char *path);        /* FUN_80044360 */
 extern uint32_t Font_LoadFNT(const char *path);         /* FUN_80015f80 */
 extern void     Font_PrepareGlyphs(int idx);            /* FUN_800165cc */
@@ -84,7 +86,7 @@ extern void     Match_ResetState(void);                 /* FUN_8002a598 */
 extern void     V8_SeedRng(uint32_t seed);              /* FUN_8001714c */
 extern void     Level_LoadByName(char *outBuf, char *displayName, int extra); /* FUN_80022ba8 */
 extern void     Shell_PostLoad(void);                   /* FUN_80012980 */
-extern void     Pad_TickWithMode(int mode);             /* FUN_800212c4 */
+extern void     FUN_800212c4(uint16_t mode);            /* Frame_PreTickAll */
 extern void     Music_StartShell(void *p, int seed);    /* FUN_8001a0ac */
 extern void     Font_DrawLine(int rend, void *str, int x, int y); /* FUN_80019960 */
 extern void     Sched_WaitFrame(void);                  /* FUN_800126f0 */
@@ -130,13 +132,17 @@ extern int8_t   bRam00000015;          /* g_matchMode */
 extern int8_t   cRam00000018, cRam00000019;
 extern uint32_t *puRam000007d0, *puRam000007d4;
 extern int32_t  iRam00000004, iRam00000008, iRam00000010, iRam0000001c, iRam00000024;
-extern int32_t  iRam00000608, iRam00000618, iRam00000624, iRam00000628;
+extern int32_t  iRam0000000c;
+extern int32_t  iRam00000618, iRam00000624, iRam00000628;
 extern int32_t  iRam000005ac, iRam0000060c, iRamffffacb0;
+extern uintptr_t iRam00000608;
 extern uint8_t  uRam0000000c, uRam000006cc, uRam000006cf, uRam00000014;
-extern uint8_t  cRam00000600, uRam000005f8, uRam00000680, uRam0000062c, uRam00000630;
+extern uint8_t  cRam00000600, uRam00000680, uRam0000062c, uRam00000630;
+extern uint32_t uRam000005f8;
 extern uint16_t uRam000006f0, uRam000007dc, uRam00000620;
 extern uint32_t DAT_80065c30, DAT_80065c28, DAT_80065c40;
-extern uint8_t  DAT_80065674, UNK_8006567a;
+extern uint8_t  DAT_80065674[];
+extern uint8_t  UNK_8006567a;
 extern void    *DAT_8006eed8, *DAT_8006eee0;
 extern uint32_t DAT_8006eef0, DAT_8006eff8, DAT_8006f100;
 
@@ -189,11 +195,14 @@ void V8_MainLoop(void)
         Audio_StreamReset();
 
         uint32_t mask = 0xe000;
+        if (DAT_80065674[1] >= 12 || DAT_80065674[1] == DAT_80065674[0]) {
+            DAT_80065674[1] = (uint8_t)((DAT_80065674[0] + 1u) % 12u);
+        }
         for (int i = 0; i < 8; i++) {
             if (i < 2 || (&UNK_8006567a)[i] != 0)
-                mask |= 1u << ((&DAT_80065674)[i] & 0x1f);
+                mask |= 1u << (DAT_80065674[i] & 0x1f);
         }
-        Audio_BankSelect(mask);
+        FUN_800227a4(mask);
 
         uRam000005f8 = Sound_LoadSND("Sounds\\Main.SND");
         uint32_t fnt = Font_LoadFNT("Misc\\Game.FNT");
@@ -212,7 +221,8 @@ void V8_MainLoop(void)
         const char *banner = "";
         uint8_t     bannerKind = 0;
         if (bRam00000015 == 0) {
-            int slot = *(int *)(iRam00000608 + DAT_80065674 * 8 + 8) + cRam00000600 * 0x10;
+            uintptr_t slot = *(uint32_t *)(iRam00000608 + DAT_80065674[0] * 8 + 8)
+                           + cRam00000600 * 0x10;
             banner = *(char **)(slot + 0xc);
             uRam000006f0  = *(uint16_t *)(slot + 2);
             uRam000007dc = *(uint16_t *)(slot + 4);
@@ -221,10 +231,12 @@ void V8_MainLoop(void)
             banner = "Loading Demo Level";
         }
         Level_LoadByName(shellPath, (char *)banner, bannerKind);
+        Host_VehicleInit();
+        Host_AIVehicleInit();
 
         Shell_PostLoad();
         uRam0000000c = 0;
-        Pad_TickWithMode(0);
+        FUN_800212c4(0);
 
         if (bRam00000015 == 0) {
             extern uint8_t DAT_80065604; extern char DAT_800102b0[];
@@ -257,13 +269,13 @@ void V8_MainLoop(void)
                 uRam0000000c++;
                 uRam000006cc = (uint8_t)uRam0000000c;
                 Physics_Step(t == (uint32_t)ticks - 1 ? (uint32_t)ticks : 0);
-                Physics_PostStep(uRam0000000c);
+                Physics_PostStep((uint32_t)iRam0000000c);
                 Physics_FlushVoxels();
                 if ((DAT_80065c30 & 0x800000) != 0) p1View = 3 - p1View;
                 padOr  |= uRam0000062c;
                 padOr2 |= uRam00000630;
             }
-            Pad_TickWithMode(uRam0000000c & 0xffff);
+            FUN_800212c4(uRam0000000c & 0xffff);
             iRam00000008 = 1 - iRam00000008;
 
             if ((int16_t)puRam000007d0[3] == 0) p1View = 0;
@@ -282,11 +294,11 @@ void V8_MainLoop(void)
                 if (iRam000005ac == 4) {
                     const char *xa = (iRam00000024 == 0) ? "Sounds\\Defeat.xa"
                                                          : "Sounds\\Victory.xa";
-                    Audio_PlayXA(xa, (int)DAT_80065674);
+                    Audio_PlayXA(xa, (int)DAT_80065674[0]);
                 }
                 if (bRam00000015 == 0) {
                     uRam00000620 = (uint16_t)Cheats_TryUnlock();
-                    uRam00000620 ^= (uint16_t)(DAT_80065674 < 6);
+                    uRam00000620 ^= (uint16_t)(DAT_80065674[0] < 6);
                 }
                 resultScreen = ResultScreen_Build(iRam00000628);
             } else if (resultScreen != 0) {
@@ -576,7 +588,7 @@ LAB_80014224:
             uVar9 = uVar15;
           }
           FUN_8002131c(uVar9);
-          FUN_80021394(uRam0000000c);
+          FUN_80021394((uint32_t)iRam0000000c);
           FUN_80021678();
           if ((DAT_80065c30 & 0x800000) != 0) {
             iVar4 = 3 - iVar4;

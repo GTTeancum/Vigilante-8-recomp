@@ -33,6 +33,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern void Object_RetireDeferred(uint32_t *self);
 extern int  RandChaff(uint32_t *self);                              /* func_0x80021c6c */
 extern void Object_Suspend(void);
@@ -100,7 +101,7 @@ edge:
                 p[9]  = ((uint32_t)(r & 0xff) - 0x80) * 0x400;
                 p[10] = 0;
                 p[0xb] = 0xfffec000u;
-                p[0x19] = (uint32_t)(uintptr_t)&FUN_80100e70;
+                Object_SetCallbackPsxSlot(p, (uintptr_t)&FUN_80100e70);
                 Object_BumpSubstate_Or_FX(self);
             }
             if (arg == NULL) return 0;

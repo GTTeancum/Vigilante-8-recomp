@@ -17,18 +17,56 @@
  */
 #include <stdint.h>
 
-extern uintptr_t DAT_1f8003f8;
-extern uint8_t  *DAT_1f8003fc;
+/* DAT_1f8003f8 / DAT_1f8003fc: PSX BIOS scratchpad stack-unwind slots.
+ * On host: written but never read (exception path never taken).
+ * DAT_1f8003f8 is a uintptr (stores return address).
+ * DAT_1f8003fc is a pointer (stores frame pointer / $fp).
+ * Defined here to avoid link errors from the extern declarations. */
+uintptr_t DAT_1f8003f8 = 0;
+uint8_t  *DAT_1f8003fc = 0;
 
-uint32_t Object_TickCallback(int obj)
+/* __builtin_return_address / __builtin_frame_address are GCC intrinsics.
+ * Provide MSVC-compatible equivalents that return something safe. */
+#if defined(_MSC_VER) && !defined(__builtin_return_address)
+#  include <intrin.h>
+#  define __builtin_return_address(n) _ReturnAddress()
+#  define __builtin_frame_address(n)  _AddressOfReturnAddress()
+#endif
+
+uintptr_t Object_CallbackFromPsxSlot(const void *obj)
 {
-    typedef uint32_t (*TickFn)(void);
-    TickFn fn = *(TickFn *)(intptr_t)(obj + 100);
+    uint32_t low;
+
+    if (obj == 0)
+        return 0;
+    low = *(const uint32_t *)((const uint8_t *)obj + 0x64);
+    if (low == 0)
+        return 0;
+    return ((uintptr_t)&Object_CallbackFromPsxSlot & ~(uintptr_t)0xffffffffu) |
+           (uintptr_t)low;
+}
+
+void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback)
+{
+    if (obj != 0)
+        *(uint32_t *)((uint8_t *)obj + 0x64) = (uint32_t)callback;
+}
+
+uint32_t Object_TickCallback(intptr_t obj, int mode, intptr_t arg2, intptr_t arg3)
+{
+    typedef uint32_t (*TickFn)(intptr_t, int, intptr_t, intptr_t);
+    TickFn fn = (TickFn)Object_CallbackFromPsxSlot((const void *)obj);
     if (fn == NULL) return 0;
-    /* Stack-save aliases for re-entry. */
+    /* Stack-save aliases for re-entry (PSX BIOS trick; no-op on host). */
     DAT_1f8003f8 = (uintptr_t)__builtin_return_address(0);
     DAT_1f8003fc = (uint8_t *)__builtin_frame_address(0);
-    return fn();
+    return fn(obj, mode, arg2, arg3);
+}
+
+/* Hex-name alias. */
+uint32_t FUN_8001e120(intptr_t param_1, int mode, intptr_t arg2)
+{
+    return Object_TickCallback(param_1, mode, arg2, 0);
 }
 
 /* ============================================================

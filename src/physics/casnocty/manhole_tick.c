@@ -17,13 +17,19 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t V8_RandNext(void);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int size, int flags);
 extern void Object_BumpSubstate_Or_FX(int obj);  /* FUN_8001d4f0 */
+extern void Object_RefitAABB(void *self);         /* FUN_8001d708 */
+extern void Damage_Apply(void *obj);              /* FUN_800205f8 */
+extern void FUN_800176f8(int obj, int32_t *vec, int32_t *pos);
 /* PSY-Q (sin, cos) interleaved LUT @ 0x800607b4 -- see canynlnd/spawner.c
  * for the Ghidra-DAT-misnaming note. */
 extern const int16_t g_v8_sincostbl[8192];
 extern uint32_t _DAT_800737d8;
+extern int32_t DAT_8010007c[3];
+extern int LAB_8004042c(int obj, int event, int param3);
 
 static uint32_t scale_4_12_signed(int32_t v, int32_t factor)
 {
@@ -34,41 +40,56 @@ static uint32_t scale_4_12_signed(int32_t v, int32_t factor)
 
 uint32_t CC_ManholeTick(int obj, uint32_t mode, int *impulse)
 {
-    if (mode == 2) return 0;
-    if (mode != 3 && mode != 0) return 0;
+    if (mode == 2) goto seal;
 
-    int16_t *cd = (int16_t *)(intptr_t)(obj + 0x80);
-    int16_t prev = *cd;
-    *cd = (int16_t)(prev - 1);
-    if (prev == 0) {
-        uint32_t *p = Object_Pool_AllocFromBank(
-            (void *)(uintptr_t)_DAT_800737d8, 0x20, 0xa0, 8);
-        if (p != NULL) {
-            uint32_t r0 = V8_RandNext();
-            uint32_t aimIdx = (r0 & 0xfff);
-            p[0] |= 0x410u;
-            int16_t sin = g_v8_sincostbl[aimIdx * 2 + 0];
-            int16_t cos = g_v8_sincostbl[aimIdx * 2 + 1];
-            p[0x22] = scale_4_12_signed(*(int32_t *)(obj + 0x84), sin);
-            p[0x24] = scale_4_12_signed(*(int32_t *)(obj + 0x84), cos);
-            uint32_t r1 = V8_RandNext();
-            int32_t vy = *(int32_t *)(obj + 0x88);
-            p[0x12] = 0;
-            p[0x23] = (uint32_t)(vy + ((int)r1 * vy >> 15));
-            p[0x13] = 0;
-            p[0x14] = 0;
-            p[0x19] = 0x8004042c;       /* main-EXE projectile post-tick */
-            Object_BumpSubstate_Or_FX(obj);
+    if (mode != 3) {
+        int16_t *cd = (int16_t *)(intptr_t)(obj + 0x80);
+        int16_t next = (int16_t)(*cd - 1);
+        *cd = next;
+        if (next == -1) {
+            uint32_t *p = Object_Pool_AllocFromBank(
+                (void *)(uintptr_t)_DAT_800737d8, 0x20, 0xa0, 8);
+            if (p != NULL) {
+                uint32_t r0 = V8_RandNext();
+                uint32_t aimIdx = (r0 & 0xfff);
+                p[0] |= 0x410u;
+                int16_t sin = g_v8_sincostbl[aimIdx * 2 + 0];
+                int16_t cos = g_v8_sincostbl[aimIdx * 2 + 1];
+                p[0x22] = scale_4_12_signed(*(int32_t *)(obj + 0x84), sin);
+                p[0x24] = scale_4_12_signed(*(int32_t *)(obj + 0x84), cos);
+                uint32_t r1 = V8_RandNext();
+                int32_t vy = *(int32_t *)(obj + 0x88);
+                p[0x12] = 0;
+                p[0x23] = (uint32_t)(vy + ((int)r1 * vy >> 15));
+                p[0x13] = 0;
+                p[0x14] = 0;
+                Object_SetCallbackPsxSlot(p, (uintptr_t)&LAB_8004042c);
+                Object_BumpSubstate_Or_FX(obj);
+            }
+            *cd = *(int16_t *)(obj + 0x82);
         }
-        *cd = *(int16_t *)(obj + 0x82);
+
+        for (int child = *(int *)(obj + 0x38); child != 0; child = *(int *)(child + 0x34)) {
+            *(int16_t *)(child + 0x44) = (int16_t)(*(int16_t *)(child + 0x44) + 0x20);
+            *(int32_t *)(child + 0x48) += *(int32_t *)(child + 0x88);
+            *(int32_t *)(child + 0x4c) += *(int32_t *)(child + 0x8c);
+            *(int32_t *)(child + 0x50) += *(int32_t *)(child + 0x90);
+            if (impulse != NULL)
+                Object_RefitAABB((void *)(intptr_t)child);
+        }
+        Damage_Apply((void *)(intptr_t)obj);
     }
 
-    /* Update children. */
-    for (int child = *(int *)(obj + 0x38); child != 0; child = *(int *)(child + 0x34)) {
-        *(int16_t *)(child + 0x44) = (int16_t)(*(int16_t *)(child + 0x44) + 0x20);
-    }
-    (void)impulse;
+    if (impulse == NULL || *(uint8_t *)(*impulse + 4) != 2) return 0;
+    FUN_800176f8(*impulse, DAT_8010007c, (int32_t *)(intptr_t)(obj + 0x48));
+seal:
+    *(uint16_t *)(obj + 0x80) = 0xffff;
     return 0;
+}
+
+uint32_t FUN_801002bc(int obj, uint32_t mode, int *impulse)
+{
+    return CC_ManholeTick(obj, mode, impulse);
 }
 
 /* ============================================================

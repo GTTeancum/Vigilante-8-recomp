@@ -53,6 +53,21 @@ extern void GTE_RotateLongMat(const uint32_t *m, const int32_t *v, int32_t *out)
 extern uint8_t *Terrain_MaterialAt(uint32_t x, uint32_t z);                            /* FUN_800255f4 ish */
 extern int32_t  Terrain_HeightAt(uint32_t x, uint32_t z);                              /* unused here */
 
+static inline int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static inline int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
 /* Forward decl. */
 int ObstacleLeaf_Test(int16_t *leaf, MATRIX *parent_mat,
                       int terrain_y, int *posXyz, int16_t *normalOut);
@@ -63,10 +78,10 @@ int ObstacleLeaf_Test(int16_t *leaf, MATRIX *parent_mat,
 int ObstacleChain_Walk(int *parent_obj, MATRIX *parent_mat,
                        int terrain_y, int *posXyz, int16_t *normalOut)
 {
-    int32_t *child = *(int32_t **)((uint8_t *)parent_obj + 0x38);
+    int32_t *child = (int32_t *)(uintptr_t)*(uint32_t *)((uint8_t *)parent_obj + 0x38);
 
     while (child != NULL) {
-        int32_t *kdroot = (int32_t *)*(uint32_t *)((uint8_t *)child + 0x5c);
+        int32_t *kdroot = (int32_t *)(uintptr_t)*(uint32_t *)((uint8_t *)child + 0x5c);
         MATRIX   composed;
 
         if (kdroot != NULL) {
@@ -79,10 +94,14 @@ int ObstacleChain_Walk(int *parent_obj, MATRIX *parent_mat,
              *
              * The constants at +0x12/0x18/0x1e are i16 components of
              * the parent object's collision sphere extent. */
-            int reach_dot =
-                  (int)composed.m[0][1] * (int)*(int16_t *)((uint8_t *)parent_obj + 0x12)
-                + (int)composed.m[1][1] * (int)*(int16_t *)((uint8_t *)parent_obj + 0x18)
-                + (int)composed.m[2][1] * (int)*(int16_t *)((uint8_t *)parent_obj + 0x1e);
+            int reach_dot = mips_addu_i32(
+                mips_addu_i32(
+                    mips_mult_lo_i32((int)composed.m[0][1],
+                                     (int)*(int16_t *)((uint8_t *)parent_obj + 0x12)),
+                    mips_mult_lo_i32((int)composed.m[1][1],
+                                     (int)*(int16_t *)((uint8_t *)parent_obj + 0x18))),
+                mips_mult_lo_i32((int)composed.m[2][1],
+                                 (int)*(int16_t *)((uint8_t *)parent_obj + 0x1e)));
 
             if ((composed.m[1][1] > 0) || (reach_dot > 0x800)) {
                 int hit = ObstacleLeaf_Test((int16_t *)kdroot, &composed,
@@ -103,7 +122,7 @@ int ObstacleChain_Walk(int *parent_obj, MATRIX *parent_mat,
             if (hit != 0) return hit;
         }
 
-        child = (int32_t *)*(uint32_t *)((uint8_t *)child + 0x34);
+        child = (int32_t *)(uintptr_t)*(uint32_t *)((uint8_t *)child + 0x34);
     }
     return 0;
 }
@@ -121,7 +140,7 @@ int Object_FindObstacleAt(int *parent_obj, int terrain_y, int *posXyz, int16_t *
         if (hit != 0) return hit;
     }
     /* Always try the parent's own kd-tree at +0x5c (parent_obj[0x17]). */
-    int16_t *kdroot = *(int16_t **)((uint8_t *)parent_obj + 0x5c);
+    int16_t *kdroot = (int16_t *)(uintptr_t)*(uint32_t *)((uint8_t *)parent_obj + 0x5c);
     return ObstacleLeaf_Test(kdroot,
                              (MATRIX *)((uint8_t *)parent_obj + 0x10),
                              terrain_y, posXyz, normalOut);
@@ -137,9 +156,9 @@ int ObstacleLeaf_Test(int16_t *leaf, MATRIX *parent_mat,
 
     /* Local frame: pos - parent_mat.t (used by kind=2 patch math). */
     int32_t local_pos[3];
-    local_pos[0] = posXyz[0] - parent_mat->t[0];
-    local_pos[1] = posXyz[1] - parent_mat->t[1];
-    local_pos[2] = posXyz[2] - parent_mat->t[2];
+    local_pos[0] = mips_subu_i32(posXyz[0], parent_mat->t[0]);
+    local_pos[1] = mips_subu_i32(posXyz[1], parent_mat->t[1]);
+    local_pos[2] = mips_subu_i32(posXyz[2], parent_mat->t[2]);
 
     while (1) {
         int16_t kind = leaf[0];
@@ -182,14 +201,19 @@ int ObstacleLeaf_Test(int16_t *leaf, MATRIX *parent_mat,
             /* In-box X/Z; final Y test against the candidate y_override. */
             int32_t y_check = transformed[1];
 
-            /* The "near-band" check: if the probe is well above the
-             * override Y (probe_y - override_y > 0x10000), AND the
-             * box's stored normal Y is significant, fall through to
-             * the override.  Otherwise, accept the box.
-             *
-             * Match Ghidra: tests `(parent_mat.t[1] + override_y < terrain_y) || (probe_y + 0x10000 < terrain_y)`. */
-            if (parent_mat->t[1] + override_y >= terrain_y &&
-                terrain_y + 0x10000 >= posXyz[1]) {
+            if (mips_addu_i32(override_y, 0x2800) <= y_check ||
+                y_check <= mips_subu_i32(override_y, 0x2800)) {
+                leaf = leaf + 14;
+                continue;
+            }
+
+            /* Match MIPS:
+             *   accept immediately when the candidate is above the current
+             *   terrain height, or when the probe is more than 1.0 world unit
+             *   below the current terrain height.  Otherwise consult the
+             *   material attribute and skip non-zero material flags. */
+            if (mips_addu_i32(parent_mat->t[1], override_y) >= terrain_y &&
+                mips_addu_i32(terrain_y, 0x10000) >= posXyz[1]) {
                 /* Surface-material check via terrain attr: only override
                  * when not over an "ignore" material. */
                 uint8_t *mat = Terrain_MaterialAt((uint32_t)posXyz[0],
@@ -201,11 +225,11 @@ int ObstacleLeaf_Test(int16_t *leaf, MATRIX *parent_mat,
             }
 
             if (normalOut != NULL) {
-                normalOut[0] = (int16_t)(-parent_mat->m[0][1]);
-                normalOut[1] = (int16_t)(-parent_mat->m[1][1]);
-                normalOut[2] = (int16_t)(-parent_mat->m[2][1]);
+                normalOut[0] = (int16_t)mips_subu_i32(0, parent_mat->m[0][1]);
+                normalOut[1] = (int16_t)mips_subu_i32(0, parent_mat->m[1][1]);
+                normalOut[2] = (int16_t)mips_subu_i32(0, parent_mat->m[2][1]);
             }
-            return parent_mat->t[1] + override_y;
+            return mips_addu_i32(parent_mat->t[1], override_y);
         }
 
         if (kind == 2) {
@@ -219,8 +243,8 @@ int ObstacleLeaf_Test(int16_t *leaf, MATRIX *parent_mat,
              * Returns parent_mat.t[1] + t when the probe lands inside
              * the patch (sign tests on IR2 control direction). */
             uint16_t n_faces = (uint16_t)leaf[1];
-            int32_t  best_t  = 0x7fff0000;
-            int32_t  best_lo = 0;
+            int32_t  lower_t = (int32_t)0x80010000;
+            int32_t  upper_t = 0x7fff0000;
             int16_t  best_n[3] = {0, 0, 0};
 
             SetRotMatrix(parent_mat);
@@ -235,37 +259,29 @@ int ObstacleLeaf_Test(int16_t *leaf, MATRIX *parent_mat,
                 int32_t ir2 = gte_stIR2();
                 int32_t ir3 = gte_stIR3();
 
-                int16_t fn_extra_x = *(int16_t *)(face_p + 8);
-                int16_t fn_extra_y = *(int16_t *)(face_p + 10);  /* unused in MIPS body proper */
-                (void)fn_extra_y;
+                int32_t plane_offset = *(int32_t *)(face_p + 8);
 
                 /* world_normal . (local_pos - face_offset).  The face's
-                 * 3 offsets live at face_p+0/2/4 (the SVECTOR's xyz)
-                 * scaled by 0x1000 (q12); the local_pos is i32 q15.16.
+                 * plane constant lives at face_p+8 as an i32.  The local
+                 * X/Z probe coordinates are q16.16; the face normal is q12.
                  * MIPS does the full 64-bit multiply with carry. */
                 int64_t lv1 = (int64_t)ir1 * (int64_t)local_pos[0];
                 int64_t lv2 = (int64_t)ir3 * (int64_t)local_pos[2];
-                int64_t sum = (int64_t)((int32_t)fn_extra_x) * 0x1000
+                int64_t sum = (int64_t)plane_offset * 0x1000
                             - lv1 - lv2;
 
                 if (ir2 < 0) {
-                    /* Plane normal points "down"; only consider faces
-                     * whose ray-param yields a finite negative t. */
                     int32_t t = (int32_t)(sum / (int64_t)ir2);
-                    if (t < best_t) {
-                        best_t   = t;
+                    if (lower_t < t) {
+                        lower_t   = t;
                         best_n[0] = (int16_t)ir1;
                         best_n[1] = (int16_t)ir2;
                         best_n[2] = (int16_t)ir3;
                     }
                 } else if (ir2 > 0) {
                     int32_t t = (int32_t)(sum / (int64_t)ir2);
-                    if (t < *(int32_t *)(face_p + 4)) {
-                        /* Below the face's lower bound -- short-circuit
-                         * "miss". */
-                        goto miss_face;
-                    }
-                    if (t < best_t) best_t = t;
+                    if (t < local_pos[1]) goto miss_face;
+                    if (t < upper_t) upper_t = t;
                 } else {
                     /* ir2 == 0: ray parallel to face plane along Y.
                      * If `sum` is negative the probe is on the "outside"
@@ -282,17 +298,19 @@ int ObstacleLeaf_Test(int16_t *leaf, MATRIX *parent_mat,
                 goto next_leaf;
             }
 
-            /* All faces visited; if best_t resolves to a real
+            /* All faces visited; if lower_t resolves to a real
              * intersection inside the band, return it. */
-            if (best_t < parent_mat->t[1] + 0 /* sentinel */) {
-                int32_t y_world = parent_mat->t[1] + best_t;
-                if (y_world < terrain_y && (posXyz[1] - 0x2800) < y_world && best_n[1] < -0x800) {
+            if (lower_t < upper_t) {
+                int32_t y_world = mips_addu_i32(parent_mat->t[1], lower_t);
+                if (y_world < terrain_y &&
+                    mips_subu_i32(posXyz[1], 0x2800) < y_world &&
+                    best_n[1] < -0x800) {
                     if (normalOut != NULL) {
                         normalOut[0] = best_n[0];
                         normalOut[1] = best_n[1];
                         normalOut[2] = best_n[2];
                     }
-                    return y_world;
+                    return mips_addu_i32(parent_mat->t[1], lower_t);
                 }
             }
             leaf = (int16_t *)((uint8_t *)leaf + (size_t)n_faces * 12 + 4);

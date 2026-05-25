@@ -21,6 +21,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern int  Terrain_HeightAt(int32_t x, int32_t z);
 extern int  Rand255(void);
 extern uint32_t Path_Pick(uint32_t bank, int seed);
@@ -31,6 +32,7 @@ extern void Object_Suspend(void);
 extern void Damage_FromImpulse(uint32_t *self, int *imp);
 extern int  Damage_StandardVehicle(uint32_t *self, int *imp);
 extern uint32_t _DAT_80065310;
+extern int LAB_8003e80c(int obj, int event, int param3);
 
 uint32_t WW_StageCoach(uint32_t *self, int mode, int *imp)
 {
@@ -61,7 +63,7 @@ uint32_t WW_StageCoach(uint32_t *self, int mode, int *imp)
             dust[0x13] = self[0x13];
             int rz = Rand255();
             dust[0x14] = self[0x14] + (rz * 0x5000 >> 15) - 0x2800;
-            dust[0x19] = 0x8003e80cu;
+            Object_SetCallbackPsxSlot(dust, (uintptr_t)&LAB_8003e80c);
             Object_Suspend();
         }
         return 0;

@@ -19,6 +19,7 @@
  *
  * This file binds the five symbols:
  *
+ *   FUN_80043248  GTE_RotateCurrentLong     -- rotate long v by current M
  *   FUN_80043358  GTE_RotateLongMat        -- rotate long v by M
  *   FUN_80043408  GTE_RotateLongMatTrans   -- rotate long v by M + translate
  *   FUN_8004352c  GTE_RotateLongMatTranspose -- rotate long v by M^T
@@ -205,7 +206,8 @@ void GTE_RotateLongMatTranspose(uint32_t *m, const int32_t *v, int32_t *out)
 
 /* HIGH: rotate short vector by M^T (transpose-load + RTV0).
  * MIPS: ldVXY0/ldVZ0 from a1, jal 0x8004366c (transpose-load M from a0),
- * RTV0, store IR1/2/3 as i16 at a2. */
+ * RTV0, store IR1/2/3 as i16 at a2.
+ * Source: SLUS_005.10  FUN_800434f8. */
 void GTE_RotateShortMatTranspose(uint32_t *m, const void *sv_in, void *sv_out)
 {
     gte_ldVXY0(sv_in);
@@ -217,6 +219,89 @@ void GTE_RotateShortMatTranspose(uint32_t *m, const void *sv_in, void *sv_out)
     *(int16_t *)((uint8_t *)sv_out + 4) = (int16_t)gte_stIR3();
 }
 
+/* HIGH: rotate an SVECTOR by M^T, output as int32_t[3] (sign-extended i16).
+ *
+ * FUN_800434d0 (11 MIPS instructions).  Same transpose-load + RTV0 as
+ * GTE_RotateShortMatTranspose, but writes 32-bit words to out[] instead of
+ * 16-bit.  Used by Vehicle_Collision to transform a contact normal from
+ * world space into the vehicle's local frame.
+ *
+ * Source: SLUS_005.10  0x800434d0
+ *
+ * MIPS sequence:
+ *   gte_ldVXY0 0x0(a1)    -- load V0.VX|VY from SVECTOR word 0
+ *   jal 0x8004366c         -- transpose-load M (a0=matrix)
+ *   _gte_ldVZ0 0x4(a1)    -- delay: load V0.VZ from SVECTOR word 1
+ *   nop
+ *   RTV0                   -- M^T * V0, sf=1 -> IR1/2/3
+ *   gte_stIR1 0x0(a2)     -- sw (32-bit) to out[0]
+ *   gte_stIR2 0x4(a2)     -- sw to out[1]
+ *   jr t7
+ *   _gte_stIR3 0x8(a2)    -- delay: sw to out[2]
+ */
+void GTE_RotateNormalTranspose(uint32_t *m, const void *sv_in, int32_t *out)
+{
+    /* V0 loaded before and during the jal to FUN_8004366c (delay slot).
+     * FUN_8004366c does not modify V0, so both loads are safe in any order
+     * before gte_rtv0(). */
+    gte_ldVXY0(sv_in);
+    gte_ldVZ0((const uint8_t *)sv_in + 4);
+    GTE_LoadMatrixTransposed(m);
+    gte_rtv0();
+    out[0] = gte_stIR1();   /* sign-extended i16 stored as i32 */
+    out[1] = gte_stIR2();
+    out[2] = gte_stIR3();
+}
+
+/* HIGH: M^T * (pos - MATRIX.t) -- rotate world delta into object local frame.
+ *
+ * FUN_800435c0 (36 MIPS instructions).  Transpose-loads M (a0[0..4]),
+ * computes delta = a1[0..2] - a0[0x14..0x1c] (= MATRIX.t[0..2]),
+ * then applies M^T to the delta using the same 17.15 hi/lo-split technique
+ * as GTE_RotateLongMat/Transpose.
+ *
+ * Used by Vehicle_Collision to transform a world-space contact point into
+ * the vehicle's local frame (needed for the cross-product angular impulse).
+ *
+ * Source: SLUS_005.10  0x800435c0
+ *
+ * MIPS 0x800435c4: jal FUN_8004366c; _nop  (delay slot NOP -- V0 not loaded)
+ * MIPS 0x800435cc-0x800435ec: load pos and MATRIX.t, compute delta.
+ * Then hi/lo split and RTIR_SF0/RTIR identical to GTE_RotateLongTranspose.
+ */
+void GTE_RotateWorldDelta(uint32_t *m, const int32_t *pos, int32_t *out)
+{
+    GTE_LoadMatrixTransposed(m);
+
+    /* delta = pos - MATRIX.t (translation at byte offset +0x14 from m). */
+    const int32_t *t = (const int32_t *)((const uint8_t *)m + 0x14u);
+    int32_t d0 = pos[0] - t[0];
+    int32_t d1 = pos[1] - t[1];
+    int32_t d2 = pos[2] - t[2];
+
+    /* Hi/lo split: same precision technique as GTE_RotateLongMatTranspose. */
+    int32_t hi[3], lo[3];
+    hi[0] = d0 >> 15;  lo[0] = d0 & 0x7fff;
+    hi[1] = d1 >> 15;  lo[1] = d1 & 0x7fff;
+    hi[2] = d2 >> 15;  lo[2] = d2 & 0x7fff;
+
+    gte_ldsv_(hi[0], hi[1], hi[2]);
+    gte_rtir_sf0();
+    int32_t up1 = gte_stMAC1();
+    int32_t up2 = gte_stMAC2();
+    int32_t up3 = gte_stMAC3();
+
+    gte_ldsv_(lo[0], lo[1], lo[2]);
+    gte_rtir();
+    int32_t lo1 = gte_stMAC1();
+    int32_t lo2 = gte_stMAC2();
+    int32_t lo3 = gte_stMAC3();
+
+    out[0] = (up1 << 3) + lo1;
+    out[1] = (up2 << 3) + lo2;
+    out[2] = (up3 << 3) + lo3;
+}
+
 /* =========================================================================
  * Aliases under their FUN_ names -- main_loop and physics call these by
  * raw FUN address (the cleanup pass renamed them but legacy refs remain).
@@ -224,6 +309,28 @@ void GTE_RotateShortMatTranspose(uint32_t *m, const void *sv_in, void *sv_out)
 
 void FUN_80043358(uint32_t *m, int32_t *v, int32_t *out)
     { GTE_RotateLongMat(m, v, out); }
+int *FUN_80043248(int32_t *v, int32_t *out)
+{
+    int32_t hi[3], lo[3];
+    split_long(v, hi, lo);
+
+    gte_ldsv_(hi[0], hi[1], hi[2]);
+    gte_rtir_sf0();
+    int32_t up1 = gte_stMAC1();
+    int32_t up2 = gte_stMAC2();
+    int32_t up3 = gte_stMAC3();
+
+    gte_ldsv_(lo[0], lo[1], lo[2]);
+    gte_rtir();
+    int32_t lo1 = gte_stMAC1();
+    int32_t lo2 = gte_stMAC2();
+    int32_t lo3 = gte_stMAC3();
+
+    out[0] = (up1 << 3) + lo1;
+    out[1] = (up2 << 3) + lo2;
+    out[2] = (up3 << 3) + lo3;
+    return out;
+}
 void FUN_80043408(uint32_t *m, int32_t *v, int32_t *out)
     { GTE_RotateLongMatTrans(m, v, out); }
 void FUN_8004352c(uint32_t *m, int32_t *v, int32_t *out)
@@ -232,3 +339,57 @@ void FUN_8004366c(uint32_t *m)
     { GTE_LoadMatrixTransposed(m); }
 void FUN_800434f8(uint32_t *m, void *sv_in, void *sv_out)
     { GTE_RotateShortMatTranspose(m, sv_in, sv_out); }
+void FUN_800434d0(uint32_t *m, const void *sv, int32_t *out)
+    { GTE_RotateNormalTranspose(m, sv, out); }
+void FUN_800435c0(uint32_t *m, const int32_t *pos, int32_t *out)
+    { GTE_RotateWorldDelta(m, pos, out); }
+
+/* HIGH: rotate long vector by the GTE's CURRENT matrix and TR (no matrix reload).
+ *
+ * FUN_800432d0 (22 MIPS instructions, leaf).  Same hi/lo-split technique as
+ * GTE_RotateLongMatTrans, but the matrix is already loaded by the caller
+ * (caller does gte_set_rot_matrix + gte_set_translation first).  The lower-
+ * half pass uses RTIRTR to fold in the currently-loaded translation vector.
+ *
+ * Source: SLUS_005.10  0x800432d0
+ *
+ * MIPS:
+ *   sra t3,t0,0xf / sra t4,t1,0xf / sra t5,t2,0xf
+ *   ldsv_ t3,t4,t5 ; load hi parts into GTE V0
+ *   andi t0..t2, 0x7fff
+ *   RTIR_SF0        ; R * V0_hi, SF=0 -> MAC
+ *   read_mt t3,t4,t5
+ *   ldsv_ t0,t1,t2  ; load lo parts
+ *   sll t3..t5, 3
+ *   RTIRTR           ; R * V0_lo + TR, SF=1 -> MAC
+ *   read_mt t0,t1,t2
+ *   addu t0,t0,t3 etc ; result = lo + (hi << 3)
+ *   store to a1; return a1
+ */
+void *GTE_RotateCurrentLongMatTrans(const int32_t *v, int32_t *out)
+{
+    int32_t hi[3], lo[3];
+    split_long(v, hi, lo);
+
+    /* Upper half: SF=0, no translation. */
+    gte_ldsv_(hi[0], hi[1], hi[2]);
+    gte_rtir_sf0();
+    int32_t up1 = gte_stMAC1();
+    int32_t up2 = gte_stMAC2();
+    int32_t up3 = gte_stMAC3();
+
+    /* Lower half: SF=1, WITH translation (RTIRTR). */
+    gte_ldsv_(lo[0], lo[1], lo[2]);
+    gte_rtirtr();
+    int32_t lo1 = gte_stMAC1();
+    int32_t lo2 = gte_stMAC2();
+    int32_t lo3 = gte_stMAC3();
+
+    out[0] = (up1 << 3) + lo1;
+    out[1] = (up2 << 3) + lo2;
+    out[2] = (up3 << 3) + lo3;
+    return out;
+}
+
+void *FUN_800432d0(const int32_t *v, int32_t *out)
+    { return GTE_RotateCurrentLongMatTrans(v, out); }

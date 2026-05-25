@@ -212,6 +212,11 @@ int Asset_VisibilityEvictTick(void)
     return 0;
 }
 
+/* Hex-name aliases for callers that use the PSX address. */
+uint32_t FUN_80020ad0(int *p) { return (uint32_t)Evict_LeafChainBackBuffer((LeafChainNode **)p); }
+uint32_t FUN_80020bec(int32_t *node, int32_t *bbox) { return (uint32_t)Evict_TreeWalk(node, bbox); }
+uint32_t FUN_80020d3c(void) { return (uint32_t)Asset_VisibilityEvictTick(); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

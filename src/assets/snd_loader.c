@@ -41,10 +41,20 @@ void *Audio_LoadSND(const char *path)
 void Audio_FreeSND(void *handle)
 {
     uint8_t *h = (uint8_t *)handle;
+    if (h == NULL)
+        return;
+
     /* SPU buffer length stored in 8-byte units at +2. */
     SpuFree((uint32_t)*(uint16_t *)(h + 2) << 3);
     Heap_Free(handle);
 }
+
+/* Hex-name aliases.
+ * FUN_80044394 (Audio_FreeSND inner) is audio-engine adjacent — left to
+ * the audio shim. */
+void *FUN_80044360(const char *path) { return Audio_LoadSND(path); }
+void *FUN_800441f8(void)              { return Audio_ParseSND(); }
+void  FUN_80044394(void *handle)       { Audio_FreeSND(handle); }
 
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)

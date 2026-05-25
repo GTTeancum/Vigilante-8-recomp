@@ -17,9 +17,14 @@ if(MSVC)
     # Treat the recomp as C even for .c files compiled as C; allow the
     # K&R-ish style and signed/unsigned mismatches inherited from Ghidra.
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+    # Force-include Ghidra placeholder type aliases (undefined4 etc.) into
+    # every translation unit.  168 decompiled files use these names; a
+    # forced include is cleaner than touching each file individually.
+    add_compile_options(/FI "${CMAKE_SOURCE_DIR}/include/ghidra_types.h")
 else()
     add_compile_options(-Wall -Wno-unused-variable -Wno-unused-but-set-variable
                         -Wno-unused-function -Wno-pointer-sign -Wno-int-conversion)
+    add_compile_options(-include "${CMAKE_SOURCE_DIR}/include/ghidra_types.h")
 endif()
 
 # ----- third party -----
@@ -55,24 +60,43 @@ add_subdirectory(platform)
 
 # ----- the executable -----
 add_executable(v8 platform/main.c)
-target_link_libraries(v8 PRIVATE v8core v8platform)
+target_link_libraries(v8 PRIVATE v8core v8platform v8core)
+set(V8_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/PS1 game")
+set_target_properties(v8 PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${V8_RUNTIME_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${V8_RUNTIME_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${V8_RUNTIME_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${V8_RUNTIME_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${V8_RUNTIME_DIR}"
+)
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/input")
+    add_custom_command(TARGET v8 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/input"
+            "${V8_RUNTIME_DIR}"
+        COMMENT "Copy game assets to PS1 game runtime directory"
+    )
+endif()
 
 if(MSVC)
     # MSVC moved sprintf et al. into legacy_stdio_definitions.lib post-VS2015;
     # decompiled code declares them as bare externs, so link against it.
     target_link_libraries(v8 PRIVATE legacy_stdio_definitions)
+    target_link_options(v8 PRIVATE "/MAP")
 endif()
 
 if(WIN32)
     set_target_properties(v8 PROPERTIES WIN32_EXECUTABLE FALSE)  # console for logs
 
-    # Copy SDL2.dll next to the executable so it can run.
+    # Copy SDL2.dll next to the executable in PS1 game so it can run
+    # natively from the asset directory.
     if(SDL2_RUNTIME_DLL)
         add_custom_command(TARGET v8 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${SDL2_RUNTIME_DLL}"
-                "$<TARGET_FILE_DIR:v8>"
-            COMMENT "Copy SDL2.dll next to v8.exe"
+                "${V8_RUNTIME_DIR}"
+            COMMENT "Copy SDL2.dll next to PS1 game/v8.exe"
         )
     endif()
 endif()

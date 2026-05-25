@@ -40,13 +40,16 @@ extern uint8_t  DAT_80065528[];
 
 void InsertOriginalCd_Loop(int fontHandle)
 {
+    if (fontHandle == 0)
+        return;
+
     while (uRam000005ac != 4) {
         PutDrawEnv(DAT_8006f208 + (1 - iRam00000008) * 0x5c);
         Layout_AlignNext(DAT_80065520, 0);
         Font_SetTint(DAT_80065520, 0xffffff);
-        *(uint8_t *)(fontHandle + 4) = 0x80;
-        *(uint8_t *)(fontHandle + 5) = 0x80;
-        *(uint8_t *)(fontHandle + 6) = 0;
+        *(uint8_t *)(uintptr_t)(fontHandle + 4) = 0x80;
+        *(uint8_t *)(uintptr_t)(fontHandle + 5) = 0x80;
+        *(uint8_t *)(uintptr_t)(fontHandle + 6) = 0;
         Font_SetColor(fontHandle, 1);
         Font_DrawText(fontHandle, "Insert Original CD", DAT_80065528, 10);
         do { VSync(0); } while (CD_IsCoverOpen() == 0);

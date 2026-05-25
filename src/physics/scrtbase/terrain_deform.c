@@ -9,14 +9,13 @@
  *      the standard +0xffff round-down for negative coords.
  *   2. Walks a 32x32 sample grid (-16..+15 around the center, +0x10
  *      cell stride) -- 0x400 (1024) cells total.
- *   3. For each cell: reads a stored delta from obj+0x884 (a
- *      pre-computed crater profile), negates it, and ADDS to the
- *      heightmap entry at that (cellX, cellZ) -- which lowers the
- *      terrain by the profile depth. After applying, the stored
- *      delta at obj+0x84 is zeroed so the deformation isn't applied
- *      twice.
- *   4. After both grids are walked, returns to caller (presumably to
- *      finish the damage state machine).
+ *   3. For each cell: computes the current crater profile into obj+0x84,
+ *      diffs it against the previous profile at obj+0x884, and applies
+ *      the delta into the shared heightmap.
+ *   4. Copies the current profile to obj+0x884, advances the 0x80
+ *      frame counter, and on frame 0x101 removes the profile from the
+ *      heightmap and retires the object.
+ *   5. Rebuilds the radial distance profile at obj+0x1084.
  *
  * Bit-exact: the heightmap deformation happens directly in
  * DAT_800911a0's chunked grid -- the same memory Terrain_HeightAt
@@ -28,33 +27,137 @@
 #include <stdint.h>
 
 extern uintptr_t DAT_800911a0[];
+extern int16_t DAT_800607b4[];
+extern long SquareRoot0(long n);
+extern void FUN_800205f8(int obj);
+
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int32_t mips_sll_i32(int32_t v, unsigned sh)
+{
+    return (int32_t)((uint32_t)v << sh);
+}
+
+static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
+static int16_t crater_profile_sample(uint8_t dist, int32_t counter)
+{
+    int32_t half = mips_addu_i32(counter, (int32_t)((uint32_t)counter >> 31)) >> 1;
+    int32_t phaseCenter = mips_addu_i32(half, 0x30);
+    int32_t ring = mips_subu_i32(0x80, dist);
+    ring = mips_mult_lo_i32(ring, ring);
+
+    int32_t phase = mips_sll_i32(mips_subu_i32(dist, phaseCenter), 7);
+    int32_t absPhase = phase < 0 ? mips_subu_i32(0, phase) : phase;
+    if (absPhase >= 0x1000)
+        return 0;
+
+    uint32_t lut = ((uint32_t)phase & 0xfffu) * 2u;
+    int32_t wave = mips_mult_lo_i32(DAT_800607b4[lut], ring);
+    if (wave < 0) wave = mips_addu_i32(wave, 0xfffff);
+    wave >>= 20;
+
+    int32_t edge = DAT_800607b4[lut + 1];
+    if (edge < 0) edge = mips_addu_i32(edge, 0x1ff);
+    edge = mips_sll_i32(mips_subu_i32(0, edge >> 9), 11);
+    return (int16_t)(wave | edge);
+}
+
+static int16_t *terrain_height_cell(uint32_t cellX, uint32_t cellZ)
+{
+    uintptr_t chunkBase = DAT_800911a0[(cellX >> 6) * 32 + (cellZ >> 6)];
+    return (int16_t *)(chunkBase + (cellX & 0x3f) * 0x80 + (cellZ & 0x3f) * 2);
+}
+
+uint32_t FUN_80100ca0(uint32_t *self, int mode, int arg)
+{
+    if (mode != 1) {
+        if (arg != 0) {
+            int32_t cx = (int32_t)self[0x12];
+            int32_t cz = (int32_t)self[0x14];
+            if (cx < 0) cx = mips_addu_i32(cx, 0xffff);
+            if (cz < 0) cz = mips_addu_i32(cz, 0xffff);
+            int32_t baseX = (cx >> 16) - 0x10;
+            int32_t baseZ = (cz >> 16) - 0x10;
+
+            for (int dx = 0; dx < 0x20; dx++) {
+                uint32_t cellX = (uint32_t)mips_addu_i32(baseX, dx);
+                for (int dz = 0; dz < 0x20; dz++) {
+                    uint8_t *cell = (uint8_t *)self + dz * 2 + dx * 0x40;
+                    int16_t oldProfile = *(int16_t *)(cell + 0x884);
+                    int16_t newProfile = crater_profile_sample(*(uint8_t *)(cell + 0x1084),
+                                                               (int32_t)self[0x20]);
+                    *(int16_t *)(cell + 0x84) = newProfile;
+                    int16_t delta = (int16_t)mips_subu_i32(newProfile, oldProfile);
+                    if (delta != 0) {
+                        uint32_t cellZ = (uint32_t)mips_addu_i32(baseZ, dz);
+                        int16_t *hp = terrain_height_cell(cellX, cellZ);
+                        *hp = (int16_t)mips_addu_i32(*hp, delta);
+                    }
+                }
+            }
+
+            uint32_t *src = (uint32_t *)((uint8_t *)self + 0x84);
+            uint32_t *dst = (uint32_t *)((uint8_t *)self + 0x884);
+            while (src != (uint32_t *)((uint8_t *)self + 0x884)) {
+                dst[0] = src[0];
+                dst[1] = src[1];
+                dst[2] = src[2];
+                dst[3] = src[3];
+                src += 4;
+                dst += 4;
+            }
+        }
+
+        self[0x20] = (uint32_t)mips_addu_i32((int32_t)self[0x20], 1);
+        if (self[0x20] != 0x101)
+            return 0;
+
+        int32_t cx = (int32_t)self[0x12];
+        int32_t cz = (int32_t)self[0x14];
+        if (cx < 0) cx = mips_addu_i32(cx, 0xffff);
+        if (cz < 0) cz = mips_addu_i32(cz, 0xffff);
+        int32_t baseX = (cx >> 16) - 0x10;
+        int32_t baseZ = (cz >> 16) - 0x10;
+
+        for (int dx = 0; dx < 0x20; dx++) {
+            uint32_t cellX = (uint32_t)mips_addu_i32(baseX, dx);
+            for (int dz = 0; dz < 0x20; dz++) {
+                int16_t profile = *(int16_t *)((uint8_t *)self + dx * 0x40 + dz * 2 + 0x884);
+                if (profile != 0) {
+                    uint32_t cellZ = (uint32_t)mips_addu_i32(baseZ, dz);
+                    int16_t *hp = terrain_height_cell(cellX, cellZ);
+                    *hp = (int16_t)mips_subu_i32(*hp, profile);
+                }
+            }
+        }
+        FUN_800205f8((int)(uintptr_t)self);
+    }
+
+    for (int x = -0x10, row = 0x10; x < 0x10; x++, row += 0x20) {
+        for (int z = -0x10; z < 0x10; z++) {
+            long d = SquareRoot0((long)mips_sll_i32(mips_addu_i32(
+                mips_mult_lo_i32(x, x), mips_mult_lo_i32(z, z)), 6));
+            *((uint8_t *)self + z + row + 0x1084) = (uint8_t)d;
+        }
+    }
+    return 0;
+}
 
 void SB_TerrainDeform_FromCrater(int obj, int onComplete)
 {
-    if (!onComplete) return;
-
-    int32_t cx = *(int32_t *)(obj + 0x48);
-    int32_t cz = *(int32_t *)(obj + 0x50);
-    if (cx < 0) cx += 0xffff;
-    if (cz < 0) cz += 0xffff;
-
-    for (int dx = 0; dx < 0x20; dx++) {
-        for (int dz = 0; dz < 0x20; dz++) {
-            uint8_t *cell = (uint8_t *)(intptr_t)(obj + dz * 2 + dx * 0x40);
-            int16_t delta = *(int16_t *)(cell + 0x884);
-            *(uint16_t *)(cell + 0x84) = 0;        /* mark consumed */
-            if (delta == 0) continue;
-
-            uint32_t cellX = (uint32_t)((cx >> 16) - 0x10 + dx);
-            uint32_t cellZ = (uint32_t)((cz >> 16) - 0x10 + dz);
-            uintptr_t chunkBase =
-                DAT_800911a0[(cellX >> 6) * 32 + (cellZ >> 6)];
-            int16_t *hp = (int16_t *)(chunkBase + (cellX & 0x3f) * 0x80 + (cellZ & 0x3f) * 2);
-            *hp = (int16_t)(*hp + -delta);          /* sink terrain */
-        }
-    }
-    /* The original continues with a 2nd pass updating obj+0x84 -- the
-     * outgoing "in-flight" delta table. Pass 3 finalises. */
+    (void)FUN_80100ca0((uint32_t *)(uintptr_t)obj, 0, onComplete);
 }
 
 /* ============================================================

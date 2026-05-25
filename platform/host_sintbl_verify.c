@@ -10,9 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern const int16_t g_v8_sincostbl[8192];
+extern int16_t DAT_800607b4[8192];
 
-#define EXE_PATH     "input/SLUS_005.10"
+#define EXE_PATH     "SLUS_005.10"
 #define EXE_LOADADDR 0x80010000u
 #define LUT_ADDR     0x800607b4u
 #define LUT_BYTES    (4096 * 2 * sizeof(int16_t))
@@ -42,7 +42,7 @@ int Host_VerifySinCosTable(void)
         return -1;
     }
 
-    if (memcmp(exe_tbl, g_v8_sincostbl, LUT_BYTES) == 0) {
+    if (memcmp(exe_tbl, DAT_800607b4, LUT_BYTES) == 0) {
         /* match -- quiet success */
         return 0;
     }
@@ -50,7 +50,7 @@ int Host_VerifySinCosTable(void)
     /* Find first mismatch for the warning. */
     int first = -1;
     for (int i = 0; i < 8192; i++) {
-        if (exe_tbl[i] != g_v8_sincostbl[i]) { first = i; break; }
+        if (exe_tbl[i] != DAT_800607b4[i]) { first = i; break; }
     }
     fprintf(stderr,
         "v8: sintbl verify -- MISMATCH at entry %d: exe=%d gen=%d\n"
@@ -58,6 +58,6 @@ int Host_VerifySinCosTable(void)
         "v8:   recomp was calibrated against. Physics will diverge from\n"
         "v8:   the original. (The generator formula is\n"
         "v8:   round(sin(2*pi*i/4096)*4096).)\n",
-        first, exe_tbl[first], g_v8_sincostbl[first], EXE_PATH);
+        first, exe_tbl[first], DAT_800607b4[first], EXE_PATH);
     return -1;
 }

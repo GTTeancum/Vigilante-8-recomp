@@ -29,6 +29,8 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+extern uintptr_t Object_CallbackFromPsxSlot(const void *obj);
 extern uint8_t Pool_AllocSFX(void);
 extern void Pool_BindSnareToObject(uint8_t h, uint32_t bin, int slot, uint32_t *xyz);
 extern uint32_t Object_SpawnFromBank(uint32_t bin, int kind, int prio, int flag);
@@ -47,9 +49,9 @@ extern void Damage_VsImpactorAlt(int imp, int dmg, void *p, int n);
 extern void GTE_RotateLongMatTrans(uint32_t *mat, uint8_t *src, uint8_t *dst);
 extern void Pool_BindFXFragment(uint32_t h, uint32_t bin, int kind, uint8_t *spawnXyz); /* FUN_800447e8 */
 extern void Particles_Burst(uint8_t *spawnXyz);
-extern int  PathPiece_Find(uint32_t *self, uint32_t flag);             /* FUN_8001b038 */
+extern intptr_t PathPiece_Find(uint32_t *self, uint32_t flag);         /* FUN_8001b038 */
 extern uint32_t Spawner_DefferedSlot(uint32_t bin, int kind, void *p); /* FUN_800407b4 */
-extern void Path_BindSpawner(uint32_t *self, int pp, uint32_t spawner);/* FUN_8001b2fc */
+extern void Path_BindSpawner(uint32_t *self, intptr_t pp, uint32_t spawner);/* FUN_8001b2fc */
 extern void Damage_RetireSelf(uint32_t spawner);
 extern void Object_BindFinalize(uint32_t spawner);
 extern uint8_t SFX_PlayWorldXY(uint32_t *posXyz);
@@ -74,7 +76,7 @@ uint32_t WW_DynamiteKeg(uint32_t *self, uint32_t mode, int *imp)
             *spark |= 0x4b4u;
             spark[0x12] = self[9]; spark[0x13] = self[10]; spark[0x14] = self[0xb];
             *(int16_t *)(spark + 0x11) = (int16_t)(cnt * 0x60);
-            spark[0x19] = (uint32_t)(uintptr_t)&FUN_80100950;
+            Object_SetCallbackPsxSlot(spark, (uintptr_t)&FUN_80100950);
             Object_Suspend();
         }
         if (imp == NULL) return 0;
@@ -135,8 +137,10 @@ uint32_t WW_DynamiteKeg(uint32_t *self, uint32_t mode, int *imp)
         Pool_BindFXFragment(h, _DAT_800658fc, 5, wpos);
         Particles_Burst(wpos);
     }
-    if (*(void (**)(int, int, int))(impObj + 100) != NULL) {
-        (*(void (**)(int, int, int))(impObj + 100))(impObj, 8, 1000);
+    void (*impCb)(int, int, int) =
+        (void (*)(int, int, int))Object_CallbackFromPsxSlot((const void *)(uintptr_t)impObj);
+    if (impCb != NULL) {
+        impCb(impObj, 8, 1000);
 retire:
         if ((char)self[2] < 0) {
             SubModel_Detach(self);
@@ -148,7 +152,7 @@ retire:
         *((char *)self + 5) = 0;
         Damage_Apply_AgainstSelf(self, (void *)(intptr_t)300);
 path_bind: {
-            int pp = PathPiece_Find(self, 0x8000);
+            intptr_t pp = PathPiece_Find(self, 0x8000);
             if (pp != 0) {
                 uint32_t sp = Spawner_DefferedSlot(_DAT_800737d8, 6, &DAT_80100130);
                 Path_BindSpawner(self, pp, sp);

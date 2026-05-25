@@ -32,23 +32,44 @@ extern void     Object_Detach(uint32_t *self);                               /* 
 extern void     Vehicle_DropBindings(uint32_t bin);                          /* func_0x8003d8c4 */
 extern uint32_t _DAT_800658fc;
 
+static inline int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static inline int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
+}
+
+static inline int32_t rtz_shift_i32(int32_t v, unsigned sh, int32_t bias)
+{
+    if (v < 0) v = mips_addu_i32(v, bias);
+    return v >> sh;
+}
+
 uint32_t CC_BlimpPilot(uint32_t *self, int mode)
 {
     if (mode == 2) goto retire;
 
     uint32_t *pilot = (uint32_t *)(uintptr_t)self[0x1e];
-    int  hostBase   = ~(int)*(int16_t *)((char *)self + 6) * 0x18;
+    int  hostBase   = mips_mult_lo_i32(~(int)*(int16_t *)((char *)self + 6), 0x18);
     int16_t *kindP  = (int16_t *)(hostBase + -0x7ff9a3d8);
     uint32_t pad    = *(uint32_t *)(hostBase + -0x7ff9a3d0);
     uint32_t *yawP  = self + 0x29;
 
     if ((*self & 1) != 0) {
-        int32_t vx = (int32_t)self[0x20]; if (vx < 0) vx += 0x7f;
-        self[9]  += vx >> 7;
-        int32_t vy = (int32_t)self[0x21]; if (vy < 0) vy += 0x7f;
-        self[10] += vy >> 7;
-        int32_t vz = (int32_t)self[0x22]; if (vz < 0) vz += 0x7f;
-        self[0xb]+= vz >> 7;
+        int32_t vx = rtz_shift_i32((int32_t)self[0x20], 7, 0x7f);
+        self[9]  = (uint32_t)mips_addu_i32((int32_t)self[9], vx);
+        int32_t vy = rtz_shift_i32((int32_t)self[0x21], 7, 0x7f);
+        self[10] = (uint32_t)mips_addu_i32((int32_t)self[10], vy);
+        int32_t vz = rtz_shift_i32((int32_t)self[0x22], 7, 0x7f);
+        self[0xb]= (uint32_t)mips_addu_i32((int32_t)self[0xb], vz);
     }
 
     int16_t kind = *kindP;
@@ -57,35 +78,38 @@ uint32_t CC_BlimpPilot(uint32_t *self, int mode)
         if (kind == 3) goto integrate_axis;
         uint32_t rollMask = (kind == 2) ? (pad & 0x800) : 0;
         if (rollMask) {
-            int32_t y = (int16_t)self[0x29] - 0x10;
+            int32_t y = mips_subu_i32((int16_t)self[0x29], 0x10);
             if (y < -0x2aa) y = -0x2aa;
             *(int16_t *)(self + 0x29) = (int16_t)y;
         }
         if (pad & 0x1000) *(uint16_t *)(self + 0x29) = 1;
-        int32_t y = (int16_t)self[0x29];
-        if (y < 0) y += 0xf;
-        *(uint16_t *)(self + 0x29) = (uint16_t)self[0x29] - (int16_t)(y >> 4);
+        int32_t y = rtz_shift_i32((int16_t)self[0x29], 4, 0xf);
+        *(uint16_t *)(self + 0x29) =
+            (uint16_t)mips_subu_i32((int32_t)(uint16_t)self[0x29], y);
 integrate_axis: {
             uint8_t  b   = *(uint8_t *)(yawP + 8);
-            *(uint16_t *)(self + 0x29) = (uint16_t)((b - 0x80) * 5);
-            uint32_t u   = (uint8_t)(b - 0x70);
-            int      iv  = u - 0x80; if (iv < 0) iv = u - 0x7d;
-            int      target = (int16_t)*yawP + (iv >> 2);
+            *(uint16_t *)(self + 0x29) =
+                (uint16_t)mips_mult_lo_i32(mips_subu_i32(b, 0x80), 5);
+            uint32_t u   = (uint8_t)mips_subu_i32(b, 0x70);
+            int      iv  = mips_subu_i32((int32_t)u, 0x80);
+            if (iv < 0) iv = mips_subu_i32((int32_t)u, 0x7d);
+            int      target = mips_addu_i32((int16_t)*yawP, iv >> 2);
             int      clamp  = (target < -0x2aa) ? -0x2aa
                              : (target >  0x2aa) ?  0x2aa : target;
-            int      cur    = (int16_t)*yawP; if (cur < 0) cur += 0xf;
-            *(int16_t *)yawP = (int16_t)(clamp - (cur >> 4));
+            int      cur    = rtz_shift_i32((int16_t)*yawP, 4, 0xf);
+            *(int16_t *)yawP = (int16_t)mips_subu_i32(clamp, cur);
         }
     }
 
     /* Hostile-state transition. */
     if ((char)pilot[2] < 4) {
-        int y = (int16_t)*yawP; if (y < 0) y = -y;
+        int y = (int16_t)*yawP; if (y < 0) y = mips_subu_i32(0, y);
         if (y > 0x2a) *(uint8_t *)(pilot + 2) = 0xff;
     }
     if ((char)pilot[2] < 0) {
-        int v = (int16_t)*yawP; if (v < 0) v += 0x1f;
-        *(int16_t *)((char *)pilot + 0x42) += (int16_t)(v >> 5);
+        int v = rtz_shift_i32((int16_t)*yawP, 5, 0x1f);
+        *(uint16_t *)((char *)pilot + 0x42) =
+            (uint16_t)mips_addu_i32(*(int16_t *)((char *)pilot + 0x42), v);
     }
 
     /* Copy transform from pilot record. */
@@ -117,6 +141,11 @@ integrate_axis: {
 retire:
     *self |= 2u;
     return 0;
+}
+
+uint32_t FUN_801006d4(uint32_t *self, int mode)
+{
+    return CC_BlimpPilot(self, mode);
 }
 
 /* ============================================================

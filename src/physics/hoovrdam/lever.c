@@ -23,10 +23,11 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int size, int flags);
 extern uint32_t Object_ClearBackBufferFlag(uint32_t *obj);  /* FUN_80020778 */
 extern void Object_PostUpdate2(uint32_t obj);
-extern void Object_SetSubState(int obj, int sub);
+extern void FUN_80020890(uint32_t *obj, int sub);
 extern uint32_t SfxChannel_Acquire(void);
 extern void Audio_PlaySfxAtPos(uint32_t ch, uint32_t bank, int sfxId, int posXyzAddr);
 extern void ImpactSparks_Spawn(void *obj);
@@ -36,9 +37,11 @@ extern uint32_t _DAT_800658fc;
 
 uint32_t HD_LeverTick(uint32_t *self, int mode)
 {
+    uint32_t *scheduleTarget = self;
+
     if (mode == 1) goto epilogue;
     if (mode == 2) goto clearFlag20;
-    if (mode != 0 && mode != 3) goto epilogue;
+    if (mode == 3) goto toggle_and_schedule;
 
     /* Swing angle. */
     int16_t *ang = (int16_t *)((uint8_t *)self + 0x44);
@@ -48,6 +51,10 @@ uint32_t HD_LeverTick(uint32_t *self, int mode)
     if (dir != 0) {
         newAng = (int16_t)(*ang + 0x10);
         if (newAng > 0x200) spawn = 1;
+        else {
+            newAng = (int16_t)(*ang - 0x10);
+            if (newAng < -0x200) spawn = 1;
+        }
     } else {
         newAng = (int16_t)(*ang - 0x10);
         if (newAng < -0x200) spawn = 1;
@@ -62,18 +69,20 @@ uint32_t HD_LeverTick(uint32_t *self, int mode)
         p[0x12] = self[0x12];
         p[0x13] = self[0x13] + 0x15000;
         p[0x14] = self[0x14];
-        p[0x19] = (uintptr_t)&FUN_80101464;
+        Object_SetCallbackPsxSlot(p, (uintptr_t)&FUN_80101464);
         Object_ClearBackBufferFlag(self);
         Object_PostUpdate2((uint32_t)(uintptr_t)p);
-        Object_SetSubState((int)(uintptr_t)p, 0x200);
+        FUN_80020890(p, 0x200);
         uint32_t ch = SfxChannel_Acquire();
         Audio_PlaySfxAtPos(ch, _DAT_800658fc, 0x41, (int)(intptr_t)&p[0x12]);
     }
     ImpactSparks_Spawn(self);
+    scheduleTarget = (uint32_t *)(uintptr_t)1;
 
+toggle_and_schedule:
     *(uint8_t *)(self + 2) = (uint8_t)(*(uint8_t *)(self + 2) ^ 1u);
     self[0] |= 0x20u;
-    Object_SetSubState((int)(uintptr_t)self, 0xf0);
+    FUN_80020890(scheduleTarget, 0xf0);
     Object_RegisterPostUpdate(self);
 
 epilogue:
@@ -81,6 +90,11 @@ epilogue:
 clearFlag20:
     self[0] &= ~0x20u;
     return 0;
+}
+
+uint32_t FUN_80101580(uint32_t *self, int mode)
+{
+    return HD_LeverTick(self, mode);
 }
 
 /* ============================================================

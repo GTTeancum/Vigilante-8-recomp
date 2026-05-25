@@ -110,6 +110,11 @@ void *V8_MemMove(void *dst, const void *src, int n)
     return dst;
 }
 
+/* Hex-name aliases (callers use raw addresses). */
+void *FUN_80044efc(void *dst, uint32_t fill, int n) { return V8_MemSet(dst, (int)fill, n); }
+void *FUN_80044c44(void *dst, const void *src, int n) { return V8_MemCopy(dst, src, n); }
+void *FUN_80044d9c(void *dst, const void *src, int n) { return V8_MemMove(dst, src, n); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

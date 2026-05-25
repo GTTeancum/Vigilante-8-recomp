@@ -36,7 +36,7 @@ extern int8_t  cRam0000067c;     /* g_currentQuest */
 extern int32_t iRam0000000c;     /* g_matchElapsedTicks */
 extern int32_t iRam00000620;     /* g_cheatsActive flag */
 
-void MatchScore_AppendLine(char *resultStr, int vehicle)
+void MatchScore_AppendLine(char *resultStr, intptr_t vehicle)
 {
     uint8_t weight = *(uint8_t *)(vehicle + 0xba);
     uint8_t skill  = *(uint8_t *)(vehicle + 0xbb);

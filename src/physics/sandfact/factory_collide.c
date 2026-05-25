@@ -14,12 +14,17 @@
  */
 #include <stdint.h>
 
-extern int Collision_AgainstTerrain(int obj, int impact);   /* func_0x8002239c */
+extern int FUN_8002239c(uint32_t *self, int32_t *impulse);
 
 void SF_TerrainOnlyImpact(int obj, int mode, int impact)
 {
     if (mode != 3) obj = 1;
-    Collision_AgainstTerrain(obj, impact);
+    FUN_8002239c((uint32_t *)(uintptr_t)(uint32_t)obj, (int32_t *)(uintptr_t)(uint32_t)impact);
+}
+
+void FUN_801010c4(int obj, int mode, int impact)
+{
+    SF_TerrainOnlyImpact(obj, mode, impact);
 }
 
 /* ============================================================

@@ -17,47 +17,133 @@
  */
 #include <stdint.h>
 
-extern void Object_ClearBackBufBit_Flag(uint32_t *obj);    /* FUN_800207f8 */
-extern void Object_ClearBackBufBit_Child(uint32_t obj);     /* FUN_800207c4 */
-extern uint32_t Bone_FindFreeSlot(int obj);                 /* FUN_8003fbc8 */
+extern void FUN_800207f8(uint32_t *obj);
+extern void FUN_800207c4(uint32_t *obj);
+extern uint32_t FUN_8003fbc8(uint32_t *obj);
 extern int32_t Terrain_HeightAt(uint32_t x, uint32_t z);
-extern int  Damage_FromImpulse(uint32_t *self, int *impulse);
-extern void Object_SetSubState(int obj, int sub);
+extern int  FUN_8002239c(uint32_t *self, int32_t *impulse);
+extern uint32_t FUN_80022320(uint32_t *self, uint32_t amount);
+extern void FUN_80020890(uint32_t *obj, int sub);
+extern int  FUN_80016aac(const int32_t *a, const int32_t *b);
+extern int  FUN_8003fc50(int obj);
+extern int  FUN_8004410c(void);
+extern void FUN_8004483c(int voice, uint32_t bank, int sfx, const void *pos);
 extern uint32_t _DAT_800659d0;
+extern uint8_t DAT_80065a18[];
+
+typedef struct VF_ListNode {
+    struct VF_ListNode *next;
+    struct VF_ListNode *prev;
+    uintptr_t payload;
+    uint32_t deadline;
+} VF_ListNode;
+
+static void VF_SiloInitMode(uint32_t *self)
+{
+    FUN_800207f8(self);
+    FUN_800207c4((uint32_t *)(uintptr_t)self[0xe]);
+    *(uint16_t *)(uintptr_t)(self[0xe] + 0xc) = 0xe;
+    uint32_t slot = FUN_8003fbc8(self);
+    self[0x1e] = *(uint32_t *)(uintptr_t)self[0x16] + slot * 0x1c + 0x1c;
+    self[0x13] = (uint32_t)Terrain_HeightAt(self[0x12], self[0x14]);
+}
+
+static int VF_SiloHasNearbyActive(uint32_t *self)
+{
+    VF_ListNode *sentinel = (VF_ListNode *)DAT_80065a18;
+    VF_ListNode *node = sentinel->next;
+    while (node != NULL) {
+        uint8_t *obj = (uint8_t *)node->payload;
+        if (obj != NULL
+            && *(int8_t *)(obj + 4) == 2
+            && *(uint16_t *)(obj + 0xc) != 0
+            && FUN_80016aac((const int32_t *)(obj + 0x24),
+                            (const int32_t *)(self + 0x12)) < 0x4b000)
+        {
+            return 1;
+        }
+        node = node->next;
+    }
+    return 0;
+}
+
+static void VF_SiloPostDamageScan(uint32_t *self)
+{
+    uint8_t state = 1;
+    if (!VF_SiloHasNearbyActive(self)) {
+        FUN_80020890(self, 0xf);
+        state = 0;
+    }
+    *(uint8_t *)(self + 2) = state;
+}
+
+static void VF_SiloCountdownAndReset(uint32_t *self)
+{
+    uint8_t state = *(uint8_t *)(self + 2);
+    *(uint8_t *)(self + 2) = (uint8_t)(state - 1);
+    if (state == 1) {
+        uint16_t *anchor = (uint16_t *)(uintptr_t)self[0x1e];
+        uint16_t saved = *anchor;
+        *anchor = 0;
+        FUN_8003fc50((int)(uintptr_t)self);
+        *anchor = saved;
+    }
+    FUN_8004483c(FUN_8004410c(), *(uint32_t *)(uintptr_t)(self[0x16] + 8),
+                 2, self + 9);
+    VF_SiloInitMode(self);
+}
 
 uint32_t VF_SiloInit(uint32_t *self, int mode, int *impulse)
 {
     switch (mode) {
-    case 1: {
-        Object_ClearBackBufBit_Flag(self);
-        Object_ClearBackBufBit_Child(self[0xe]);
-        *(uint16_t *)(self[0xe] + 0xc) = 0xe;
-        uint32_t slot = Bone_FindFreeSlot((int)(intptr_t)self);
-        self[0x1e] = *(uint32_t *)self[0x16] + slot * 0x1c + 0x1c;
-        self[0x13] = (uint32_t)Terrain_HeightAt(self[0x12], self[0x14]);
+    case 1:
+        VF_SiloInitMode(self);
         return 0;
-    }
     case 3: {
         int8_t needState = 7;
         if ((uint32_t)impulse[3] == self[0xe]) {
-            int killed = Damage_FromImpulse((uint32_t *)(intptr_t)impulse[3], impulse);
+            int killed = FUN_8002239c((uint32_t *)(uintptr_t)(uint32_t)impulse[3],
+                                      (int32_t *)impulse);
             if (killed == 0) return 0;
             *(int8_t *)(self + 2) = 0x1e;
             *(uint16_t *)((uintptr_t)self + 0x46) = (uint16_t)_DAT_800659d0;
-            Object_ClearBackBufBit_Child((uint32_t)(intptr_t)self);
-            Object_SetSubState((int)(intptr_t)self, 0x78);
+            FUN_800207c4(self);
+            FUN_80020890(self, 0x78);
             needState = 0;
         }
         if (*(int8_t *)(*impulse + 4) != needState) return 0;
-        /* impulse now = (int)*(uint16_t *)(*impulse + 0xc); -- caller uses */
-        return 0;
+        impulse = (int *)(uintptr_t)*(uint16_t *)(*impulse + 0xc);
+        break;
     }
+    case 8:
+        break;
     case 2:
-        /* same teardown */
-        return 0;
+        goto post_damage_scan;
+    case 5:
+        goto countdown_and_reset;
     default:
         return 0;
     }
+
+    {
+        uint16_t *anchor = (uint16_t *)(uintptr_t)self[0x1e];
+        uint16_t saved = *anchor;
+        if ((self[0] & 4u) != 0) *anchor = 0;
+        FUN_80022320(self, (uint32_t)(uintptr_t)impulse);
+        *anchor = saved;
+    }
+
+post_damage_scan:
+    VF_SiloPostDamageScan(self);
+
+countdown_and_reset:
+    VF_SiloCountdownAndReset(self);
+    return 0;
+}
+
+uint32_t FUN_80100c1c(uint32_t *self, int mode, int *impulse)
+{
+    return VF_SiloInit(self, mode, impulse);
 }
 
 /* ============================================================

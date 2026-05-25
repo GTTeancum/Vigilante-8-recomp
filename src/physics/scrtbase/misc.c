@@ -10,26 +10,37 @@
  */
 #include <stdint.h>
 
-extern int  Collision_AgainstTerrain(int obj, int impact);    /* func_0x8002239c */
-extern int  Collision_Circular     (int obj, int impact);    /* func_0x80022320 */
+extern int  FUN_8002239c(uint32_t *self, int32_t *impulse);
+extern uint32_t FUN_80022320(uint32_t *self, uint32_t amount);
 extern void Object_BroadcastEvent  (int eventId, int spawnId); /* func_0x8002185c */
 
 uint32_t SB_FenceImpact(int obj, uint32_t mode, void *impact)
 {
-    if (mode == 3 || mode == 8) Collision_AgainstTerrain(obj, (int)(intptr_t)impact);
-    Collision_Circular(obj, (int)(intptr_t)impact);
+    if (mode != 8)
+        FUN_8002239c((uint32_t *)(uintptr_t)(uint32_t)obj, (int32_t *)impact);
+    FUN_80022320((uint32_t *)(uintptr_t)(uint32_t)obj, (uint32_t)(uintptr_t)impact);
     return 0xffffffffu;
+}
+
+uint32_t FUN_801006f4(int obj, uint32_t mode, void *impact)
+{
+    return SB_FenceImpact(obj, mode, impact);
 }
 
 uint32_t SB_TurretHit(int obj, uint32_t mode, int *impulse)
 {
-    if (mode == 3 || mode == 8) {
+    if (mode != 8) {
         if (*(int8_t *)(*impulse + 4) != 7) return 0;
         impulse = (int *)(uintptr_t)*(uint16_t *)(*impulse + 0xc);
     }
-    int hit = Collision_Circular(obj, (int)(intptr_t)impulse);
+    int hit = FUN_80022320((uint32_t *)(uintptr_t)(uint32_t)obj, (uint32_t)(uintptr_t)impulse);
     if (hit != 0) Object_BroadcastEvent(9, *(int16_t *)(obj + 6));
     return 0;
+}
+
+uint32_t FUN_801025ec(int obj, uint32_t mode, int *impulse)
+{
+    return SB_TurretHit(obj, mode, impulse);
 }
 
 /* ============================================================

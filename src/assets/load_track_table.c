@@ -1,39 +1,81 @@
-/* load_track_table.c -- read CD audio track-position table from disc.
+/* load_track_table.c -- read TERR HEAD and COLS level setup records.
  *
- * Source: LOAD.DLL  FUN_801002ac.
+ * Source: LOAD.DLL
+ *   FUN_801002ac        -- Terrain_LoadTerrHead
+ *   hidden 0x80105318   -- Terrain_LoadCols
  *
- * The Shell\Load.tbl payload contains a header followed by an array of
- * i16 entries representing CD-DA track positions used by the music
- * sequencer. The first five i16s are header values (track count,
- * format hint, options...), and from the sixth i16 onward each entry
- * is a per-track sector offset.
+ * The top-level TERR/HEAD payload contains five big-endian i16 header words
+ * followed by i16 table entries copied to DAT_800658e8. Header[0] is passed to
+ * Terrain_InitFlatWorld; header[1..2] are passed to 0x80041d40. Header[3..4]
+ * are consumed but otherwise discarded by the source.
  *
- * The function reads the header into five locals (only one of which
- * is currently used), then loops over `(size - 10) / 2` entries
- * (i.e. all remaining i16s after the 10-byte header) into the global
- * track table at DAT_800658e8.
+ * The COLS payload is a separate 28-byte color/light/fog setup record consumed
+ * by hidden LOAD code at 0x80105318.
  *
- * HIGH confidence on shape; MED on the meaning of the 5 header fields.
+ * HIGH confidence on shape; MED on the meaning of the color words.
  */
 #include <stdint.h>
 
-extern int16_t XobfStream_ReadI16(void *st);   /* func_0x800224b4 */
-extern int16_t DAT_800658e8[];                  /* track-position table */
+extern int16_t XobfStream_ReadI16(void *streamRef);  /* func_0x800224b4 */
+extern int16_t DAT_800658e8[];                  /* COLS runtime table */
+extern int16_t _DAT_800658ee;
+extern int8_t  DAT_8006531a;
+extern void Terrain_InitFlatWorld(int16_t levelId);
+extern void FUN_80041d40(int16_t envA, int16_t envB);
 
-void Audio_LoadTrackTable(void *stream, int payloadSize)
+extern uint32_t DAT_80065b58;
+extern uint32_t _DAT_80065b00;
+extern uint32_t DAT_80065b2c;
+extern uint32_t DAT_80065b54;
+extern uint32_t _DAT_80065b08;
+extern uint32_t _DAT_80065b10;
+extern uint32_t _DAT_80065af8;
+
+void Terrain_LoadTerrHead(void *payload, int payloadSize)
 {
-    /* 10-byte header (5 i16s) -- parse-and-discard for now. */
-    int16_t h0 = XobfStream_ReadI16(stream);
-    int16_t h1 = XobfStream_ReadI16(stream);
-    int16_t h2 = XobfStream_ReadI16(stream);
-    int16_t h3 = XobfStream_ReadI16(stream);
-    int16_t h4 = XobfStream_ReadI16(stream);
+    uint8_t *cursor = (uint8_t *)payload;
+    int16_t h0 = XobfStream_ReadI16(&cursor);
+    int16_t h1 = XobfStream_ReadI16(&cursor);
+    int16_t h2 = XobfStream_ReadI16(&cursor);
+    int16_t h3 = XobfStream_ReadI16(&cursor);
+    int16_t h4 = XobfStream_ReadI16(&cursor);
     (void)h0; (void)h1; (void)h2; (void)h3; (void)h4;
 
     int n = (payloadSize - 10) / 2;
     for (int i = 0; i < n; i++) {
-        DAT_800658e8[i] = XobfStream_ReadI16(stream);
+        DAT_800658e8[i] = XobfStream_ReadI16(&cursor);
     }
+
+    _DAT_800658ee = (int16_t)(((int32_t)_DAT_800658ee << 1) >> (DAT_8006531a & 0x1f));
+    Terrain_InitFlatWorld(h0);
+    FUN_80041d40(h1, h2);
+}
+
+/* HIGH-MED: hidden LOAD 0x80105318, direct 28-byte COLS color/light copy.
+ * The source also derives a few small color deltas for renderer draw-env
+ * records; those renderer-side writes are intentionally omitted here.
+ */
+void Terrain_LoadCols(const uint8_t *payload)
+{
+    DAT_80065b58 = (uint32_t)payload[0] << 24 | (uint32_t)payload[1] << 16 |
+                   (uint32_t)payload[2] << 8 | payload[3];
+    _DAT_80065b00 = (uint32_t)payload[4] << 24 | (uint32_t)payload[5] << 16 |
+                    (uint32_t)payload[6] << 8 | payload[7];
+    DAT_80065b2c = (uint32_t)payload[8] << 24 | (uint32_t)payload[9] << 16 |
+                   (uint32_t)payload[10] << 8 | payload[11];
+    DAT_80065b54 = (uint32_t)payload[12] << 24 | (uint32_t)payload[13] << 16 |
+                   (uint32_t)payload[14] << 8 | payload[15];
+    _DAT_80065b08 = (uint32_t)payload[16] << 24 | (uint32_t)payload[17] << 16 |
+                    (uint32_t)payload[18] << 8 | payload[19];
+    _DAT_80065b10 = (uint32_t)payload[20] << 24 | (uint32_t)payload[21] << 16 |
+                    (uint32_t)payload[22] << 8 | payload[23];
+    _DAT_80065af8 = (uint32_t)payload[24] << 24 | (uint32_t)payload[25] << 16 |
+                    (uint32_t)payload[26] << 8 | payload[27];
+}
+
+void Audio_LoadTrackTable(void *stream, int payloadSize)
+{
+    Terrain_LoadTerrHead(stream, payloadSize);
 }
 
 /* ============================================================

@@ -23,6 +23,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t V8_RandNext(void);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int flags);
 /* PSY-Q (sin, cos) interleaved LUT @ 0x800607b4 -- see canynlnd/spawner.c
@@ -30,6 +31,7 @@ extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int
 extern const int16_t g_v8_sincostbl[8192];
 extern uint8_t *Matrix_ComposeParentChain(int obj);   /* FUN_8001d624 */
 extern void     Object_RegisterInScene(uint32_t *obj);
+extern int LAB_800404c4(int obj, int event, int param3);
 
 static uint32_t scale_4_12_signed(int32_t v, int32_t factor)
 {
@@ -65,13 +67,18 @@ uint32_t CC_RandomFire(int obj, int mode)
     child[9]  = *(uint32_t *)(m + 0x14);
     child[10] = *(uint32_t *)(m + 0x18);
     child[11] = *(uint32_t *)(m + 0x1c);
-    child[0x19] = 0x800404c4;       /* main-EXE projectile tick */
+    Object_SetCallbackPsxSlot(child, (uintptr_t)&LAB_800404c4);       /* main-EXE projectile tick */
 
     Object_RegisterInScene(child);
 
     /* Reload countdown. */
     *countdown = *(int16_t *)(obj + 0x82);
     return 0;
+}
+
+uint32_t FUN_80100a9c(int obj, int mode)
+{
+    return CC_RandomFire(obj, mode);
 }
 
 /* ============================================================

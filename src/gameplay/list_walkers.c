@@ -21,14 +21,25 @@ extern void Object_PreTickChildren(int chainHead, uint16_t arg); /* FUN_8001fc38
 extern void Object_Free(uint32_t *obj);                         /* FUN_80020540 */
 extern void Object_Destroy(int payload);                        /* FUN_8001de08 */
 extern int32_t **piRam00000774;
+typedef struct ListWalkerHostNode {
+    struct ListWalkerHostNode *next;
+    struct ListWalkerHostNode *prev;
+    uintptr_t payload;
+    uint32_t deadline;
+} ListWalkerHostNode;
 
 /* HIGH: recursive object pre-tick. Applies the per-object pre-tick to
  * the node, then if its child list is populated recurses into them. */
 void Object_FrameCounterBump(int payload, uint16_t arg)
 {
     int r = Object_PreTickRecurse(payload, arg);
-    if (r < 0 || *(int *)(payload + 0x38) == 0) return;
-    Object_PreTickChildren(*(int *)(payload + 0x38), arg);
+    if (r < 0 || *(int *)(uintptr_t)(uint32_t)(payload + 0x38) == 0) return;
+    Object_PreTickChildren(*(int *)(uintptr_t)(uint32_t)(payload + 0x38), arg);
+}
+
+void FUN_8001fcb4(int payload, uint16_t arg)
+{
+    Object_FrameCounterBump(payload, arg);
 }
 
 /* HIGH: walk an object list, freeing each payload and re-linking the
@@ -36,21 +47,23 @@ void Object_FrameCounterBump(int payload, uint16_t arg)
 extern uint8_t DAT_80065a74[];
 void ObjList_FreeAllAndRetire(int **listSentinel)
 {
-    int *next = (int *)listSentinel[2];
-    while (next != (int *)listSentinel) {
-        int *node = (int *)*listSentinel;
-        Object_Free((uint32_t *)(intptr_t)node[2]);
-        int32_t *prev = (int32_t *)node[1];
-        int32_t  back = node[0];
-        *(int32_t **)(back + 4) = prev;
-        *prev = back;
-
-        int32_t **deadTail = piRam00000774;
-        piRam00000774 = (int32_t **)node;
-        *prev = (int32_t)(intptr_t)node;
-        next = (int *)listSentinel[2];
-        (void)deadTail;
+    ListWalkerHostNode *sentinel = (ListWalkerHostNode *)listSentinel;
+    ListWalkerHostNode *node;
+    (void)piRam00000774;
+    if (sentinel == NULL || sentinel->prev == NULL)
+        return;
+    node = sentinel->next;
+    while (node != NULL) {
+        ListWalkerHostNode *next = node->next;
+        if (node->payload != 0)
+            Object_Free((uint32_t *)node->payload);
+        node->next = NULL;
+        node->prev = NULL;
+        node->payload = 0;
+        node = next;
     }
+    sentinel->next = NULL;
+    sentinel->prev = sentinel;
 }
 
 /* HIGH: free a whole kd-tree, including the per-leaf object lists. */
@@ -70,11 +83,13 @@ void Tree_FreeRecursive(int *node)
 /* HIGH: walk a list, calling Object_Destroy on each payload. */
 void ObjList_ApplyDestroy(int **listSentinel)
 {
-    int *node = (int *)listSentinel[0];
-    int *next = (int *)*(int *)listSentinel[0];
-    for (; next != NULL; next = (int *)*next) {
-        Object_Destroy(node[2]);
-        node = next;
+    ListWalkerHostNode *sentinel = (ListWalkerHostNode *)listSentinel;
+    ListWalkerHostNode *node;
+    if (sentinel == NULL || sentinel->prev == NULL)
+        return;
+    for (node = sentinel->next; node != NULL; node = node->next) {
+        if (node->payload != 0)
+            Object_Destroy((int)node->payload);
     }
 }
 
@@ -84,13 +99,13 @@ int ObjList_FindWithPredicate(int **listSentinel,
                               int (*pred)(int *node, uint32_t arg),
                               uint32_t arg)
 {
-    int *node = (int *)listSentinel[0];
-    int *next = (int *)*(int *)listSentinel[0];
-    while (next != NULL) {
-        int r = pred(node, arg);
+    ListWalkerHostNode *sentinel = (ListWalkerHostNode *)listSentinel;
+    ListWalkerHostNode *node;
+    if (sentinel == NULL || sentinel->prev == NULL)
+        return 0;
+    for (node = sentinel->next; node != NULL; node = node->next) {
+        int r = pred((int *)node, arg);
         if (r != 0) return r;
-        node = next;
-        next = (int *)*next;
     }
     return 0;
 }

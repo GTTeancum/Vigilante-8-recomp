@@ -43,6 +43,7 @@ void  DrawOTag      (const u_long *ot)                                      { (v
 void  DrawSync      (int mode)                                              { (void)mode; }
 void  ClearImage    (const RECT *r, uint8_t r8, uint8_t g8, uint8_t b8)     { (void)r; (void)r8; (void)g8; (void)b8; }
 void  MargePrim     (void *a, void *b)                                      { (void)a; (void)b; }
+void  AddPrim       (void *ot, void *prim)                                  { (void)ot; (void)prim; }
 
 /* ---- libgte: all real implementations live in libgte.c.
  * Symbols formerly stubbed here:
@@ -81,3 +82,65 @@ void  SpuSetVoiceVolume(int v, int16_t l, int16_t r)                        { (v
 void  PadInit       (int mode)                                              { (void)mode; }
 void  PadInitDirect (uint8_t *port1, uint8_t *port2)                        { (void)port1; (void)port2; }
 uint32_t PadRead    (int id)                                                { (void)id; return 0; }
+
+/* ---- Additional libgte matrix ops ---- */
+/* HIGH: direct ports of SLUS_005.10 RotMatrixX/RotMatrixY. */
+MATRIX *RotMatrixX(int rx, MATRIX *m)
+{
+    int32_t s = rsin(rx);
+    int32_t c = rcos(rx);
+    int32_t r10 = m->m[1][0], r20 = m->m[2][0];
+    int32_t r11 = m->m[1][1], r21 = m->m[2][1];
+    int32_t r12 = m->m[1][2], r22 = m->m[2][2];
+
+    m->m[1][0] = (int16_t)((c * r10 - s * r20) >> 12);
+    m->m[1][1] = (int16_t)((c * r11 - s * r21) >> 12);
+    m->m[1][2] = (int16_t)((c * r12 - s * r22) >> 12);
+    m->m[2][0] = (int16_t)((s * r10 + c * r20) >> 12);
+    m->m[2][1] = (int16_t)((s * r11 + c * r21) >> 12);
+    m->m[2][2] = (int16_t)((s * r12 + c * r22) >> 12);
+    return m;
+}
+
+MATRIX *RotMatrixY(int ry, MATRIX *m)
+{
+    int32_t s = -rsin(ry);
+    int32_t c = rcos(ry);
+    int32_t r00 = m->m[0][0], r20 = m->m[2][0];
+    int32_t r01 = m->m[0][1], r21 = m->m[2][1];
+    int32_t r02 = m->m[0][2], r22 = m->m[2][2];
+
+    m->m[0][0] = (int16_t)((c * r00 - s * r20) >> 12);
+    m->m[0][1] = (int16_t)((c * r01 - s * r21) >> 12);
+    m->m[0][2] = (int16_t)((c * r02 - s * r22) >> 12);
+    m->m[2][0] = (int16_t)((s * r00 + c * r20) >> 12);
+    m->m[2][1] = (int16_t)((s * r01 + c * r21) >> 12);
+    m->m[2][2] = (int16_t)((s * r02 + c * r22) >> 12);
+    return m;
+}
+
+extern void FUN_8004c874(int x, int y, int z, int *ox, int *oy, int *oz);
+
+/* HIGH: wrapper for SLUS_005.10 VectorNormal, preserving integer GTE path. */
+long VectorNormal(VECTOR *v0, VECTOR *v1)
+{
+    int32_t x = (int16_t)v0->vx;
+    int32_t y = (int16_t)v0->vy;
+    int32_t z = (int16_t)v0->vz;
+    int ox, oy, oz;
+    FUN_8004c874(x, y, z, &ox, &oy, &oz);
+    v1->vx = ox;
+    v1->vy = oy;
+    v1->vz = oz;
+    return (long)(int32_t)((uint32_t)(x * x + y * y) + (uint32_t)(z * z));
+}
+
+/* HIGH: direct port of SLUS_005.10 TransposeMatrix at 0x8004d734.
+ * Only the 3x3 rotation block is written; translation is untouched. */
+MATRIX *TransposeMatrix(const MATRIX *src, MATRIX *dst)
+{
+    dst->m[0][0] = src->m[0][0]; dst->m[0][1] = src->m[1][0]; dst->m[0][2] = src->m[2][0];
+    dst->m[1][0] = src->m[0][1]; dst->m[1][1] = src->m[1][1]; dst->m[1][2] = src->m[2][1];
+    dst->m[2][0] = src->m[0][2]; dst->m[2][1] = src->m[1][2]; dst->m[2][2] = src->m[2][2];
+    return dst;
+}

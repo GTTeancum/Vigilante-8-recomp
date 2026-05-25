@@ -239,6 +239,11 @@ static void mvmva(int mx, int v, int cv, int sf, int lm)
     static const uint32_t IR_SAT[3]  = { FLAG_IR1_SAT,  FLAG_IR2_SAT,  FLAG_IR3_SAT  };
 
     int shift = sf ? 12 : 0;
+    int32_t src[3] = {
+        vec_elem(v, 0),
+        vec_elem(v, 1),
+        vec_elem(v, 2)
+    };
 
     /* Clear FLAG before op (FLAG is sticky; nocash says it's clobbered
      * per-op). Real PSX clears all sticky flags at the start of each
@@ -248,7 +253,7 @@ static void mvmva(int mx, int v, int cv, int sf, int lm)
     for (int r = 0; r < 3; r++) {
         int64_t sum = (int64_t)cv_elem(cv, r) << 12;
         for (int c = 0; c < 3; c++) {
-            int64_t prod = (int64_t)mtx_elem(mx, r, c) * (int64_t)vec_elem(v, c);
+            int64_t prod = (int64_t)mtx_elem(mx, r, c) * (int64_t)src[c];
             sum += prod;
         }
         sum = mac_overflow_check(sum, MAC_POS[r], MAC_NEG[r]);
@@ -348,15 +353,55 @@ void gte_ldLZCS(int32_t v) {
 }
 int32_t gte_stLZCR(void) { return g_data[LZCR]; }
 
-/* PSY-Q SquareRoot0(n): integer sqrt of a u32, returns floor(sqrt(n))
- * matching the BIOS routine's published behaviour.  Newton-Raphson
- * with x0 = n converges in ~5 iterations for any u32 input. */
+static const int16_t s_sqrt_tbl[192] = {
+    4096, 4127, 4159, 4190, 4222, 4252, 4283, 4314,
+    4344, 4374, 4404, 4434, 4463, 4492, 4521, 4550,
+    4579, 4608, 4636, 4664, 4692, 4720, 4748, 4775,
+    4802, 4830, 4857, 4884, 4910, 4937, 4964, 4990,
+    5016, 5042, 5068, 5094, 5120, 5145, 5170, 5196,
+    5221, 5246, 5271, 5296, 5320, 5345, 5369, 5394,
+    5418, 5442, 5466, 5490, 5514, 5538, 5561, 5585,
+    5608, 5632, 5655, 5678, 5701, 5724, 5747, 5769,
+    5792, 5815, 5837, 5860, 5882, 5904, 5926, 5948,
+    5970, 5992, 6014, 6036, 6058, 6079, 6101, 6122,
+    6144, 6165, 6186, 6207, 6228, 6249, 6270, 6291,
+    6312, 6333, 6353, 6374, 6394, 6415, 6435, 6456,
+    6476, 6496, 6516, 6536, 6556, 6576, 6596, 6616,
+    6636, 6656, 6675, 6695, 6714, 6734, 6753, 6773,
+    6792, 6811, 6830, 6850, 6869, 6888, 6907, 6926,
+    6945, 6963, 6982, 7001, 7020, 7038, 7057, 7075,
+    7094, 7112, 7131, 7149, 7168, 7186, 7204, 7222,
+    7240, 7258, 7276, 7294, 7312, 7330, 7348, 7366,
+    7384, 7401, 7419, 7437, 7454, 7472, 7489, 7507,
+    7524, 7542, 7559, 7576, 7594, 7611, 7628, 7645,
+    7662, 7680, 7697, 7714, 7731, 7747, 7764, 7781,
+    7798, 7815, 7832, 7848, 7865, 7882, 7898, 7915,
+    7931, 7948, 7964, 7981, 7997, 8014, 8030, 8046,
+    8062, 8079, 8095, 8111, 8127, 8143, 8159, 8175,
+};
+
+/* HIGH: direct port of SLUS_005.10 SquareRoot0 at 0x8004c6e4. */
 long SquareRoot0(long n) {
-    if (n <= 0) return 0;
-    uint64_t x = (uint64_t)n;
-    uint64_t y = (x + 1) >> 1;
-    while (y < x) { x = y; y = (x + (uint64_t)n / x) >> 1; }
-    return (long)x;
+    int32_t a = (int32_t)n;
+    gte_ldLZCS(a);
+    int32_t lz = gte_stLZCR();
+    if (lz == 0x20)
+        return 0;
+
+    lz &= ~1;
+    int32_t norm;
+    if ((int32_t)(lz - 0x18) < 0)
+        norm = a >> ((0x18 - lz) & 31);
+    else
+        norm = (int32_t)((uint32_t)a << ((lz - 0x18) & 31));
+
+    int32_t idx = norm - 0x40;
+    if (idx < 0 || idx >= 192)
+        return 0;
+
+    int32_t shift = ((0x1f - lz) >> 1) & 31;
+    uint32_t scaled = (uint32_t)((int32_t)s_sqrt_tbl[idx] << shift);
+    return (long)(scaled >> 12);
 }
 
 /* MVMVA convenience forms.  Per the PSY-Q macro naming:
@@ -367,7 +412,7 @@ long SquareRoot0(long n) {
  *                    flag handling differs)
  *   gte_rtir_sf0_b = mx=R, v=IR, cv=none, sf=0, lm=0
  *   gte_rtirtr_b   = mx=R, v=IR, cv=TR, sf=1, lm=0
- *   gte_rtv0_b     = mx=R, v=V0, cv=TR, sf=1, lm=0
+ *   gte_rtv0_b     = mx=R, v=V0, cv=none, sf=1, lm=0
  */
 void gte_rtir       (void) { mvmva(0, 3, 3, 1, 0); }
 void gte_rtir_b     (void) { mvmva(0, 3, 3, 1, 0); }
@@ -375,7 +420,7 @@ void gte_rtir_sf0_b (void) { mvmva(0, 3, 3, 0, 0); }
 void gte_rtir_sf0   (void) { mvmva(0, 3, 3, 0, 0); }   /* alias: RTIR_SF0 */
 void gte_rtirtr_b   (void) { mvmva(0, 3, 0, 1, 0); }
 void gte_rtirtr     (void) { mvmva(0, 3, 0, 1, 0); }   /* alias: RTIRTR */
-void gte_rtv0_b     (void) { mvmva(0, 0, 0, 1, 0); }
+void gte_rtv0_b     (void) { mvmva(0, 0, 3, 1, 0); }
 void gte_rtv0       (void) { mvmva(0, 0, 3, 1, 0); }   /* RTV0: V0 by R, no translation */
 
 /* GTE OP: outer product (cross-product) of two 3-vectors.  Per nocash:
@@ -419,6 +464,93 @@ static void gte_OP_impl(int sf)
 void gte_OP(int sf) { gte_OP_impl(sf); }
 void gte_op12(void) { gte_OP_impl(1); }      /* PSY-Q macro alias used in
                                                 FUN_8001787c MIPS dump */
+void gte_op12_b(void) { gte_OP_impl(1); }    /* "no error abort" alias */
+
+/* GTE SQR: square each IR component into its MAC.
+ *   MAC[1-3] = IR[1-3] * IR[1-3]
+ *   MAC[r] >>= (sf * 12)
+ *   IR[r]   = sat_i16(MAC[r])
+ * Per nocash PSX-SPX § "OP/SQR/...".
+ */
+static void gte_SQR_impl(int sf)
+{
+    g_ctl[FLAG] = 0;
+    int shift = sf ? 12 : 0;
+    static const uint32_t MP[3] = { FLAG_MAC1_POS, FLAG_MAC2_POS, FLAG_MAC3_POS };
+    static const uint32_t MN[3] = { FLAG_MAC1_NEG, FLAG_MAC2_NEG, FLAG_MAC3_NEG };
+    static const uint32_t IS[3] = { FLAG_IR1_SAT,  FLAG_IR2_SAT,  FLAG_IR3_SAT  };
+    for (int r = 0; r < 3; r++) {
+        int64_t v = (int64_t)g_data[IR1_+r] * g_data[IR1_+r];
+        v = mac_overflow_check(v, MP[r], MN[r]);
+        if (shift) v >>= shift;
+        int32_t mac = mac_clip32(v);
+        g_data[MAC1+r] = mac;
+        g_data[IR1_+r] = ir_saturate(mac, 0, IS[r]);
+    }
+    flag_update_summary();
+}
+void gte_SQR(int sf) { gte_SQR_impl(sf); }
+
+/* GTE GPF: general polynomial function.
+ *   MAC[r] = IR0 * IR[r]
+ *   MAC[r] >>= (sf * 12)
+ *   IR[r]   = sat_i16(MAC[r])
+ * Per nocash PSX-SPX.
+ */
+static void gte_GPF_impl(int sf)
+{
+    g_ctl[FLAG] = 0;
+    int shift = sf ? 12 : 0;
+    int32_t ir0 = g_data[IR0];
+    static const uint32_t MP[3] = { FLAG_MAC1_POS, FLAG_MAC2_POS, FLAG_MAC3_POS };
+    static const uint32_t MN[3] = { FLAG_MAC1_NEG, FLAG_MAC2_NEG, FLAG_MAC3_NEG };
+    static const uint32_t IS[3] = { FLAG_IR1_SAT,  FLAG_IR2_SAT,  FLAG_IR3_SAT  };
+    for (int r = 0; r < 3; r++) {
+        int64_t v = (int64_t)ir0 * g_data[IR1_+r];
+        v = mac_overflow_check(v, MP[r], MN[r]);
+        if (shift) v >>= shift;
+        int32_t mac = mac_clip32(v);
+        g_data[MAC1+r] = mac;
+        g_data[IR1_+r] = ir_saturate(mac, 0, IS[r]);
+    }
+    flag_update_summary();
+}
+void gte_GPF(int sf) { gte_GPF_impl(sf); }
+
+/* IR0 load/store. */
+void gte_ldIR0(int v) { g_data[IR0] = (int32_t)(int16_t)v; }
+
+/* Rotation-matrix register readbacks (used by MatrixNormal). */
+uint32_t gte_stR11R12(void) { return (uint32_t)g_ctl[RT_11_12]; }
+uint32_t gte_stR22R23(void) { return (uint32_t)g_ctl[RT_22_23]; }
+uint32_t gte_stR33   (void) { return (uint32_t)g_ctl[RT_33];    }
+
+/* V0/V1 short-vector register load/store (Ghidra ldVXY0/VZ0/VXY1 macros).
+ * VXY0: packed (vx,vy) in a single 32-bit word, each as i16.
+ * VZ0 : vz as i16 in low 16 bits.
+ * VXY1: packed (vx,vy) of V1 (same format). */
+void gte_ldVXY1(int v)
+{
+    g_data[V1_XY] = (int32_t)v;     /* raw 32-bit load, same as VXY0 */
+}
+/* Integer-argument variants for use when the MIPS passes a register
+ * value directly (mtc2 <reg>, C2_VXY0 / C2_VZ0).  Used by MatrixNormal
+ * (FUN_8004c934) to stash row1 components across GTE OP12 calls. */
+void gte_ldVXY0_i(int v) { g_data[V0_XY] = (int32_t)v; }
+void gte_ldVZ0_i (int v) { g_data[V0_Z]  = (int32_t)(int16_t)v; }
+
+/* Store V0/V1 back (Ghidra stVXY0/VZ0/VXY1 macros - read from IR regs after
+ * RTIR, which writes IR1/IR2 → these macros actually read back MAC/IR). */
+int32_t gte_stVXY0(void) { return (int32_t)((uint16_t)g_data[IR1_] | ((uint32_t)(uint16_t)g_data[IR2_] << 16)); }
+int32_t gte_stVZ0 (void) { return (int32_t)(uint16_t)g_data[IR3_]; }
+int32_t gte_stVXY1(void) { return gte_stVXY0(); }   /* uses current IR like VXY0 */
+
+/* V0/V1 readback variants that read the actual V0/V1 data registers.
+ * Used by FUN_8004c934 to retrieve scratch-stashed row1 components after
+ * a FUN_8004c874 call (mfc2 <reg>, C2_VXY0 / C2_VZ0 / C2_VXY1). */
+int32_t gte_stVXY0_V0(void) { return g_data[V0_XY]; }
+int32_t gte_stVZ0_V0 (void) { return g_data[V0_Z];  }
+int32_t gte_stVXY1_V1(void) { return g_data[V1_XY]; }
 
 /* ============================================================
  * PSY-Q library functions (built on top of the GTE).  Each matches
@@ -461,29 +593,31 @@ void SetTransMatrix(const MATRIX *m) {
 
 /* ApplyMatrix: V_out = M * V_in (q12 multiply, sf=1).
  * Uses MVMVA with v=V0, cv=none. */
-void ApplyMatrix(const MATRIX *m, const SVECTOR *v0, VECTOR *v1) {
+VECTOR *ApplyMatrix(const MATRIX *m, const SVECTOR *v0, VECTOR *v1) {
     SetRotMatrix(m);
     gte_ldv0(v0);
     mvmva(0, 0, 3, 1, 0);   /* mx=R, v=V0, cv=none, sf=1, lm=0 */
     v1->vx = g_data[MAC1];
     v1->vy = g_data[MAC2];
     v1->vz = g_data[MAC3];
+    return v1;
 }
 
 /* ApplyMatrixSV: V_out (SVECTOR) = M * V_in (SVECTOR), q12.  Identical
  * to ApplyMatrix for the GTE math, but the result is stored as i16
  * (truncating MAC1/2/3 to short) via the IR registers.  PSY-Q symbol
  * at SLUS:0x8004d2b4. */
-void ApplyMatrixSV(const MATRIX *m, const SVECTOR *v0, SVECTOR *v1) {
+SVECTOR *ApplyMatrixSV(const MATRIX *m, const SVECTOR *v0, SVECTOR *v1) {
     SetRotMatrix(m);
     gte_ldv0(v0);
     mvmva(0, 0, 3, 1, 0);
     v1->vx = (int16_t)gte_stIR1();
     v1->vy = (int16_t)gte_stIR2();
     v1->vz = (int16_t)gte_stIR3();
+    return v1;
 }
 
-void ApplyMatrixLV(const MATRIX *m, const VECTOR *v0, VECTOR *v1) {
+VECTOR *ApplyMatrixLV(const MATRIX *m, const VECTOR *v0, VECTOR *v1) {
     SetRotMatrix(m);
     /* Long-vector input goes through IR.  Saturate-to-i16 on load is
      * the PSY-Q behavior. */
@@ -494,123 +628,198 @@ void ApplyMatrixLV(const MATRIX *m, const VECTOR *v0, VECTOR *v1) {
     v1->vx = g_data[MAC1];
     v1->vy = g_data[MAC2];
     v1->vz = g_data[MAC3];
+    return v1;
 }
 
-/* RotMatrix: build a rotation matrix from a YXZ Euler-angle SVECTOR.
- * Order on PSX (PSY-Q convention): M = Rz * Ry * Rx applied to a column
- * vector, equivalent to R = Rx * Ry * Rz applied as a row-vector basis.
- * Each angle is q12 in [0, 4096).
- *
- * The hardware doesn't have a single "build rotation" op; PSY-Q
- * synthesizes it from rsin/rcos and matrix multiplies.  We mirror
- * that here: compute the 3 angle sines/cosines, fill the matrix
- * elements with the closed-form expressions, then i16-clamp.
- */
+/* HIGH: direct port of SLUS_005.10 RotMatrixYXZ_gte at 0x8004dab4.
+ * The source builds the matrix through staged GTE GPF12 operations; the
+ * intermediate IR saturation is observable and is therefore preserved. */
+MATRIX *RotMatrixYXZ_gte(const SVECTOR *r, MATRIX *m)
+{
+    int32_t sx = rsin(r->vx);
+    int32_t cx = rcos(r->vx);
+    int32_t sy = rsin(r->vy);
+    int32_t cy = rcos(r->vy);
+    int32_t sz = rsin(r->vz);
+    int32_t cz = rcos(r->vz);
+    int32_t cy_sx, cy_sz, cy_cz;
+    int32_t sy_sx, sy_sz, sy_cz;
+    int32_t cz_cx, cz_sy_sx, cz_cy_sx;
+    int32_t sz_cx, sz_sy_sx, sz_cy_sx;
+
+    gte_ldIR0(cy);
+    gte_ldIR1(sx);
+    gte_ldIR2(sz);
+    gte_ldIR3(cz);
+    gte_GPF(1);
+    cy_sx = gte_stIR1();
+    cy_sz = gte_stIR2();
+    cy_cz = gte_stIR3();
+
+    gte_ldIR0(sy);
+    gte_ldIR1(sx);
+    gte_ldIR2(sz);
+    gte_ldIR3(cz);
+    gte_GPF(1);
+    sy_sx = gte_stIR1();
+    sy_sz = gte_stIR2();
+    sy_cz = gte_stIR3();
+
+    m->m[2][2] = (int16_t)((cx * cy) >> 12);
+
+    gte_ldIR0(cz);
+    gte_ldIR1(cx);
+    gte_ldIR2(sy_sx);
+    gte_ldIR3(cy_sx);
+    gte_GPF(1);
+    cz_cx = gte_stIR1();
+    cz_sy_sx = gte_stIR2();
+    cz_cy_sx = gte_stIR3();
+
+    gte_ldIR0(sz);
+    gte_ldIR1(cx);
+    gte_ldIR2(sy_sx);
+    gte_ldIR3(cy_sx);
+    gte_GPF(1);
+    sz_cx = gte_stIR1();
+    sz_sy_sx = gte_stIR2();
+    sz_cy_sx = gte_stIR3();
+
+    m->m[0][0] = (int16_t)(cy_cz + sz_sy_sx);
+    m->m[0][1] = (int16_t)(cz_sy_sx - cy_sz);
+    m->m[0][2] = (int16_t)((cx * sy) >> 12);
+    m->m[1][0] = (int16_t)sz_cx;
+    m->m[1][1] = (int16_t)cz_cx;
+    m->m[1][2] = (int16_t)-sx;
+    m->m[2][0] = (int16_t)(sz_cy_sx - sy_cz);
+    m->m[2][1] = (int16_t)(cz_cy_sx + sy_sz);
+    return m;
+}
+
 void RotMatrix(const SVECTOR *r, MATRIX *m)
 {
-    /* PSY-Q RotMatrix is the Y*X*Z order. */
-    int cx = rcos(r->vx), sx = rsin(r->vx);
-    int cy = rcos(r->vy), sy = rsin(r->vy);
-    int cz = rcos(r->vz), sz = rsin(r->vz);
-
-    /* All sines/cosines are q12. Products are q24; right-shift by 12
-     * (PSY-Q matches PSX by truncating, not rounding) to fit each
-     * matrix element back into q12.
-     *
-     * Combined Y*X rotation first. */
-    int m11_yx = ( cy * 0x1000) >> 12;    /* row1*col1 of (Ry*Rx) -> cy */
-    int m13_yx = ( sy * 0x1000) >> 12;    /* ... -> sy */
-    int m21_yx = ( sx * sy)     >> 12;    /* sx*sy */
-    int m22_yx = ( cx * 0x1000) >> 12;    /* cx */
-    int m23_yx = (-sx * cy)     >> 12;    /* -sx*cy */
-    int m31_yx = (-cx * sy)     >> 12;
-    int m32_yx = ( sx * 0x1000) >> 12;
-    int m33_yx = ( cx * cy)     >> 12;
-
-    /* Then multiply by Rz on the left. */
-    int M11 = ( cz * m11_yx +  sz * m21_yx) >> 12;
-    int M12 = ( cz * 0      +  sz * m22_yx) >> 12;
-    int M13 = ( cz * m13_yx +  sz * m23_yx) >> 12;
-    int M21 = (-sz * m11_yx +  cz * m21_yx) >> 12;
-    int M22 = (-sz * 0      +  cz * m22_yx) >> 12;
-    int M23 = (-sz * m13_yx +  cz * m23_yx) >> 12;
-    int M31 = m31_yx;
-    int M32 = m32_yx;
-    int M33 = m33_yx;
-
-    m->m[0][0] = (int16_t)M11; m->m[0][1] = (int16_t)M12; m->m[0][2] = (int16_t)M13;
-    m->m[1][0] = (int16_t)M21; m->m[1][1] = (int16_t)M22; m->m[1][2] = (int16_t)M23;
-    m->m[2][0] = (int16_t)M31; m->m[2][1] = (int16_t)M32; m->m[2][2] = (int16_t)M33;
+    (void)RotMatrixYXZ_gte(r, m);
 }
 
-/* RotMatrixYXZ_gte: load Y, X, Z Euler angles in degrees-q12 from
- * an SVECTOR-laid-out source, produce a YXZ rotation matrix into m.
- * Mirrors PSY-Q's "rotation about Y first, then X, then Z" convention. */
-void RotMatrixYXZ_gte(const SVECTOR *r, MATRIX *m) { RotMatrix(r, m); }
+static void load_rot_regs(const MATRIX *m)
+{
+    const uint32_t *w = (const uint32_t *)m;
+    gte_ldR11R12(w[0]);
+    gte_ldR13R21(w[1]);
+    gte_ldR22R23(w[2]);
+    gte_ldR31R32(w[3]);
+    gte_ldR33(w[4]);
+}
 
-/* MulMatrix0: m_out = m0 * m1.  We do this in C (no GTE), since
- * PSY-Q's MulMatrix uses CompMatrix which is itself a multi-MVMVA. */
-void MulMatrix0(const MATRIX *a, const MATRIX *b, MATRIX *out) {
-    int16_t r[3][3];
-    for (int i = 0; i < 3; i++)
-    for (int j = 0; j < 3; j++) {
-        int64_t s = 0;
-        for (int k = 0; k < 3; k++) s += (int64_t)a->m[i][k] * b->m[k][j];
-        s >>= 12;
-        if (s >  0x7fff) s =  0x7fff;
-        if (s < -0x8000) s = -0x8000;
-        r[i][j] = (int16_t)s;
+static void load_matrix_column_v0(const MATRIX *m, int col)
+{
+    uint32_t xy;
+
+    if (col == 0) {
+        xy = (uint16_t)m->m[0][0] | ((uint32_t)(uint16_t)m->m[1][0] << 16);
+        gte_ldVXY0_i((int32_t)xy);
+        gte_ldVZ0_i(m->m[2][0]);
+    } else if (col == 1) {
+        xy = (uint16_t)m->m[0][1] | ((uint32_t)(uint16_t)m->m[1][1] << 16);
+        gte_ldVXY0_i((int32_t)xy);
+        gte_ldVZ0_i(m->m[2][1]);
+    } else {
+        xy = (uint16_t)m->m[0][2] | ((uint32_t)(uint16_t)m->m[1][2] << 16);
+        gte_ldVXY0_i((int32_t)xy);
+        gte_ldVZ0_i(m->m[2][2]);
     }
-    memcpy(out->m, r, sizeof r);
-    out->t[0] = a->t[0]; out->t[1] = a->t[1]; out->t[2] = a->t[2];
-}
-void MulMatrix(const MATRIX *a, MATRIX *b) { MulMatrix0(a, b, b); }
-
-long CompMatrix(const MATRIX *m0, const MATRIX *m1, MATRIX *m2) {
-    MulMatrix0(m0, m1, m2);
-    return 0;
-}
-long CompMatrixLV(const MATRIX *m0, const MATRIX *m1, MATRIX *m2) {
-    return CompMatrix(m0, m1, m2);
 }
 
-/* MatrixNormal: re-orthogonalise via Gram-Schmidt with q12 normalization.
- * PSY-Q computes each row's length squared, takes sqrt via SqrtRR, then
- * divides each component by length/0x1000.  We do equivalent integer
- * math with a binary-search sqrt to stay deterministic. */
-static uint32_t isqrt32(uint64_t n) {
-    if (n == 0) return 0;
-    uint64_t x = n, y = (x + 1) >> 1;
-    while (y < x) { x = y; y = (x + n / x) >> 1; }
-    return (uint32_t)x;
+/* HIGH: direct port of SLUS_005.10 MulMatrix0 at 0x8004ccb4.
+ * The source rotates each column of m1 through the GTE and stores only
+ * the 3x3 rotation block; translation words are intentionally untouched. */
+MATRIX *MulMatrix0(const MATRIX *m0, const MATRIX *m1, MATRIX *m2)
+{
+    int32_t c0x, c0y, c0z;
+    int32_t c1x, c1y, c1z;
+
+    load_rot_regs(m0);
+
+    load_matrix_column_v0(m1, 0);
+    gte_rtv0_b();
+    c0x = gte_stIR1();
+    c0y = gte_stIR2();
+    c0z = gte_stIR3();
+
+    load_matrix_column_v0(m1, 1);
+    gte_rtv0_b();
+    c1x = gte_stIR1();
+    c1y = gte_stIR2();
+    c1z = gte_stIR3();
+
+    load_matrix_column_v0(m1, 2);
+    gte_rtv0_b();
+
+    m2->m[0][0] = (int16_t)c0x;
+    m2->m[1][0] = (int16_t)c0y;
+    m2->m[2][0] = (int16_t)c0z;
+    m2->m[0][1] = (int16_t)c1x;
+    m2->m[1][1] = (int16_t)c1y;
+    m2->m[2][1] = (int16_t)c1z;
+    m2->m[0][2] = (int16_t)gte_stIR1();
+    m2->m[1][2] = (int16_t)gte_stIR2();
+    m2->m[2][2] = (int16_t)gte_stIR3();
+    return m2;
 }
+
+void MulMatrix(const MATRIX *a, MATRIX *b) { (void)MulMatrix0(a, b, b); }
+
+static void split_compmatrix_component(int32_t v, int32_t *hi, int32_t *lo)
+{
+    if (v < 0) {
+        uint32_t mag = (uint32_t)-v;
+        *hi = -(int32_t)(mag >> 15);
+        *lo = -(int32_t)(mag & 0x7fff);
+    } else {
+        *hi = v >> 15;
+        *lo = v & 0x7fff;
+    }
+}
+
+/* HIGH: direct port of SLUS_005.10 CompMatrixLV at 0x8004cf04. */
+MATRIX *CompMatrixLV(const MATRIX *m0, const MATRIX *m1, MATRIX *m2)
+{
+    int32_t hi[3], lo[3];
+    int32_t up[3], low[3];
+
+    (void)MulMatrix0(m0, m1, m2);
+
+    split_compmatrix_component(m1->t[0], &hi[0], &lo[0]);
+    split_compmatrix_component(m1->t[1], &hi[1], &lo[1]);
+    split_compmatrix_component(m1->t[2], &hi[2], &lo[2]);
+
+    gte_ldsv_(hi[0], hi[1], hi[2]);
+    gte_rtir_sf0_b();
+    up[0] = gte_stMAC1();
+    up[1] = gte_stMAC2();
+    up[2] = gte_stMAC3();
+
+    gte_ldsv_(lo[0], lo[1], lo[2]);
+    gte_rtir_b();
+    low[0] = gte_stMAC1();
+    low[1] = gte_stMAC2();
+    low[2] = gte_stMAC3();
+
+    m2->t[0] = low[0] + up[0] * 8 + m0->t[0];
+    m2->t[1] = low[1] + up[1] * 8 + m0->t[1];
+    m2->t[2] = low[2] + up[2] * 8 + m0->t[2];
+    return m2;
+}
+
+MATRIX *CompMatrix(const MATRIX *m0, const MATRIX *m1, MATRIX *m2) {
+    return CompMatrixLV(m0, m1, m2);
+}
+
+extern void FUN_8004c934(MATRIX *m, MATRIX *n);
+
 void MatrixNormal(const MATRIX *m_in, MATRIX *m_out)
 {
-    if (m_in != m_out) *m_out = *m_in;
-    for (int r = 0; r < 3; r++) {
-        int64_t a = m_out->m[r][0];
-        int64_t b = m_out->m[r][1];
-        int64_t c = m_out->m[r][2];
-        uint64_t mag2 = (uint64_t)(a*a + b*b + c*c);
-        if (mag2 == 0) {
-            m_out->m[r][0] = (r == 0) ? 0x1000 : 0;
-            m_out->m[r][1] = (r == 1) ? 0x1000 : 0;
-            m_out->m[r][2] = (r == 2) ? 0x1000 : 0;
-            continue;
-        }
-        uint32_t mag = isqrt32(mag2);
-        if (mag == 0) continue;
-        /* Scale each component so that the row length becomes 0x1000. */
-        int64_t na = (a * 0x1000) / mag;
-        int64_t nb = (b * 0x1000) / mag;
-        int64_t nc = (c * 0x1000) / mag;
-        if (na >  0x7fff) na =  0x7fff;  if (na < -0x8000) na = -0x8000;
-        if (nb >  0x7fff) nb =  0x7fff;  if (nb < -0x8000) nb = -0x8000;
-        if (nc >  0x7fff) nc =  0x7fff;  if (nc < -0x8000) nc = -0x8000;
-        m_out->m[r][0] = (int16_t)na;
-        m_out->m[r][1] = (int16_t)nb;
-        m_out->m[r][2] = (int16_t)nc;
-    }
+    FUN_8004c934((MATRIX *)m_in, m_out);
 }
 
 /* ============================================================
@@ -626,65 +835,117 @@ void MatrixNormal(const MATRIX *m_in, MATRIX *m_out)
  * reference landed in Ghidra, not the table start.
  * ============================================================ */
 extern const int16_t g_v8_sincostbl[8192];   /* platform/psyq/sintbl.c */
+extern int16_t DAT_800647b4[1025];
 
 int rsin(int a) { return g_v8_sincostbl[((a) & 0xfff) * 2 + 0]; }
 int rcos(int a) { return g_v8_sincostbl[((a) & 0xfff) * 2 + 1]; }
 
 
-/* PSY-Q ratan2: returns q12 angle in [0, 4096) for atan2(y, x).
- *
- * Implemented via binary search of the same g_v8_sincostbl LUT we
- * use for rsin/rcos.  Maximum error: 1 LSB relative to evaluating
- * the table at the exact returned index (no float intermediates).
- *
- * Quadrant decomposition:
- *   Q0: x>=0, y>=0  -> idx in [0..1024]
- *   Q1: x<0,  y>=0  -> 2048 - idx_of_(-x,y)
- *   Q2: x<0,  y<0   -> 2048 + idx_of_(-x,-y)
- *   Q3: x>=0, y<0   -> 4096 - idx_of_(x,-y)
- *
- * Within Q0, we binary-search the LUT for the smallest i such that
- *   sin(i) * x  >=  cos(i) * y
- * which is the angular threshold where atan2(y, x) <= i*(2pi/4096).
- * Using cross-multiplication avoids any division. */
-static int ratan2_q0(int y, int x)
+static int32_t neg32_wrap(int32_t v)
 {
-    if (x == 0) return 0x400;        /* 90 degrees */
-    if (y == 0) return 0;
-    int lo = 0, hi = 1024;            /* Q0 covers [0, 1024] */
-    while (lo < hi) {
-        int mid = (lo + hi) >> 1;
-        int s = g_v8_sincostbl[mid * 2 + 0];
-        int c = g_v8_sincostbl[mid * 2 + 1];
-        /* sin(mid)*x  vs  cos(mid)*y in i64 to avoid overflow at edges. */
-        if ((int64_t)s * x >= (int64_t)c * y) hi = mid;
-        else                                  lo = mid + 1;
-    }
-    return lo;
+    return (int32_t)(0u - (uint32_t)v);
 }
 
+/* HIGH: direct port of SLUS_005.10 ratan2 at 0x8004ecd4.
+ * Returns signed PSY-Q angle units; callers commonly truncate to int16_t. */
 int ratan2(int y, int x)
 {
-    if (x == 0 && y == 0) return 0;
-    if (x >= 0 && y >= 0) return ratan2_q0(y, x);
-    if (x < 0  && y >= 0) return 0x800 - ratan2_q0(y, -x);
-    if (x < 0  && y < 0)  return 0x800 + ratan2_q0(-y, -x);
-    return (0x1000 - ratan2_q0(-y, x)) & 0xfff;
+    int xNeg = 0;
+    int yNeg = 0;
+    int32_t ax = x;
+    int32_t ay = y;
+    int32_t angle = 0;
+
+    if (ax < 0) {
+        xNeg = 1;
+        ax = neg32_wrap(ax);
+    }
+    if (ay < 0) {
+        yNeg = 1;
+        ay = neg32_wrap(ay);
+    }
+
+    if (ax != 0 || ay != 0) {
+        int32_t ratio;
+        if (ay < ax) {
+            if (((uint32_t)ay & 0x7fe00000u) != 0) {
+                ratio = ay / (ax >> 10);
+            } else {
+                ratio = (int32_t)((uint32_t)ay << 10) / ax;
+            }
+            angle = DAT_800647b4[ratio];
+        } else {
+            if (((uint32_t)ax & 0x7fe00000u) != 0) {
+                ratio = ax / (ay >> 10);
+            } else {
+                ratio = (int32_t)((uint32_t)ax << 10) / ay;
+            }
+            angle = 0x400 - DAT_800647b4[ratio];
+        }
+        if (xNeg)
+            angle = 0x800 - angle;
+        if (yNeg)
+            angle = -angle;
+    }
+    return angle;
 }
 
 /* ============================================================
  * Misc helpers (less hot paths; minimal but correct).
  * ============================================================ */
 
-void VectorNormalSS(const VECTOR *v0, VECTOR *v1) {
-    uint64_t mag2 = (uint64_t)((int64_t)v0->vx * v0->vx
-                             + (int64_t)v0->vy * v0->vy
-                             + (int64_t)v0->vz * v0->vz);
-    uint32_t mag = isqrt32(mag2);
-    if (mag == 0) { v1->vx = v1->vy = v1->vz = 0; return; }
-    v1->vx = (int32_t)(((int64_t)v0->vx * 0x1000) / mag);
-    v1->vy = (int32_t)(((int64_t)v0->vy * 0x1000) / mag);
-    v1->vz = (int32_t)(((int64_t)v0->vz * 0x1000) / mag);
+static const int16_t s_vnormal_tbl[192] = {
+    4096, 4064, 4033, 4003, 3973, 3944, 3916, 3888,
+    3861, 3835, 3809, 3783, 3758, 3734, 3710, 3686,
+    3663, 3640, 3618, 3596, 3575, 3554, 3533, 3513,
+    3493, 3473, 3454, 3435, 3416, 3397, 3379, 3361,
+    3344, 3327, 3310, 3293, 3276, 3260, 3244, 3228,
+    3213, 3197, 3182, 3167, 3153, 3138, 3124, 3110,
+    3096, 3082, 3069, 3055, 3042, 3029, 3016, 3003,
+    2991, 2978, 2966, 2954, 2942, 2930, 2919, 2907,
+    2896, 2885, 2873, 2862, 2852, 2841, 2830, 2820,
+    2809, 2799, 2789, 2779, 2769, 2759, 2749, 2740,
+    2730, 2721, 2711, 2702, 2693, 2684, 2675, 2666,
+    2657, 2649, 2640, 2631, 2623, 2615, 2606, 2598,
+    2590, 2582, 2574, 2566, 2558, 2550, 2543, 2535,
+    2528, 2520, 2513, 2505, 2498, 2491, 2484, 2477,
+    2469, 2462, 2456, 2449, 2442, 2435, 2428, 2422,
+    2415, 2409, 2402, 2396, 2389, 2383, 2377, 2371,
+    2364, 2358, 2352, 2346, 2340, 2334, 2328, 2322,
+    2317, 2311, 2305, 2299, 2294, 2288, 2283, 2277,
+    2272, 2266, 2261, 2255, 2250, 2245, 2239, 2234,
+    2229, 2224, 2219, 2214, 2209, 2204, 2199, 2194,
+    2189, 2184, 2179, 2174, 2170, 2165, 2160, 2155,
+    2151, 2146, 2142, 2137, 2133, 2128, 2124, 2119,
+    2115, 2110, 2106, 2102, 2097, 2093, 2089, 2084,
+    2080, 2076, 2072, 2068, 2064, 2060, 2056, 2052,
+};
+
+static int32_t host_lzcr32(int32_t v)
+{
+    uint32_t u = (v < 0) ? ~(uint32_t)v : (uint32_t)v;
+    int n = 0;
+    while (n < 32 && (u & 0x80000000u) == 0) {
+        n++;
+        u <<= 1;
+    }
+    return n;
+}
+
+extern void FUN_8004c874(int x, int y, int z, int *ox, int *oy, int *oz);
+
+/* HIGH: direct wrapper for SLUS_005.10 VectorNormalSS at 0x8004c844. */
+long VectorNormalSS(const SVECTOR *v0, SVECTOR *v1) {
+    int32_t x = (int16_t)v0->vx;
+    int32_t y = (int16_t)v0->vy;
+    int32_t z = (int16_t)v0->vz;
+    int ox, oy, oz;
+
+    FUN_8004c874(x, y, z, &ox, &oy, &oz);
+    v1->vx = (int16_t)ox;
+    v1->vy = (int16_t)oy;
+    v1->vz = (int16_t)oz;
+    return (long)(int32_t)((uint32_t)(x * x + y * y) + (uint32_t)(z * z));
 }
 
 long RotMatrix_ret(const SVECTOR *r, MATRIX *m) { RotMatrix(r, m); return 0; }

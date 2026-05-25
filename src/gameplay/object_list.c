@@ -38,60 +38,94 @@
 extern void  Object_FreeAndUnhook(void *p);             /* FUN_8001bddc */
 extern void  HandlePair_Free(void **handle);            /* FUN_8003e2c4 */
 extern void  Object_HeapFree(void *p);                  /* FUN_800204dc */
+extern void  FUN_80020540(uint32_t *obj);
 extern int32_t **piRam00000774;
 extern uint8_t  DAT_80065a74[];
+
+typedef struct ObjListHostNode {
+    struct ObjListHostNode *next;
+    struct ObjListHostNode *prev;
+    uintptr_t payload;
+    uint32_t deadline;
+} ObjListHostNode;
 
 /* HIGH: find the list node whose payload pointer equals `payload`. */
 int *ObjList_FindByPayload(int **listSentinel, int payload)
 {
-    int *node = (int *)listSentinel[0];
-    int *next = (int *)*(int *)listSentinel[0];
-    for (;;) {
-        if (next == NULL) return NULL;
-        if (node[2] == payload) return node;
-        node = next;
-        next = (int *)*next;
+    ObjListHostNode *sentinel = (ObjListHostNode *)listSentinel;
+    ObjListHostNode *node;
+    if (sentinel == NULL || sentinel->prev == NULL) return NULL;
+    for (node = sentinel->next; node != NULL; node = node->next) {
+        if (node->payload == (uintptr_t)(uint32_t)payload)
+            return (int *)node;
     }
+    return NULL;
 }
 
 /* HIGH: same, but uses obj.spawnId (i16 @ payload+6) as the match key
  * and *excludes* one specific payload pointer (skip self). */
 int *ObjList_FindBySpawnId(int **listSentinel, int spawnId, int excludePayload)
 {
-    int *node = (int *)listSentinel[0];
-    int *next = (int *)*(int *)listSentinel[0];
-    for (;;) {
-        if (next == NULL) return NULL;
-        if (node[2] != excludePayload && *(int16_t *)(node[2] + 6) == spawnId)
-            return node;
-        node = next;
-        next = (int *)*next;
+    ObjListHostNode *sentinel = (ObjListHostNode *)listSentinel;
+    ObjListHostNode *node;
+    if (sentinel == NULL || sentinel->prev == NULL) return NULL;
+    for (node = sentinel->next; node != NULL; node = node->next) {
+        uintptr_t payload = node->payload;
+        if (payload != (uintptr_t)(uint32_t)excludePayload &&
+            *(int16_t *)(payload + 6) == spawnId)
+            return (int *)node;
     }
+    return NULL;
 }
 
 /* HIGH: find + splice + push onto dead list. */
 uint32_t ObjList_RemoveByPayload(int **listSentinel, int payload)
 {
-    int *node = (int *)listSentinel[0];
-    int *next = (int *)*(int *)listSentinel[0];
-    for (;;) {
-        if (next == NULL) return 0;
-        if (node[2] == payload) break;
-        node = next;
-        next = (int *)*next;
-    }
-    int32_t *prevTail = (int32_t *)node[1];
-    int32_t  back     = node[0];
-    *(int32_t **)(back + 4) = prevTail;
-    *prevTail               = back;
-
-    int32_t **deadTail = piRam00000774;
-    *piRam00000774 = (int32_t *)node;
-    piRam00000774 = (int32_t **)node;
-    node[1] = (int32_t)(uintptr_t)deadTail;
-    node[0] = (int32_t)(uintptr_t)DAT_80065a74;
-    node[2] = 0;
+    ObjListHostNode *sentinel = (ObjListHostNode *)listSentinel;
+    ObjListHostNode *node = (ObjListHostNode *)ObjList_FindByPayload(listSentinel, payload);
+    (void)piRam00000774;
+    (void)DAT_80065a74;
+    if (node == NULL) return 0;
+    if (node->prev != NULL) node->prev->next = node->next;
+    if (node->next != NULL) node->next->prev = node->prev;
+    if (sentinel->next == node) sentinel->next = node->next;
+    if (sentinel->prev == node)
+        sentinel->prev = (node->prev == sentinel) ? sentinel : node->prev;
+    node->next = NULL;
+    node->prev = NULL;
+    node->payload = 0;
     return 1;
+}
+
+intptr_t ObjectList_RemoveTraverse(void *listHead, void *obj)
+{
+    return (intptr_t)ObjList_FindByPayload((int **)listHead, (int)(uintptr_t)obj);
+}
+
+uint32_t ObjectList_RemoveFromBackbuf(void *listHead, void *obj)
+{
+    return ObjList_RemoveByPayload((int **)listHead, (int)(uintptr_t)obj);
+}
+
+intptr_t ObjectList_RemoveFromChain(void *root, void *obj)
+{
+    uint32_t *node = (uint32_t *)root;
+
+    if (node == NULL)
+        return 0;
+    while (node[0] != 0) {
+        intptr_t hit;
+
+        if (node[0] > 2)
+            return 0;
+        hit = ObjectList_RemoveFromChain((void *)(uintptr_t)node[2], obj);
+        if (hit != 0)
+            return hit;
+        node = (uint32_t *)(uintptr_t)node[3];
+        if (node == NULL)
+            return 0;
+    }
+    return ObjectList_RemoveTraverse((void *)(node + 1), obj);
 }
 
 /* HIGH: recurse into a spatial-tree (kind 0=leaf, 1/2=split). At a
@@ -114,6 +148,11 @@ void Object_Free(uint32_t *obj)
     if (obj[0x1a] != 0) Object_FreeAndUnhook((void *)(uintptr_t)obj[0x1a]);
     if ((obj[0] & 8u) != 0) HandlePair_Free((void **)(uintptr_t)obj[0x1c]);
     Object_HeapFree(obj);
+}
+
+void FreeAfterNFrames(int handle)
+{
+    FUN_80020540((uint32_t *)(uintptr_t)(uint32_t)handle);
 }
 
 /* ============================================================

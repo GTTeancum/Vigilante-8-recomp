@@ -14,25 +14,84 @@
  */
 #include <stdint.h>
 
-extern void Proximity_Trigger(void);   /* FUN_800420f4 */
-extern int32_t **piRam000008c4;
+extern int FUN_80025400(int x, int z);
+extern uintptr_t DAT_800911a0[];
+extern uintptr_t *piRam000008c4;
+void FUN_800420f4(int param_1);
 
 void Proximity_DispatchInRange(int posX, int posZ, int tolerance)
 {
-    int32_t *node = (int32_t *)piRam000008c4[0];
-    int32_t **prev = piRam000008c4;
+    uintptr_t *node = (uintptr_t *)piRam000008c4[0];
+    uintptr_t *prev = piRam000008c4;
     while (node != NULL) {
-        int32_t dx = prev[3] - posX;
-        int32_t dz = prev[5] - posZ;
+        int32_t dx = (int32_t)prev[3] - posX;
+        int32_t dz = (int32_t)prev[5] - posZ;
         if (dx < 0) dx = -dx;
         if (dz < 0) dz = -dz;
         int32_t cheby = (dx > dz) ? dx : dz;
         if (cheby < (int32_t)prev[6] + tolerance) {
-            Proximity_Trigger();
+            FUN_800420f4((int)(uintptr_t)prev);
         }
-        prev = (int32_t **)node;
-        node = (int32_t *)*node;
+        prev = node;
+        node = (uintptr_t *)*node;
     }
+}
+
+void FUN_800420f4(int param_1)
+{
+    uint8_t *base = (uint8_t *)(uintptr_t)(uint32_t)param_1;
+    int32_t count = *(int32_t *)(base + 0x1c);
+
+    if (count < 0)
+        return;
+
+    for (int32_t i = 0; i <= count; i++) {
+        uint8_t *slot0 = base + i * 0x10;
+        uint8_t *slot1 = slot0 + 8;
+
+        int32_t x0 = *(int32_t *)(base + 0x0c) +
+                     (int16_t)*(uint16_t *)(slot0 + 0x20) * 0x100;
+        int32_t z0 = *(int32_t *)(base + 0x14) +
+                     (int16_t)*(uint16_t *)(slot0 + 0x24) * 0x100;
+        int32_t h0 = FUN_80025400(x0, z0);
+        *(uint16_t *)(slot0 + 0x22) =
+            (uint16_t)((h0 - *(int32_t *)(base + 0x10)) >> 8);
+
+        int32_t sx0 = (x0 < 0) ? (x0 + 0xffff) : x0;
+        int32_t sz0 = (z0 < 0) ? (z0 + 0xffff) : z0;
+        uint32_t cx0 = (uint32_t)(sx0 >> 16);
+        uint32_t cz0 = (uint32_t)(sz0 >> 16);
+        uintptr_t chunk0 = DAT_800911a0[((cz0 >> 6) * 0x20u) + (cx0 >> 6)];
+        if (chunk0 != 0) {
+            uint32_t off0 = ((cz0 & 0x3fu) << 1) + ((cx0 & 0x3fu) << 7);
+            *(uint16_t *)(slot0 + 0x26) =
+                (uint16_t)(((*(uint16_t *)(chunk0 + off0)) >> 11) << 2);
+        }
+
+        int32_t x1 = *(int32_t *)(base + 0x0c) +
+                     (int16_t)*(uint16_t *)(slot1 + 0x20) * 0x100;
+        int32_t z1 = *(int32_t *)(base + 0x14) +
+                     (int16_t)*(uint16_t *)(slot1 + 0x24) * 0x100;
+        int32_t h1 = FUN_80025400(x1, z1);
+        *(uint16_t *)(slot1 + 0x22) =
+            (uint16_t)((h1 - *(int32_t *)(base + 0x10)) >> 8);
+
+        int32_t sx1 = (x1 < 0) ? (x1 + 0xffff) : x1;
+        int32_t sz1 = (z1 < 0) ? (z1 + 0xffff) : z1;
+        uint32_t cx1 = (uint32_t)(sx1 >> 16);
+        uint32_t cz1 = (uint32_t)(sz1 >> 16);
+        uintptr_t chunk1 = DAT_800911a0[((cz1 >> 6) * 0x20u) + (cx1 >> 6)];
+        if (chunk1 != 0) {
+            uint32_t off1 = ((cz1 & 0x3fu) << 1) + ((cx1 & 0x3fu) << 7);
+            *(uint16_t *)(slot1 + 0x26) =
+                (uint16_t)(((*(uint16_t *)(chunk1 + off1)) >> 11) << 2);
+        }
+    }
+}
+
+void FUN_800422d8(int param_1, int param_2, int param_3)
+{
+    Proximity_DispatchInRange(param_1, param_2, param_3);
 }
 
 /* ============================================================

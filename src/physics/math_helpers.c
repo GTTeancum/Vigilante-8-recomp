@@ -3,8 +3,10 @@
  * Source: SLUS_005.10
  *   FUN_80016c54  -- Math_Atan2FromField(+10,+0x10)
  *   FUN_80016c88  -- Math_Atan2FromField(+4, +0x10)
+ *   FUN_80016cb8  -- Math_MatrixRollAngle(mat)            (~5 instr)
  *   FUN_80016dfc  -- Matrix_InverseRigid
  *   FUN_80016e64  -- Math_NormalizeXZAndReorthogonalize
+ *   FUN_800170c8  -- Math_Sqrt64(lo, hi)                  (~16 instr)
  *
  * ratan2 (PSY-Q) returns an angle in 4.12 format (4096 = 360 deg).
  *
@@ -35,6 +37,16 @@ int16_t Math_Atan2_Pos(const uint8_t *obj)
     int16_t y = *(int16_t *)(obj + 0x04);
     int16_t x = *(int16_t *)(obj + 0x10);
     return (int16_t)ratan2(y, x);
+}
+
+int FUN_80016c54(int param_1)
+{
+    return (int)Math_Atan2_PosNeg((const uint8_t *)(uintptr_t)(uint32_t)param_1);
+}
+
+int FUN_80016c88(int param_1)
+{
+    return (int)Math_Atan2_Pos((const uint8_t *)(uintptr_t)(uint32_t)param_1);
 }
 
 /* HIGH: inverse of a rigid-body matrix = transpose(R) | -R^T * t.
@@ -86,6 +98,54 @@ void Math_NormalizeXZ(int16_t *v)
     int32_t r5 = cx * v[0] - cz * v[2];   if (r5 < 0) r5 += 0xfff;
     v[0] = (int16_t)(r5 >> 12);
     v[2] = 0;
+}
+
+/* ================================================================
+ * FUN_80016cb8 -- Math_MatrixRollAngle
+ *
+ * Extracts the roll angle from a MATRIX (or any int16_t[] where
+ * element[0]=m[0][0], element[3]=m[1][0]).
+ * Returns -(int16_t)ratan2(m[1][0], m[0][0]).
+ * ================================================================ */
+int16_t FUN_80016cb8(int16_t *param_1)
+{
+    long lVar1 = ratan2((int)param_1[3], (int)param_1[0]);
+    return (int16_t)(-(int16_t)lVar1);
+}
+
+/* ================================================================
+ * FUN_800170c8 -- Math_Sqrt64
+ *
+ * 64-bit integer square root via GTE leading-zero-count normalization.
+ *   param_1 = low 32 bits of the value
+ *   param_2 = high 32 bits of the value
+ *
+ * Uses GTE LZCS/LZCR to find the normalization shift uVar3, shifts
+ * the 64-bit value right by 2*uVar3 (discarding the low bits), then
+ * takes the 32-bit sqrt and scales the result back up by uVar3.
+ *
+ * Bit-exact: preserves the branch on (uVar3 << 0x1b) sign to choose
+ * whether to take the shifted high or low word as sqrt input.
+ * ================================================================ */
+int FUN_800170c8(uint32_t param_1, int param_2)
+{
+    int      iVar1;
+    long     lVar2;
+    uint32_t uVar3;
+
+    gte_ldLZCS(param_2);
+    iVar1 = gte_stLZCR();
+    uVar3 = (uint32_t)(0x23 - iVar1) >> 1;
+    if ((int)(uVar3 << 0x1b) < 0) {
+        param_1 = (uint32_t)(param_2 >> (int)(uVar3 * 2u & 0x1fu));
+    } else {
+        param_1 = param_1 >> (uVar3 * 2u & 0x1fu);
+        if ((uVar3 << 0x1b) != 0) {
+            param_1 = param_1 | (uint32_t)(param_2 << (int)(uVar3 * (uint32_t)(-2) & 0x1fu));
+        }
+    }
+    lVar2 = SquareRoot0((int)param_1);
+    return (int)(lVar2 << (int)(uVar3 & 0x1fu));
 }
 
 /* ============================================================
@@ -182,6 +242,44 @@ void FUN_80016e64(short *param_1)
   *param_1 = (short)(iVar2 >> 0xc);
   param_1[2] = 0;
   return;
+}
+
+/* --- SLUS_005.10 FUN_80016cb8  (from analysis/SLUS_005.10/decomp/80016cb8.c) --- */
+// addr: 0x80016cb8  name: FUN_80016cb8
+
+int FUN_80016cb8(short *param_1)
+
+{
+  long lVar1;
+
+  lVar1 = ratan2((int)param_1[3],(int)*param_1);
+  return (int)(short)-(short)lVar1;
+}
+
+/* --- SLUS_005.10 FUN_800170c8  (from analysis/SLUS_005.10/decomp/800170c8.c) --- */
+// addr: 0x800170c8  name: FUN_800170c8
+
+int FUN_800170c8(uint param_1,int param_2)
+
+{
+  int iVar1;
+  long lVar2;
+  uint uVar3;
+
+  gte_ldLZCS(param_2);
+  iVar1 = gte_stLZCR();
+  uVar3 = 0x23 - iVar1 >> 1;
+  if ((int)(uVar3 << 0x1b) < 0) {
+    param_1 = param_2 >> (uVar3 * 2 & 0x1f);
+  }
+  else {
+    param_1 = param_1 >> (uVar3 * 2 & 0x1f);
+    if (uVar3 << 0x1b != 0) {
+      param_1 = param_1 | param_2 << (uVar3 * -2 & 0x1f);
+    }
+  }
+  lVar2 = SquareRoot0(param_1);
+  return lVar2 << (uVar3 & 0x1f);
 }
 
 #endif  /* GHIDRA REF */

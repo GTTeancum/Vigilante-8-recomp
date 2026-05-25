@@ -15,6 +15,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int size, int flags);
 extern int Bone_AllocSlot(int parent, uint16_t slotKey);
 extern void Object_CopyMatrixFromBone(void *outMatrix, int parent, int bonePtr);
@@ -35,7 +36,7 @@ uint32_t *SB_TurretSpawn(int self, int attacker)
     *((int8_t *)p + 4) = 7;
     *((uint16_t *)p + 6) = *(uint16_t *)(self + 6);
     *(uint16_t *)(p + 3) = 0;
-    p[0x19] = (uintptr_t)&FUN_801010f4;
+    Object_SetCallbackPsxSlot(p, (uintptr_t)&FUN_801010f4);
 
     int target = *(int *)(attacker + 0xe4);
     if (target == 0) target = attacker;

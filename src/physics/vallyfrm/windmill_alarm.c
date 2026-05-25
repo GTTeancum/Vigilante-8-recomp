@@ -24,6 +24,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern int Rand255(void);
 extern uint32_t Path_Pick(uint32_t bank, int seed);
 extern int Path_AttachToObj(uint32_t flag, uint32_t path);
@@ -44,6 +45,7 @@ extern void Heap_Free(uint32_t p);
 extern uint32_t DAT_80101304, DAT_80101308;
 extern uint8_t  DAT_8008f660;
 extern uint32_t _DAT_80065a10, _DAT_800659fc;
+extern int LAB_8003e80c(int obj, int event, int param3);
 
 uint32_t VF_WindmillAlarm(uint32_t *self, uint32_t mode, uint32_t *arg)
 {
@@ -104,7 +106,7 @@ uint32_t VF_WindmillAlarm(uint32_t *self, uint32_t mode, uint32_t *arg)
             p[0x12] = arg[0]; p[0x13] = arg[1]; p[0x14] = arg[2];
             *(uint16_t *)((char *)p + 0x42) =
                 (uint16_t)Math_Atan2_Pos((int)(uintptr_t)((uintptr_t)head + 0x10));
-            p[0x19] = 0x8003e80cu;
+            Object_SetCallbackPsxSlot(p, (uintptr_t)&LAB_8003e80c);
             Object_Suspend();
             self = (uint32_t *)1;
         case 0xb:

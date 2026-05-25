@@ -80,7 +80,7 @@ void *SAT_SelectAxis(uint8_t *host_obj, uint8_t *query)
         *(uint32_t *)(query + 0x10));
 
     /* Shape #1 (host's AABB descriptor). */
-    int16_t *shape1 = *(int16_t **)(query + 0x4);
+    int16_t *shape1 = (int16_t *)(uintptr_t)*(uint32_t *)(query + 0x4);
     if ((uint16_t)shape1[0] != 1) {
         /* Host shape is not kind=1 (AABB); we don't handle other kinds. */
         return query;
@@ -88,7 +88,7 @@ void *SAT_SelectAxis(uint8_t *host_obj, uint8_t *query)
     int32_t *host_aabb = (int32_t *)(shape1 + 2);     /* skip kind+count header */
 
     /* Shape #2 (candidate's shape: kind 1 = AABB, kind 2 = poly). */
-    int16_t *shape2 = *(int16_t **)(query + 0x8);
+    int16_t *shape2 = (int16_t *)(uintptr_t)*(uint32_t *)(query + 0x8);
     uint16_t cand_kind = (uint16_t)shape2[0];
 
     /* host_mat = host_obj + 0x10. */
@@ -168,7 +168,7 @@ void *SAT_SelectAxis(uint8_t *host_obj, uint8_t *query)
 }
 
 /* Legacy FUN_ alias. */
-void *FUN_8001f5a0(int host_obj_int, int query_int)
+void *FUN_8001f5a0(intptr_t host_obj_int, intptr_t query_int)
 {
     return SAT_SelectAxis((uint8_t *)(intptr_t)host_obj_int,
                           (uint8_t *)(intptr_t)query_int);

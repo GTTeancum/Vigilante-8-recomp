@@ -46,16 +46,18 @@ is the residual set, separated by what's *deliberately* out of scope
 
 ## Remaining unknowns (pass 3 active surface)
 
-### Vehicle struct allocation site
+### Vehicle struct allocation site -- RESOLVED 2026-05-24
 
-Vehicle objects are referenced via the globals `puRam000007d0` (P1)
-and `puRam000007d4` (P2). The malloc/init site that fills them is
-**not** in any cleaned function -- it likely lives in a static BSS
-pool reachable indirectly through the level loader.
+`FUN_8002e630` / `Vehicle_Construct` is the vehicle allocation site.
+It allocates `0x124` bytes through `FUN_8001ac44`, installs the chassis
+tick at object `+0x64`, creates four wheel children, and clears the
+vehicle child/weapon pointer block at `+0xec..+0x118`. Earlier notes
+that treated the vehicle size as unknown or guessed `0x200` are stale;
+`0x200` remains only the temporary host-shim allocation size.
 
-Pass 3 task: open Ghidra interactively, look for stores to those two
-globals using References > Find Writes To, then trace the producing
-function.
+2026-05-24 audit note: the cleaned constructor previously zeroed the
+`+0xec..+0x118` block in the wrong direction. It now matches MIPS
+`8002e704..8002e710`: clear words `obj[0x46]` down through `obj[0x3b]`.
 
 ### `g_playerSlotIdx` table semantics (DAT_80065674[8])
 
@@ -95,9 +97,9 @@ analysis warranted.
 
 ## Structs (still partial)
 
-- **Vehicle** -- 22 fields known and confidence-tagged in
-  `include/structs.h`. Total size still unknown (likely ~0x140-0x200
-  based on access pattern but no alloc site to confirm).
+- **Vehicle** -- engine allocation size confirmed as `0x124` by
+  `Vehicle_Construct`. `include/structs.h` still needs a struct-layout
+  pass to replace host-era padding and stale `0x200` commentary.
 - **DLL overlay header** -- 8-12 u32 fields + string table; reloc
   table layout HIGH (tag 0/1/2/3 = abs32/HI16/abs16/J26). Some early
   fields (image_size, entry, bss?) still tentative -- see
@@ -311,3 +313,51 @@ matches its decompiled body exactly.
 This is several sessions of work; the next concrete step is to
 identify WHICH of the 78 gap callbacks is the wheel tick (likely
 distinguished by which template-spawn pattern creates it).
+
+## Pass 3 audit: Renderer-adjacent functions (2026-05-23)
+
+Cross-referencing the 434 "unknown-subsystem" functions from
+`analysis/SLUS_005.10/classification.json` against `src/` confirms:
+
+- **387 of 434** are referenced (implemented, stubbed, or extern'd) in `src/`.
+- **47 remain unreferenced** in `src/`.
+
+Of those 47, all are renderer-adjacent or PSY-Q library:
+
+### Renderer functions (OUT OF SCOPE — rewritten renderer)
+
+These are called exclusively from `FUN_80021600` (Render_BuildLists)
+or from functions it dispatches into:
+
+| Address    | Size  | Role                                          |
+|------------|-------|-----------------------------------------------|
+| 0x8002623c | 9920  | OT/visibility dispatch (kd-tree traversal)    |
+| 0x800289d8 | 1756  | Visible-range spatial subdivider               |
+| 0x80025bc0 | 1660  | Per-object OT primitive builder                |
+| 0x800290d8 | 1656  | Viewport/clip setup (reads screen W/H)         |
+| 0x80029750 | 1300  | Matrix setup for render dispatch               |
+| 0x80029e48 |  928  | Render chain helper                            |
+| 0x80021460 |  368  | Render list init (called by FUN_800215d0)      |
+| 0x800288fc |  220  | Recursive range subdivider for 0x8002623c      |
+| 0x80025b20 |  160  | OT node builder (called by 0x80025bc0)         |
+| 0x80022cd0 |  132  | World-object render iterator                   |
+| 0x8002a1e8 |  116  | GPU primitive OT-list appender                 |
+| 0x800215d0 |   48  | Render helper (calls 0x80021460)               |
+| 0x800290b4 |   36  | Callback wrapper that calls 0x800290d8         |
+| 0x80018xxx | various | Font/GPU primitive helpers (renderer)        |
+| 0x800197f4 |  364  | Renderer helper                               |
+
+### PSY-Q library functions (OUT OF SCOPE — runtime/library)
+
+| Address range      | Names                                          |
+|--------------------|-------------------------------------------------|
+| 0x80040e38/5c      | PSY-Q sound library helpers                    |
+| 0x80041c5c/fd4     | SPU helpers                                    |
+| 0x80043xxx-8005xxx | SPU, CD-ROM, GTE, printf, string library       |
+
+### Conclusion
+
+The in-scope function coverage (physics / assets / gameplay) is
+**complete for pass 3**.  No in-scope function has been missed.
+All 47 unreferenced entries are renderer or PSY-Q library functions
+explicitly out of scope per the charter.

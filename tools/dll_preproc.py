@@ -43,7 +43,12 @@ def reloc(image: bytearray, base: int) -> None:
             v = (struct.unpack_from('<H', image, target)[0] + (base & 0xffff)) & 0xffff
             struct.pack_into('<H', image, target, v)
         elif tag == 3:  # 26-bit J/JAL fixup
-            v = (struct.unpack_from('<I', image, target)[0] + ((base << 4) >> 6)) & 0xffffffff
+            # The PS1 code performs this with 32-bit unsigned overflow:
+            #     word += ((uint32_t)(base << 4)) >> 6
+            # Mask before the right shift. Without the overflow, synthetic
+            # bases such as 0x80100000 turn JAL/J opcodes into SLTIU/SLTI.
+            v = (struct.unpack_from('<I', image, target)[0] +
+                 (((base << 4) & 0xffffffff) >> 6)) & 0xffffffff
             struct.pack_into('<I', image, target, v)
         else:
             raise RuntimeError(f"impossible tag {tag} at 0x{pos-4:x}")

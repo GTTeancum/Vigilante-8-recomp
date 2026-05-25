@@ -1,9 +1,9 @@
 /* load_helpers.c -- small leaf helpers from LOAD.DLL.
  *
  * Source: LOAD.DLL
- *   FUN_801001ec  -- IffNode_Link: link a freshly built FORM node into
- *                    a parent's child chain. Stops if the kind field
- *                    is 2 (sentinel) and otherwise normalises kind to 1.
+ *   FUN_80100148  -- Terrain_LoadBspNode: recursive BSP/kd-tree reader.
+ *   FUN_801001ec  -- Terrain_BspInsertObject: insert a placed object-list
+ *                    node into the BSP leaf selected by object +0x48/+0x50.
  *   FUN_8010063c  -- Map_ReadRegion: reads a 14-byte map-region record
  *                    (x,y, x2-x1+1, y2-y1+1, attr1, attr2) from the
  *                    map stream and links into the global region list.
@@ -22,23 +22,92 @@
 #include <stdint.h>
 
 extern void *Heap_AllocOrRetry(uint32_t n);
-extern int16_t XobfStream_ReadI16(void *st);    /* func_0x800224b4 */
+extern int16_t XobfStream_ReadI16(void *streamRef);  /* func_0x800224b4 */
+extern int32_t XobfStream_ReadI32(void *streamRef);  /* func_0x800224ec */
 extern void DMACallback(int ch, void (*cb)(int));
 
+extern void *_DAT_80065a00;
 extern void **_DAT_80065aa8;
 extern uint8_t DAT_80065aa4[];
 
+/* HIGH: LOAD 80100148.  BSP stream node:
+ *   i16 kind
+ *   kind 0: leaf; runtime initializes an empty list sentinel in node[1..3].
+ *   kind 1: X split, then i32 splitCoord, left subtree, right subtree.
+ *   kind 2: Z split, then i32 splitCoord, left subtree, right subtree.
+ *   other : rejected after the kind word, returning NULL.
+ */
+int32_t *Terrain_LoadBspNode(void *stream)
+{
+    int32_t kind = XobfStream_ReadI16(stream);
+    int32_t *node;
+
+    if (kind == 0) {
+        node = (int32_t *)Heap_AllocOrRetry(0x10);
+        node[1] = (int32_t)(uintptr_t)(node + 2);
+        node[0] = 0;
+        node[2] = 0;
+        node[3] = (int32_t)(uintptr_t)(node + 1);
+        return node;
+    }
+    if ((uint32_t)kind >= 3) {
+        return 0;
+    }
+
+    node = (int32_t *)Heap_AllocOrRetry(0x10);
+    node[0] = kind;
+    node[1] = XobfStream_ReadI32(stream);
+    node[2] = (int32_t)(uintptr_t)Terrain_LoadBspNode(stream);
+    node[3] = (int32_t)(uintptr_t)Terrain_LoadBspNode(stream);
+    return node;
+}
+
+/* HIGH: LOAD 801001ec.  Insert a list node whose payload is at child[2]
+ * into the static-object BSP.  Object +0x48 is X and +0x50 is Z.
+ */
+void Terrain_BspInsertObject(int32_t *node, int32_t *child)
+{
+    int32_t kind = node[0];
+    if (kind == 1) {
+        uint8_t *obj = (uint8_t *)(uintptr_t)child[2];
+        if (node[1] < *(int32_t *)(obj + 0x48)) {
+            Terrain_BspInsertObject((int32_t *)(uintptr_t)node[3], child);
+        } else {
+            Terrain_BspInsertObject((int32_t *)(uintptr_t)node[2], child);
+        }
+        return;
+    }
+    if (kind == 2) {
+        uint8_t *obj = (uint8_t *)(uintptr_t)child[2];
+        if (node[1] < *(int32_t *)(obj + 0x50)) {
+            Terrain_BspInsertObject((int32_t *)(uintptr_t)node[3], child);
+        } else {
+            Terrain_BspInsertObject((int32_t *)(uintptr_t)node[2], child);
+        }
+        return;
+    }
+    if (kind != 0) {
+        return;
+    }
+
+    int32_t *tail = (int32_t *)(uintptr_t)node[3];
+    node[3] = (int32_t)(uintptr_t)child;
+    tail[0] = (int32_t)(uintptr_t)child;
+    child[1] = (int32_t)(uintptr_t)tail;
+    child[0] = (int32_t)(uintptr_t)(node + 2);
+}
+
+/* HIGH: LOAD 801005c0. */
+void Terrain_LoadBsp(void *payload)
+{
+    uint8_t *cursor = (uint8_t *)payload;
+    _DAT_80065a00 = Terrain_LoadBspNode(&cursor);
+}
+
+/* Backwards-compatible old cleanup name from pass 1. */
 void IffNode_Link(int *parent, int *child)
 {
-    int kind = *parent;
-    if (kind == 1) return;
-    if (kind == 2) return;
-    if (kind != 0) parent = (int *)1;    /* sentinel-handling artifact */
-    void *tail = (void *)parent[3];
-    parent[3] = (int)child;
-    *(int *)tail = (int)child;
-    child[1] = (int)tail;
-    *child   = (int)(parent + 2);
+    Terrain_BspInsertObject((int32_t *)parent, (int32_t *)child);
 }
 
 /* HIGH: 14-byte map region record:
@@ -47,17 +116,18 @@ void IffNode_Link(int *parent, int *child)
  *   +0x08 i16 attrA     +0x0a i16 attrB      (palette / icon ids)
  * Then linked into the global region list at DAT_80065aa4.
  */
-void *Map_ReadRegion(void *stream)
+void *Map_ReadRegion(void *payload)
 {
+    uint8_t *cursor = (uint8_t *)payload;
     uint16_t *r = (uint16_t *)Heap_AllocOrRetry(0x14);
     int16_t x1, y1, x2, y2;
-    r[3 * 2 + 0] = (uint16_t)(x1 = XobfStream_ReadI16(stream));   /* x  @ +0x0c */
-    r[3 * 2 + 1] = (uint16_t)(y1 = XobfStream_ReadI16(stream));   /* y  @ +0x0e */
-    x2 = XobfStream_ReadI16(stream);  r[4 * 2 + 0] = (uint16_t)((x2 - x1) + 1);  /* w @+0x10 */
-    y2 = XobfStream_ReadI16(stream);  r[4 * 2 + 1] = (uint16_t)((y2 - y1) + 1);  /* h @+0x12 */
-    (void)XobfStream_ReadI16(stream); /* discarded i16 */
-    r[2 * 2 + 0] = (uint16_t)XobfStream_ReadI16(stream);          /* attrA @ +0x08 */
-    r[2 * 2 + 1] = (uint16_t)XobfStream_ReadI16(stream);          /* attrB @ +0x0a */
+    r[3 * 2 + 0] = (uint16_t)(x1 = XobfStream_ReadI16(&cursor));   /* x  @ +0x0c */
+    r[3 * 2 + 1] = (uint16_t)(y1 = XobfStream_ReadI16(&cursor));   /* y  @ +0x0e */
+    x2 = XobfStream_ReadI16(&cursor);  r[4 * 2 + 0] = (uint16_t)((x2 - x1) + 1);  /* w @+0x10 */
+    y2 = XobfStream_ReadI16(&cursor);  r[4 * 2 + 1] = (uint16_t)((y2 - y1) + 1);  /* h @+0x12 */
+    (void)XobfStream_ReadI16(&cursor); /* discarded i16 */
+    r[2 * 2 + 0] = (uint16_t)XobfStream_ReadI16(&cursor);          /* attrA @ +0x08 */
+    r[2 * 2 + 1] = (uint16_t)XobfStream_ReadI16(&cursor);          /* attrB @ +0x0a */
     /* Tail-link insertion. */
     uint32_t **head = (uint32_t **)_DAT_80065aa8;
     *_DAT_80065aa8  = (void *)r;

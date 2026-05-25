@@ -16,21 +16,25 @@
  */
 #include <stdint.h>
 
-extern int  Damage_FromImpulse(uint32_t *self, int *impulse);
-extern int  Damage_AccumulateOrFire(uint32_t *self, uint16_t amount);
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+extern int  FUN_8002239c(uint32_t *self, int32_t *impulse);
+extern uint32_t FUN_80022320(uint32_t *self, uint32_t amount);
 extern void Object_SetState(int obj, int state);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int flags);
 extern void Object_RandomizeRotation(uint32_t *obj);   /* FUN_80016da8 */
 extern void Object_RegisterInScene(uint32_t *obj);     /* FUN_800202f4 */
-extern uint32_t FUN_80100a18;                           /* HD projectile tick */
+extern void FUN_80020890(uint32_t *obj, int timer);
+extern int  FUN_8004410c(void);
+extern void FUN_800447e8(int voice, uint32_t bank, int sfx, const void *pos);
+extern uint32_t HD_ScatterTick(int obj, uint32_t mode);  /* FUN_80100a18 */
 
 uint32_t HD_TransfBoxBroadcast(int obj, uint32_t mode, void *impactCtx)
 {
     int hit = 0;
-    if ((mode == 3 || mode != 8) && (hit = Damage_FromImpulse((uint32_t *)(intptr_t)obj, (int *)impactCtx)) != 0) {
+    if (mode != 8 && (hit = FUN_8002239c((uint32_t *)(uintptr_t)(uint32_t)obj, (int32_t *)impactCtx)) != 0) {
         goto fire;
     }
-    if ((hit = Damage_AccumulateOrFire((uint32_t *)(intptr_t)obj, (uint16_t)(uintptr_t)impactCtx)) == 0) return 0;
+    if ((hit = (int)FUN_80022320((uint32_t *)(uintptr_t)(uint32_t)obj, (uint32_t)(uintptr_t)impactCtx)) == 0) return 0;
 fire:
     {
         int32_t px = *(int32_t *)(obj + 0x48);
@@ -47,6 +51,11 @@ fire:
     return 0;
 }
 
+uint32_t FUN_80101a98(int obj, uint32_t mode, void *impactCtx)
+{
+    return HD_TransfBoxBroadcast(obj, mode, impactCtx);
+}
+
 uint32_t *HD_PipeChildSpawn(uint32_t *parentPos, uint32_t bank, uint16_t kind,
                             uint16_t animSlot, uint16_t spriteSlot, uint32_t lifetime)
 {
@@ -55,15 +64,22 @@ uint32_t *HD_PipeChildSpawn(uint32_t *parentPos, uint32_t bank, uint16_t kind,
     c[9]  = parentPos[0];
     c[10] = parentPos[1];
     c[11] = parentPos[2];
-    c[0x19] = (uintptr_t)&FUN_80100a18;
+    Object_SetCallbackPsxSlot(c, (uintptr_t)&HD_ScatterTick);
     c[0x15] = 0x8000;
     c[0x26] = bank;
     *(uint16_t *)((uint8_t *)c + 0x96) = animSlot;
     c[0] |= 0xa4u;
     *(uint16_t *)((uint8_t *)c + 0x82) = spriteSlot;
     Object_RegisterInScene(c);
-    (void)lifetime;
+    FUN_80020890(c, (int)lifetime);
+    FUN_800447e8(FUN_8004410c(), *(uint32_t *)(uintptr_t)(bank + 8), 0, parentPos);
     return c;
+}
+
+uint32_t *FUN_80100b40(uint32_t *parentPos, uint32_t bank, uint16_t kind,
+                       uint16_t animSlot, uint16_t spriteSlot, uint32_t lifetime)
+{
+    return HD_PipeChildSpawn(parentPos, bank, kind, animSlot, spriteSlot, lifetime);
 }
 
 /* ============================================================

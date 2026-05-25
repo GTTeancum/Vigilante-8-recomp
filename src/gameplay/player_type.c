@@ -36,6 +36,9 @@ uint32_t Player_GetType(int slot)
     }
 }
 
+/* FUN_80011f8c is also implemented in hud_reticle.c as VehicleAnim_GetInputState
+ * (same body, different semantic name). No alias needed here. */
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *

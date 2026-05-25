@@ -1,45 +1,68 @@
-/* sphere_test.c -- sphere-vs-obstacle proximity test + result post.
+/* sphere_test.c -- light/proximity attenuation against an object's cone.
  *
  * Source: LOAD.DLL  FUN_80100fa8.
  *
- * For an obstacle at obj+0x12/+0x18/+0x1e (3 i16 packed: yaw +
- * extent +pitch?) checks if its bounding sphere (via Sphere_Test
- * at func_0x80016810) is non-zero w.r.t. param_3. On non-hit,
- * computes the delta from `param_2` (probe pos) to obj+0x48..0x50
- * (collision center), normalises (FUN_80016a20), transforms via
- * FUN_80016b08, and re-runs the sphere test with the new direction.
+ * Tests a world-space sample against the object's orientation cone and
+ * distance falloff. Used by LOAD.DLL draw-time per-vertex lighting.
  *
- * Used in collision-cast pipelines (e.g., projectile vs static
- * obstacles).
- *
- * MED.
+ * HIGH-MED.
  */
 #include <stdint.h>
 
-extern int  Sphere_Test(uint32_t obstacleHandle, void *probe);   /* func_0x80016810 */
-extern void Vec3_Normalize(int32_t *vec);                         /* FUN_80016a20 */
-extern uint32_t Vec3_Project(int32_t *vec, void *outScratch);     /* FUN_80016b08 */
+extern int32_t Sphere_Test(uintptr_t probe, const int16_t *packed); /* func_0x80016810 */
+extern int32_t Vec3_Length(const int32_t *v);                     /* FUN_80016a20 */
+extern int16_t *Vec3_Project(int32_t *v, int16_t *out);           /* FUN_80016b08 */
 
-uint32_t Sphere_TestWithBacktrack(int obj, int *probePos, uint32_t obstacle)
+static int32_t rtz_shift12(int32_t v)
+{
+    if (v < 0) v += 0xfff;
+    return v >> 12;
+}
+
+uint32_t Sphere_TestWithBacktrack(uintptr_t obj, int *probePos, uintptr_t probe)
 {
     int16_t packed[3];
     packed[0] = *(int16_t *)(obj + 0x12);
     packed[1] = *(int16_t *)(obj + 0x18);
     packed[2] = *(int16_t *)(obj + 0x1e);
 
-    int hit = Sphere_Test(obstacle, packed);
-    if (hit >= 0) return 0;       /* clean hit -- no need to backtrack */
+    int32_t cone = Sphere_Test(probe, packed);
+    if (cone >= 0) return 0;
 
     int32_t delta[3];
     delta[0] = probePos[0] - *(int32_t *)(obj + 0x48);
     delta[1] = probePos[1] - *(int32_t *)(obj + 0x4c);
     delta[2] = probePos[2] - *(int32_t *)(obj + 0x50);
 
-    Vec3_Normalize(delta);
-    uint8_t scratch[8];
-    uint32_t projected = Vec3_Project(delta, scratch);
-    Sphere_Test(projected, packed);
-    return 0;
+    int32_t dist = Vec3_Length(delta);
+    int16_t dir[4];
+    uintptr_t dirProbe = (uintptr_t)Vec3_Project(delta, dir);
+    int32_t dirCone = Sphere_Test(dirProbe, packed);
+    if (dirCone < 0) dirCone += 0xfff;
+
+    int32_t outer = *(int32_t *)(obj + 0x88);
+    int32_t inner = *(int32_t *)(obj + 0x84);
+    int32_t maxCone = (uint16_t)*(uint16_t *)(obj + 0x8e);
+    int32_t minCone = (uint16_t)*(uint16_t *)(obj + 0x8c);
+    int32_t angle = dirCone >> 12;
+
+    if ((uint32_t)dist >= (uint32_t)outer) return 0;
+    if (maxCone <= angle) return 0;
+
+    int32_t distFade = outer - dist;
+    int32_t distDen = (uint32_t)(outer - inner) >> 12;
+    uint32_t distScale = (distDen != 0) ? (uint32_t)distFade / (uint32_t)distDen : 0x1000u;
+    if (distScale > 0x1000u) distScale = 0x1000u;
+
+    int32_t coneFade = (maxCone - angle) << 12;
+    int32_t coneDen = maxCone - minCone;
+    int32_t coneScale = (coneDen != 0) ? coneFade / coneDen : 0x1000;
+    if (coneScale > 0x1000) coneScale = 0x1000;
+
+    int32_t v = rtz_shift12(rtz_shift12(-cone) * (int32_t)distScale);
+    v = rtz_shift12(v * coneScale);
+    v = rtz_shift12(v * (uint16_t)*(uint16_t *)(obj + 0x90));
+    return (uint32_t)(uint16_t)v;
 }
 
 /* ============================================================

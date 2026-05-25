@@ -1,13 +1,16 @@
-/* screenshot.c -- write the GL backbuffer to a portable image file.
+/* screenshot.c -- write the GL backbuffer to a PNG file.
  *
- * Phase 3b: writes PPM (binary P6) so we don't need a PNG dependency.
- * The smoke-test predicate (tools/smoke/check_screenshot.py) reads
- * the raw RGB pixels and asserts non-uniform color.
+ * Uses stb_image_write (single-header, MIT) for PNG encoding.
+ * Falls back to PPM if the platform window is not available.
  */
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* stb_image_write single-file implementation. */
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "../third_party/stb_image_write.h"
 
 extern int Platform_ReadBackbuffer(uint8_t *rgba, int *w, int *h);
 extern int Platform_Width(void);
@@ -18,7 +21,7 @@ int Screenshot_Save(const char *path)
     int w = Platform_Width();
     int h = Platform_Height();
     if (w <= 0 || h <= 0) {
-        fprintf(stderr, "v8: screenshot -- no platform window\n");
+        fprintf(stderr, "v8: screenshot -- no platform window (headless?)\n");
         return -1;
     }
 
@@ -32,29 +35,24 @@ int Screenshot_Save(const char *path)
         return -1;
     }
 
-    /* PPM is bottom-up vs top-down: GL gives us bottom-up, ppm wants
-     * top-down. Flip vertically. */
-    FILE *f = fopen(path, "wb");
-    if (!f) {
-        fprintf(stderr, "v8: screenshot -- cannot open %s\n", path);
-        free(rgba);
-        return -1;
+    /* GL gives bottom-up rows; PNG wants top-down. Flip. */
+    uint8_t *flipped = (uint8_t *)malloc(nrgba);
+    if (!flipped) { free(rgba); return -1; }
+    for (int y = 0; y < h; y++) {
+        memcpy(flipped + (size_t)(h - 1 - y) * w * 4,
+               rgba   + (size_t)y            * w * 4,
+               (size_t)w * 4);
     }
-    fprintf(f, "P6\n%d %d\n255\n", w, h);
-    uint8_t *row = (uint8_t *)malloc((size_t)w * 3);
-    for (int y = h - 1; y >= 0; y--) {
-        const uint8_t *src = rgba + (size_t)y * w * 4;
-        for (int x = 0; x < w; x++) {
-            row[x*3+0] = src[x*4+0];
-            row[x*3+1] = src[x*4+1];
-            row[x*3+2] = src[x*4+2];
-        }
-        fwrite(row, 1, (size_t)w * 3, f);
-    }
-    free(row);
-    fclose(f);
     free(rgba);
 
-    fprintf(stderr, "v8: screenshot saved -> %s (%dx%d PPM)\n", path, w, h);
+    int ok = stbi_write_png(path, w, h, 4, flipped, w * 4);
+    free(flipped);
+
+    if (!ok) {
+        fprintf(stderr, "v8: screenshot -- stbi_write_png failed for %s\n", path);
+        return -1;
+    }
+
+    fprintf(stderr, "v8: screenshot saved -> %s (%dx%d PNG)\n", path, w, h);
     return 0;
 }

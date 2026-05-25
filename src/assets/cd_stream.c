@@ -61,14 +61,15 @@ void Stream_Open(int sector)
 }
 
 /* HIGH: re-open by name (uses the descriptor cache rather than a new sector). */
-extern void *FUN_800157d4(void);
+/* PSX calling conv: a0 (path) is unchanged at the jal to FUN_800157d4; pass explicitly. */
+extern void *FUN_800157d4(const uint8_t *path);   /* Iso_OpenPath */
 extern void *FUN_80015368(uint32_t);    /* failure-path infinite-loop trap */
 
-uint32_t Stream_OpenByName(uint32_t pathHandle)
+uint32_t Stream_OpenByName(const char *path)
 {
-    void *desc = FUN_800157d4();
+    void *desc = FUN_800157d4((const uint8_t *)path);
     if (desc == NULL) {
-        FUN_80015368(pathHandle);
+        FUN_80015368((uint32_t)(uintptr_t)path);
         return 0;
     }
     /* Reuse the streaming opener with the descriptor's start sector. */
@@ -133,6 +134,35 @@ void Stream_Seek(uint32_t pos, int relative)
     }
     uRam000006ac = pos;
 }
+
+/* ================================================================
+ * FUN_80015798 -- Stream_Stop
+ *
+ * Sends CdlPause (0x09), clears the ready callback, frees the sector
+ * buffer.  Called by Stream_Close.
+ * HIGH confidence (direct Ghidra port).
+ * ================================================================ */
+extern void Heap_Free(void *p);    /* FUN_80045088 */
+void FUN_80015798(void)
+{
+    CdControl(0x09, NULL, NULL);
+    CdReadyCallback((void (*)(int, unsigned char *))0);
+    Heap_Free((void *)(uintptr_t)uRam000006a0);
+}
+
+/* ================================================================
+ * FUN_80015a00 -- Stream_Close
+ * ================================================================ */
+uint32_t FUN_80015a00(void)
+{
+    FUN_80015798();
+    return 1;
+}
+
+/* Hex-name aliases for Stream_Seek, Stream_OpenByName, Stream_Read. */
+void FUN_80015bf0(uint32_t pos, int relative) { Stream_Seek(pos, relative); }
+uint32_t FUN_800159b4(uint32_t path) { return Stream_OpenByName((const char *)(uintptr_t)path); }
+uint32_t FUN_80015a20(void *dst, uint32_t nBytes) { return Stream_Read(dst, nBytes); }
 
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)

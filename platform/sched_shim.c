@@ -17,6 +17,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#if defined(V8_HAVE_SDL)
+#include <SDL.h>
+#endif
 
 extern uint32_t uRam0000062c;   /* pad bits for player 1 */
 extern uint32_t uRam00000630;   /* pad bits for player 2 */
@@ -39,6 +42,10 @@ void Sched_WaitFrame(void)
         fprintf(stderr, "v8: WAIT LOOP HANG (%d spins); exiting\n", g_wait_count);
         exit(2);
     }
+    /* Yield the CPU during wait-loops so we don't spin-lock. */
+#if defined(V8_HAVE_SDL)
+    SDL_Delay(1);
+#endif
 }
 
 void Sched_BeginFrame(void)

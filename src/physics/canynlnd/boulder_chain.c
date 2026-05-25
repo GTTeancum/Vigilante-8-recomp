@@ -17,11 +17,14 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int flags);
 extern void Damage_Apply(void *obj);
-extern void Object_SetSubState(int obj, int sub);
+extern void FUN_80020890(uint32_t *obj, int sub);
 extern void Object_RegisterPostUpdate(uint32_t *obj);     /* FUN_80020744 */
 extern void Object_PostUpdate2(uint32_t obj);             /* FUN_8002036c */
+extern int LAB_8003e80c(int obj, int event, int param3);
+extern uint32_t FUN_80100be8(uint32_t *obj, int mode, int impulse);
 
 uint32_t CL_BoulderChain(uint32_t *self, uint32_t mode, uint32_t *impulse)
 {
@@ -32,21 +35,21 @@ uint32_t CL_BoulderChain(uint32_t *self, uint32_t mode, uint32_t *impulse)
     if (sub == 1) {
 spawn_dust:
         Damage_Apply((void *)(uintptr_t)self[0x1d]);
-        Object_SetSubState((int)(uintptr_t)self, 0x708);
+        FUN_80020890(self, 0x708);
         *(int8_t *)((uint8_t *)self + 8) = 0;
         self[0] |= 0x20u;
     } else if (sub == 0 || sub == 2) {
         /* Spawn a fresh boulder. */
         uint32_t bank = self[0x16];
         uint32_t *boulder = Object_Pool_AllocFromBank((void *)(uintptr_t)bank, 0x2bf, 0x80, 8);
-        *(void **)((uint8_t *)boulder + 100) = (void *)(uintptr_t)0;   /* tick installed by FUN_80100be8 = Boulder_Tick (we previously cleaned) */
+        Object_SetCallbackPsxSlot(boulder, (uintptr_t)&FUN_80100be8);
         *(uint32_t *)((uint8_t *)boulder + 0x48) = self[0x12];
         *(uint32_t *)((uint8_t *)boulder + 0x4c) = self[0x13] - 0x14000;
         *(uint32_t *)((uint8_t *)boulder + 0x50) = self[0x14];
         Object_PostUpdate2((uint32_t)(uintptr_t)boulder);
         self[0x1d] = (uintptr_t)boulder;
         self[0] &= ~0x20u;
-        Object_SetSubState((int)(uintptr_t)self, 900);
+        FUN_80020890(self, 900);
         *(int8_t *)((uint8_t *)self + 8) = 1;
         goto spawn_dust;
     }
@@ -59,10 +62,15 @@ spawn_dust:
     dust[0x12] = *(uint32_t *)(boulderHandle + 0x48);
     dust[0x13] = *(uint32_t *)(boulderHandle + 0x4c);
     dust[0x14] = *(uint32_t *)(boulderHandle + 0x50);
-    dust[0x19] = 0x8003e80c;
+    Object_SetCallbackPsxSlot(dust, (uintptr_t)&LAB_8003e80c);
     Object_PostUpdate2((uint32_t)(uintptr_t)dust);
     (void)impulse;
     return 0;
+}
+
+uint32_t FUN_80100cbc(uint32_t *self, uint32_t mode, uint32_t *impulse)
+{
+    return CL_BoulderChain(self, mode, impulse);
 }
 
 /* ============================================================

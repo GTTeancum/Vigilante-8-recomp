@@ -22,6 +22,8 @@ ghidra/
 # Original PSX disc contents and extracted assets stay LOCAL ONLY.
 /bin-cue/*.bin
 /bin-cue/*.cue
+/*.bin
+/*.cue
 /PS1 game/
 /input/
 # Note: analysis/ contains Ghidra decomp output (derived work, used as
@@ -31,7 +33,11 @@ ghidra/
 *.png
 *.ppm
 *.wav
+*.log
+v8_previous_*.log
 tools/smoke/captures/
+__pycache__/
+*.pyc
 
 # Compiled objects
 *.o

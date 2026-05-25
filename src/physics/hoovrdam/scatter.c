@@ -15,8 +15,10 @@
 
 extern uint32_t V8_RandNext(void);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int flags);
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern void Object_BumpSubstate_Or_FX(int obj);     /* FUN_8001d4f0 */
 extern void Damage_Apply(void *obj);
+extern int LAB_8003e80c(int obj, int event, int param3);
 
 uint32_t HD_ScatterTick(int obj, uint32_t mode)
 {
@@ -36,7 +38,7 @@ uint32_t HD_ScatterTick(int obj, uint32_t mode)
         *(int32_t *)((uint8_t *)child + 0x28) = 0;
         *(int32_t *)((uint8_t *)child + 0x24) = rx;
         *(int32_t *)((uint8_t *)child + 0x2c) = rz;
-        *(uint32_t *)((uint8_t *)child + 100) = 0x8003e80c;
+        Object_SetCallbackPsxSlot(child, (uintptr_t)&LAB_8003e80c);
         Object_BumpSubstate_Or_FX(obj);
         *countdown = *(int16_t *)(obj + 0x82);
     }
@@ -48,6 +50,11 @@ clearChildSlot:
 applyTermFlag:
     *(uint16_t *)(obj + 0x80) = 0xffff;
     return 0;
+}
+
+uint32_t FUN_80100a18(int obj, uint32_t mode)
+{
+    return HD_ScatterTick(obj, mode);
 }
 
 /* ============================================================

@@ -15,22 +15,28 @@
 
 extern uint32_t V8_RandNext(void);
 extern void Audio_PlaySfxRelative(uint32_t bank, int sfxId, void *pos);  /* func_0x80044ac8 */
-extern void Object_SetSubState(int obj, int sub);                        /* FUN_80020890 */
+extern void FUN_80020890(uint32_t *obj, int sub);
 extern void Object_DefaultDispatch(int obj, int mode, uint32_t arg);     /* func_0x800223dc */
 
 void WW_ShackTick(int obj, int mode, uint32_t arg)
 {
-    if (mode == 1) goto fallthrough;
-    if (mode != 2) goto fallthrough;
+    if (mode != 1) {
+        if (mode != 2) goto fallthrough;
 
-    int sfxId = (*(int16_t *)(obj + 0xa) == 1) ? 2 : 1;
-    Audio_PlaySfxRelative(*(uint32_t *)(*(int *)(obj + 0x58) + 8), sfxId, (void *)(intptr_t)(obj + 0x48));
+        int sfxId = (*(int16_t *)(obj + 0xa) == 1) ? 2 : 1;
+        Audio_PlaySfxRelative(*(uint32_t *)(*(int *)(obj + 0x58) + 8), sfxId, (void *)(intptr_t)(obj + 0x48));
+    }
 
     int r = (int)V8_RandNext();
-    Object_SetSubState(obj, (r * 0x78 >> 15) + 0x3c);
+    FUN_80020890((uint32_t *)(uintptr_t)(uint32_t)obj, (r * 0x78 >> 15) + 0x3c);
 
 fallthrough:
     Object_DefaultDispatch(obj, mode, arg);
+}
+
+void FUN_801005e4(int obj, int mode, uint32_t arg)
+{
+    WW_ShackTick(obj, mode, arg);
 }
 
 /* ============================================================

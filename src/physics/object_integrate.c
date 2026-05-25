@@ -46,6 +46,7 @@ extern void gte_ldR33   (uint32_t v);
 extern void gte_ldIR1   (int v);
 extern void gte_ldIR2   (int v);
 extern void gte_ldIR3   (int v);
+extern void gte_ldsv_   (int x, int y, int z);
 extern void gte_rtir_b  (void);
 extern int32_t gte_stIR1(void);
 extern int32_t gte_stIR2(void);
@@ -62,6 +63,16 @@ extern void MatrixNormal(MATRIX *m, MATRIX *out);   /* PSY-Q libgte */
 #define ANGVEL_Y_OFF   0x94
 #define ANGVEL_Z_OFF   0x98
 #define ROT_MATRIX_OFF 0x10
+
+static inline int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static inline int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
 
 /* HIGH: rotate `m` by (pitch, yaw, roll) angular-velocity components.
  *
@@ -95,14 +106,14 @@ void Object_ApplyAngularVelocity(uint32_t *m, int pitchRate, int yawRate, int ro
     /* Column 1: input vector (1, roll, -yaw). Result is new (R11, R21, R31). */
     gte_ldIR1(0x1000);
     gte_ldIR2(rollRate);
-    gte_ldIR3(-yawRate);
+    gte_ldIR3(mips_subu_i32(0, yawRate));
     gte_rtir_b();
     int32_t c1_R11 = gte_stIR1();
     int32_t c1_R21 = gte_stIR2();
     int32_t c1_R31 = gte_stIR3();
 
     /* Column 2: input vector (-roll, 1, pitch). Result is new (R12, R22, R32). */
-    gte_ldsv_(-rollRate, 0x1000, pitchRate);
+    gte_ldsv_(mips_subu_i32(0, rollRate), 0x1000, pitchRate);
     gte_rtir_b();
     /* The Ghidra ref writes col1 results into the matrix AFTER computing
      * col2's multiply but BEFORE reading col2's IR. We follow the same
@@ -115,7 +126,7 @@ void Object_ApplyAngularVelocity(uint32_t *m, int pitchRate, int yawRate, int ro
     int32_t c2_R32 = gte_stIR3();
 
     /* Column 3: input vector (yaw, -pitch, 1). Result is new (R13, R23, R33). */
-    gte_ldsv_(yawRate, -pitchRate, 0x1000);
+    gte_ldsv_(yawRate, mips_subu_i32(0, pitchRate), 0x1000);
     gte_rtir_b();
     bytes[1]  = (int16_t)c2_R12;     /* R12 @ byte 2  */
     bytes[4]  = (int16_t)c2_R22;     /* R22 @ byte 8  */
@@ -136,20 +147,23 @@ void Object_IntegrateAndOrient(uint8_t *obj)
     int32_t pr = *(int32_t *)(obj + ANGVEL_X_OFF);
     int32_t yr = *(int32_t *)(obj + ANGVEL_Y_OFF);
     int32_t rr = *(int32_t *)(obj + ANGVEL_Z_OFF);
-    if (pr < 0) pr += 0x7f;
-    if (yr < 0) yr += 0x7f;
-    if (rr < 0) rr += 0x7f;
+    if (pr < 0) pr = mips_addu_i32(pr, 0x7f);
+    if (yr < 0) yr = mips_addu_i32(yr, 0x7f);
+    if (rr < 0) rr = mips_addu_i32(rr, 0x7f);
     Object_ApplyAngularVelocity((uint32_t *)m, pr >> 7, yr >> 7, rr >> 7);
 
     int32_t vx = *(int32_t *)(obj + VEL_X_OFF);
     int32_t vy = *(int32_t *)(obj + VEL_Y_OFF);
     int32_t vz = *(int32_t *)(obj + VEL_Z_OFF);
-    if (vx < 0) vx += 0x7f;
-    if (vy < 0) vy += 0x7f;
-    if (vz < 0) vz += 0x7f;
-    *(int32_t *)(obj + POS_X_OFF) += (vx >> 7);
-    *(int32_t *)(obj + POS_Y_OFF) += (vy >> 7);
-    *(int32_t *)(obj + POS_Z_OFF) += (vz >> 7);
+    if (vx < 0) vx = mips_addu_i32(vx, 0x7f);
+    if (vy < 0) vy = mips_addu_i32(vy, 0x7f);
+    if (vz < 0) vz = mips_addu_i32(vz, 0x7f);
+    *(int32_t *)(obj + POS_X_OFF) =
+        mips_addu_i32(*(int32_t *)(obj + POS_X_OFF), vx >> 7);
+    *(int32_t *)(obj + POS_Y_OFF) =
+        mips_addu_i32(*(int32_t *)(obj + POS_Y_OFF), vy >> 7);
+    *(int32_t *)(obj + POS_Z_OFF) =
+        mips_addu_i32(*(int32_t *)(obj + POS_Z_OFF), vz >> 7);
 
     MatrixNormal(m, m);
 }

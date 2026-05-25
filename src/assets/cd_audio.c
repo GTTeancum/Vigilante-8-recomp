@@ -57,6 +57,9 @@ uint8_t CD_IsCoverOpen(void)
     return (uint8_t)((st[0] >> 4) & 1);
 }
 
+/* Hex-name alias.  Pause_Poll is provided as a stub in panic_stubs.c. */
+uint8_t FUN_80043bb4(void)   { return CD_IsCoverOpen(); }
+
 /* HIGH-MED: identify the current disc, set the disc-state global. */
 uint8_t CD_DetectDiskType(void)
 {

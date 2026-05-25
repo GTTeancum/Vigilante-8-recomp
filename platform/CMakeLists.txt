@@ -28,10 +28,18 @@ add_library(v8platform STATIC
     pad_shim.c
     screenshot.c
     renderer.c
+    mesh_loader.c
     audio_shim.c
+    common_exp_loader.c
+    exe_data_tables.c
+    font_decode_stub.c
     host_vehicle.c
+    host_weapon.c
+    host_ai_vehicle.c
+    host_vehicle_exp_probe.c
     physics_shim.c
     host_terrain.c
+    terrain_mesh.c
     host_sintbl_verify.c
 )
 target_include_directories(v8platform PUBLIC

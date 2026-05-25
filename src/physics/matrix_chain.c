@@ -20,7 +20,7 @@
 
 extern int   Object_Parent(int obj);                 /* FUN_8001d5a0 */
 extern MATRIX *CompMatrixLV(MATRIX *a, MATRIX *b, MATRIX *out);
-extern MATRIX DAT_8006f640;
+MATRIX DAT_8006f640;
 
 MATRIX *Matrix_ComposeParentChain(int obj)
 {
@@ -32,6 +32,29 @@ MATRIX *Matrix_ComposeParentChain(int obj)
         m = &DAT_8006f640;
     }
     return m;
+}
+
+/* Hex-name alias. */
+MATRIX *FUN_8001d624(int obj) { return Matrix_ComposeParentChain(obj); }
+
+/* ================================================================
+ * FUN_8001d68c -- Matrix_ComposeRelativeToObject
+ *
+ * Build a matrix `param_1` that is the composition of the parent
+ * chain of `param_2` with the object-local transform of `param_3`
+ * (built via Matrix_FromObjectTransform / FUN_8001b07c into param_1).
+ *
+ * Final result is written to param_1 via CompMatrixLV.
+ *
+ * HIGH confidence (direct Ghidra port).
+ * ================================================================ */
+extern MATRIX *FUN_8001b07c(MATRIX *out, int obj);    /* Matrix_FromObjectTransform */
+
+void FUN_8001d68c(MATRIX *param_1, int param_2, int param_3)
+{
+    MATRIX *m0 = FUN_8001d624(param_2);
+    MATRIX *m1 = FUN_8001b07c(param_1, param_3);
+    CompMatrixLV(m0, m1, param_1);
 }
 
 /* ============================================================

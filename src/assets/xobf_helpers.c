@@ -6,15 +6,13 @@
  *                    index 0x12 (so [0..0x11] = 18 slots reserved for
  *                    18 entries -- larger than the 14 vehicles; pass 2
  *                    will figure out what 14..17 are reserved for).
- *   FUN_801005e8  -- XOBF_LoadBlob: alloc+memcpy a generic blob and
- *                    expose it via _DAT_800659f0 / _DAT_800659e8 (ptr
- *                    + size). Used by font and palette callbacks.
+ *   FUN_801005e8  -- Terrain_LoadAimp: alloc+memcpy the AIMP navigation
+ *                    quadtree and expose it via _DAT_800659f0 /
+ *                    _DAT_800659e8 (ptr + size).
  *   FUN_80100594  -- XOBF_LoadFNT: hands the chunk body to the font
  *                    decoder (FUN_800187e4) and sets a default glyph
  *                    paint at DAT_800659d2 = 0x80.
- *   FUN_801005c0  -- XOBF_StashReturn: latches whatever's in v0 into
- *                    _DAT_80065a00. Used as a callback that captures
- *                    the previous handler's return value.
+ *   FUN_801005c0  -- Terrain_LoadBsp, implemented in load_helpers.c.
  *   FUN_8010243c  -- XOBF_AllocArray: alloc a (count * 0x10 + 0x30)-byte
  *                    record and store the count at off +0x1c. Generic
  *                    array-of-struct allocator.
@@ -30,10 +28,12 @@ extern void *Heap_AllocOrRetry(uint32_t n);
 extern void *V8_MemCopy(void *dst, const void *src, int n);
 extern void *XOBF_Parse(uint32_t remaining, int chainRegister);
 extern void  Font_DecodeFNT(void *src, void *dst);     /* FUN_800187e4 */
-extern int32_t XobfStream_ReadI32(void *st);            /* func_0x800224ec */
-extern int16_t XobfStream_ReadI16(void *st);            /* func_0x800224b4 */
+extern int32_t XobfStream_ReadI32(void *streamRef);     /* func_0x800224ec */
+extern int16_t XobfStream_ReadI16(void *streamRef);     /* func_0x800224b4 */
 
 extern void *DAT_800737a0[]; /* vehicle + extra-object array */
+extern void *DAT_800737e8;
+extern void *_DAT_800737e8;
 extern void *_DAT_800659f0;
 extern uint32_t _DAT_800659e8;
 extern uint8_t   DAT_800659d2;
@@ -49,14 +49,24 @@ void XOBF_AppendExtra(uint32_t remaining)
         while (DAT_800737a0[++idx] != NULL) { /* nop */ }
     }
     DAT_800737a0[idx] = XOBF_Parse(remaining, 1);
+    if (idx == 0x12) {
+        DAT_800737e8 = DAT_800737a0[idx];
+        _DAT_800737e8 = DAT_800737a0[idx];
+    }
 }
 
-/* HIGH: alloc + memcpy a raw blob (palette, lookup, etc.). */
-void XOBF_LoadBlob(const void *src, uint32_t size)
+/* HIGH: LOAD 801005e8, AIMP navigation quadtree raw-copy loader. */
+void Terrain_LoadAimp(const void *src, uint32_t size)
 {
     _DAT_800659f0 = Heap_AllocOrRetry(size);
     V8_MemCopy(_DAT_800659f0, src, (int)size);
     _DAT_800659e8 = size;
+}
+
+/* Pass-1 name retained for old references. */
+void XOBF_LoadBlob(const void *src, uint32_t size)
+{
+    Terrain_LoadAimp(src, size);
 }
 
 /* HIGH: pass an FNT body to the font decoder. */
@@ -66,7 +76,7 @@ void XOBF_LoadFNT(void *src)
     DAT_800659d2 = 0x80;
 }
 
-/* HIGH: latch the previously-returned value (from $v0) into a global. */
+/* Deprecated pass-1 helper; source LOAD 801005c0 is Terrain_LoadBsp. */
 void XOBF_StashReturn(uint32_t v0Latched)
 {
     _DAT_80065a00 = (void *)(uintptr_t)v0Latched;
@@ -89,14 +99,15 @@ void *XOBF_AllocArray(int count)
  *   +0x8e i16 halfY
  *   +0x90 i16 halfZ
  */
-void XOBF_ReadCollisionBox(uint8_t *dst, void *stream)
+void XOBF_ReadCollisionBox(uint8_t *dst, void *payload)
 {
-    *(int32_t *)(dst + 0x80) = XobfStream_ReadI32(stream);
-    *(int32_t *)(dst + 0x84) = XobfStream_ReadI32(stream);
-    *(int32_t *)(dst + 0x88) = XobfStream_ReadI32(stream);
-    *(int16_t *)(dst + 0x8c) = XobfStream_ReadI16(stream);
-    *(int16_t *)(dst + 0x8e) = XobfStream_ReadI16(stream);
-    *(int16_t *)(dst + 0x90) = XobfStream_ReadI16(stream);
+    uint8_t *cursor = (uint8_t *)payload;
+    *(int32_t *)(dst + 0x80) = XobfStream_ReadI32(&cursor);
+    *(int32_t *)(dst + 0x84) = XobfStream_ReadI32(&cursor);
+    *(int32_t *)(dst + 0x88) = XobfStream_ReadI32(&cursor);
+    *(int16_t *)(dst + 0x8c) = XobfStream_ReadI16(&cursor);
+    *(int16_t *)(dst + 0x8e) = XobfStream_ReadI16(&cursor);
+    *(int16_t *)(dst + 0x90) = XobfStream_ReadI16(&cursor);
 }
 
 /* ============================================================

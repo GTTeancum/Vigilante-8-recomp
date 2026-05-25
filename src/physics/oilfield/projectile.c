@@ -14,6 +14,7 @@
  */
 #include <stdint.h>
 
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t *Object_Pool_Alloc(uint32_t size);     /* FUN_8001d470 */
 extern uint32_t  Composite_Matrix_From(uint8_t *outTmp, uint32_t parentMtxIdx);  /* FUN_8001b07c */
 extern void      CompMatrixLV(void *, void *, void *);  /* PSY-Q */
@@ -30,7 +31,7 @@ uint32_t *OF_ProjectileSpawn(int parentObj)
     uint32_t mtx = Composite_Matrix_From(tmp, *(uint32_t *)(parentObj + 0x70));
     CompMatrixLV((void *)(intptr_t)(parentObj + 0x10), (void *)(uintptr_t)mtx, p + 4);
 
-    p[0x19] = (uint32_t)(uintptr_t)FUN_801002b0;
+    Object_SetCallbackPsxSlot(p, (uintptr_t)FUN_801002b0);
     p[0x15] = 0x40000;
     *((uint8_t *)p + 4) = 7;                /* state */
     *((uint16_t *)p + 6) = 5;               /* sub-state */

@@ -41,27 +41,28 @@
 
 extern void     Object_GeneralTick(uint32_t *obj);         /* FUN_80030c08 */
 extern uint8_t *Terrain_MaterialAt(uint32_t x, uint32_t z); /* FUN_800255f4 */
-extern void     FUN_80030a88(uint32_t *obj, void *lut);
+extern void     FUN_80030a88(uint32_t *obj, const void *lut);
 extern void     FUN_8002d494(uint32_t *obj, void *lut);
 extern void     FUN_8002d44c(uint32_t *obj);
-extern void     FUN_8002d82c(uint32_t *obj, int arg);
+extern int      FUN_8002d82c(uint32_t *obj, intptr_t collision_node);
 extern uint32_t FUN_800446dc(const int32_t *xyz);           /* SfxCurve_2P_Stereo */
 extern int      FUN_800129e8(int mode, const char *msg);
 extern void     FUN_8003e76c(uint32_t *obj);
 extern void     FUN_8002cce8(uint32_t *obj, uint8_t arg);
 extern void    *FUN_8001ac44(int *bank, uint16_t kind, uint32_t size, uint32_t flags);
-extern int      FUN_8001affc(int *bank, uint16_t kind, uint16_t key);
-extern void     FUN_8001b2fc(uint32_t *chassis, int joint, void *wheel);
+extern intptr_t FUN_8001affc(int *bank, uint16_t kind, uint16_t key);
+extern void     FUN_8001b2fc(uint32_t *chassis, const void *joint, uint32_t *wheel);
 extern int      FUN_8001b270(uint32_t *obj);
 extern void    *FUN_8001d470(uint32_t size);
 extern void     FUN_8001d4f0(uint32_t *chassis, void *extra);
+extern void     Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern void     FUN_8001d708(void *obj);
 extern int      sprintf(char *buf, const char *fmt, ...);
 
 extern void   *iRam00000010;                /* gp[16] display flag */
 extern const char DAT_80055738[];            /* sprintf format */
 extern const uint8_t DAT_80065c28[];         /* per-status lookup table */
-extern int *  DAT_8005ec10;                  /* spawn-mode template @0x80060000-0x13f0 */
+extern const uint8_t DAT_8005ec10[0x24];      /* spawn-mode template */
 
 /* The original MIPS writes to 0x1f801bf0 -- the PSX SPU voice
  * register block (24 voices * 16 bytes each + a small base offset).
@@ -73,13 +74,23 @@ static uint8_t g_spu_voice_scratch[24 * 16 + 16];
 static uint32_t * const SPU_VOICE_BASE =
     (uint32_t *)((uintptr_t)g_spu_voice_scratch);
 
+static int32_t mips_addu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
 /* Forward decl. */
-int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3);
+int Vehicle_RollingTick(uint32_t *self, int mode, intptr_t arg2, intptr_t arg3);
 
 /* HIGH: rolling per-frame tick.  Always integrates via
  * Object_GeneralTick; in damaged state also does material/audio/
  * counter work. */
-int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3)
+int Vehicle_RollingTick(uint32_t *self, int mode, intptr_t arg2, intptr_t arg3)
 {
     (void)arg3;
     uint8_t *s = (uint8_t *)self;
@@ -106,7 +117,7 @@ int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3)
          * sub-projectile's tick callback, copy a slice of template data. */
         int *bank = (int *)self;       /* a0 (which the caller passed as "obj") */
         uint16_t kind = (uint16_t)(arg2 & 0xffff);
-        int *s3_template = (int *)((uintptr_t)0x80060000 - 0x13f0);  /* &DAT_8005ec10 */
+        const uint8_t *s3_template = DAT_8005ec10;
 
         uint32_t *p = (uint32_t *)FUN_8001ac44(bank, kind, 292, 0);
         *(uint16_t *)((uint8_t *)p + 6) = 0;
@@ -118,14 +129,13 @@ int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3)
         *(uint32_t *)((uint8_t *)p + 0x7c) = (uint32_t)br;
 
         /* Install this very function as the new object's tick callback. */
-        *(uint32_t *)((uint8_t *)p + 0x64) =
-            (uint32_t)(uintptr_t)&Vehicle_RollingTick;
+        Object_SetCallbackPsxSlot(p, (uintptr_t)&Vehicle_RollingTick);
 
         void *extra = FUN_8001d470(128);
-        *(void **)((uint8_t *)p + 0xf8) = extra;
-        int joint = FUN_8001affc(bank, kind, 0x8100);
+        *(uint32_t *)((uint8_t *)p + 0xf8) = (uint32_t)(uintptr_t)extra;
+        intptr_t joint = FUN_8001affc(bank, kind, 0x8100);
         if (joint != 0) {
-            FUN_8001b2fc(p, joint, extra);
+            FUN_8001b2fc(p, (const void *)(uintptr_t)joint, (uint32_t *)extra);
         } else {
             *(int32_t *)((uintptr_t)extra + 0x4c) = -21845;   /* 0xffffaaab */
             FUN_8001d708(extra);
@@ -168,9 +178,9 @@ int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3)
 
         /* Material attr 7 -> bounce: invert all 3 vel components. */
         if (*(int16_t *)(material + 0x16) == 7) {
-            *(int32_t *)(s + 0x80) = -*(int32_t *)(s + 0x80);
-            *(int32_t *)(s + 0x84) = -*(int32_t *)(s + 0x84);
-            *(int32_t *)(s + 0x88) = -*(int32_t *)(s + 0x88);
+            *(int32_t *)(s + 0x80) = mips_subu_i32(0, *(int32_t *)(s + 0x80));
+            *(int32_t *)(s + 0x84) = mips_subu_i32(0, *(int32_t *)(s + 0x84));
+            *(int32_t *)(s + 0x88) = mips_subu_i32(0, *(int32_t *)(s + 0x88));
         }
 
         FUN_80030a88(self, (void *)(uintptr_t)lut);
@@ -180,7 +190,7 @@ int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3)
         uint8_t *s2 = s + 0xa4;
         uint8_t cnt = *(uint8_t *)(s2 + 0x12);
         if (cnt != 0) {
-            uint8_t new = cnt - 1;
+            uint8_t new = (uint8_t)mips_addu_i32(cnt, -1);
             *(uint8_t *)(s2 + 0x12) = new;
             if (new == 0) {
                 uint8_t b9 = *(uint8_t *)(s2 + 0x15);
@@ -190,7 +200,7 @@ int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3)
                         char msgbuf[32];
                         sprintf(msgbuf, (const char *)DAT_80055738,
                                 (unsigned)*(uint8_t *)(s2 + 0x15));
-                        int dmode = (iRam00000010 != 0) ? -st2 : 0;
+                        int dmode = (iRam00000010 != 0) ? mips_subu_i32(0, st2) : 0;
                         FUN_800129e8(dmode, msgbuf);
                         FUN_8002d44c(self);
                     }
@@ -198,7 +208,7 @@ int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3)
                     uint8_t prev_ba = *(uint8_t *)(s2 + 0x16);
                     *(uint8_t *)(s2 + 0x12) = 30;
                     *(uint8_t *)(s2 + 0x15) = 0;
-                    *(uint8_t *)(s2 + 0x16) = prev_ba + prev_b9;
+                    *(uint8_t *)(s2 + 0x16) = (uint8_t)mips_addu_i32(prev_ba, prev_b9);
                 }
             }
         }
@@ -243,7 +253,7 @@ int Vehicle_RollingTick(uint32_t *self, int mode, int arg2, int arg3)
 }
 
 /* Legacy gap alias. */
-int gap_80030f34(uint32_t *self, int mode, int arg2, int arg3)
+int gap_80030f34(uint32_t *self, int mode, intptr_t arg2, intptr_t arg3)
 {
     return Vehicle_RollingTick(self, mode, arg2, arg3);
 }

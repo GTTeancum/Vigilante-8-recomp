@@ -70,6 +70,10 @@ uint32_t SfxPan_For3DPosDelayed(void *srcPos)
     return 0;
 }
 
+/* FUN_ aliases so callers that use the raw address name link correctly. */
+uint32_t FUN_800449bc(void *srcPos) { return SfxPan_For3DPos(srcPos); }
+uint32_t FUN_800446dc(void *srcPos) { return SfxPan_For3DPosDelayed(srcPos); }
+
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)
  *
