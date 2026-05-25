@@ -41,14 +41,17 @@
 
 #if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
 #include <GL/gl3w.h>
+#include "xobf_texture.h"
 
 /* ------------------------------------------------------------------ */
 /* Public state consumed by renderer.c                                  */
 /* ------------------------------------------------------------------ */
 GLuint g_mesh_vao[14];
 int    g_mesh_vtx[14];   /* vertex (not triangle) count */
+GLuint g_mesh_tex[14];
 GLuint g_wheel_mesh_vao[10];
 int    g_wheel_mesh_vtx[10];
+GLuint g_wheel_mesh_tex[10];
 
 /* ------------------------------------------------------------------ */
 /* Format constants                                                     */
@@ -94,7 +97,9 @@ static int16_t rds16le(const uint8_t *b, uint32_t o)
 /* ------------------------------------------------------------------ */
 /* Per-vertex data sent to GL: 6 floats (x,y,z,r,g,b)                  */
 /* ------------------------------------------------------------------ */
-typedef struct { float x,y,z,r,g,b; } GlVert;
+typedef struct { float x,y,z,r,g,b,u,v; } GlVert;
+static V8XobfTexAtlas g_vehicle_atlas[14];
+static V8XobfTexAtlas g_wheel_atlas;
 
 /* ------------------------------------------------------------------ */
 /* IFF walker: collects (payload_offset, size) for every BIN chunk     */
@@ -168,6 +173,7 @@ static int iff_find_xobf_bin(const uint8_t *d, uint32_t off, uint32_t end,
 }
 
 static void parse_group_desc(const uint8_t *B, uint32_t bsz, uint32_t bd,
+                             const V8XobfTexAtlas *atlas,
                              GlVert *vbuf, int *nvtx, int cap)
 {
     if (bd + 0x19 > bsz) return;
@@ -175,6 +181,7 @@ static void parse_group_desc(const uint8_t *B, uint32_t bsz, uint32_t bd,
     uint32_t vc  = rd32le(B, bd + 0x00);
     uint32_t vr  = rd32le(B, bd + 0x04);
     uint16_t pc  = rd16le(B, bd + 0x10);
+    int16_t tex_base = rds16le(B, bd + 0x12);
     uint32_t pr  = rd32le(B, bd + 0x14);
     uint8_t scale_shift = B[bd + 0x18];
     float model_scale = scale_shift <= 15 ? (1.0f / (float)(1u << scale_shift))
@@ -235,16 +242,22 @@ static void parse_group_desc(const uint8_t *B, uint32_t bsz, uint32_t bd,
                 float ndotl = nx*LX + ny*LY + nz*LZ;
                 float lit = 0.35f + 0.65f * (ndotl > 0.0f ? ndotl : 0.0f);
                 float lr = cr * lit, lg = cg * lit, lb = cb * lit;
+                float uv[4][2] = {
+                    {-1.0f, -1.0f}, {-1.0f, -1.0f},
+                    {-1.0f, -1.0f}, {-1.0f, -1.0f}
+                };
+                int has_uv = V8_XobfTex_DecodePacketUv(atlas, B + po, nib,
+                                                       (int)tex_base, uv);
 
                 /* Triangle 0: v0,v1,v2 */
-                vbuf[*nvtx] = (GlVert){vx[0],vy[0],vz[0],lr,lg,lb}; (*nvtx)++;
-                vbuf[*nvtx] = (GlVert){vx[1],vy[1],vz[1],lr,lg,lb}; (*nvtx)++;
-                vbuf[*nvtx] = (GlVert){vx[2],vy[2],vz[2],lr,lg,lb}; (*nvtx)++;
+                vbuf[*nvtx] = (GlVert){vx[0],vy[0],vz[0],lr,lg,lb,has_uv?uv[0][0]:-1.0f,has_uv?uv[0][1]:-1.0f}; (*nvtx)++;
+                vbuf[*nvtx] = (GlVert){vx[1],vy[1],vz[1],lr,lg,lb,has_uv?uv[1][0]:-1.0f,has_uv?uv[1][1]:-1.0f}; (*nvtx)++;
+                vbuf[*nvtx] = (GlVert){vx[2],vy[2],vz[2],lr,lg,lb,has_uv?uv[2][0]:-1.0f,has_uv?uv[2][1]:-1.0f}; (*nvtx)++;
                 /* Quad second triangle: v0,v2,v3 */
                 if (IS_QUAD[nib] && *nvtx + 3 <= cap) {
-                    vbuf[*nvtx] = (GlVert){vx[0],vy[0],vz[0],lr,lg,lb}; (*nvtx)++;
-                    vbuf[*nvtx] = (GlVert){vx[2],vy[2],vz[2],lr,lg,lb}; (*nvtx)++;
-                    vbuf[*nvtx] = (GlVert){vx[3],vy[3],vz[3],lr,lg,lb}; (*nvtx)++;
+                    vbuf[*nvtx] = (GlVert){vx[0],vy[0],vz[0],lr,lg,lb,has_uv?uv[0][0]:-1.0f,has_uv?uv[0][1]:-1.0f}; (*nvtx)++;
+                    vbuf[*nvtx] = (GlVert){vx[2],vy[2],vz[2],lr,lg,lb,has_uv?uv[2][0]:-1.0f,has_uv?uv[2][1]:-1.0f}; (*nvtx)++;
+                    vbuf[*nvtx] = (GlVert){vx[3],vy[3],vz[3],lr,lg,lb,has_uv?uv[3][0]:-1.0f,has_uv?uv[3][1]:-1.0f}; (*nvtx)++;
                 }
             }
         }
@@ -256,6 +269,7 @@ static void parse_group_desc(const uint8_t *B, uint32_t bsz, uint32_t bd,
 /* Parse one BIN chunk -> append triangles to *vbuf, increment *nvtx   */
 /* ------------------------------------------------------------------ */
 static void parse_bin(const uint8_t *B, uint32_t bsz,
+                      const V8XobfTexAtlas *atlas,
                       GlVert *vbuf, int *nvtx, int cap)
 {
     if (bsz < 8) return;
@@ -266,7 +280,7 @@ static void parse_bin(const uint8_t *B, uint32_t bsz,
         if (btbase + bi*4 + 4 > bsz) break;
         uint32_t rel = rd32le(B, btbase + bi*4);
         uint32_t bd  = btbase + rel;
-        parse_group_desc(B, bsz, bd, vbuf, nvtx, cap);
+        parse_group_desc(B, bsz, bd, atlas, vbuf, nvtx, cap);
     }
 }
 
@@ -289,6 +303,9 @@ static GLuint upload_mesh(const GlVert *vbuf, int nvtx)
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(GlVert),
                           (void *)offsetof(GlVert, r));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(GlVert),
+                          (void *)offsetof(GlVert, u));
     glBindVertexArray(0);
 
     return vao;
@@ -343,7 +360,12 @@ void MeshLoader_Init(void)
 
     for (int vid = 0; vid < n_load; vid++) {
         int nvtx = 0;
+        int tex = V8_XobfTexAtlas_BuildFromBin(&g_vehicle_atlas[vid],
+                                               raw + s_bins[vid].off,
+                                               s_bins[vid].sz);
+        g_mesh_tex[vid] = g_vehicle_atlas[vid].tex;
         parse_bin(raw + s_bins[vid].off, s_bins[vid].sz,
+                  &g_vehicle_atlas[vid],
                   vbuf, &nvtx, MAX_TRIS_PER_VEH * 3);
 
         g_mesh_vtx[vid] = nvtx;
@@ -355,8 +377,8 @@ void MeshLoader_Init(void)
         }
 
         g_mesh_vao[vid] = upload_mesh(vbuf, nvtx);
-        fprintf(stderr, "v8:   veh[%2d]: %d vertices (%d tris)\n",
-                vid, nvtx, nvtx/3);
+        fprintf(stderr, "v8:   veh[%2d]: %d vertices (%d tris), tex_slots=%d\n",
+                vid, nvtx, nvtx/3, tex);
     }
 
     free(vbuf);
@@ -388,6 +410,8 @@ void WheelMeshLoader_Init(void)
         free(raw);
         return;
     }
+    int tex = V8_XobfTexAtlas_BuildFromBin(&g_wheel_atlas, B, bsz);
+    fprintf(stderr, "v8: WheelMeshLoader -- texture slots=%d\n", tex);
 
     uint32_t numGroups = rd32le(B, 0);
     uint32_t groupTable = rd32le(B, 4);
@@ -412,8 +436,10 @@ void WheelMeshLoader_Init(void)
         uint32_t rel = rd32le(B, groupTable + group * 4);
         uint32_t bd = groupTable + rel;
         int nvtx = 0;
-        parse_group_desc(B, bsz, bd, vbuf, &nvtx, MAX_TRIS_PER_WHEEL * 3);
+        parse_group_desc(B, bsz, bd, &g_wheel_atlas,
+                         vbuf, &nvtx, MAX_TRIS_PER_WHEEL * 3);
         g_wheel_mesh_vtx[kind] = nvtx;
+        g_wheel_mesh_tex[kind] = g_wheel_atlas.tex;
         if (nvtx <= 0) {
             g_wheel_mesh_vao[kind] = 0;
             fprintf(stderr, "v8:   wheel[%d]: 0 vertices -- skip\n", kind);

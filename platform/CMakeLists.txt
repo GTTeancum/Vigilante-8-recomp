@@ -29,6 +29,7 @@ add_library(v8platform STATIC
     screenshot.c
     renderer.c
     mesh_loader.c
+    xobf_texture.c
     audio_shim.c
     common_exp_loader.c
     exe_data_tables.c

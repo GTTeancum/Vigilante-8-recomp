@@ -69,6 +69,9 @@
 #include <stddef.h>
 #include <math.h>
 #include "gte.h"
+#if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
+#include "xobf_texture.h"
+#endif
 
 /* ------------------------------------------------------------------ */
 /* CPU-side triangle store -- always compiled, headless-safe.          */
@@ -328,6 +331,9 @@ typedef struct {
     uint32_t obstacle_table;
     uint32_t obstacle_end;
     uint32_t slot_count;
+#if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
+    V8XobfTexAtlas atlas;
+#endif
 } TmBank;
 
 typedef struct {
@@ -1070,6 +1076,9 @@ static void tm_collect_level_r(const uint8_t *data, uint32_t off, uint32_t end,
                     0x1c + b->slot_count * 0x1cu > b->group_table) {
                     b->slot_count = 0;
                 }
+#if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
+                V8_XobfTexAtlas_BuildFromBin(&b->atlas, b->data, b->size);
+#endif
                 if (b->obstacle_count > 4096 ||
                     b->obstacle_table >= b->size ||
                     b->obstacle_end > b->size ||
@@ -1237,6 +1246,7 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
     uint32_t vc = tm_rd32le(B, bd + 0x00);
     uint32_t vr = tm_rd32le(B, bd + 0x04);
     uint16_t pc = tm_rd16le(B, bd + 0x10);
+    int16_t tex_base = tm_rds16le(B, bd + 0x12);
     uint32_t pr = tm_rd32le(B, bd + 0x14);
     uint8_t scale_shift = B[bd + 0x18];
     uint32_t vo = bd + vr;
@@ -1297,7 +1307,13 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                 {-1.0f, -1.0f}, {-1.0f, -1.0f},
                 {-1.0f, -1.0f}, {-1.0f, -1.0f}
             };
-            int has_uv = tm_decode_packet_uv(B, po, nib, uv);
+            int has_uv = 0;
+#if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
+            has_uv = V8_XobfTex_DecodePacketUv(&bank->atlas, B + po, nib,
+                                                (int)tex_base, uv);
+#else
+            has_uv = tm_decode_packet_uv(B, po, nib, uv);
+#endif
 
             int ground0 = tm_is_render_ground_tri(vx[0], vy[0], vz[0],
                                                   vx[1], vy[1], vz[1],
@@ -1768,6 +1784,15 @@ static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
                        rsegs, &nrsegs, 4096,
                        rtypes, &nrtypes, 64,
                        &bsp_payload, &bsp_size);
+#if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
+    if (nbanks > 0 && banks[0].atlas.tex != 0) {
+        g_terrainmesh_tex = banks[0].atlas.tex;
+        g_terrainmesh_tex_w = banks[0].atlas.w;
+        g_terrainmesh_tex_h = banks[0].atlas.h;
+        fprintf(stderr, "v8: TerrainMesh -- XOBF texture atlas %dx%d slots=%d\n",
+                banks[0].atlas.w, banks[0].atlas.h, banks[0].atlas.slots);
+    }
+#endif
     tm_log_head_name_summary(heads, nheads);
     tm_build_spawn_placeholders(heads, nheads);
 

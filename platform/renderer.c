@@ -28,8 +28,10 @@ static GLint  g_loc_tex    = -1;
 /* Vehicle mesh VAOs (loaded from VEHICLES.EXP by MeshLoader_Init). */
 extern GLuint g_mesh_vao[14];
 extern int    g_mesh_vtx[14];
+extern GLuint g_mesh_tex[14];
 extern GLuint g_wheel_mesh_vao[10];
 extern int    g_wheel_mesh_vtx[10];
+extern GLuint g_wheel_mesh_tex[10];
 static GLuint g_terr_vao   = 0, g_terr_vbo = 0, g_terr_ibo = 0;
 static int    g_terr_idxCount = 0;
 static int    g_initialized = 0;
@@ -489,8 +491,17 @@ static void draw_vehicle_wheels(uint8_t *veh, const float parentM[16],
         mat4_mul(parentM, childM, wheelM);
         mat4_mul(VP, wheelM, MVP);
         glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        if (g_wheel_mesh_tex[kind]) {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, g_wheel_mesh_tex[kind]);
+            glUniform1i(g_loc_tex, 0);
+            glUniform1i(g_loc_useTex, 1);
+        } else {
+            glUniform1i(g_loc_useTex, 0);
+        }
         glBindVertexArray(g_wheel_mesh_vao[kind]);
         glDrawArrays(GL_TRIANGLES, 0, g_wheel_mesh_vtx[kind]);
+        glUniform1i(g_loc_useTex, 0);
     }
     glEnable(GL_CULL_FACE);
 }
@@ -628,12 +639,21 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
     /* Draw the player vehicle (vehicle 0) with a warm tint so the
      * red-orange smoke-test threshold is met and the model looks good. */
     if (g_mesh_vao[0] && g_mesh_vtx[0] > 0) {
-        glUniform3f(g_loc_tint, 2.5f, 0.7f, 0.2f);
+        glUniform3f(g_loc_tint, g_mesh_tex[0] ? 1.15f : 2.5f,
+                    g_mesh_tex[0] ? 1.15f : 0.7f,
+                    g_mesh_tex[0] ? 1.15f : 0.2f);
         memcpy(M, vehM, sizeof(M));
         mat4_mul(VP, M, MVP);
         glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        if (g_mesh_tex[0]) {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, g_mesh_tex[0]);
+            glUniform1i(g_loc_tex, 0);
+            glUniform1i(g_loc_useTex, 1);
+        }
         glBindVertexArray(g_mesh_vao[0]);
         glDrawArrays(GL_TRIANGLES, 0, g_mesh_vtx[0]);
+        glUniform1i(g_loc_useTex, 0);
     }
     glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
     draw_vehicle_wheels(veh, vehM, VP, MVP);
@@ -653,12 +673,21 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
         int ai_vid = 1;   /* use vehicle 1 shape for the AI opponent */
         if (g_mesh_vao[ai_vid] && g_mesh_vtx[ai_vid] > 0) {
             /* Blue tint: polygon grey base (0.5) × 5.0 = saturated blue. */
-            glUniform3f(g_loc_tint, 0.0f, 0.0f, 5.0f);
+            glUniform3f(g_loc_tint, g_mesh_tex[ai_vid] ? 1.0f : 0.0f,
+                        g_mesh_tex[ai_vid] ? 1.0f : 0.0f,
+                        g_mesh_tex[ai_vid] ? 1.15f : 5.0f);
             memcpy(M, aiM, sizeof(M));
             mat4_mul(VP, M, MVP);
             glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+            if (g_mesh_tex[ai_vid]) {
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, g_mesh_tex[ai_vid]);
+                glUniform1i(g_loc_tex, 0);
+                glUniform1i(g_loc_useTex, 1);
+            }
             glBindVertexArray(g_mesh_vao[ai_vid]);
             glDrawArrays(GL_TRIANGLES, 0, g_mesh_vtx[ai_vid]);
+            glUniform1i(g_loc_useTex, 0);
         }
         glUniform3f(g_loc_tint, 0.75f, 0.85f, 1.2f);
         draw_vehicle_wheels(ai, aiM, VP, MVP);
