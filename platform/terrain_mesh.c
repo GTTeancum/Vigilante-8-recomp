@@ -66,6 +66,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <limits.h>
+#include <stddef.h>
 #include <math.h>
 #include "gte.h"
 
@@ -262,7 +263,10 @@ int TerrainMesh_ObstacleHeightAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
 
 /* ---- Public GL globals ---- */
 GLuint g_terrainmesh_vao = 0;
+GLuint g_terrainmesh_tex = 0;
 int    g_terrainmesh_vtx = 0;
+int    g_terrainmesh_tex_w = 0;
+int    g_terrainmesh_tex_h = 0;
 
 /* ---- Config ---- */
 #define TERR_SCALE      (1.0f / 16.0f)   /* fallback unplaced BIN scale */
@@ -313,7 +317,7 @@ static const int TM_IS_QUAD[16] = {
 #define TM_DISPLAY_Y_SCALE  (1.0f / 65536.0f)
 
 /* ---- Per-vertex GL data ---- */
-typedef struct { float x,y,z,r,g,b; } TmVert;
+typedef struct { float x,y,z,r,g,b,u,v; } TmVert;
 
 typedef struct {
     const uint8_t *data;
@@ -404,6 +408,146 @@ static uint8_t *tm_load_exp_blob(const char *exp_path, uint32_t *out_size,
     uint32_t form_size = tm_rd32be(raw, 4);
     *out_size = form_size + 8u;
     return raw;
+}
+
+static void tm_psx555_rgba(uint16_t c, uint8_t *out)
+{
+    uint8_t r = (uint8_t)(c & 0x1f);
+    uint8_t g = (uint8_t)((c >> 5) & 0x1f);
+    uint8_t b = (uint8_t)((c >> 10) & 0x1f);
+    out[0] = (uint8_t)((r << 3) | (r >> 2));
+    out[1] = (uint8_t)((g << 3) | (g >> 2));
+    out[2] = (uint8_t)((b << 3) | (b >> 2));
+    out[3] = (c == 0) ? 0 : 255;
+}
+
+static int tm_pixel_width_from_words(int words, int depth)
+{
+    if (depth == 0) return words * 4;
+    if (depth == 1) return words * 2;
+    return words;
+}
+
+static int tm_find_chunk_in_form(const uint8_t *data, uint32_t off, uint32_t end,
+                                 const char tag[4],
+                                 uint32_t *out_off, uint32_t *out_size)
+{
+    while (off + 8 <= end) {
+        uint32_t csz = tm_rd32be(data, off + 4);
+        uint32_t body = off + 8;
+        uint32_t next = body + csz;
+        if (next > end) break;
+        if (memcmp(data + off, tag, 4) == 0) {
+            *out_off = body;
+            *out_size = csz;
+            return 1;
+        }
+        if (memcmp(data + off, "FORM", 4) == 0 && body + 4 <= next) {
+            if (tm_find_chunk_in_form(data, body + 4, next, tag,
+                                      out_off, out_size)) {
+                return 1;
+            }
+        }
+        off = next + (csz & 1);
+    }
+    return 0;
+}
+
+static GLuint tm_upload_xbmp_texture(const uint8_t *raw, uint32_t raw_size)
+{
+    uint32_t off = 0, size = 0;
+    if (!tm_find_chunk_in_form(raw, 0, raw_size, "XBMP", &off, &size))
+        return 0;
+    if (size < 0x220)
+        return 0;
+
+    const uint8_t *p = raw + off;
+    uint32_t flags = tm_rd32le(p, 4);
+    uint32_t image_off = tm_rd32le(p, 8);
+    int depth = (int)(flags & 3u);
+    if (depth != 1 || image_off + 0x14 > size)
+        return 0;
+
+    int image_words = tm_rds16le(p, image_off + 0x10);
+    int image_h = tm_rds16le(p, image_off + 0x12);
+    int image_w = tm_pixel_width_from_words(image_words, depth);
+    uint32_t pix_off = image_off + 0x14;
+    uint32_t pix_size = (uint32_t)(image_w * image_h);
+    if (image_w <= 0 || image_h <= 0 || pix_off + pix_size > size)
+        return 0;
+
+    uint8_t palette[256][4];
+    for (int i = 0; i < 256; i++)
+        tm_psx555_rgba(tm_rd16le(p, 0x14 + (uint32_t)i * 2u), palette[i]);
+
+    uint8_t *rgba = (uint8_t *)malloc((size_t)image_w * (size_t)image_h * 4u);
+    if (rgba == NULL)
+        return 0;
+    const uint8_t *pix = p + pix_off;
+    for (int i = 0; i < image_w * image_h; i++) {
+        rgba[i * 4 + 0] = palette[pix[i]][0];
+        rgba[i * 4 + 1] = palette[pix[i]][1];
+        rgba[i * 4 + 2] = palette[pix[i]][2];
+        rgba[i * 4 + 3] = palette[pix[i]][3];
+    }
+
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, image_w, image_h, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    free(rgba);
+
+    g_terrainmesh_tex_w = image_w;
+    g_terrainmesh_tex_h = image_h;
+    fprintf(stderr, "v8: TerrainMesh -- uploaded XBMP texture %dx%d flags=0x%x\n",
+            image_w, image_h, (unsigned)flags);
+    return tex;
+}
+
+static int tm_decode_packet_uv(const uint8_t *B, uint32_t po,
+                               int nib, float uv[4][2])
+{
+    if (g_terrainmesh_tex_w <= 0 || g_terrainmesh_tex_h <= 0)
+        return 0;
+
+    uint32_t uvbase = 0;
+    uint32_t tpage_off = 0;
+    switch (nib) {
+    case 5:
+        uvbase = 0x0c;
+        tpage_off = 0x12;
+        break;
+    case 9:
+    case 11:
+        uvbase = 0x10;
+        tpage_off = 0x16;
+        break;
+    case 12:
+    case 13:
+    case 15:
+        uvbase = 0x0c;
+        tpage_off = 0x12;
+        break;
+    default:
+        return 0;
+    }
+
+    uint16_t tpage = tm_rd16le(B, po + tpage_off);
+    float page_x = (float)((tpage & 0x0fu) * 64u);
+    float page_y = (float)(((tpage & 0x10u) != 0) ? 256u : 0u);
+    for (int i = 0; i < 4; i++) {
+        uint8_t u = B[po + uvbase + (uint32_t)i * 2u + 0u];
+        uint8_t v = B[po + uvbase + (uint32_t)i * 2u + 1u];
+        uv[i][0] = (page_x + (float)u + 0.5f) / (float)g_terrainmesh_tex_w;
+        uv[i][1] = (page_y + (float)v + 0.5f) / (float)g_terrainmesh_tex_h;
+    }
+    return 1;
 }
 
 static int tm_is_render_ground_tri(float ax, float ay, float az,
@@ -1064,9 +1208,9 @@ static void tm_emit_flat_face(float vx[4], float vy[4], float vz[4],
         tt->pd = tnx*vx[ia] + tny*vy[ia] + tnz*vz[ia];
     }
     if (nvtx + 3 <= vcap) {
-        vbuf[nvtx++] = (TmVert){vx[ia],vy[ia],vz[ia],lr,lg,lb};
-        vbuf[nvtx++] = (TmVert){vx[ic],vy[ic],vz[ic],lr,lg,lb};
-        vbuf[nvtx++] = (TmVert){vx[ib],vy[ib],vz[ib],lr,lg,lb};
+        vbuf[nvtx++] = (TmVert){vx[ia],vy[ia],vz[ia],lr,lg,lb,-1.0f,-1.0f};
+        vbuf[nvtx++] = (TmVert){vx[ic],vy[ic],vz[ic],lr,lg,lb,-1.0f,-1.0f};
+        vbuf[nvtx++] = (TmVert){vx[ib],vy[ib],vz[ib],lr,lg,lb,-1.0f,-1.0f};
     }
 
     *nvtx_io = nvtx;
@@ -1149,6 +1293,11 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
             float lr = 0.34f * lit;
             float lg = 0.38f * lit;
             float lb = 0.36f * lit;
+            float uv[4][2] = {
+                {-1.0f, -1.0f}, {-1.0f, -1.0f},
+                {-1.0f, -1.0f}, {-1.0f, -1.0f}
+            };
+            int has_uv = tm_decode_packet_uv(B, po, nib, uv);
 
             int ground0 = tm_is_render_ground_tri(vx[0], vy[0], vz[0],
                                                   vx[1], vy[1], vz[1],
@@ -1175,9 +1324,9 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                                         vx[1], vy[1], vz[1],
                                         vx[2], vy[2], vz[2], ground0)
                 && nvtx + 3 <= vcap) {
-                vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr,lg,lb};
-                vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr,lg,lb};
-                vbuf[nvtx++] = (TmVert){vx[1],vy[1],vz[1],lr,lg,lb};
+                vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr,lg,lb, has_uv ? uv[0][0] : -1.0f, has_uv ? uv[0][1] : -1.0f};
+                vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr,lg,lb, has_uv ? uv[2][0] : -1.0f, has_uv ? uv[2][1] : -1.0f};
+                vbuf[nvtx++] = (TmVert){vx[1],vy[1],vz[1],lr,lg,lb, has_uv ? uv[1][0] : -1.0f, has_uv ? uv[1][1] : -1.0f};
             }
 
             if (TM_IS_QUAD[nib]) {
@@ -1206,9 +1355,9 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                                             vx[2], vy[2], vz[2],
                                             vx[3], vy[3], vz[3], ground1)
                     && nvtx + 3 <= vcap) {
-                    vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr1,lg1,lb1};
-                    vbuf[nvtx++] = (TmVert){vx[3],vy[3],vz[3],lr1,lg1,lb1};
-                    vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr1,lg1,lb1};
+                    vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr1,lg1,lb1, has_uv ? uv[0][0] : -1.0f, has_uv ? uv[0][1] : -1.0f};
+                    vbuf[nvtx++] = (TmVert){vx[3],vy[3],vz[3],lr1,lg1,lb1, has_uv ? uv[3][0] : -1.0f, has_uv ? uv[3][1] : -1.0f};
+                    vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr1,lg1,lb1, has_uv ? uv[2][0] : -1.0f, has_uv ? uv[2][1] : -1.0f};
                 }
             }
         }
@@ -1971,9 +2120,9 @@ static int tm_parse_bin(const uint8_t *B, uint32_t bsz,
                     tt->pd = tnx*vx[0] + tny*vy[0] + tnz*vz[0];
                 }
                 if (nvtx + 3 <= vcap) {
-                    vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr,lg,lb};  /* A */
-                    vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr,lg,lb};  /* C */
-                    vbuf[nvtx++] = (TmVert){vx[1],vy[1],vz[1],lr,lg,lb};  /* B */
+                    vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr,lg,lb,-1.0f,-1.0f};  /* A */
+                    vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr,lg,lb,-1.0f,-1.0f};  /* C */
+                    vbuf[nvtx++] = (TmVert){vx[1],vy[1],vz[1],lr,lg,lb,-1.0f,-1.0f};  /* B */
                 }
 
                 /* --- Quad second triangle: A, D, C (CCW from above) --- */
@@ -2000,9 +2149,9 @@ static int tm_parse_bin(const uint8_t *B, uint32_t bsz,
                         tt->pd = tnx*vx[0] + tny*vy[0] + tnz*vz[0];
                     }
                     if (nvtx + 3 <= vcap) {
-                        vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr1,lg1,lb1};  /* A */
-                        vbuf[nvtx++] = (TmVert){vx[3],vy[3],vz[3],lr1,lg1,lb1};  /* D */
-                        vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr1,lg1,lb1};  /* C */
+                        vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr1,lg1,lb1,-1.0f,-1.0f};  /* A */
+                        vbuf[nvtx++] = (TmVert){vx[3],vy[3],vz[3],lr1,lg1,lb1,-1.0f,-1.0f};  /* D */
+                        vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr1,lg1,lb1,-1.0f,-1.0f};  /* C */
                     }
                 }
             }
@@ -2048,6 +2197,7 @@ void TerrainMesh_Load(const char *exp_path,
     if (!raw) {
         return;
     }
+    g_terrainmesh_tex = tm_upload_xbmp_texture(raw, fsz);
 
     /* Allocate vertex + triangle buffers (generous cap). */
     int cap    = 500000;
@@ -2121,6 +2271,9 @@ void TerrainMesh_Load(const char *exp_path,
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(TmVert),
                           (void *)offsetof(TmVert, r));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(TmVert),
+                          (void *)offsetof(TmVert, u));
     glBindVertexArray(0);
 
     g_terrainmesh_vao = vao;
