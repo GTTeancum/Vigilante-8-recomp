@@ -154,13 +154,38 @@ void Platform_FrameTick(void)
     if ((g_v8_frame_count % 300) == 0)
         fprintf(stderr, "v8: frame phase @%d swap-end\n", g_v8_frame_count);
 
-    /* 60 Hz cap: sleep the unused portion of the 16ms frame budget. */
-    static Uint32 s_last = 0;
-    Uint32 now = SDL_GetTicks();
-    if (s_last == 0) s_last = now;
-    Uint32 elapsed = now - s_last;
-    if (elapsed < 16) SDL_Delay(16 - elapsed);
-    s_last = SDL_GetTicks();
+    /* NTSC tick pacing: keep the rewritten host loop at 60 Hz instead
+     * of the old 16ms sleep, which ran at 62.5 Hz. */
+    static Uint64 s_next_counter = 0;
+    static Uint64 s_frequency = 0;
+    static Uint64 s_frame_remainder = 0;
+    if (s_frequency == 0)
+        s_frequency = SDL_GetPerformanceFrequency();
+    Uint64 frame_ticks = s_frequency / 60;
+    Uint64 frame_rem = s_frequency % 60;
+    if (frame_ticks == 0)
+        frame_ticks = 1;
+    Uint64 now = SDL_GetPerformanceCounter();
+    if (s_next_counter == 0 || now > s_next_counter + frame_ticks * 4) {
+        s_next_counter = now + frame_ticks;
+        s_frame_remainder = frame_rem;
+    } else {
+        s_next_counter += frame_ticks;
+        s_frame_remainder += frame_rem;
+        if (s_frame_remainder >= 60) {
+            s_next_counter++;
+            s_frame_remainder -= 60;
+        }
+    }
+    for (;;) {
+        now = SDL_GetPerformanceCounter();
+        if (now >= s_next_counter)
+            break;
+        Uint64 remaining = s_next_counter - now;
+        Uint32 ms = (Uint32)((remaining * 1000u) / s_frequency);
+        if (ms > 1)
+            SDL_Delay(ms - 1);
+    }
 #endif
 }
 
