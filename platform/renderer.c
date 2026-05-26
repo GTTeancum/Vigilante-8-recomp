@@ -48,6 +48,12 @@ extern uintptr_t DAT_800911a0[32 * 32];
 extern int       g_terrain_loaded;
 extern uint8_t   g_terrain_tile_x_min, g_terrain_tile_x_max;
 extern uint8_t   g_terrain_tile_z_min, g_terrain_tile_z_max;
+extern int       g_terrain_xbmp_w, g_terrain_xbmp_h;
+typedef struct {
+    uint8_t valid;
+    uint16_t u[4], v[4];
+} HostTerrainMaterialRender;
+extern HostTerrainMaterialRender g_terrain_material_render[256];
 
 static const char *VS_SRC =
     "#version 330 core\n"
@@ -122,6 +128,17 @@ static uint32_t terr_sample(int x_cell, int z_cell) {
     return (uint32_t)(raw & 0x7ff);
 }
 
+static uint8_t terr_material_id(int x_cell, int z_cell)
+{
+    int chunk_x = (x_cell >> 6) & 0x1f;
+    int chunk_z = (z_cell >> 6) & 0x1f;
+    uintptr_t base = DAT_800911a0[chunk_x * 32 + chunk_z];
+    if (!base) return 0;
+    uint32_t off = 0x2000u + (uint32_t)((x_cell & 0x3f) * 0x40)
+                 + (uint32_t)(z_cell & 0x3f);
+    return *(uint8_t *)(base + off);
+}
+
 static int host_heap_contains_ptr(uintptr_t p, size_t need)
 {
     uintptr_t base = (uintptr_t)Host_HeapBase();
@@ -134,103 +151,112 @@ static void build_terrain_mesh(void) {
     int is_ski = strstr(g_v8_level_exp_path, "SKIRESRT") != NULL
               || strstr(g_v8_level_exp_path, "Ski") != NULL;
 
-    /* The PSX loader initializes a full flat collision table before the
-     * level's ZMAP replaces detailed chunks.  That backing table is useful
-     * for runtime height fallback, but drawing it as visible world art makes
-     * the level look like an enormous fake flat plane.  For diagnostics, draw
-     * only the ZMAP/ZONE detail tiles; placed XOBF supplies the broader object
-     * and patch geometry. */
+    /* Draw the authored ZMAP/ZONE cells as the terrain skin.  The source
+     * material id per cell selects a TINF record, whose atlas coordinate is
+     * sampled from the level XBMP texture. */
     int col0 = g_terrain_tile_x_min, col1 = g_terrain_tile_x_max;
     int row0 = g_terrain_tile_z_min, row1 = g_terrain_tile_z_max;
-    int step = 2;
-    int verts_x = ((col1 - col0 + 1) * 64) / step;
-    int verts_z = ((row1 - row0 + 1) * 64) / step;
-    int n_verts = verts_x * verts_z;
-    int n_quads = (verts_x - 1) * (verts_z - 1);
+    int step = 1;
+    int cells_x = (col1 - col0 + 1) * 64;
+    int cells_z = (row1 - row0 + 1) * 64;
+    int n_quads = cells_x * cells_z;
+    int n_verts = n_quads * 6;
 
-    float *vbuf = (float *)malloc(sizeof(float) * 6 * n_verts);
-    uint32_t *ibuf = (uint32_t *)malloc(sizeof(uint32_t) * 6 * n_quads);
+    float *vbuf = (float *)malloc(sizeof(float) * 9 * (size_t)n_verts);
+    uint32_t *ibuf = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)n_verts);
     if (!vbuf || !ibuf) { free(vbuf); free(ibuf); return; }
 
-    for (int gz = 0; gz < verts_z; gz++) {
-        for (int gx = 0; gx < verts_x; gx++) {
+    int outv = 0;
+    for (int gz = 0; gz < cells_z; gz++) {
+        for (int gx = 0; gx < cells_x; gx++) {
             int x_cell = col0 * 64 + gx * step;
             int z_cell = row0 * 64 + gz * step;
-            uint32_t h = terr_sample(x_cell, z_cell);
-            /* Convert the 11-bit runtime height to engine world-Y. */
-            int32_t fx = x_cell << 16;
-            int32_t fz = z_cell << 16;
-            int32_t fy = (int32_t)(h << 11);   /* h8 * 2048 → 17.15 world-Y */
-
-            float *p = vbuf + (gz * verts_x + gx) * 6;
-            p[0] = fixed_xz_to_m(fx);
-            p[1] = -fixed_y_to_m(fy);   /* negate: physics Y-down → OpenGL Y-up */
-            p[2] = fixed_xz_to_m(fz);
-            /* Colour: neutral terrain backing with brighter detail chunks.
-             * The flat InitFlatWorld sample is 0x5ff after HEIGHT_MASK. */
+            uint32_t h00 = terr_sample(x_cell, z_cell);
+            uint32_t h10 = terr_sample(x_cell + step, z_cell);
+            uint32_t h01 = terr_sample(x_cell, z_cell + step);
+            uint32_t h11 = terr_sample(x_cell + step, z_cell + step);
             int detail = x_cell >= (int)g_terrain_tile_x_min * 64
                       && x_cell <= ((int)g_terrain_tile_x_max + 1) * 64
                       && z_cell >= (int)g_terrain_tile_z_min * 64
                       && z_cell <= ((int)g_terrain_tile_z_max + 1) * 64;
-            float t = (float)h / 2047.0f;
+            float t = (float)h00 / 2047.0f;
+            float col[3];
             if (detail) {
                 if (is_ski) {
-                    p[3] = 0.70f + 0.22f * t;
-                    p[4] = 0.78f + 0.17f * t;
-                    p[5] = 0.82f + 0.13f * t;
+                    col[0] = 0.70f + 0.22f * t;
+                    col[1] = 0.78f + 0.17f * t;
+                    col[2] = 0.82f + 0.13f * t;
                 } else {
-                    p[3] = 0.28f + 0.20f * t;
-                    p[4] = 0.23f + 0.17f * t;
-                    p[5] = 0.15f + 0.08f * (1.0f - t);
+                    col[0] = 0.28f + 0.20f * t;
+                    col[1] = 0.23f + 0.17f * t;
+                    col[2] = 0.15f + 0.08f * (1.0f - t);
                 }
             } else {
                 if (is_ski) {
-                    p[3] = 0.54f;
-                    p[4] = 0.58f;
-                    p[5] = 0.62f;
+                    col[0] = 0.54f;
+                    col[1] = 0.58f;
+                    col[2] = 0.62f;
                 } else {
-                    p[3] = 0.20f;
-                    p[4] = 0.18f;
-                    p[5] = 0.13f;
+                    col[0] = 0.20f;
+                    col[1] = 0.18f;
+                    col[2] = 0.13f;
                 }
+            }
+
+            uint8_t mat_id = terr_material_id(x_cell, z_cell);
+            HostTerrainMaterialRender *mat = &g_terrain_material_render[mat_id];
+            float uv[4][2] = {{-1.0f,-1.0f},{-1.0f,-1.0f},{-1.0f,-1.0f},{-1.0f,-1.0f}};
+            float tex_kind = 0.0f;
+            if (mat->valid && g_terrain_xbmp_w > 0 && g_terrain_xbmp_h > 0) {
+                for (int i = 0; i < 4; i++) {
+                    uv[i][0] = ((float)mat->u[i] + 0.5f) / (float)g_terrain_xbmp_w;
+                    uv[i][1] = ((float)mat->v[i] + 0.5f) / (float)g_terrain_xbmp_h;
+                }
+                tex_kind = 1.0f;
+            }
+
+            float pos[4][3] = {
+                { (float)x_cell,          -fixed_y_to_m((int32_t)(h00 << 11)), (float)z_cell },
+                { (float)(x_cell + step), -fixed_y_to_m((int32_t)(h10 << 11)), (float)z_cell },
+                { (float)x_cell,          -fixed_y_to_m((int32_t)(h01 << 11)), (float)(z_cell + step) },
+                { (float)(x_cell + step), -fixed_y_to_m((int32_t)(h11 << 11)), (float)(z_cell + step) }
+            };
+            int order[6] = { 0, 2, 1, 1, 2, 3 };
+            for (int oi = 0; oi < 6; oi++) {
+                int k = order[oi];
+                float *dst = vbuf + outv * 9;
+                dst[0] = pos[k][0]; dst[1] = pos[k][1]; dst[2] = pos[k][2];
+                dst[3] = col[0]; dst[4] = col[1]; dst[5] = col[2];
+                dst[6] = uv[k][0]; dst[7] = uv[k][1]; dst[8] = tex_kind;
+                ibuf[outv] = (uint32_t)outv;
+                outv++;
             }
         }
     }
-
-    uint32_t *ip = ibuf;
-    for (int gz = 0; gz < verts_z - 1; gz++) {
-        for (int gx = 0; gx < verts_x - 1; gx++) {
-            uint32_t a = gz * verts_x + gx;
-            uint32_t b = a + 1;
-            uint32_t c = a + verts_x;
-            uint32_t d = c + 1;
-            /* CCW winding viewed from above (camera at large +Y, terrain at -Y
-             * after negation). Cross((c-a),(b-a)) Y-component = +1 always,
-             * so front face normal points +Y → visible from camera above. */
-            *ip++ = a; *ip++ = c; *ip++ = b;
-            *ip++ = b; *ip++ = c; *ip++ = d;
-        }
-    }
-    g_terr_idxCount = 6 * n_quads;
+    g_terr_idxCount = outv;
 
     glGenVertexArrays(1, &g_terr_vao); glBindVertexArray(g_terr_vao);
     glGenBuffers(1, &g_terr_vbo);
     glBindBuffer(GL_ARRAY_BUFFER, g_terr_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * n_verts, vbuf, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 9 * (size_t)n_verts, vbuf, GL_STATIC_DRAW);
     glGenBuffers(1, &g_terr_ibo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_terr_ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(uint32_t) * g_terr_idxCount, ibuf, GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(uint32_t) * (size_t)g_terr_idxCount, ibuf, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float)*6, (void *)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float)*9, (void *)0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(float)*6, (void *)(sizeof(float)*3));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(float)*9, (void *)(sizeof(float)*3));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(float)*9, (void *)(sizeof(float)*6));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(float)*9, (void *)(sizeof(float)*8));
 
     fprintf(stderr, "v8: terrain mesh built -- full tiles [%d..%d]x[%d..%d], "
-            "detail tiles [%d..%d]x[%d..%d], %d verts, %d tris\n",
+            "detail tiles [%d..%d]x[%d..%d], %d verts, %d tris, xbmp=%dx%d\n",
             col0, col1, row0, row1,
             g_terrain_tile_x_min, g_terrain_tile_x_max,
             g_terrain_tile_z_min, g_terrain_tile_z_max,
-            n_verts, g_terr_idxCount / 3);
+            outv, g_terr_idxCount / 3, g_terrain_xbmp_w, g_terrain_xbmp_h);
 
     free(vbuf);
     free(ibuf);
@@ -585,15 +611,23 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
     /* Draw the decoded ZONE heightmap first as a cropped diagnostic floor.
      * Placed XOBF geometry is drawn afterward so object/occluder placement is
      * not hidden by the fallback terrain surface. */
-    if (g_terr_idxCount > 0 &&
-        !(V8_RENDER_XOBF_VISUALS && g_terrainmesh_vao && g_terrainmesh_vtx > 0)) {
+    if (g_terr_idxCount > 0) {
         glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
+        if (g_terrainmesh_xbmp_tex) {
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, g_terrainmesh_xbmp_tex);
+            glUniform1i(g_loc_tex2, 1);
+            glUniform1i(g_loc_useTex, 1);
+        } else {
+            glUniform1i(g_loc_useTex, 0);
+        }
         mat4_mul(VP, I, MVP);
         glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
         glBindVertexArray(g_terr_vao);
         glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(-1.0f, -1.0f);
         glDrawElements(GL_TRIANGLES, g_terr_idxCount, GL_UNSIGNED_INT, 0);
+        glUniform1i(g_loc_useTex, 0);
         glDisable(GL_POLYGON_OFFSET_FILL);
 #if V8_TERRAIN_WIREFRAME_OVERLAY
         glUniform3f(g_loc_tint, 0.02f, 0.02f, 0.02f);

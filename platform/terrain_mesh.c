@@ -271,6 +271,15 @@ GLuint g_terrainmesh_xbmp_tex = 0;
 int    g_terrainmesh_vtx = 0;
 int    g_terrainmesh_tex_w = 0;
 int    g_terrainmesh_tex_h = 0;
+static int g_terrainmesh_xbmp_w = 0;
+static int g_terrainmesh_xbmp_h = 0;
+static int g_terrainmesh_xbmp_x = 0;
+static int g_terrainmesh_xbmp_y = 0;
+static int g_tm_uv_ground_xbmp = 0;
+static int g_tm_uv_ground_xbmp_oob = 0;
+static int g_tm_uv_ground_none = 0;
+static int g_tm_uv_xobf = 0;
+static int g_tm_uv_none = 0;
 
 /* ---- Config ---- */
 #define TERR_SCALE      (1.0f / 16.0f)   /* fallback unplaced BIN scale */
@@ -480,6 +489,8 @@ static GLuint tm_upload_xbmp_texture(const uint8_t *raw, uint32_t raw_size)
     int image_w = tm_pixel_width_from_words(image_words, depth);
     uint32_t pix_off = image_off + 0x14;
     uint32_t pix_size = (uint32_t)(image_w * image_h);
+    int image_x = tm_rds16le(p, image_off + 0x0c);
+    int image_y = tm_rds16le(p, image_off + 0x0e);
     if (image_w <= 0 || image_h <= 0 || pix_off + pix_size > size)
         return 0;
 
@@ -510,17 +521,19 @@ static GLuint tm_upload_xbmp_texture(const uint8_t *raw, uint32_t raw_size)
     glBindTexture(GL_TEXTURE_2D, 0);
     free(rgba);
 
-    g_terrainmesh_tex_w = image_w;
-    g_terrainmesh_tex_h = image_h;
-    fprintf(stderr, "v8: TerrainMesh -- uploaded XBMP texture %dx%d flags=0x%x\n",
-            image_w, image_h, (unsigned)flags);
+    g_terrainmesh_xbmp_w = image_w;
+    g_terrainmesh_xbmp_h = image_h;
+    g_terrainmesh_xbmp_x = image_x;
+    g_terrainmesh_xbmp_y = image_y;
+    fprintf(stderr, "v8: TerrainMesh -- uploaded XBMP texture %dx%d vram=(%d,%d) flags=0x%x\n",
+            image_w, image_h, image_x, image_y, (unsigned)flags);
     return tex;
 }
 
 static int tm_decode_packet_uv(const uint8_t *B, uint32_t po,
                                int nib, float uv[4][2])
 {
-    if (g_terrainmesh_tex_w <= 0 || g_terrainmesh_tex_h <= 0)
+    if (g_terrainmesh_xbmp_w <= 0 || g_terrainmesh_xbmp_h <= 0)
         return 0;
 
     uint32_t uvbase = 0;
@@ -551,8 +564,15 @@ static int tm_decode_packet_uv(const uint8_t *B, uint32_t po,
     for (int i = 0; i < 4; i++) {
         uint8_t u = B[po + uvbase + (uint32_t)i * 2u + 0u];
         uint8_t v = B[po + uvbase + (uint32_t)i * 2u + 1u];
-        uv[i][0] = (page_x + (float)u + 0.5f) / (float)g_terrainmesh_tex_w;
-        uv[i][1] = (page_y + (float)v + 0.5f) / (float)g_terrainmesh_tex_h;
+        float x = page_x + (float)u - (float)g_terrainmesh_xbmp_x;
+        float y = page_y + (float)v - (float)g_terrainmesh_xbmp_y;
+        if (x < 0.0f || y < 0.0f ||
+            x >= (float)g_terrainmesh_xbmp_w ||
+            y >= (float)g_terrainmesh_xbmp_h) {
+            return 0;
+        }
+        uv[i][0] = (x + 0.5f) / (float)g_terrainmesh_xbmp_w;
+        uv[i][1] = (y + 0.5f) / (float)g_terrainmesh_xbmp_h;
     }
     return 1;
 }
@@ -1323,6 +1343,14 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                                                     (int)tex_base, uv);
                 tex_kind = 0.0f;
             }
+            if (ground0) {
+                if (has_uv && tex_kind > 0.5f) g_tm_uv_ground_xbmp++;
+                else if (has_uv) g_tm_uv_xobf++;
+                else g_tm_uv_ground_none++;
+            } else {
+                if (has_uv) g_tm_uv_xobf++;
+                else g_tm_uv_none++;
+            }
 #else
             has_uv = tm_decode_packet_uv(B, po, nib, uv);
 #endif
@@ -1371,6 +1399,14 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                         memcpy(uv1, uv, sizeof(uv1));
                         tex_kind1 = tex_kind;
                     }
+                }
+                if (ground1) {
+                    if (has_uv1 && tex_kind1 > 0.5f) g_tm_uv_ground_xbmp++;
+                    else if (has_uv1) g_tm_uv_xobf++;
+                    else g_tm_uv_ground_none++;
+                } else {
+                    if (has_uv1) g_tm_uv_xobf++;
+                    else g_tm_uv_none++;
                 }
                 if (ground1) {
                     float gy = (vy[0] + vy[2] + vy[3]) * (1.0f / 3.0f);
@@ -1887,6 +1923,9 @@ static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
     fprintf(stderr, "v8: TerrainMesh -- instanced XOBF banks=%d heads=%d roots=%d junc_nodes=%d rsegs=%d rtypes=%d junc_tris=%d route_tris=%d cpu_tris=%d gpu_vtx=%d bad_pkts=%d\n",
             nbanks, nheads, roots, njuncs, nrsegs, nrtypes,
             junc_patch_tris, route_tris, ntris, nvtx, bad);
+    fprintf(stderr, "v8: TerrainMesh -- texture uv ground_xbmp=%d ground_none=%d xobf=%d untextured=%d\n",
+            g_tm_uv_ground_xbmp, g_tm_uv_ground_none,
+            g_tm_uv_xobf, g_tm_uv_none);
     fprintf(stderr, "v8: TerrainMesh -- placed obstacle leaf objects=%d\n",
             g_obstacle_nobjs);
     if (g_object_bsp != NULL) {
@@ -2238,6 +2277,15 @@ void TerrainMesh_Load(const char *exp_path,
                       float world_x_centre, float world_z_centre)
 {
     tm_clear_obstacles();
+    g_terrainmesh_xbmp_w = 0;
+    g_terrainmesh_xbmp_h = 0;
+    g_terrainmesh_xbmp_x = 0;
+    g_terrainmesh_xbmp_y = 0;
+    g_tm_uv_ground_xbmp = 0;
+    g_tm_uv_ground_xbmp_oob = 0;
+    g_tm_uv_ground_none = 0;
+    g_tm_uv_xobf = 0;
+    g_tm_uv_none = 0;
 
     uint32_t fsz = 0;
     uint8_t *raw = tm_load_exp_blob(exp_path, &fsz, "TerrainMesh");
@@ -2337,6 +2385,15 @@ void TerrainMesh_LoadCpuOnly(const char *exp_path,
                              float world_x_centre, float world_z_centre)
 {
     tm_clear_obstacles();
+    g_terrainmesh_xbmp_w = 0;
+    g_terrainmesh_xbmp_h = 0;
+    g_terrainmesh_xbmp_x = 0;
+    g_terrainmesh_xbmp_y = 0;
+    g_tm_uv_ground_xbmp = 0;
+    g_tm_uv_ground_xbmp_oob = 0;
+    g_tm_uv_ground_none = 0;
+    g_tm_uv_xobf = 0;
+    g_tm_uv_none = 0;
 
     uint32_t fsz = 0;
     uint8_t *raw = tm_load_exp_blob(exp_path, &fsz, "TerrainMesh CPU");

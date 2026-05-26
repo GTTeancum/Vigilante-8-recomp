@@ -53,6 +53,14 @@ uintptr_t DAT_800911a0[32 * 32];
 int      g_terrain_loaded = 0;
 uint8_t  g_terrain_tile_x_min = 0, g_terrain_tile_x_max = 0;
 uint8_t  g_terrain_tile_z_min = 0, g_terrain_tile_z_max = 0;
+int      g_terrain_xbmp_w = 0, g_terrain_xbmp_h = 0;
+
+typedef struct {
+    uint8_t valid;
+    uint16_t u[4], v[4];
+} HostTerrainMaterialRender;
+
+HostTerrainMaterialRender g_terrain_material_render[256];
 
 /* Original LOAD.DLL calls Terrain_InitFlatWorld before it loads any ZONE
  * chunks. That routine fills every DAT_800911a0 slot with a valid 0x3000-byte
@@ -154,19 +162,62 @@ static uint8_t *convert_zone_to_runtime_chunk(const uint8_t *zone, uint32_t zone
 static void load_tinf_materials(const uint8_t *tinf, uint32_t tinf_size)
 {
     memset(DAT_8008f020, 0, 0x2000);
+    memset(g_terrain_material_render, 0, sizeof(g_terrain_material_render));
     uint32_t n = tinf_size / 0x28u;
     if (n > 256u)
         n = 256u;
     for (uint32_t i = 0; i < n; i++) {
         const uint8_t *src = tinf + i * 0x28u;
         uint8_t *dst = DAT_8008f020 + i * 0x20u;
+        uint16_t base_u = be16(src + 2);
+        uint16_t base_v = be16(src + 4);
         for (uint32_t j = 0; j < 7; j++) {
             uint16_t v = be16(src + (4u + j) * 2u);
             *(uint16_t *)(dst + 0x10u + j * 2u) = v;
         }
         *(uint16_t *)(dst + 0x1eu) = (uint16_t)((be16(src + 6) >> 11) & 1u);
+
+        g_terrain_material_render[i].valid = 1;
+        g_terrain_material_render[i].u[0] = base_u;
+        g_terrain_material_render[i].v[0] = base_v;
+        g_terrain_material_render[i].u[1] = (uint16_t)(base_u + 48u);
+        g_terrain_material_render[i].v[1] = base_v;
+        g_terrain_material_render[i].u[2] = base_u;
+        g_terrain_material_render[i].v[2] = (uint16_t)(base_v + 48u);
+        g_terrain_material_render[i].u[3] = (uint16_t)(base_u + 48u);
+        g_terrain_material_render[i].v[3] = (uint16_t)(base_v + 48u);
     }
     fprintf(stderr, "v8: TINF materials loaded -- %u records\n", (unsigned)n);
+}
+
+static int psx_pixel_width_from_words(int words, int depth)
+{
+    if (depth == 0) return words * 4;
+    if (depth == 1) return words * 2;
+    return words;
+}
+
+static void load_xbmp_meta(const uint8_t *xbmp, uint32_t xbmp_size)
+{
+    g_terrain_xbmp_w = 0;
+    g_terrain_xbmp_h = 0;
+    if (xbmp == NULL || xbmp_size < 0x220)
+        return;
+    uint32_t flags = (uint32_t)xbmp[4] | ((uint32_t)xbmp[5] << 8)
+                   | ((uint32_t)xbmp[6] << 16) | ((uint32_t)xbmp[7] << 24);
+    uint32_t image_off = (uint32_t)xbmp[8] | ((uint32_t)xbmp[9] << 8)
+                       | ((uint32_t)xbmp[10] << 16) | ((uint32_t)xbmp[11] << 24);
+    int depth = (int)(flags & 3u);
+    if (image_off + 0x14 > xbmp_size)
+        return;
+    int words = (int)(int16_t)((uint16_t)xbmp[image_off + 0x10]
+                             | ((uint16_t)xbmp[image_off + 0x11] << 8));
+    int h = (int)(int16_t)((uint16_t)xbmp[image_off + 0x12]
+                         | ((uint16_t)xbmp[image_off + 0x13] << 8));
+    g_terrain_xbmp_w = psx_pixel_width_from_words(words, depth);
+    g_terrain_xbmp_h = h;
+    fprintf(stderr, "v8: XBMP terrain texture meta -- %dx%d depth=%d\n",
+            g_terrain_xbmp_w, g_terrain_xbmp_h, depth);
 }
 
 /* Public: load + parse + wire-up. Path is a V8-style "TRACK\\Foo.TER";
@@ -219,7 +270,14 @@ int Host_TerrainLoad(const char *exp_path)
         load_tinf_materials(tinf, tinf_size);
     } else {
         memset(DAT_8008f020, 0, 0x2000);
+        memset(g_terrain_material_render, 0, sizeof(g_terrain_material_render));
         fprintf(stderr, "v8: TINF materials not found\n");
+    }
+
+    {
+        uint32_t xbmp_size = 0;
+        const uint8_t *xbmp = find_chunk(form_body, form_inner_size, "XBMP", &xbmp_size);
+        load_xbmp_meta(xbmp, xbmp_size);
     }
 
     /* LOAD.DLL FUN_801005e8 raw-copies AIMP and exposes it via the
