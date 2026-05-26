@@ -62,6 +62,19 @@ typedef struct {
 
 HostTerrainMaterialRender g_terrain_material_render[256];
 
+/* LOAD.DLL data at 0x80106dbc. FUN_80105550 uses (tinf[+6] & 7) to
+ * select one row, then adds these four UV pairs to the material base. */
+static const uint8_t g_tinf_uv_corners[8][8] = {
+    { 0,31, 31,31,  0, 0, 31, 0 },
+    {31,31,  0,31, 31, 0,  0, 0 },
+    { 0, 0,  0,31, 31, 0, 31,31 },
+    { 0,31,  0, 0, 31,31, 31, 0 },
+    {31, 0,  0, 0, 31,31,  0,31 },
+    { 0, 0, 31, 0,  0,31, 31,31 },
+    {31,31, 31, 0,  0,31,  0, 0 },
+    {31, 0, 31,31,  0, 0,  0,31 },
+};
+
 /* Original LOAD.DLL calls Terrain_InitFlatWorld before it loads any ZONE
  * chunks. That routine fills every DAT_800911a0 slot with a valid 0x3000-byte
  * flat chunk, then the level ZMAP replaces only detailed chunks. Keep the
@@ -169,23 +182,24 @@ static void load_tinf_materials(const uint8_t *tinf, uint32_t tinf_size)
     for (uint32_t i = 0; i < n; i++) {
         const uint8_t *src = tinf + i * 0x28u;
         uint8_t *dst = DAT_8008f020 + i * 0x20u;
-        uint16_t base_u = be16(src + 2);
+        uint16_t base_word = be16(src + 2);
         uint16_t base_v = be16(src + 4);
+        uint16_t tile_word = be16(src + 6);
+        uint16_t base_u = (uint16_t)(base_word & 0x7fu);
+        uint32_t tile = (uint32_t)(tile_word & 7u);
         for (uint32_t j = 0; j < 7; j++) {
             uint16_t v = be16(src + (4u + j) * 2u);
             *(uint16_t *)(dst + 0x10u + j * 2u) = v;
         }
-        *(uint16_t *)(dst + 0x1eu) = (uint16_t)((be16(src + 6) >> 11) & 1u);
+        *(uint16_t *)(dst + 0x1eu) = (uint16_t)((tile_word >> 11) & 1u);
 
         g_terrain_material_render[i].valid = 1;
-        g_terrain_material_render[i].u[0] = base_u;
-        g_terrain_material_render[i].v[0] = base_v;
-        g_terrain_material_render[i].u[1] = (uint16_t)(base_u + 48u);
-        g_terrain_material_render[i].v[1] = base_v;
-        g_terrain_material_render[i].u[2] = base_u;
-        g_terrain_material_render[i].v[2] = (uint16_t)(base_v + 48u);
-        g_terrain_material_render[i].u[3] = (uint16_t)(base_u + 48u);
-        g_terrain_material_render[i].v[3] = (uint16_t)(base_v + 48u);
+        for (uint32_t j = 0; j < 4; j++) {
+            g_terrain_material_render[i].u[j] =
+                (uint16_t)(base_u + g_tinf_uv_corners[tile][j * 2u + 0u]);
+            g_terrain_material_render[i].v[j] =
+                (uint16_t)(base_v + g_tinf_uv_corners[tile][j * 2u + 1u]);
+        }
     }
     fprintf(stderr, "v8: TINF materials loaded -- %u records\n", (unsigned)n);
 }
