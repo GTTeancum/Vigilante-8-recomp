@@ -40,6 +40,7 @@ extern int      g_v8_auto_fire_period;
 extern uint32_t uRam0000062c;
 extern uint32_t uRam00000630;
 extern uint8_t  DAT_80065c28[];
+extern void     Platform_PumpEventsOnly(void);
 extern void     Platform_FrameTick(void);
 extern void     Audio_PumpHeadless(int frames_per_tick);
 extern int      Screenshot_Save(const char *path);
@@ -135,6 +136,7 @@ static uint32_t read_pad_input(void)
     }
 
 #if defined(V8_HAVE_SDL)
+    Platform_PumpEventsOnly();
     const Uint8 *k = SDL_GetKeyboardState(NULL);
     if (k) {
         if (k[SDL_SCANCODE_UP]    || k[SDL_SCANCODE_W]) pad |= 0x10000000;
@@ -164,9 +166,18 @@ void Pad_Tick(void)
 
 uint32_t Host_PadShimTick(void)
 {
+    static uint32_t prev_logged_pad = 0;
+    static int transition_logs = 0;
+
     g_v8_frame_count++;
 
     uint32_t pad = read_pad_input();
+    if (pad != prev_logged_pad && transition_logs < 64) {
+        fprintf(stderr, "v8: pad transition @%d pad=0x%08x\n",
+                g_v8_frame_count, pad);
+        prev_logged_pad = pad;
+        transition_logs++;
+    }
     uRam0000062c = pad;
     uRam00000630 = 0;
     update_physics_input_lut(pad);

@@ -102,20 +102,10 @@ void Platform_Shutdown(void)
 #endif
 }
 
-/* Called once per logical frame from sched_shim.c / pad_shim.c.
- * Pumps SDL events, clears + swaps the GL backbuffer. */
-void Platform_FrameTick(void)
+static void platform_pump_events(void)
 {
 #if defined(V8_HAVE_SDL)
-    if (!g_initialized) return;
-    extern int g_v8_frame_count;
-    static int s_phase_log_frame = 0;
-
     SDL_Event e;
-    if (g_v8_frame_count >= s_phase_log_frame) {
-        fprintf(stderr, "v8: frame phase @%d poll\n", g_v8_frame_count);
-        s_phase_log_frame = g_v8_frame_count + 300;
-    }
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) {
             fprintf(stderr, "v8: SDL_QUIT received\n");
@@ -127,6 +117,31 @@ void Platform_FrameTick(void)
             exit(0);
         }
     }
+#endif
+}
+
+void Platform_PumpEventsOnly(void)
+{
+#if defined(V8_HAVE_SDL)
+    if (!g_initialized) return;
+    platform_pump_events();
+#endif
+}
+
+/* Called once per logical frame from sched_shim.c / pad_shim.c.
+ * Pumps SDL events, clears + swaps the GL backbuffer. */
+void Platform_FrameTick(void)
+{
+#if defined(V8_HAVE_SDL)
+    if (!g_initialized) return;
+    extern int g_v8_frame_count;
+    static int s_phase_log_frame = 0;
+
+    if (g_v8_frame_count >= s_phase_log_frame) {
+        fprintf(stderr, "v8: frame phase @%d poll\n", g_v8_frame_count);
+        s_phase_log_frame = g_v8_frame_count + 300;
+    }
+    platform_pump_events();
   #if defined(V8_HAVE_GL)
     extern void Renderer_DrawFrame(int w, int h, int frame_idx);
     if ((g_v8_frame_count % 300) == 0)

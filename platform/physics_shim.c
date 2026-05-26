@@ -92,6 +92,18 @@ static int motion_stalled_after_tick(const uint32_t before[13],
     return position_equal(before, after) && has_nonzero_motion(after);
 }
 
+static int input_active_for_vehicle(uint8_t *obj)
+{
+    if (!obj)
+        return 0;
+    int16_t status = *(int16_t *)(obj + 0x06);
+    if (status >= 0)
+        return 0;
+    uint32_t idx = (uint32_t)~(int32_t)status * 24u;
+    uint32_t flags = *(uint32_t *)(DAT_80065c28 + idx + 0x08);
+    return (flags & 0x00041f00u) != 0;
+}
+
 typedef struct HostObjListNode {
     struct HostObjListNode *next;
     struct HostObjListNode *prev;
@@ -127,8 +139,12 @@ void Physics_Step(uint32_t catchupFlag)
 {
     static int call_count = 0;
     static int log_first = 1;
-    static int player_stall_frames = 0;
-    static int opponent_stall_frames = 0;
+    static uint32_t player_prev_after[13];
+    static uint32_t opponent_prev_after[13];
+    static int player_same_pos_frames = 0;
+    static int opponent_same_pos_frames = 0;
+    static int have_player_prev = 0;
+    static int have_opponent_prev = 0;
     if (log_first) {
         fprintf(stderr, "v8: Physics_Step first call (puRam000007d0=%p)\n",
                 puRam000007d0);
@@ -157,24 +173,29 @@ void Physics_Step(uint32_t catchupFlag)
     }
     snapshot_motion(player, player_after);
     snapshot_motion(opponent, opponent_after);
-    if (motion_stalled_after_tick(player_before, player_after))
-        player_stall_frames++;
+    if (have_player_prev && position_equal(player_prev_after, player_after))
+        player_same_pos_frames++;
     else
-        player_stall_frames = 0;
-    if (motion_stalled_after_tick(opponent_before, opponent_after))
-        opponent_stall_frames++;
+        player_same_pos_frames = 0;
+    if (have_opponent_prev && position_equal(opponent_prev_after, opponent_after))
+        opponent_same_pos_frames++;
     else
-        opponent_stall_frames = 0;
+        opponent_same_pos_frames = 0;
+    for (int i = 0; i < 13; i++) {
+        player_prev_after[i] = player_after[i];
+        opponent_prev_after[i] = opponent_after[i];
+    }
+    have_player_prev = player != NULL;
+    have_opponent_prev = opponent != NULL;
 
     if (ticked && player && Object_CallbackFromPsxSlot(player) != 0 &&
-        ((!list_has_player && call_count > 60) ||
-         (player_stall_frames >= 60 && call_count > 300))) {
+        !list_has_player && call_count > 60) {
         static int logged_player_fallback = 0;
         uint32_t direct_before[13], direct_after[13];
         if (!logged_player_fallback) {
             fprintf(stderr,
-                    "v8: Physics_Step sustained player stall candidate (%d frames) at frame %d; direct fallback disabled\n",
-                    player_stall_frames, call_count);
+                    "v8: Physics_Step player missing from source tick list at frame %d; direct fallback disabled\n",
+                    call_count);
             logged_player_fallback = 1;
         }
 #if 0
@@ -196,14 +217,13 @@ void Physics_Step(uint32_t catchupFlag)
 #endif
     }
     if (ticked && opponent && Object_CallbackFromPsxSlot(opponent) != 0 &&
-        ((!list_has_opponent && call_count > 60) ||
-         (opponent_stall_frames >= 60 && call_count > 300))) {
+        !list_has_opponent && call_count > 60) {
         static int logged_opponent_fallback = 0;
         uint32_t direct_before[13], direct_after[13];
         if (!logged_opponent_fallback) {
             fprintf(stderr,
-                    "v8: Physics_Step sustained opponent stall candidate (%d frames) at frame %d; direct fallback disabled\n",
-                    opponent_stall_frames, call_count);
+                    "v8: Physics_Step opponent missing from source tick list at frame %d; direct fallback disabled\n",
+                    call_count);
             logged_opponent_fallback = 1;
         }
 #if 0
@@ -228,6 +248,24 @@ void Physics_Step(uint32_t catchupFlag)
         fprintf(stderr, "v8: match timer expired at frame %d -- triggering ResultScreen\n",
                 call_count);
         iRam00000624 = 1;
+    }
+    if (player_same_pos_frames >= 180 && input_active_for_vehicle(player) &&
+        (player_same_pos_frames % 180) == 0) {
+        fprintf(stderr,
+                "v8: Physics_Step player position unchanged for 180 frames while input is active at frame %d pos=(0x%x,0x%x,0x%x) vel=(%d,%d,%d)\n",
+                call_count,
+                player_after[1], player_after[2], player_after[3],
+                (int32_t)player_after[4], (int32_t)player_after[5],
+                (int32_t)player_after[6]);
+    }
+    if (opponent_same_pos_frames >= 180 && input_active_for_vehicle(opponent) &&
+        (opponent_same_pos_frames % 180) == 0) {
+        fprintf(stderr,
+                "v8: Physics_Step opponent position unchanged for 180 frames while input is active at frame %d pos=(0x%x,0x%x,0x%x) vel=(%d,%d,%d)\n",
+                call_count,
+                opponent_after[1], opponent_after[2], opponent_after[3],
+                (int32_t)opponent_after[4], (int32_t)opponent_after[5],
+                (int32_t)opponent_after[6]);
     }
     if (call_count == 60 || call_count == 120 || call_count == 240 ||
         call_count == 480 || call_count == 600 || call_count == 720 ||

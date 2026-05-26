@@ -39,10 +39,12 @@ typedef struct HostEventQueueNode {
 
 static HostEventQueueNode s_event_nodes[2048];
 static uint32_t s_event_next;
+static HostEventQueueNode *s_event_free;
 
 void ObjectEventQueue_HostReset(void)
 {
     s_event_next = 0;
+    s_event_free = NULL;
     for (uint32_t i = 0; i < (uint32_t)(sizeof s_event_nodes / sizeof s_event_nodes[0]); i++) {
         s_event_nodes[i].next = NULL;
         s_event_nodes[i].prev = NULL;
@@ -53,9 +55,31 @@ void ObjectEventQueue_HostReset(void)
 
 static HostEventQueueNode *event_node_alloc(void)
 {
+    HostEventQueueNode *node;
+
+    if (s_event_free != NULL) {
+        node = s_event_free;
+        s_event_free = s_event_free->next;
+        node->next = NULL;
+        node->prev = NULL;
+        node->obj = NULL;
+        node->deadline = 0;
+        return node;
+    }
     if (s_event_next >= (uint32_t)(sizeof s_event_nodes / sizeof s_event_nodes[0]))
         return NULL;
     return &s_event_nodes[s_event_next++];
+}
+
+static void event_node_free(HostEventQueueNode *node)
+{
+    if (node == NULL)
+        return;
+    node->prev = NULL;
+    node->obj = NULL;
+    node->deadline = 0;
+    node->next = s_event_free;
+    s_event_free = node;
 }
 
 static HostEventQueueNode *event_sentinel(void)
@@ -99,10 +123,8 @@ static void event_unlink(HostEventQueueNode *node)
         sentinel->next = node->next;
     if (sentinel->prev == node)
         sentinel->prev = (node->prev == sentinel) ? sentinel : node->prev;
-    node->next = NULL;
-    node->prev = NULL;
-    node->obj = NULL;
     event_tail_sync();
+    event_node_free(node);
 }
 
 static void event_remove_obj(uint32_t *obj)
@@ -164,11 +186,13 @@ void ObjectEventQueue_Tick(uint32_t tick)
     for (;;) {
         HostEventQueueNode *node = sentinel->next;
         uint32_t *obj;
+        uint32_t deadline;
 
         if (node == NULL || tick < node->deadline)
             break;
 
         obj = node->obj;
+        deadline = node->deadline;
         event_unlink(node);
         if (obj != 0) {
             *obj &= 0xfffffffeu;
@@ -181,7 +205,7 @@ void ObjectEventQueue_Tick(uint32_t tick)
                         (unsigned)obj[0],
                         (int)*(int16_t *)((uint8_t *)obj + 0x06),
                         (unsigned)*(uint8_t *)((uint8_t *)obj + 0xd0),
-                        (unsigned)node->deadline);
+                        (unsigned)deadline);
             }
             if (cb != (ObjTickFn)0)
                 cb(obj, 2, 0);
