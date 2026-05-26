@@ -277,6 +277,47 @@ int TerrainMesh_ObstacleHeightAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
                                        terrain_y, NULL, out_y);
 }
 
+static int32_t tm_abs_i32(int32_t v)
+{
+    return (v < 0) ? (int32_t)(0u - (uint32_t)v) : v;
+}
+
+static int32_t tm_radius_from_obstacle_stream(const uint8_t *stream)
+{
+    int32_t best = 0x10000;
+    const uint8_t *p = stream;
+    int guard = 0;
+
+    if (p == NULL) return best;
+    while (guard++ < 256) {
+        int16_t kind = *(const int16_t *)p;
+        if (kind == 0) break;
+        if (kind == 1) {
+            const int32_t *box = (const int32_t *)(p + 4);
+            for (int i = 0; i < 6; i++) {
+                int32_t a = tm_abs_i32(box[i]);
+                if (a > best) best = a;
+            }
+            p += 0x1c;
+        } else if (kind == 2) {
+            uint16_t count = *(const uint16_t *)(p + 2);
+            const int16_t *s = (const int16_t *)(p + 4);
+            for (uint16_t i = 0; i < count; i++) {
+                int32_t x = (int32_t)s[i * 6 + 0] << 12;
+                int32_t y = (int32_t)s[i * 6 + 1] << 12;
+                int32_t z = (int32_t)s[i * 6 + 2] << 12;
+                int32_t r = ((int32_t)(uint16_t)s[i * 6 + 3]) << 12;
+                int32_t candidate = tm_abs_i32(x) + tm_abs_i32(y) + tm_abs_i32(z) + r;
+                if (candidate > best) best = candidate;
+            }
+            p += 4 + (size_t)count * 12;
+        } else {
+            break;
+        }
+    }
+    return best;
+}
+
 /* ------------------------------------------------------------------ */
 /* Everything below requires SDL + OpenGL.                             */
 /* ------------------------------------------------------------------ */
@@ -1799,7 +1840,10 @@ static void tm_obstacle_obj_add(const MATRIX *mat, const uint8_t *stream,
     if (stream == NULL || *count >= cap) return;
     TmObstacleObj *o = &objs[(*count)++];
     memset(o->obj, 0, sizeof(o->obj));
+    *(uint32_t *)(o->obj + 0x00) = 0x40u;
+    *(int16_t  *)(o->obj + 0x06) = (int16_t)(0x6000 + (*count & 0x1fff));
     memcpy(o->obj + 0x10, mat, sizeof(*mat));
+    *(int32_t  *)(o->obj + 0x54) = tm_radius_from_obstacle_stream(stream);
     *(uint32_t *)(o->obj + 0x5c) = (uint32_t)(uintptr_t)stream;
     o->root_x = root_x;
     o->root_z = root_z;
