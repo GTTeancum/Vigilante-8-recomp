@@ -1736,14 +1736,10 @@ static void tm_build_slot_like_original(const TmBank *bank, int slot,
     if (key < 0 && (key != -1 || ((flags & 4) != 0))) {
         /* FUN_8001b0c4 scans an object's first-child/next-sibling slot chain for
          * key0 values in the 0xcxxx range and builds one extra render group
-         * at obj+0x68.  That group is rendered with the parent object's
-         * matrix, not as a separate transformed child object.  Keep it in
-         * the diagnostic visual/CPU store so level occluders/alternate
-         * object meshes are not silently dropped. */
-        if ((((uint16_t)key) & 0xf000u) == 0xc000u) {
-            tm_emit_group(bank, (uint32_t)(((uint16_t)key) & 0x07ffu), parent_xf,
-                          vbuf, vcap, nvtx, tribuf, tcap, ntris, bad);
-        }
+         * at obj+0x68. Static HEAD placement does not automatically render
+         * those alternates; drawing every one creates large grey state/LOD
+         * panels around Wild West buildings. Keep walking siblings exactly
+         * like FUN_8001ac44, but do not emit the state-controlled group here. */
         if ((flags & 1) != 0 && next_sibling != -1) {
             tm_build_slot_like_original(bank, next_sibling, parent_xf, 0, flags,
                                         depth + 1, seen, vbuf, vcap,
