@@ -91,6 +91,8 @@ static int    g_terrain_ntris = 0;
 
 typedef struct {
     uint8_t obj[0x80];
+    uint8_t coll_shape[0x20];
+    const uint8_t *probe_stream;
     int32_t root_x;
     int32_t root_z;
     int next_in_leaf;
@@ -115,6 +117,7 @@ static int              g_object_bsp_nnodes = 0;
 static int              g_object_bsp_root = -1;
 
 extern void  Heap_Free(void *p);
+extern void *FUN_8001178c(uint32_t size, uint32_t mode);
 extern void RotMatrixYXZ_gte(const SVECTOR *r, MATRIX *m);
 extern long CompMatrixLV(const MATRIX *m0, const MATRIX *m1, MATRIX *m2);
 extern int32_t Terrain_HeightAt(uint32_t x, uint32_t z);
@@ -123,9 +126,20 @@ extern int rcos(int a);
 extern int Object_FindObstacleAt(int *parent_obj, int terrain_y,
                                  int *posXyz, int16_t *normalOut);
 
+static int32_t tm_q12_mul_i32(int32_t a, int32_t b)
+{
+    return (int32_t)(((int64_t)a * (int64_t)b) >> 12);
+}
+
+static int32_t tm_q12_dot3_i32(int32_t a0, int32_t a1, int32_t a2,
+                               int32_t b0, int32_t b1, int32_t b2)
+{
+    return (int32_t)(((int64_t)a0 * b0 + (int64_t)a1 * b1 + (int64_t)a2 * b2) >> 12);
+}
+
 static void tm_clear_obstacles(void)
 {
-    free(g_obstacle_objs);
+    Heap_Free(g_obstacle_objs);
     g_obstacle_objs = NULL;
     g_obstacle_nobjs = 0;
     Heap_Free(g_obstacle_raw);
@@ -248,8 +262,12 @@ int TerrainMesh_ObstacleProbeAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
     int i = (leaf >= 0) ? g_object_bsp[leaf].first_obj : 0;
 
     while (i >= 0 && i < g_obstacle_nobjs) {
+        uint32_t saved_shape = *(uint32_t *)(g_obstacle_objs[i].obj + 0x5c);
+        *(uint32_t *)(g_obstacle_objs[i].obj + 0x5c) =
+            (uint32_t)(uintptr_t)g_obstacle_objs[i].probe_stream;
         int32_t hit = Object_FindObstacleAt((int *)g_obstacle_objs[i].obj,
                                             terrain_y, pos, normal);
+        *(uint32_t *)(g_obstacle_objs[i].obj + 0x5c) = saved_shape;
         if (hit != 0 && (!found || hit < best_y)) {
             best_y = hit;
             best_normal[0] = normal[0];
@@ -268,6 +286,104 @@ int TerrainMesh_ObstacleProbeAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
     }
     if (found && out_y != NULL) *out_y = best_y;
     return found;
+}
+
+uint32_t TerrainMesh_CollidePropObjects(intptr_t obj)
+{
+    if (g_obstacle_objs == NULL || g_obstacle_nobjs <= 0) return 1;
+    static int disabled_cached = -1;
+    static int trace_cached = -1;
+    static int trace_count = 0;
+    if (disabled_cached < 0) {
+        const char *env = getenv("V8_DISABLE_PROP_COLLISION");
+        disabled_cached = (env != NULL && env[0] != 0 && env[0] != '0');
+    }
+    if (disabled_cached) return 1;
+    if (trace_cached < 0) {
+        const char *env = getenv("V8_TRACE_PROP_COLLISION");
+        trace_cached = (env != NULL && env[0] != 0 && env[0] != '0');
+    }
+
+    int32_t pos_x = *(int32_t *)(uintptr_t)(obj + 0x24);
+    int32_t pos_z = *(int32_t *)(uintptr_t)(obj + 0x2c);
+    int leaf = tm_object_bsp_find_leaf(pos_x, pos_z);
+    int i = (leaf >= 0) ? g_object_bsp[leaf].first_obj : 0;
+
+    while (i >= 0 && i < g_obstacle_nobjs) {
+        uint32_t *prop = (uint32_t *)g_obstacle_objs[i].obj;
+        *(uint32_t *)(g_obstacle_objs[i].obj + 0x5c) =
+            (uint32_t)(uintptr_t)g_obstacle_objs[i].coll_shape;
+        if (trace_cached && trace_count < 240) {
+            fprintf(stderr,
+                    "v8: prop_collide obj=%p prop=%p idx=%d leaf=%d pos=(0x%x,0x%x) ppos=(0x%x,0x%x) r=0x%x shape=%p kind=%d\n",
+                    (void *)obj, (void *)prop, i, leaf,
+                    (unsigned)pos_x, (unsigned)pos_z,
+                    (unsigned)*(int32_t *)(g_obstacle_objs[i].obj + 0x24),
+                    (unsigned)*(int32_t *)(g_obstacle_objs[i].obj + 0x2c),
+                    (unsigned)*(int32_t *)(g_obstacle_objs[i].obj + 0x54),
+                    (void *)g_obstacle_objs[i].coll_shape,
+                    (int)*(int16_t *)g_obstacle_objs[i].coll_shape);
+            fflush(stderr);
+            trace_count++;
+        }
+        if ((*prop & 0x20u) == 0) {
+            const int32_t *box = (const int32_t *)(g_obstacle_objs[i].coll_shape + 4);
+            const MATRIX *m = (const MATRIX *)(g_obstacle_objs[i].obj + 0x10);
+            int32_t radius = *(int32_t *)(uintptr_t)(obj + 0x54);
+            int32_t dx = *(int32_t *)(uintptr_t)(obj + 0x24) - m->t[0];
+            int32_t dy = *(int32_t *)(uintptr_t)(obj + 0x28) - m->t[1];
+            int32_t dz = *(int32_t *)(uintptr_t)(obj + 0x2c) - m->t[2];
+            int32_t lx = tm_q12_dot3_i32(m->m[0][0], m->m[1][0], m->m[2][0], dx, dy, dz);
+            int32_t ly = tm_q12_dot3_i32(m->m[0][1], m->m[1][1], m->m[2][1], dx, dy, dz);
+            int32_t lz = tm_q12_dot3_i32(m->m[0][2], m->m[1][2], m->m[2][2], dx, dy, dz);
+            int32_t minx = box[0] - radius, miny = box[1] - radius, minz = box[2] - radius;
+            int32_t maxx = box[3] + radius, maxy = box[4] + radius, maxz = box[5] + radius;
+
+            if (lx > minx && lx < maxx && ly > miny && ly < maxy &&
+                lz > minz && lz < maxz) {
+                int axis = 0;
+                int32_t pen = lx - minx;
+                int sign = -1;
+                int32_t d = maxx - lx;
+                if (d < pen) { pen = d; axis = 0; sign = 1; }
+                d = ly - miny;
+                if (d < pen) { pen = d; axis = 1; sign = -1; }
+                d = maxy - ly;
+                if (d < pen) { pen = d; axis = 1; sign = 1; }
+                d = lz - minz;
+                if (d < pen) { pen = d; axis = 2; sign = -1; }
+                d = maxz - lz;
+                if (d < pen) { pen = d; axis = 2; sign = 1; }
+                pen += 0x1000;
+
+                int32_t nx = (axis == 0) ? sign * m->m[0][0] :
+                             (axis == 1) ? sign * m->m[0][1] : sign * m->m[0][2];
+                int32_t ny = (axis == 0) ? sign * m->m[1][0] :
+                             (axis == 1) ? sign * m->m[1][1] : sign * m->m[1][2];
+                int32_t nz = (axis == 0) ? sign * m->m[2][0] :
+                             (axis == 1) ? sign * m->m[2][1] : sign * m->m[2][2];
+
+                *(int32_t *)(uintptr_t)(obj + 0x24) += tm_q12_mul_i32(nx, pen);
+                *(int32_t *)(uintptr_t)(obj + 0x28) += tm_q12_mul_i32(ny, pen);
+                *(int32_t *)(uintptr_t)(obj + 0x2c) += tm_q12_mul_i32(nz, pen);
+                *(int32_t *)(uintptr_t)(obj + 0x48) = *(int32_t *)(uintptr_t)(obj + 0x24);
+                *(int32_t *)(uintptr_t)(obj + 0x4c) = *(int32_t *)(uintptr_t)(obj + 0x28);
+                *(int32_t *)(uintptr_t)(obj + 0x50) = *(int32_t *)(uintptr_t)(obj + 0x2c);
+
+                int32_t *vel = (int32_t *)(uintptr_t)(obj + 0x80);
+                int32_t vn = tm_q12_dot3_i32(vel[0], vel[1], vel[2], nx, ny, nz);
+                if (vn < 0) {
+                    vel[0] -= tm_q12_mul_i32(nx, vn);
+                    vel[1] -= tm_q12_mul_i32(ny, vn);
+                    vel[2] -= tm_q12_mul_i32(nz, vn);
+                }
+                *(uint32_t *)(uintptr_t)(obj + 0x74) = (uint32_t)(uintptr_t)prop;
+                return 0;
+            }
+        }
+        i = (leaf >= 0) ? g_obstacle_objs[i].next_in_leaf : i + 1;
+    }
+    return 1;
 }
 
 int TerrainMesh_ObstacleHeightAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
@@ -316,6 +432,38 @@ static int32_t tm_radius_from_obstacle_stream(const uint8_t *stream)
         }
     }
     return best;
+}
+
+static void tm_collision_shape_from_obstacle_stream(const uint8_t *stream,
+                                                    uint8_t *shape,
+                                                    int32_t radius)
+{
+    const uint8_t *p = stream;
+    int guard = 0;
+
+    memset(shape, 0, 0x20);
+    while (p != NULL && guard++ < 256) {
+        int16_t kind = *(const int16_t *)p;
+        if (kind == 0) break;
+        if (kind == 1) {
+            memcpy(shape, p, 0x1c);
+            return;
+        }
+        if (kind == 2) {
+            uint16_t count = *(const uint16_t *)(p + 2);
+            p += 4 + (size_t)count * 12;
+        } else {
+            break;
+        }
+    }
+
+    *(int16_t *)(shape + 0x00) = 1;
+    *(int32_t *)(shape + 0x04) = -radius;
+    *(int32_t *)(shape + 0x08) = -radius;
+    *(int32_t *)(shape + 0x0c) = -radius;
+    *(int32_t *)(shape + 0x10) = radius;
+    *(int32_t *)(shape + 0x14) = radius;
+    *(int32_t *)(shape + 0x18) = radius;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1839,12 +1987,21 @@ static void tm_obstacle_obj_add(const MATRIX *mat, const uint8_t *stream,
 {
     if (stream == NULL || *count >= cap) return;
     TmObstacleObj *o = &objs[(*count)++];
+    int32_t radius = tm_radius_from_obstacle_stream(stream);
     memset(o->obj, 0, sizeof(o->obj));
     *(uint32_t *)(o->obj + 0x00) = 0x40u;
     *(int16_t  *)(o->obj + 0x06) = (int16_t)(0x6000 + (*count & 0x1fff));
     memcpy(o->obj + 0x10, mat, sizeof(*mat));
-    *(int32_t  *)(o->obj + 0x54) = tm_radius_from_obstacle_stream(stream);
-    *(uint32_t *)(o->obj + 0x5c) = (uint32_t)(uintptr_t)stream;
+    *(int32_t  *)(o->obj + 0x24) = mat->t[0];
+    *(int32_t  *)(o->obj + 0x28) = mat->t[1];
+    *(int32_t  *)(o->obj + 0x2c) = mat->t[2];
+    *(int32_t  *)(o->obj + 0x48) = mat->t[0];
+    *(int32_t  *)(o->obj + 0x4c) = mat->t[1];
+    *(int32_t  *)(o->obj + 0x50) = mat->t[2];
+    *(int32_t  *)(o->obj + 0x54) = radius;
+    tm_collision_shape_from_obstacle_stream(stream, o->coll_shape, radius);
+    *(uint32_t *)(o->obj + 0x5c) = (uint32_t)(uintptr_t)o->coll_shape;
+    o->probe_stream = stream;
     o->root_x = root_x;
     o->root_z = root_z;
     o->next_in_leaf = -1;
@@ -1980,20 +2137,21 @@ static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
 
     {
         int obstacle_cap = 8192;
-        TmObstacleObj *objs = (TmObstacleObj *)calloc((size_t)obstacle_cap,
-                                                      sizeof(TmObstacleObj));
+        TmObstacleObj *objs = (TmObstacleObj *)FUN_8001178c(
+            (uint32_t)((size_t)obstacle_cap * sizeof(TmObstacleObj)), 1);
         int nobjs = 0;
         if (objs != NULL) {
+            memset(objs, 0, (size_t)obstacle_cap * sizeof(TmObstacleObj));
             nobjs = tm_build_obstacle_instances(banks, nbanks, heads, nheads,
                                                 objs, obstacle_cap);
             tm_build_object_bsp(bsp_payload, bsp_size, objs, nobjs);
-            free(g_obstacle_objs);
+            Heap_Free(g_obstacle_objs);
             if (nobjs > 0) {
                 g_obstacle_objs = objs;
                 g_obstacle_nobjs = nobjs;
                 g_obstacle_raw = (uint8_t *)raw;
             } else {
-                free(objs);
+                Heap_Free(objs);
                 g_obstacle_objs = NULL;
                 g_obstacle_nobjs = 0;
                 g_obstacle_raw = NULL;

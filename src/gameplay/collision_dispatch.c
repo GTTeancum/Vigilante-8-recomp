@@ -40,6 +40,7 @@ extern void (*pcRam00000730)(uint32_t obj, int eventId, uint32_t param2);
 extern void  Damage_Apply(void *obj);        /* FUN_800205f8 */
 extern void  ObjList_ApplyDestroy(int **listSentinel); /* FUN_800206f0 */
 extern uint32_t FUN_8001edb4(intptr_t param_1, uint32_t *param_2); /* Object_TestCollision */
+extern uint32_t TerrainMesh_CollidePropObjects(intptr_t obj);
 
 extern int32_t   *piRam00000714;  /* active-object list head node */
 extern uintptr_t  uRam000006fc;   /* world collision kd-tree root */
@@ -262,6 +263,9 @@ void FUN_8002169c(void)
         }
         if (((*puVar6 & 0x100) == 0) && uRam000006fc != 0) {
             FUN_80020f14((int *)(uintptr_t)uRam000006fc, (intptr_t)puVar6);
+        }
+        if ((*puVar6 & 0x100) == 0) {
+            TerrainMesh_CollidePropObjects((intptr_t)puVar6);
         }
     }
 }
