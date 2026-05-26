@@ -232,13 +232,15 @@ int TerrainMesh_Bounds(float *out_x0, float *out_x1,
     return 1;
 }
 
-int TerrainMesh_ObstacleHeightAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
-                                 int32_t terrain_y, int32_t *out_y)
+int TerrainMesh_ObstacleProbeAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
+                                int32_t terrain_y, int16_t *out_normal,
+                                int32_t *out_y)
 {
     if (g_obstacle_objs == NULL || g_obstacle_nobjs <= 0) return 0;
 
     int pos[3] = { pos_x, pos_y, pos_z };
     int16_t normal[4] = { 0, 0, 0, 0 };
+    int16_t best_normal[4] = { 0, -4096, 0, 0 };
     int32_t best_y = 0;
     int found = 0;
 
@@ -250,12 +252,29 @@ int TerrainMesh_ObstacleHeightAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
                                             terrain_y, pos, normal);
         if (hit != 0 && (!found || hit < best_y)) {
             best_y = hit;
+            best_normal[0] = normal[0];
+            best_normal[1] = normal[1];
+            best_normal[2] = normal[2];
+            best_normal[3] = normal[3];
             found = 1;
         }
         i = (leaf >= 0) ? g_obstacle_objs[i].next_in_leaf : i + 1;
     }
+    if (found && out_normal != NULL) {
+        out_normal[0] = best_normal[0];
+        out_normal[1] = best_normal[1];
+        out_normal[2] = best_normal[2];
+        out_normal[3] = best_normal[3];
+    }
     if (found && out_y != NULL) *out_y = best_y;
     return found;
+}
+
+int TerrainMesh_ObstacleHeightAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
+                                 int32_t terrain_y, int32_t *out_y)
+{
+    return TerrainMesh_ObstacleProbeAt(pos_x, pos_y, pos_z,
+                                       terrain_y, NULL, out_y);
 }
 
 /* ------------------------------------------------------------------ */

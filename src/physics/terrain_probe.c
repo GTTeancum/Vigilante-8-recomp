@@ -27,6 +27,9 @@ extern uint8_t *Terrain_MaterialAt(uint32_t x, uint32_t z);
 extern void  Terrain_NormalAt(uint32_t x, uint32_t z, SVECTOR *out);  /* FUN_80025648 */
 extern long  VectorNormalSS(SVECTOR *a, SVECTOR *out);
 extern int   Object_FindObstacleAt(int *parentObj, int terrainY, int *posXyz, int16_t *normalOut);  /* FUN_8001f51c */
+extern int   TerrainMesh_ObstacleProbeAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
+                                         int32_t terrain_y, int16_t *normalOut,
+                                         int32_t *out_y);
 extern void  FUN_80016fa8(int16_t *param_1, int16_t *param_2); /* Matrix_FromNormal */
 
 /* Forward declaration (defined later in this file) */
@@ -71,6 +74,24 @@ int Terrain_HeightAndProbe(intptr_t obj, int *posXyz, SVECTOR *normalOut, uintpt
         if (trace_cached && trace_count < 240) {
             fprintf(stderr,
                     "v8: terrain_probe obj=%p pos=(0x%x,0x%x,0x%x) terrain=0x%x hitB=0x%x normal=(%d,%d,%d)\n",
+                    (void *)obj, (unsigned)posXyz[0], (unsigned)posXyz[1],
+                    (unsigned)posXyz[2], (unsigned)terrainY, (unsigned)yResult,
+                    normalOut ? normalOut->vx : 0,
+                    normalOut ? normalOut->vy : 0,
+                    normalOut ? normalOut->vz : 0);
+            trace_count++;
+        }
+        return yResult;
+    }
+
+    if (TerrainMesh_ObstacleProbeAt(posXyz[0], posXyz[1], posXyz[2],
+                                    terrainY, (int16_t *)normalOut, &yResult)) {
+        if (materialOut != NULL) {
+            *materialOut = 0;
+        }
+        if (trace_cached && trace_count < 240) {
+            fprintf(stderr,
+                    "v8: terrain_probe obj=%p pos=(0x%x,0x%x,0x%x) terrain=0x%x hitXOBF=0x%x normal=(%d,%d,%d)\n",
                     (void *)obj, (unsigned)posXyz[0], (unsigned)posXyz[1],
                     (unsigned)posXyz[2], (unsigned)terrainY, (unsigned)yResult,
                     normalOut ? normalOut->vx : 0,
