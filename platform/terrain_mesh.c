@@ -1978,9 +1978,11 @@ static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
         junc_patch_tris += ntris - before;
     }
 
-    route_tris = tm_emit_route_strips(juncs, njuncs, rsegs, nrsegs,
-                                      rtypes, nrtypes, vbuf, vcap, &nvtx,
-                                      tribuf, tcap, &ntris);
+    /* RSEG/XRTP records describe the route/navigation surface used by source
+     * loaders and audits. The authored placed XOBF/JUNC geometry already
+     * provides the visible props/surfaces, so uploading synthetic route strips
+     * here draws a second coplanar layer through fences, bridges, and roads. */
+    route_tris = 0;
 
     fprintf(stderr, "v8: TerrainMesh -- instanced XOBF banks=%d heads=%d roots=%d junc_nodes=%d rsegs=%d rtypes=%d junc_tris=%d route_tris=%d cpu_tris=%d gpu_vtx=%d bad_pkts=%d\n",
             nbanks, nheads, roots, njuncs, nrsegs, nrtypes,
