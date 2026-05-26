@@ -720,9 +720,7 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
         mat4_mul(VP, I, MVP);
         glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
         glBindVertexArray(g_terrainmesh_vao);
-        glDisable(GL_CULL_FACE);
         glDrawArrays(GL_TRIANGLES, 0, g_terrainmesh_vtx);
-        glEnable(GL_CULL_FACE);
         glUniform1i(g_loc_useTex, 0);
 #if V8_TERRAIN_WIREFRAME_OVERLAY
         glUniform3f(g_loc_tint, 0.02f, 0.02f, 0.02f);

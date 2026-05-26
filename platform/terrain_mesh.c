@@ -1301,8 +1301,8 @@ static void tm_emit_flat_face(float vx[4], float vy[4], float vz[4],
     }
     if (nvtx + 3 <= vcap) {
         vbuf[nvtx++] = (TmVert){vx[ia],vy[ia],vz[ia],lr,lg,lb,-1.0f,-1.0f,0.0f};
-        vbuf[nvtx++] = (TmVert){vx[ic],vy[ic],vz[ic],lr,lg,lb,-1.0f,-1.0f,0.0f};
         vbuf[nvtx++] = (TmVert){vx[ib],vy[ib],vz[ib],lr,lg,lb,-1.0f,-1.0f,0.0f};
+        vbuf[nvtx++] = (TmVert){vx[ic],vy[ic],vz[ic],lr,lg,lb,-1.0f,-1.0f,0.0f};
     }
 
     *nvtx_io = nvtx;
@@ -1381,11 +1381,14 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
             if (nl > 1e-6f) { tnx/=nl; tny/=nl; tnz/=nl; }
             tnx=-tnx; tny=-tny; tnz=-tnz;
 
+            float cr = B[po + 0] / 255.0f;
+            float cg = B[po + 1] / 255.0f;
+            float cb = B[po + 2] / 255.0f;
             float ndotl = tnx*LX + tny*LY + tnz*LZ;
             float lit   = 0.42f + 0.45f * (ndotl > 0 ? ndotl : 0);
-            float lr = 0.34f * lit;
-            float lg = 0.38f * lit;
-            float lb = 0.36f * lit;
+            float lr = cr * lit;
+            float lg = cg * lit;
+            float lb = cb * lit;
             float uv[4][2] = {
                 {-1.0f, -1.0f}, {-1.0f, -1.0f},
                 {-1.0f, -1.0f}, {-1.0f, -1.0f}
@@ -1440,15 +1443,15 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                                         vx[2], vy[2], vz[2], ground0)
                 && nvtx + 3 <= vcap) {
                 vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr,lg,lb, has_uv ? uv[0][0] : -1.0f, has_uv ? uv[0][1] : -1.0f, tex_kind};
-                vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr,lg,lb, has_uv ? uv[2][0] : -1.0f, has_uv ? uv[2][1] : -1.0f, tex_kind};
                 vbuf[nvtx++] = (TmVert){vx[1],vy[1],vz[1],lr,lg,lb, has_uv ? uv[1][0] : -1.0f, has_uv ? uv[1][1] : -1.0f, tex_kind};
+                vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr,lg,lb, has_uv ? uv[2][0] : -1.0f, has_uv ? uv[2][1] : -1.0f, tex_kind};
             }
 
             if (TM_IS_QUAD[nib]) {
                 int ground1 = tm_is_render_ground_tri(vx[0], vy[0], vz[0],
                                                       vx[2], vy[2], vz[2],
                                                       vx[3], vy[3], vz[3], tny);
-                float lr1 = 0.34f * lit, lg1 = 0.38f * lit, lb1 = 0.36f * lit;
+                float lr1 = cr * lit, lg1 = cg * lit, lb1 = cb * lit;
                 float uv1[4][2];
                 memcpy(uv1, uv, sizeof(uv1));
                 int has_uv1 = has_uv;
@@ -1492,8 +1495,8 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                                             vx[3], vy[3], vz[3], ground1)
                     && nvtx + 3 <= vcap) {
                     vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr1,lg1,lb1, has_uv1 ? uv1[0][0] : -1.0f, has_uv1 ? uv1[0][1] : -1.0f, tex_kind1};
-                    vbuf[nvtx++] = (TmVert){vx[3],vy[3],vz[3],lr1,lg1,lb1, has_uv1 ? uv1[3][0] : -1.0f, has_uv1 ? uv1[3][1] : -1.0f, tex_kind1};
                     vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr1,lg1,lb1, has_uv1 ? uv1[2][0] : -1.0f, has_uv1 ? uv1[2][1] : -1.0f, tex_kind1};
+                    vbuf[nvtx++] = (TmVert){vx[3],vy[3],vz[3],lr1,lg1,lb1, has_uv1 ? uv1[3][0] : -1.0f, has_uv1 ? uv1[3][1] : -1.0f, tex_kind1};
                 }
             }
         }
