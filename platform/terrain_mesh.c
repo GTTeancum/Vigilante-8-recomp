@@ -268,9 +268,12 @@ int TerrainMesh_ObstacleHeightAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
 GLuint g_terrainmesh_vao = 0;
 GLuint g_terrainmesh_tex = 0;
 GLuint g_terrainmesh_xbmp_tex = 0;
+GLuint g_terrainmesh_sky_tex = 0;
 int    g_terrainmesh_vtx = 0;
 int    g_terrainmesh_tex_w = 0;
 int    g_terrainmesh_tex_h = 0;
+int    g_terrainmesh_sky_w = 0;
+int    g_terrainmesh_sky_h = 0;
 static int g_terrainmesh_xbmp_w = 0;
 static int g_terrainmesh_xbmp_h = 0;
 static int g_terrainmesh_xbmp_x = 0;
@@ -527,6 +530,65 @@ static GLuint tm_upload_xbmp_texture(const uint8_t *raw, uint32_t raw_size)
     g_terrainmesh_xbmp_y = image_y;
     fprintf(stderr, "v8: TerrainMesh -- uploaded XBMP texture %dx%d vram=(%d,%d) flags=0x%x\n",
             image_w, image_h, image_x, image_y, (unsigned)flags);
+    return tex;
+}
+
+static GLuint tm_upload_xbgm_texture(const uint8_t *raw, uint32_t raw_size)
+{
+    uint32_t off = 0, size = 0;
+    if (!tm_find_chunk_in_form(raw, 0, raw_size, "XBGM", &off, &size))
+        return 0;
+    if (size < 0x220)
+        return 0;
+
+    const uint8_t *p = raw + off;
+    uint32_t flags = tm_rd32le(p, 4);
+    uint32_t image_off = tm_rd32le(p, 8);
+    int depth = (int)(flags & 3u);
+    if (depth != 1 || image_off + 0x14 > size)
+        return 0;
+
+    int image_words = tm_rds16le(p, image_off + 0x10);
+    int image_h = tm_rds16le(p, image_off + 0x12);
+    int image_w = tm_pixel_width_from_words(image_words, depth);
+    uint32_t pix_off = image_off + 0x14;
+    uint32_t pix_size = (uint32_t)(image_w * image_h);
+    if (image_w <= 0 || image_h <= 0 || pix_off + pix_size > size)
+        return 0;
+
+    uint8_t palette[256][4];
+    for (int i = 0; i < 256; i++) {
+        tm_psx555_rgba(tm_rd16le(p, 0x14 + (uint32_t)i * 2u), palette[i]);
+        palette[i][3] = 255;
+    }
+
+    uint8_t *rgba = (uint8_t *)malloc((size_t)image_w * (size_t)image_h * 4u);
+    if (rgba == NULL)
+        return 0;
+    const uint8_t *pix = p + pix_off;
+    for (int i = 0; i < image_w * image_h; i++) {
+        rgba[i * 4 + 0] = palette[pix[i]][0];
+        rgba[i * 4 + 1] = palette[pix[i]][1];
+        rgba[i * 4 + 2] = palette[pix[i]][2];
+        rgba[i * 4 + 3] = 255;
+    }
+
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, image_w, image_h, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    free(rgba);
+
+    g_terrainmesh_sky_w = image_w;
+    g_terrainmesh_sky_h = image_h;
+    fprintf(stderr, "v8: TerrainMesh -- uploaded XBGM sky %dx%d flags=0x%x\n",
+            image_w, image_h, (unsigned)flags);
     return tex;
 }
 
@@ -2286,6 +2348,8 @@ void TerrainMesh_Load(const char *exp_path,
     g_tm_uv_ground_none = 0;
     g_tm_uv_xobf = 0;
     g_tm_uv_none = 0;
+    g_terrainmesh_sky_w = 0;
+    g_terrainmesh_sky_h = 0;
 
     uint32_t fsz = 0;
     uint8_t *raw = tm_load_exp_blob(exp_path, &fsz, "TerrainMesh");
@@ -2293,6 +2357,7 @@ void TerrainMesh_Load(const char *exp_path,
         return;
     }
     g_terrainmesh_xbmp_tex = tm_upload_xbmp_texture(raw, fsz);
+    g_terrainmesh_sky_tex = tm_upload_xbgm_texture(raw, fsz);
 
     /* Allocate vertex + triangle buffers (generous cap). */
     int cap    = 500000;

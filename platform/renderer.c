@@ -26,6 +26,7 @@ static GLint  g_loc_tint   = -1;
 static GLint  g_loc_useTex = -1;
 static GLint  g_loc_tex    = -1;
 static GLint  g_loc_tex2   = -1;
+static GLuint g_sky_vao    = 0, g_sky_vbo = 0;
 /* Vehicle mesh VAOs (loaded from VEHICLES.EXP by MeshLoader_Init). */
 extern GLuint g_mesh_vao[14];
 extern int    g_mesh_vtx[14];
@@ -100,7 +101,9 @@ extern int  TerrainMesh_HeightAt(float wx, float wz, float *out_gl_y);
 extern GLuint g_terrainmesh_vao;
 extern GLuint g_terrainmesh_tex;
 extern GLuint g_terrainmesh_xbmp_tex;
+extern GLuint g_terrainmesh_sky_tex;
 extern int    g_terrainmesh_vtx;
+extern int    g_terrainmesh_sky_w, g_terrainmesh_sky_h;
 extern char   g_v8_level_exp_path[128];
 extern void  *Host_HeapBase(void);
 extern uint32_t Host_HeapSize(void);
@@ -280,6 +283,33 @@ static void init_once(void) {
     g_loc_tex = glGetUniformLocation(g_prog, "uTex");
     g_loc_tex2 = glGetUniformLocation(g_prog, "uTex2");
     glDeleteShader(vs); glDeleteShader(fs);
+    {
+        static const float sky[] = {
+            -1.0f,-1.0f,0.0f, 1.0f,1.0f,1.0f, 0.0f,1.0f,0.0f,
+             1.0f,-1.0f,0.0f, 1.0f,1.0f,1.0f, 1.0f,1.0f,0.0f,
+            -1.0f, 1.0f,0.0f, 1.0f,1.0f,1.0f, 0.0f,0.0f,0.0f,
+             1.0f,-1.0f,0.0f, 1.0f,1.0f,1.0f, 1.0f,1.0f,0.0f,
+             1.0f, 1.0f,0.0f, 1.0f,1.0f,1.0f, 1.0f,0.0f,0.0f,
+            -1.0f, 1.0f,0.0f, 1.0f,1.0f,1.0f, 0.0f,0.0f,0.0f
+        };
+        glGenVertexArrays(1, &g_sky_vao);
+        glBindVertexArray(g_sky_vao);
+        glGenBuffers(1, &g_sky_vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, g_sky_vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(sky), sky, GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 9, (void *)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 9,
+                              (void *)(sizeof(float) * 3));
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 9,
+                              (void *)(sizeof(float) * 6));
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(float) * 9,
+                              (void *)(sizeof(float) * 8));
+        glBindVertexArray(0);
+    }
     MeshLoader_Init();
     WheelMeshLoader_Init();
     build_terrain_mesh();
@@ -559,6 +589,35 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
+    glUseProgram(g_prog);
+    glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
+    glUniform1i(g_loc_useTex, 0);
+
+    if (g_terrainmesh_sky_tex != 0 && g_sky_vao != 0) {
+        static int sky_logged = 0;
+        float skyMvp[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glDepthMask(GL_FALSE);
+        glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, skyMvp);
+        glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, g_terrainmesh_sky_tex);
+        glUniform1i(g_loc_tex, 0);
+        glUniform1i(g_loc_useTex, 1);
+        glBindVertexArray(g_sky_vao);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glUniform1i(g_loc_useTex, 0);
+        glDepthMask(GL_TRUE);
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_CULL_FACE);
+        if (!sky_logged) {
+            fprintf(stderr, "v8: renderer sky -- XBGM %dx%d active\n",
+                    g_terrainmesh_sky_w, g_terrainmesh_sky_h);
+            sky_logged = 1;
+        }
+    }
+
     /* Read engine vehicle pose. If the engine hasn't allocated one
      * yet, the frame stays empty. */
     uint8_t *veh = (uint8_t *)puRam000007d0;
@@ -589,7 +648,6 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
         log_first = 0;
     }
 
-    glUseProgram(g_prog);
     glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
     glUniform1i(g_loc_useTex, 0);
 
@@ -662,7 +720,9 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
         mat4_mul(VP, I, MVP);
         glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
         glBindVertexArray(g_terrainmesh_vao);
+        glDisable(GL_CULL_FACE);
         glDrawArrays(GL_TRIANGLES, 0, g_terrainmesh_vtx);
+        glEnable(GL_CULL_FACE);
         glUniform1i(g_loc_useTex, 0);
 #if V8_TERRAIN_WIREFRAME_OVERLAY
         glUniform3f(g_loc_tint, 0.02f, 0.02f, 0.02f);
