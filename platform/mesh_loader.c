@@ -410,7 +410,7 @@ void WheelMeshLoader_Init(void)
         free(raw);
         return;
     }
-    int tex = V8_XobfTexAtlas_BuildFromBin(&g_wheel_atlas, B, bsz);
+    int tex = V8_XobfTexAtlas_BuildFromBinEx(&g_wheel_atlas, B, bsz, 1);
     fprintf(stderr, "v8: WheelMeshLoader -- texture slots=%d\n", tex);
 
     uint32_t numGroups = rd32le(B, 0);

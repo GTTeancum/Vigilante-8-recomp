@@ -22,6 +22,9 @@ typedef struct {
 void V8_XobfTexAtlas_Reset(V8XobfTexAtlas *atlas);
 int  V8_XobfTexAtlas_BuildFromBin(V8XobfTexAtlas *atlas,
                                   const uint8_t *bin, uint32_t binSize);
+int  V8_XobfTexAtlas_BuildFromBinEx(V8XobfTexAtlas *atlas,
+                                    const uint8_t *bin, uint32_t binSize,
+                                    int blackCutout);
 int  V8_XobfTex_DecodePacketUv(const V8XobfTexAtlas *atlas,
                                const uint8_t *pkt, int nib, int texBase,
                                float uv[4][2]);

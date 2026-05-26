@@ -28,7 +28,7 @@ static int16_t rds16le(const uint8_t *b, uint32_t o)
     return (int16_t)rd16le(b, o);
 }
 
-static void psx555_rgba(uint16_t c, uint8_t out[4])
+static void psx555_rgba(uint16_t c, int blackCutout, uint8_t out[4])
 {
     uint8_t r = (uint8_t)(c & 0x1f);
     uint8_t g = (uint8_t)((c >> 5) & 0x1f);
@@ -36,7 +36,7 @@ static void psx555_rgba(uint16_t c, uint8_t out[4])
     out[0] = (uint8_t)((r << 3) | (r >> 2));
     out[1] = (uint8_t)((g << 3) | (g >> 2));
     out[2] = (uint8_t)((b << 3) | (b >> 2));
-    out[3] = (c == 0) ? 0 : 255;
+    out[3] = (c == 0 || (blackCutout && (c & 0x7fffu) == 0)) ? 0 : 255;
 }
 
 static int pixel_width_from_words(int words, int depth)
@@ -47,7 +47,7 @@ static int pixel_width_from_words(int words, int depth)
 }
 
 static int decode_slot(const uint8_t *bin, uint32_t binSize,
-                       uint32_t off, DecodedSlot *out)
+                       uint32_t off, int blackCutout, DecodedSlot *out)
 {
     if (off + 0x20 > binSize)
         return 0;
@@ -77,7 +77,8 @@ static int decode_slot(const uint8_t *bin, uint32_t binSize,
     if (off + 0x14 + (uint32_t)palCount * 2u > binSize)
         return 0;
     for (int i = 0; i < palCount; i++)
-        psx555_rgba(rd16le(bin, off + 0x14 + (uint32_t)i * 2u), palette[i]);
+        psx555_rgba(rd16le(bin, off + 0x14 + (uint32_t)i * 2u),
+                    blackCutout, palette[i]);
 
     uint8_t *rgba = (uint8_t *)calloc((size_t)w * (size_t)h, 4u);
     if (rgba == NULL)
@@ -114,6 +115,13 @@ void V8_XobfTexAtlas_Reset(V8XobfTexAtlas *atlas)
 int V8_XobfTexAtlas_BuildFromBin(V8XobfTexAtlas *atlas,
                                  const uint8_t *bin, uint32_t binSize)
 {
+    return V8_XobfTexAtlas_BuildFromBinEx(atlas, bin, binSize, 0);
+}
+
+int V8_XobfTexAtlas_BuildFromBinEx(V8XobfTexAtlas *atlas,
+                                   const uint8_t *bin, uint32_t binSize,
+                                   int blackCutout)
+{
     if (atlas == NULL || bin == NULL || binSize < 0x18)
         return 0;
     V8_XobfTexAtlas_Reset(atlas);
@@ -133,7 +141,7 @@ int V8_XobfTexAtlas_BuildFromBin(V8XobfTexAtlas *atlas,
     for (uint32_t i = 0; i < slotCount; i++) {
         uint32_t rel = rd32le(bin, slotTable + i * 4u);
         uint32_t off = slotTable + rel;
-        if (!decode_slot(bin, binSize, off, &decoded[i]))
+        if (!decode_slot(bin, binSize, off, blackCutout, &decoded[i]))
             continue;
         if (rowW != 0 && rowW + decoded[i].w > maxRowW) {
             if (rowW > atlasW) atlasW = rowW;
