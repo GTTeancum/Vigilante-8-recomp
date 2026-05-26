@@ -21,7 +21,7 @@
 
 extern char g_v8_level_exp_path[128];
 
-static char g_level_path[64] = "Track\\SKIRESRT.TER";
+static char g_level_path[64] = "Track\\WILDWEST.TER";
 
 static char *shell_get_path(void)
 {

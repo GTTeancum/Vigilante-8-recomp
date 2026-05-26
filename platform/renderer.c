@@ -40,8 +40,8 @@ static int    g_initialized = 0;
 /* Render the XOBF visual mesh. terrain_mesh.c uploads all placed visual
  * triangles, while its HeightAt() API filters to low, upward-facing ground. */
 #define V8_RENDER_XOBF_VISUALS 1
-/* Debug readability: draw muted solid terrain, then overlay wireframe lines. */
-#define V8_TERRAIN_WIREFRAME_OVERLAY 1
+/* Debug readability: keep the wireframe overlay available without enabling it by default. */
+#define V8_TERRAIN_WIREFRAME_OVERLAY 0
 
 /* Engine terrain table + populated-tile bounds, supplied by host_terrain.c. */
 extern uintptr_t DAT_800911a0[32 * 32];

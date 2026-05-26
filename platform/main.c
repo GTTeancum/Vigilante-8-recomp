@@ -144,7 +144,7 @@ int g_v8_vehicle_construct_probe_kind = 5;
 /* Optional output paths from CLI. exit handlers consume these. */
 const char *g_screenshot_path = NULL;
 const char *g_audio_capture_path = NULL;
-char g_v8_level_exp_path[128] = "Terrain\\SKIRESRT.EXP";
+char g_v8_level_exp_path[128] = "Terrain\\WILDWEST.EXP";
 
 int Screenshot_Save(const char *path);
 
@@ -184,7 +184,7 @@ static void print_help(void) {
          "  --screenshot-interval N    frames between series shots (default 150)\n"
          "  --hidden-render      create a hidden GL context while headless\n"
          "  --audio-capture <p>  dump mixer to WAV (phase 8+)\n"
-         "  --level <name>       load TERRAIN/<name>.EXP (default SKIRESRT)\n"
+         "  --level <name>       load TERRAIN/<name>.EXP (default WILDWEST)\n"
          "  --terrain-probe      headless terrain height scan, then exit\n"
          "  --vehicle-template-probe  headless Vehicles.exp object-template audit, then exit\n"
          "  --vehicle-construct-probe  headless Common.exp Vehicle_Construct audit, then exit\n"
