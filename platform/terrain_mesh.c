@@ -1058,6 +1058,15 @@ typedef struct {
 } TmRseg;
 
 typedef struct {
+    int32_t x, y, z;
+    int16_t dx, dz;
+} TmTrainPathSample;
+
+#define TM_WW_TRAIN_MAX_SAMPLES 1024
+static TmTrainPathSample g_ww_train_path[TM_WW_TRAIN_MAX_SAMPLES];
+static int g_ww_train_path_count = 0;
+
+typedef struct {
     float m[3][3];
     float x, y, z;
     MATRIX raw;
@@ -2182,6 +2191,105 @@ static int32_t tm_route_deriv_component_q8(int32_t p0, int32_t p1,
     return (int32_t)(v >> 8);
 }
 
+static const TmRseg *tm_find_rseg_between(const TmRseg *rsegs, int nrsegs,
+                                          int a, int b)
+{
+    for (int i = 0; i < nrsegs; i++) {
+        const TmRseg *seg = &rsegs[i];
+        if ((seg->node_a == a && seg->node_b == b) ||
+            (seg->node_a == b && seg->node_b == a))
+            return seg;
+    }
+    return NULL;
+}
+
+static int32_t tm_bezier_eval_runtime(int32_t p0, int32_t p1,
+                                      int32_t p2, int32_t p3,
+                                      int32_t t)
+{
+    int64_t u = 0x1000 - t;
+    int64_t u2 = (u * u) >> 12;
+    int64_t t2 = ((int64_t)t * t) >> 12;
+    int64_t u3 = (u2 * u) >> 12;
+    int64_t t3 = (t2 * t) >> 12;
+    int64_t v = u3 * p0 + 3 * ((u2 * t) >> 12) * p1
+              + 3 * ((u * t2) >> 12) * p2 + t3 * p3;
+    if (v < 0) v -= 0x800;
+    else v += 0x800;
+    return (int32_t)(v >> 12);
+}
+
+static void tm_ww_train_add_sample(int32_t x, int32_t z, int16_t dx, int16_t dz)
+{
+    if (g_ww_train_path_count >= TM_WW_TRAIN_MAX_SAMPLES)
+        return;
+    TmTrainPathSample *s = &g_ww_train_path[g_ww_train_path_count++];
+    s->x = x;
+    s->z = z;
+    s->y = Terrain_HeightAt((uint32_t)x, (uint32_t)z);
+    s->dx = dx;
+    s->dz = dz;
+}
+
+static void tm_build_wildwest_train_path(const TmJuncNode *juncs, int njuncs,
+                                         const TmRseg *rsegs, int nrsegs)
+{
+    static const int loop[] = {
+        2, 11, 3, 4, 5, 6, 35, 36, 7, 8, 9, 10,
+        38, 37, 34, 0, 1, 2
+    };
+    g_ww_train_path_count = 0;
+
+    for (int li = 0; li + 1 < (int)(sizeof(loop) / sizeof(loop[0])); li++) {
+        int aidx = loop[li];
+        int bidx = loop[li + 1];
+        if (aidx < 0 || aidx >= njuncs || bidx < 0 || bidx >= njuncs)
+            continue;
+        const TmRseg *seg = tm_find_rseg_between(rsegs, nrsegs, aidx, bidx);
+        if (seg == NULL)
+            continue;
+
+        const TmJuncNode *a = &juncs[aidx];
+        const TmJuncNode *b = &juncs[bidx];
+        int forward = (seg->node_a == aidx && seg->node_b == bidx);
+        int32_t p0x = a->raw_x, p0z = a->raw_z;
+        int32_t p3x = b->raw_x, p3z = b->raw_z;
+        int32_t p1x, p1z, p2x, p2z;
+        if (forward) {
+            p1x = p0x + seg->ctrl_ax;
+            p1z = p0z + seg->ctrl_az;
+            p2x = p3x + seg->ctrl_bx;
+            p2z = p3z + seg->ctrl_bz;
+        } else {
+            p1x = p0x - seg->ctrl_bx;
+            p1z = p0z - seg->ctrl_bz;
+            p2x = p3x - seg->ctrl_ax;
+            p2z = p3z - seg->ctrl_az;
+        }
+
+        for (int step = 0; step < 24; step++) {
+            int32_t t0 = (step * 0x1000) / 24;
+            int32_t t1 = ((step + 1) * 0x1000) / 24;
+            int32_t x0 = tm_bezier_eval_runtime(p0x, p1x, p2x, p3x, t0);
+            int32_t z0 = tm_bezier_eval_runtime(p0z, p1z, p2z, p3z, t0);
+            int32_t x1 = tm_bezier_eval_runtime(p0x, p1x, p2x, p3x, t1);
+            int32_t z1 = tm_bezier_eval_runtime(p0z, p1z, p2z, p3z, t1);
+            int32_t dx = x1 - x0;
+            int32_t dz = z1 - z0;
+            double len = sqrt((double)dx * (double)dx + (double)dz * (double)dz);
+            int16_t ndx = 0, ndz = 0x1000;
+            if (len > 1.0) {
+                ndx = (int16_t)((double)dx * 4096.0 / len);
+                ndz = (int16_t)((double)dz * 4096.0 / len);
+            }
+            tm_ww_train_add_sample(x0, z0, ndx, ndz);
+        }
+    }
+
+    fprintf(stderr, "v8: WILDWEST train path samples=%d\n",
+            g_ww_train_path_count);
+}
+
 static uint16_t tm_terrain_word_at_fixed(int32_t fx, int32_t fz)
 {
     int x_cell = fx >> 16;
@@ -3046,11 +3154,104 @@ static intptr_t tm_ww_warehouse_init(intptr_t self, int mode, int arg)
     return 0;
 }
 
+static int tm_ww_train_closest_sample(const uint32_t *obj)
+{
+    if (g_ww_train_path_count <= 0)
+        return 0;
+    int32_t x = (int32_t)obj[0x12];
+    int32_t z = (int32_t)obj[0x14];
+    int best = 0;
+    uint64_t best_d = UINT64_MAX;
+    for (int i = 0; i < g_ww_train_path_count; i++) {
+        int64_t dx = (int64_t)x - g_ww_train_path[i].x;
+        int64_t dz = (int64_t)z - g_ww_train_path[i].z;
+        uint64_t d = (uint64_t)(dx * dx + dz * dz);
+        if (d < best_d) {
+            best_d = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+static void tm_ww_train_apply_pose(uint32_t *obj, int sample_idx)
+{
+    if (g_ww_train_path_count <= 0)
+        return;
+    sample_idx %= g_ww_train_path_count;
+    if (sample_idx < 0)
+        sample_idx += g_ww_train_path_count;
+    const TmTrainPathSample *s = &g_ww_train_path[sample_idx];
+
+    obj[0x09] = (uint32_t)s->x;
+    obj[0x0a] = (uint32_t)s->y;
+    obj[0x0b] = (uint32_t)s->z;
+    obj[0x12] = (uint32_t)s->x;
+    obj[0x13] = (uint32_t)s->y;
+    obj[0x14] = (uint32_t)s->z;
+
+    *(int16_t *)((uint8_t *)obj + 0x10) = s->dz;
+    *(int16_t *)((uint8_t *)obj + 0x14) = s->dx;
+    *(int16_t *)((uint8_t *)obj + 0x18) = 0;
+    *(int16_t *)((uint8_t *)obj + 0x1c) = (int16_t)-s->dx;
+    *(int16_t *)((uint8_t *)obj + 0x20) = s->dz;
+    *(int16_t *)((uint8_t *)obj + 0x22) = 0;
+}
+
+static intptr_t tm_ww_train_runtime(intptr_t self, int mode, int arg)
+{
+    uint32_t *obj = (uint32_t *)(uintptr_t)self;
+    if (obj == NULL)
+        return 0;
+
+    if (mode == 1) {
+        int sample = tm_ww_train_closest_sample(obj);
+        obj[0x29] = 1;
+        obj[0x2a] = 0x5000;
+        obj[0x2c] = (uint32_t)(sample << 16);
+        *obj |= 0x180u;
+        tm_ww_train_apply_pose(obj, sample);
+        return 0;
+    }
+
+    if (mode == 0 && g_ww_train_path_count > 0) {
+        uint32_t progress = obj[0x2c] + (obj[0x2a] ? obj[0x2a] : 0x5000);
+        uint32_t wrap = (uint32_t)g_ww_train_path_count << 16;
+        if (wrap != 0) {
+            while (progress >= wrap)
+                progress -= wrap;
+        }
+        obj[0x2c] = progress;
+        tm_ww_train_apply_pose(obj, (int)(progress >> 16));
+        return 0;
+    }
+
+    return (intptr_t)FUN_800223dc(obj, mode, (intptr_t)arg);
+}
+
+intptr_t TM_WW_TrainEngineCallback(intptr_t self, int mode, int arg)
+{
+    return tm_ww_train_runtime(self, mode, arg);
+}
+
+intptr_t TM_WW_TrainCoalCallback(intptr_t self, int mode, int arg)
+{
+    return tm_ww_train_runtime(self, mode, arg);
+}
+
+intptr_t TM_WW_TrainFlatbedCallback(intptr_t self, int mode, int arg)
+{
+    return tm_ww_train_runtime(self, mode, arg);
+}
+
 static uintptr_t tm_host_level_callback_by_offset(const char *stem, uint32_t off)
 {
     if (tm_str_ieq(stem, "WILDWEST")) {
         switch (off) {
         case 0x04a0: return (uintptr_t)tm_ww_warehouse_init;
+        case 0x09a8: return (uintptr_t)TM_WW_TrainEngineCallback;
+        case 0x0fa4: return (uintptr_t)TM_WW_TrainCoalCallback;
+        case 0x10a8: return (uintptr_t)TM_WW_TrainFlatbedCallback;
         default: break;
         }
     }
@@ -3492,6 +3693,9 @@ static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
     tm_upload_route_textures(rtypes, nrtypes);
 #endif
     tm_log_head_name_summary(heads, nheads);
+    if (strstr(g_v8_level_exp_path, "WILDWEST") != NULL ||
+        strstr(g_v8_level_exp_path, "WildWest") != NULL)
+        tm_build_wildwest_train_path(juncs, njuncs, rsegs, nrsegs);
     tm_build_spawn_placeholders(banks, nbanks, heads, nheads);
     tm_build_source_static_tree(bsp_payload, bsp_size, banks, nbanks, heads, nheads);
     tm_build_source_dynamic_objects(banks, nbanks, heads, nheads);
@@ -3523,6 +3727,10 @@ static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
     for (int hi = 0; hi < nheads; hi++) {
         const TmHead *h = &heads[hi];
         if (h->type == 1 || h->type == 6 || h->type > 6) continue;
+        if (strcmp(h->name, "M1train_engine_1") == 0 ||
+            strcmp(h->name, "M1train_coalcar_1") == 0 ||
+            strcmp(h->name, "M1train_flatbed_1") == 0)
+            continue;
         if (h->type == 5 &&
             tm_resolve_global_head_callback(h->name) != (uintptr_t)LAB_8003c61c)
             continue;

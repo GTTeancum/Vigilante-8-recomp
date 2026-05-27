@@ -131,6 +131,9 @@ extern void *puRam000007d4;
 extern uint8_t DAT_80065a18[];
 extern uintptr_t Object_CallbackFromPsxSlot(const void *obj);
 extern intptr_t LAB_80031634(intptr_t obj, int event, intptr_t param3);
+extern intptr_t TM_WW_TrainEngineCallback(intptr_t self, int mode, int arg);
+extern intptr_t TM_WW_TrainCoalCallback(intptr_t self, int mode, int arg);
+extern intptr_t TM_WW_TrainFlatbedCallback(intptr_t self, int mode, int arg);
 extern uint16_t DAT_800568fc[];
 static void mat4_mul(const float A[16], const float B[16], float out[16]);
 
@@ -1072,6 +1075,74 @@ static int draw_machine_gun_projectiles(const float VP[16], float MVP[16])
     return drawn + tracer_drawn;
 }
 
+static int draw_wildwest_train_objects(const float VP[16], float MVP[16])
+{
+    ObjListHostNode *sentinel = (ObjListHostNode *)DAT_80065a18;
+    ObjListHostNode *node;
+    int drawn = 0;
+    int guard = 0;
+    static int trace = -1;
+
+    if (sentinel == NULL || sentinel->prev == NULL)
+        return 0;
+    if (trace < 0) {
+        const char *env = getenv("V8_TRACE_TRAIN");
+        trace = (env != NULL && env[0] != 0 && env[0] != '0');
+    }
+
+    glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
+    glUniform1i(g_loc_useTex, 1);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_terrainmesh_tex);
+    glUniform1i(g_loc_tex, 0);
+
+    for (node = sentinel->next; node != NULL && guard++ < 1024; node = node->next) {
+        if (!object_world_list_is_plausible(sentinel, node))
+            break;
+
+        uintptr_t op = node->payload;
+        if (!host_heap_contains_ptr(op, 0x98))
+            continue;
+        uint8_t *obj = (uint8_t *)op;
+        uintptr_t cb = Object_CallbackFromPsxSlot(obj);
+        if (cb != (uintptr_t)&TM_WW_TrainEngineCallback &&
+            cb != (uintptr_t)&TM_WW_TrainCoalCallback &&
+            cb != (uintptr_t)&TM_WW_TrainFlatbedCallback)
+            continue;
+
+        uintptr_t group = runtime_object_group_from_bank(obj);
+        RuntimeGroupMesh *mesh = runtime_group_mesh(group);
+        if (mesh == NULL || mesh->vao == 0 || mesh->vtx <= 0)
+            continue;
+
+        float M[16];
+        make_model_from_obj(M, obj,
+                            fixed_xz_to_m(*(int32_t *)(obj + 0x24)),
+                            -fixed_y_to_m(*(int32_t *)(obj + 0x28)),
+                            fixed_xz_to_m(*(int32_t *)(obj + 0x2c)));
+        mat4_mul(VP, M, MVP);
+        glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        glBindVertexArray(mesh->vao);
+        glDrawArrays(GL_TRIANGLES, 0, mesh->vtx);
+        drawn++;
+
+        if (trace && drawn <= 3) {
+            fprintf(stderr,
+                    "v8: train_draw obj=%p slot=%u pos=(%.2f,%.2f,%.2f) cb=%p vtx=%d\n",
+                    (void *)obj, (unsigned)rd16p(obj + 0x0a),
+                    fixed_xz_to_m(*(int32_t *)(obj + 0x24)),
+                    -fixed_y_to_m(*(int32_t *)(obj + 0x28)),
+                    fixed_xz_to_m(*(int32_t *)(obj + 0x2c)),
+                    (void *)cb, mesh->vtx);
+        }
+    }
+
+    glUniform1i(g_loc_useTex, 0);
+    if (trace)
+        fprintf(stderr, "v8: train_draw total=%d\n", drawn);
+    return drawn;
+}
+
 void Renderer_DrawFrame(int w, int h, int frame_idx)
 {
     (void)frame_idx;
@@ -1254,6 +1325,7 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
 #endif
     }
 
+    draw_wildwest_train_objects(VP, MVP);
     draw_machine_gun_projectiles(VP, MVP);
 
     /* Draw the player vehicle (vehicle 0) with a warm tint so the
