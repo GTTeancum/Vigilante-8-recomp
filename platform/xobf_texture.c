@@ -202,14 +202,18 @@ int V8_XobfTexAtlas_BuildFromBinEx(V8XobfTexAtlas *atlas,
 
 static int packet_slot_offset(int nib)
 {
+    /* Match FUN_8001b49c's texture-slot resolution exactly.  Only these
+     * packet kinds call FUN_8001b3d4 and install a CLUT/TPAGE pair into the
+     * generated PSX primitive.  Kinds 0xb and 0xf look textured from their GPU
+     * opcodes, but the source builder does not resolve a texture slot for
+     * them; treating their inline words as slots maps unrelated vertex data
+     * into the atlas and produces corrupt/transparent faces. */
     switch (nib) {
     case 1:
     case 5:
     case 13:
-    case 15:
         return 0x12;
     case 9:
-    case 11:
         return 0x16;
     case 12:
         return 0x10;
@@ -220,10 +224,9 @@ static int packet_slot_offset(int nib)
 
 static int packet_uv_offset(int nib, int idx)
 {
-    if (nib == 1 || nib == 3) {
-        static const int off[4] = {0x0c, 0x10, 0x14, 0x14};
-        return off[idx & 3];
-    }
+    /* FUN_8001b49c builds textured triangle/quad primitives from source
+     * packet UV pairs.  Nibble 1 copies source +0x0c/+0x0e/+0x10 into
+     * output uv0/uv1/uv2; it does not use +0x14 as a UV field. */
     if (nib == 9 || nib == 11) {
         static const int off[4] = {0x10, 0x12, 0x14, 0x14};
         return off[idx & 3];

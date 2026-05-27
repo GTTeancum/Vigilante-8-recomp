@@ -4,13 +4,13 @@
  *
  *  FUN_80031e34 / LAB_80031fa0  -- wtype-2 child tick (bouncing debris)
  *  FUN_80032f7c / LAB_8003302c  -- wtype-4 child tick (spring-guided projectile)
- *  FUN_80033648 / LAB_800336fc  -- wtype-6 child spawn helper (spring launcher)
+ *  FUN_80033648 / LAB_800336fc  -- wtype-6 missile-slot event dispatcher
  *
  * These are invoked by split_child_tick.c event-3 dispatch for the
  * respective weapon types.  LAB_80031fa0 and LAB_8003302c are installed
- * as per-tick obj[+0x64] callbacks on child objects.  LAB_800336fc is a
- * one-shot spawn helper whose address is also stored as the wtype-6
- * callback; it spawns a wtype-2 child, applies impulse, and returns.
+ * as per-tick obj[+0x64] callbacks on child objects.  LAB_800336fc is the
+ * event callback stored for the wtype-6 attached slot; its keyed fire path
+ * can spawn homing missile children.
  *
  * MED confidence: direct MIPS disassembly port.
  * NOTE: event-0 SFX uses PSX SPU direct-register writes in the original
@@ -20,6 +20,8 @@
  */
 
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 /* -- External helpers -- */
 
@@ -27,10 +29,10 @@
 extern int FUN_80025400(int x, int z);
 
 /* FUN_8001d708 -- Object_InitBoneMatrix: initialise/reset bone transform. */
-extern void FUN_8001d708(int obj);
+extern void FUN_8001d708(intptr_t obj);
 
 /* FUN_8003fd24 -- Debris_Spawn: spawn impact particle, kind=arg2. Returns int handle. */
-extern int FUN_8003fd24(const int32_t *xyz, int kind);
+extern intptr_t FUN_8003fd24(const int32_t *xyz, int kind);
 
 /* FUN_8004410c -- Audio_AllocVoice: allocate a free SPU voice channel. */
 extern int FUN_8004410c(void);
@@ -39,14 +41,15 @@ extern int FUN_8004410c(void);
 extern int FUN_8004483c(int voice, int bank, int sfx, const int32_t *pos);
 
 /* FUN_800205f8 -- Damage_Apply / Object_Retire: retire object from scene. */
-extern void FUN_800205f8(int obj);
+extern void FUN_800205f8(intptr_t obj);
 
 /* FUN_80030c08 -- Object_GeneralTick: run general rolling/physics tick. */
 extern void FUN_80030c08(uint32_t *obj);
 
 /* FUN_80031454 -- WeaponHit_Apply: apply impulse + damage to collider.
  *   Returns -1 (event consumed) or 0 (pass-through). */
-extern int FUN_80031454(int param_1, int *param_2, uint16_t param_3, int param_4);
+extern int FUN_80031454(intptr_t param_1, intptr_t *param_2, uint16_t param_3, int param_4);
+extern uintptr_t Collision_QueryHostWord(const void *query, uint32_t index);
 
 /* FUN_80017160 -- V8_RandNext: advance LCG, return next random uint32. */
 extern uint32_t FUN_80017160(void);
@@ -58,18 +61,26 @@ extern void FUN_800439b8(uint32_t *obj);
 extern void FUN_8004c934(uint32_t *obj);
 
 /* FUN_800202f4 -- Object_RegisterInScene: register new object in the world. */
-extern void FUN_800202f4(int obj);
+extern void FUN_800202f4(intptr_t obj);
 extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 
 /* FUN_80031300 -- Object_SpawnAttached: spawn a bone child object.
  *   (parent, subBin, kind, kindB=0x98, flags) -> child object handle */
-extern int FUN_80031300(int parent, int subBin, int kind, uint32_t kindB, int flags);
+extern intptr_t FUN_80031300(intptr_t parent, intptr_t subBin, int kind, uint32_t kindB, intptr_t flags);
 
 /* FUN_800176f8 -- Object_ApplyImpulseAtPoint: add impulse vec to linear+angular vel. */
-extern void FUN_800176f8(int obj, const int32_t *vec, const int32_t *pos);
+extern void FUN_800176f8(intptr_t obj, const int32_t *vec, const int32_t *pos);
 
 /* FUN_8002cb7c -- WeaponSlot_Deactivate: deactivate/despawn weapon slot on vehicle. */
-extern void FUN_8002cb7c(int vehicle);
+extern void FUN_8002cb7c(intptr_t vehicle);
+extern int FUN_8003c538(uint32_t *obj, intptr_t arg);
+extern void *FUN_8003351c(intptr_t self, uint32_t *owner, int16_t kind,
+                          uint16_t timer);
+extern intptr_t LAB_80033290(intptr_t obj, int event, intptr_t param3);
+extern int FUN_80016aac(const int32_t *a, const int32_t *b);
+extern void *Matrix_ComposeParentChain(intptr_t obj);
+extern long ratan2(int y, int x);
+extern intptr_t FUN_8001d5a0(intptr_t obj);
 
 /* Globals */
 extern int32_t DAT_80065310; /* frame tick counter (low word) */
@@ -77,7 +88,7 @@ extern int32_t DAT_80065310; /* frame tick counter (low word) */
  * This is the most likely candidate for the 'bank' arg to FUN_8004483c in the
  * child tick SFX paths.  FIXME: unverified (original uses PSX SPU direct-writes
  * in some paths; FUN_8004483c is only called in event-3 collision paths). */
-extern int32_t DAT_80065BB8;
+extern uintptr_t DAT_80065BB8;
 
 /* ------------------------------------------------------------------ */
 /* Helper: round-toward-zero arithmetic right shift. */
@@ -108,6 +119,17 @@ static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
     return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
 }
 
+static int weapon_trace_enabled(void)
+{
+    static int checked = 0;
+    static int enabled = 0;
+    if (!checked) {
+        enabled = getenv("V8_TRACE_WEAPONS") != NULL;
+        checked = 1;
+    }
+    return enabled;
+}
+
 /* ------------------------------------------------------------------ */
 /*
  * LAB_80031fa0 / FUN_80031e34 -- wtype-2 split child tick.
@@ -134,9 +156,9 @@ static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
  *   3  -> collision: check target type, spawn debris, play SFX, retire self.
  *   other -> return 0.
  */
-int LAB_80031fa0(int obj, int event, int param3)
+intptr_t LAB_80031fa0(intptr_t obj, int event, intptr_t param3)
 {
-    uint8_t  *s0  = (uint8_t  *)(uintptr_t)(uint32_t)obj;
+    uint8_t  *s0  = (uint8_t  *)(uintptr_t)obj;
     int32_t  *pos = (int32_t  *)(s0 + 72);
 
     if (event == 0) {
@@ -157,7 +179,7 @@ int LAB_80031fa0(int obj, int event, int param3)
             FUN_80017160();
 
             /* Transition child to general rolling tick. */
-            FUN_80030c08((uint32_t *)(uintptr_t)(uint32_t)obj);
+            FUN_80030c08((uint32_t *)(uintptr_t)obj);
             return 0;
         }
 
@@ -177,15 +199,15 @@ int LAB_80031fa0(int obj, int event, int param3)
             --life;
             *(uint16_t *)(s0 + 148) = life;
             if (life == 0)
-                FUN_80030c08((uint32_t *)(uintptr_t)(uint32_t)obj);
+                FUN_80030c08((uint32_t *)(uintptr_t)obj);
         }
         return 0;
     }
 
     if (event == 3) {
         /* Collision: dereference param3 to get target object. */
-        int       target_h = *(int *)(uintptr_t)(uint32_t)param3;
-        uint8_t  *tgt      = (uint8_t *)(uintptr_t)(uint32_t)target_h;
+        intptr_t target_h = (intptr_t)Collision_QueryHostWord((void *)(uintptr_t)param3, 0);
+        uint8_t  *tgt      = (uint8_t *)(uintptr_t)target_h;
 
         /* Skip if target is terrain (type byte at +4 == 3). */
         if (tgt[4] == 3)
@@ -253,18 +275,18 @@ int LAB_80031fa0(int obj, int event, int param3)
  *   4  -> die: clear flag 0x800000 on proxy object.
  *   other -> return 0.
  */
-int LAB_8003302c(int obj, int event, int param3)
+intptr_t LAB_8003302c(intptr_t obj, int event, intptr_t param3)
 {
-    uint8_t  *s1  = (uint8_t  *)(uintptr_t)(uint32_t)obj;
+    uint8_t  *s1  = (uint8_t  *)(uintptr_t)obj;
     int32_t  *pos = (int32_t  *)(s1 + 72);
 
     if (event == 3) {
         /* Collision: load target, skip if type == 7, else apply hit. */
-        int       t_h = *(int *)(uintptr_t)(uint32_t)param3;
-        uint8_t  *tgt = (uint8_t *)(uintptr_t)(uint32_t)t_h;
+        intptr_t t_h = (intptr_t)Collision_QueryHostWord((void *)(uintptr_t)param3, 0);
+        uint8_t  *tgt = (uint8_t *)(uintptr_t)t_h;
         if (tgt[4] == 7)
             return 0;
-        return FUN_80031454(obj, (int *)(uintptr_t)(uint32_t)param3, 26u, 55);
+        return FUN_80031454(obj, (intptr_t *)(uintptr_t)param3, 26u, 55);
     }
 
     if (event == 4) {
@@ -355,90 +377,181 @@ int LAB_8003302c(int obj, int event, int param3)
     }
 
     /* Apply angular velocity to rotation matrix. */
-    FUN_800439b8((uint32_t *)(uintptr_t)(uint32_t)obj);
+    FUN_800439b8((uint32_t *)(uintptr_t)obj);
 
     /* Every 32 frames: smoke effect. */
     if ((DAT_80065310 & 31) == 0)
-        FUN_8004c934((uint32_t *)(uintptr_t)(uint32_t)obj);
+        FUN_8004c934((uint32_t *)(uintptr_t)obj);
 
     return 0;
 }
 
 /* ------------------------------------------------------------------ */
 /*
- * LAB_800336fc / FUN_80033648 -- wtype-6 child spawn helper.
+ * LAB_800336fc -- wtype-6 / missile-slot event dispatcher.
  *
- * Called from split_child_tick.c event-3 dispatch as a one-shot handler.
- * Prototype matches (target_vehicle, proj_self, kind).
- *
- * Spawns a wtype-2 child attached to target_vehicle via FUN_80031300,
- * initialises spring velocities, applies an impulse, stores the proxy
- * reference, and decrements the vehicle's ammo counter.
- *
- * Arguments:
- *   target_vehicle (a0) : vehicle that the split child has hit
- *   proj_self      (a1) : the split child projectile (self)
- *   kind           (a2) : weapon kind (passed through to child spawner)
- *
- * Returns: child object handle.
- *
- * Note: FUN_80031300 is called with swapped args (a0↔a1), i.e.
- *   FUN_80031300(proj_self, target_vehicle, kind, 0x98, 0).
+ * This is the callback stored in DAT_80010534 for vehicle sub-object kind 7.
+ * It was previously mistranscribed as a one-shot spawn helper; the original
+ * MIPS has a 15-entry event jump table at 0x80010680.
  */
-int LAB_800336fc(int target_vehicle, int proj_self, int kind)
+intptr_t LAB_800336fc(intptr_t obj, intptr_t event, int kind)
 {
-    uint8_t *vs = (uint8_t *)(uintptr_t)(uint32_t)target_vehicle;
-    uint8_t *ps = (uint8_t *)(uintptr_t)(uint32_t)proj_self;
+    uint8_t *self = (uint8_t *)(uintptr_t)obj;
+    intptr_t arg = (intptr_t)kind;
 
-    /* Spawn bone child; note swapped parent/subBin relative to call site. */
-    int      child = FUN_80031300(proj_self, target_vehicle, kind, 0x98u, 0);
-    uint8_t *cs    = (uint8_t *)(uintptr_t)(uint32_t)child;
-
-    /* Read spring offsets from child's bone attachment (int16 at +18, +24, +30). */
-    int32_t spring_vec[3];
-    spring_vec[0] = mips_sll_i32((int16_t)*(int16_t *)(cs + 18), 5);
-    spring_vec[1] = mips_sll_i32((int16_t)*(int16_t *)(cs + 24), 5);
-    spring_vec[2] = mips_sll_i32((int16_t)*(int16_t *)(cs + 30), 5);
-
-    /* Set child flags and install wtype-2 tick callback. */
-    *(int32_t *)cs         = 0x800084;
-    Object_SetCallbackPsxSlot(cs, (uintptr_t)&LAB_80031fa0);
-    FUN_800202f4(child);
-
-    /* Compute initial spring velocities from proj_self ammo/base value (+128). */
-    {
-        int32_t base_vel = rtz_sra(*(int32_t *)(ps + 128), 7);
-        int16_t sv0 = *(int16_t *)(cs + 18);
-        int16_t sv1 = *(int16_t *)(cs + 24);
-        int16_t sv2 = *(int16_t *)(cs + 30);
-        *(int32_t *)(cs + 136) = mips_subu_i32(base_vel, rtz_sra(mips_mult_lo_i32(sv0, 15258), 12));
-        *(int32_t *)(cs + 140) = mips_subu_i32(base_vel, rtz_sra(mips_mult_lo_i32(sv1, 15258), 12));
-        *(int32_t *)(cs + 144) = mips_subu_i32(base_vel, rtz_sra(mips_mult_lo_i32(sv2, 15258), 12));
+    if (weapon_trace_enabled() && (event == 0xb || event == 1 || event == 0)) {
+        fprintf(stderr,
+                "v8: missile weapon dispatch obj=%p event=%d arg=%p hp=%u status=%d flags=0x%x\n",
+                (void *)(uintptr_t)obj, (int)event, (void *)(uintptr_t)arg,
+                (unsigned)*(uint16_t *)(self + 0x0c),
+                (int)*(int16_t *)(self + 0x06),
+                (unsigned)*(uint32_t *)self);
     }
 
-    /* Determine velocity source: proj_self[+228] if non-zero, else proj_self. */
-    int vel_src = *(int32_t *)(ps + 228);
-    if (vel_src == 0)
-        vel_src = proj_self;
+    switch ((int)event) {
+    case 0:
+        if (!FUN_8003c538((uint32_t *)(uintptr_t)obj, arg))
+            return 0;
+        if (*(uint32_t *)(uintptr_t)(arg + 0xe4) == 0)
+            return 0;
 
-    /* Apply spring impulse to velocity source at child's world position. */
-    FUN_800176f8(vel_src, spring_vec, (const int32_t *)(cs + 72));
+        {
+            uint8_t *joint = (uint8_t *)(uintptr_t)*(uint32_t *)(self + 0x38);
+            int32_t *target_pos = (int32_t *)(uintptr_t)(*(uint32_t *)(uintptr_t)(arg + 0xe4) + 0x48);
+            int32_t *self_pos = (int32_t *)(self + 0x48);
+            int32_t dx = mips_subu_i32(target_pos[0], self_pos[0]);
+            int32_t dy = mips_subu_i32(target_pos[1], self_pos[1]);
+            int32_t dz = mips_subu_i32(target_pos[2], self_pos[2]);
+            int32_t dist = FUN_80016aac(self_pos, target_pos);
+            int32_t yaw = (int32_t)((ratan2(dx, dz) << 20) >> 20);
+            int32_t pitch = (int32_t)((-ratan2(dy, dist)) << 20) >> 20;
+            if (pitch > 256) pitch = 256;
+            if (pitch < -128) pitch = -128;
+            if (joint) {
+                int32_t cur_yaw = *(int16_t *)(joint + 0x42);
+                int32_t delta_yaw = mips_subu_i32(yaw, cur_yaw);
+                if (delta_yaw < 0) delta_yaw = mips_addu_i32(delta_yaw, 3);
+                *(uint16_t *)(joint + 0x42) =
+                    (uint16_t)mips_addu_i32((int32_t)*(uint16_t *)(joint + 0x42), delta_yaw >> 2);
 
-    /* Store velocity source as proxy reference for child's rolling tick. */
-    *(int32_t *)(cs + 132) = vel_src;
-
-    /* Decrement vehicle ammo (uint16 at +12); deactivate weapon if empty. */
-    {
-        uint16_t ammo = *(uint16_t *)(vs + 12);
-        if (--ammo == 0) {
-            *(uint16_t *)(vs + 12) = 0;
-            FUN_8002cb7c(target_vehicle);
-        } else {
-            *(uint16_t *)(vs + 12) = ammo;
+                int32_t cur_pitch = *(int16_t *)(joint + 0x40);
+                int32_t delta_pitch = mips_subu_i32(pitch, cur_pitch);
+                if (delta_pitch < 0) delta_pitch = mips_addu_i32(delta_pitch, 3);
+                *(uint16_t *)(joint + 0x40) =
+                    (uint16_t)mips_addu_i32((int32_t)*(uint16_t *)(joint + 0x40), delta_pitch >> 2);
+                FUN_8001d708((intptr_t)joint);
+            }
         }
+        return 0;
+
+    case 1:
+        *(uint16_t *)(self + 0x0c) = 12;
+        self[0x08] = 3;
+        *(uint32_t *)self |= 0x4000u;
+        return 0;
+
+    case 9: {
+        uint32_t fire_code = (uint32_t)arg & 0xfffu;
+        if (fire_code == 0x242u) {
+            uint16_t ammo = *(uint16_t *)(self + 0x0c);
+            if (ammo < 2)
+                return -1;
+            *(uint16_t *)(self + 0x0c) = (uint16_t)mips_addu_i32(ammo, -1);
+            intptr_t owner = FUN_8001d5a0(obj);
+            uint32_t *shot = (uint32_t *)FUN_8003351c(obj, (uint32_t *)(uintptr_t)owner, 0x23, 0x28);
+            *(uint8_t *)((uint8_t *)shot + 0x08) = 1;
+            *shot |= 0x01000000u;
+            return 0x78;
+        }
+        if (fire_code == 0x244u) {
+            uint16_t ammo = *(uint16_t *)(self + 0x0c);
+            if (ammo < 2)
+                return -1;
+            intptr_t owner = FUN_8001d5a0(obj);
+            uint8_t *joint = (uint8_t *)(uintptr_t)*(uint32_t *)(self + 0x38);
+            int16_t save_pitch = joint ? *(int16_t *)(joint + 0x40) : 0;
+            int16_t save_yaw = joint ? *(int16_t *)(joint + 0x42) : 0;
+            uint8_t *first = (uint8_t *)FUN_8003351c(obj, (uint32_t *)(uintptr_t)owner, 6, 0x4b);
+            if (first != NULL)
+                *(uint32_t *)first |= 0x01000000u;
+            for (uint32_t i = 1; i < 6 && *(uint16_t *)(self + 0x0c) != 0; i++) {
+                uint8_t *shot;
+                if (joint) {
+                    int32_t rand_pitch = (mips_mult_lo_i32((int32_t)FUN_80017160(), 3) << 6) >> 15;
+                    int32_t rand_yaw = (mips_mult_lo_i32((int32_t)FUN_80017160(), 3) << 6) >> 15;
+                    *(uint16_t *)(joint + 0x40) =
+                        (uint16_t)mips_addu_i32(mips_addu_i32(save_pitch, rand_pitch), -96);
+                    *(uint16_t *)(joint + 0x42) =
+                        (uint16_t)mips_addu_i32(mips_addu_i32(save_yaw, rand_yaw), -96);
+                    FUN_8001d708((intptr_t)joint);
+                }
+                shot = (uint8_t *)FUN_80031300(owner, (intptr_t)joint, 6, 0x98, 0);
+                if (shot != NULL) {
+                    *(uint32_t *)shot = 0x01800094u;
+                    *(uint16_t *)(shot + 0x0c) = 75;
+                    Object_SetCallbackPsxSlot(shot, (uintptr_t)&LAB_80033290);
+                    FUN_800202f4((intptr_t)shot);
+                    *(uint16_t *)(shot + 0x94) = 60;
+                    *(int32_t *)(shot + 0x88) =
+                        rtz_sra(*(int32_t *)((uint8_t *)(uintptr_t)owner + 0x80), 7) +
+                        (int16_t)*(uint16_t *)(shot + 0x14) * 6;
+                    *(int32_t *)(shot + 0x8c) =
+                        rtz_sra(*(int32_t *)((uint8_t *)(uintptr_t)owner + 0x84), 7) +
+                        (int16_t)*(uint16_t *)(shot + 0x1a) * 6;
+                    *(int32_t *)(shot + 0x90) =
+                        rtz_sra(*(int32_t *)((uint8_t *)(uintptr_t)owner + 0x88), 7) +
+                        (int16_t)*(uint16_t *)(shot + 0x20) * 6;
+                }
+                *(uint16_t *)(self + 0x0c) =
+                    (uint16_t)mips_addu_i32(*(uint16_t *)(self + 0x0c), -1);
+            }
+            if (joint) {
+                *(int16_t *)(joint + 0x40) = save_pitch;
+                *(int16_t *)(joint + 0x42) = save_yaw;
+                FUN_8001d708((intptr_t)joint);
+            }
+            if (*(uint16_t *)(self + 0x0c) == 0)
+                FUN_8002cb7c(obj);
+            return 0x78;
+        }
+        return 0;
     }
 
-    return child;
+    case 10:
+        return 0;
+
+    case 11: {
+        uint16_t timer = (*(int16_t *)(uintptr_t)(arg + 0x11c) != 0) ? 150u : 75u;
+        void *shot = FUN_8003351c(obj, (uint32_t *)(uintptr_t)arg, 6, timer);
+        if (weapon_trace_enabled()) {
+            fprintf(stderr,
+                    "v8: missile weapon fired weapon=%p owner=%p shot=%p timer=%u ammo=%u\n",
+                    (void *)(uintptr_t)obj, (void *)(uintptr_t)arg, shot,
+                    (unsigned)timer, (unsigned)*(uint16_t *)(self + 0x0c));
+        }
+        return 60;
+    }
+
+    case 12: {
+        intptr_t target = *(uint32_t *)(uintptr_t)(arg + 0xe4);
+        if (target == 0)
+            return 0;
+        int dist = FUN_80016aac((const int32_t *)(self + 0x48),
+                                (const int32_t *)(uintptr_t)(target + 0x48));
+        if (dist > 0x3e7fff)
+            return 0;
+        return (*(int32_t *)(uintptr_t)(arg + 0x8c) < 0x11e1) ? 1 : 0;
+    }
+
+    case 13:
+        return 3;
+
+    case 14:
+        return 0x8013;
+
+    default:
+        return 0;
+    }
 }
 
 /* ============================================================

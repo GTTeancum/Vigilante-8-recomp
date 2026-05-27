@@ -38,34 +38,35 @@
 
 /* FUN_8003eab0 -- Projectile_GravityTick: integrate vel, gravity, collision.
  * Returns >= 0 when in-flight, < 0 on impact/death. */
-extern int FUN_8003eab0(int obj, int event, int param3);
+extern uint32_t FUN_8003eab0(uint8_t *obj, int event, intptr_t param3);
 
 /* FUN_80021b80 -- Bone_AllocWithCallback: allocate new object with callback. */
-extern int FUN_80021b80(int (*cb)(int, int, int), int bank, uint16_t count, uint32_t flags);
+extern intptr_t FUN_80021b80(intptr_t (*cb)(intptr_t, int, intptr_t),
+                             intptr_t bank, uint16_t count, uint32_t flags);
 
 /* FUN_8002036c -- Object_PostUpdate2: post-spawn scene registration. */
-extern void FUN_8002036c(int obj);
+extern void FUN_8002036c(intptr_t obj);
 
 /* FUN_8001b0c4 -- BoneAnim_SetupByWeaponType: initialise bone animations. */
-extern void FUN_8001b0c4(int obj);
+extern void FUN_8001b0c4(intptr_t obj);
 
 /* FUN_80020890 -- Object_SchedulePostEvent: queue a post-frame event. */
-extern void FUN_80020890(int obj, int timer);
+extern void FUN_80020890(intptr_t obj, int timer);
 
 /* FUN_80017160 -- V8_RandNext: PRNG. */
 extern uint32_t FUN_80017160(void);
 extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 
 /* LAB_8003c61c -- split projectile state-machine tick (child callback). */
-extern int LAB_8003c61c(int obj, int event, int param3);
+extern intptr_t LAB_8003c61c(intptr_t obj, int event, intptr_t param3);
 
 /* DAT_800737dc: vehicle-sound bank handle.  Used to identify same-bank splits. */
-extern uint32_t DAT_800737dc;
+extern uintptr_t DAT_800737dc;
 
 /* DAT_80065BB8: shared bank pointer written by LAB_8003c61c event-1 (spawn)
  * and read here to pass to FUN_80021b80 when splitting.
  * PSX address: gp+2228 = 0x80065304+2228 = 0x80065BB8. */
-extern int32_t DAT_80065BB8;
+extern uintptr_t DAT_80065BB8;
 
 /* ------------------------------------------------------------------ */
 
@@ -91,12 +92,12 @@ static int split_count(uint16_t wtype, int same_bank)
 
 /* ------------------------------------------------------------------ */
 
-int LAB_8003cb64(int obj, int event, int param3)
+intptr_t LAB_8003cb64(intptr_t obj, int event, intptr_t param3)
 {
-    uint8_t *s0 = (uint8_t *)(uintptr_t)(uint32_t)obj;
+    uint8_t *s0 = (uint8_t *)(uintptr_t)obj;
 
     /* Forward all events to the gravity tick. */
-    int ret = FUN_8003eab0(obj, event, param3);
+    int ret = (int)FUN_8003eab0((uint8_t *)(uintptr_t)obj, event, param3);
 
     /* Still in flight (>= 0): nothing more to do. */
     if (ret >= 0)
@@ -111,7 +112,7 @@ int LAB_8003cb64(int obj, int event, int param3)
 
     /* Determine split count. */
     int32_t bank_old = *(int32_t *)(s0 + 0x58);
-    int same_bank = ((uint32_t)bank_old == DAT_800737dc);
+    int same_bank = ((uintptr_t)(uint32_t)bank_old == DAT_800737dc);
     uint16_t wtype = *(uint16_t *)(s0 + 0x0a);
     int count = split_count(wtype, same_bank);
 
@@ -120,11 +121,11 @@ int LAB_8003cb64(int obj, int event, int param3)
         return ret;
 
     /* ---- Spawn child split-projectile. ---- */
-    int new_obj = FUN_80021b80(&LAB_8003c61c,
-                                DAT_80065BB8,
-                                (uint16_t)((uint32_t)count & 0xffffu),
-                                0);
-    uint8_t *p = (uint8_t *)(uintptr_t)(uint32_t)new_obj;
+    intptr_t new_obj = FUN_80021b80(&LAB_8003c61c,
+                                    (intptr_t)DAT_80065BB8,
+                                    (uint16_t)((uint32_t)count & 0xffffu),
+                                    0);
+    uint8_t *p = (uint8_t *)(uintptr_t)new_obj;
 
     /* Copy HP. */
     *(uint16_t *)(p + 0x0c) = hp;
@@ -155,7 +156,7 @@ int LAB_8003cb64(int obj, int event, int param3)
     return ret;
 }
 
-int FUN_8003cb64(int obj, int event, int param3)
+intptr_t FUN_8003cb64(intptr_t obj, int event, intptr_t param3)
 {
     return LAB_8003cb64(obj, event, param3);
 }

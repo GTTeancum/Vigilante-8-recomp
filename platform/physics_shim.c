@@ -1,22 +1,18 @@
-/* physics_shim.c -- one-vehicle Physics_Step host shim.
+/* physics_shim.c -- host boundary for source Physics_Step.
  *
  * The engine's real Physics_Step (FUN_8002131c) walks a linked list
  * at piRam0000075c and dispatches per-object tick callbacks. That
  * list has a 32-bit-pointer layout (node[2] = obj) that won't
  * round-trip cleanly on x64 without packed structs.
  *
- * For the single-player-driving milestone we don't need a multi-
- * object world walker. This shim does the minimum: invoke the
- * player vehicle's +0x64 tick callback directly. Multi-vehicle
- * support comes later (proper packed ObjNode in host_vehicle.c).
- *
- * Despite the shortcut on the walker, the per-object physics IS
- * the engine's: each vehicle's tick callback runs
- * Object_IntegrateAndOrient (cleaned, src/physics/object_integrate.c)
- * which exercises the real GTE-driven matrix update + integration.
+ * The source walker is now used when the list is populated. The shim
+ * mirrors the original gp+0xc 32-bit frame counter aliases before that
+ * call so delayed events and frame-phased physics see the same tick.
  */
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 extern void *puRam000007d0;    /* player 1 vehicle */
 extern void *puRam000007d4;    /* player 2 vehicle (NULL in solo) */
@@ -24,12 +20,18 @@ extern uint8_t DAT_80065a60[]; /* source Physics_Step list head */
 extern uint8_t DAT_80065a18[]; /* source active collision list */
 extern uint32_t *piRam00000714;
 extern uintptr_t Object_CallbackFromPsxSlot(const void *obj);
+extern uintptr_t g_v8_static_collision_objs[512];
+extern int g_v8_static_collision_obj_count;
+extern uint32_t FUN_8001edb4(intptr_t self, uint32_t *other);
+extern uintptr_t uRam000006fc;
+extern uint32_t FUN_80020f14(int *root, intptr_t obj);
 
 /* Match timer: g_v8_match_timer > 0 → set iRam00000624=1 when Physics_Step
  * call count reaches that value, simulating "timer expired" match end. */
 extern int     g_v8_match_timer;
 extern int     g_v8_frame_count;
 extern int32_t iRam0000000c;
+extern uint32_t uRam0000000c;
 extern int32_t DAT_80065310;
 extern uint32_t _DAT_80065310;
 extern int32_t iRam00000624;   /* match-end flag → triggers ResultScreen */
@@ -104,6 +106,129 @@ static int input_active_for_vehicle(uint8_t *obj)
     return (flags & 0x00041f00u) != 0;
 }
 
+static int static_collision_probe_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *env = getenv("V8_STATIC_COLLISION_PROBE");
+        cached = (env != NULL && env[0] != 0 && env[0] != '0') ? atoi(env) : 0;
+    }
+    return cached;
+}
+
+static void run_static_collision_probe(uint8_t *player)
+{
+    static int ran;
+    uint8_t saved[0x130];
+    uint8_t direct_after[0x130];
+    uint8_t tree_after[0x130];
+    int limit;
+    int side_probe;
+
+    if (ran || !static_collision_probe_enabled() || player == NULL)
+        return;
+    ran = 1;
+    memcpy(saved, player, sizeof(saved));
+    limit = g_v8_static_collision_obj_count;
+    if (limit > 128)
+        limit = 128;
+    fprintf(stderr, "v8: static_collision_probe objects=%d limit=%d\n",
+            g_v8_static_collision_obj_count, limit);
+    side_probe = static_collision_probe_enabled() > 1;
+    for (int i = 0; i < limit; i++) {
+        uint32_t *other = (uint32_t *)g_v8_static_collision_objs[i];
+        uint8_t *shape;
+        int32_t minx, miny, minz, maxx, maxy, maxz;
+        int32_t px, py, pz;
+        int32_t vx, vz;
+        if (other == NULL)
+            continue;
+        memcpy(player, saved, sizeof(saved));
+        px = (int32_t)other[9];
+        py = (int32_t)other[10];
+        pz = (int32_t)other[11];
+        vx = 0;
+        vz = 0;
+        shape = (uint8_t *)(uintptr_t)(uint32_t)other[0x17];
+        if (side_probe && shape != NULL && *(uint16_t *)shape == 1) {
+            minx = *(int32_t *)(shape + 4);
+            miny = *(int32_t *)(shape + 8);
+            minz = *(int32_t *)(shape + 12);
+            maxx = *(int32_t *)(shape + 16);
+            maxy = *(int32_t *)(shape + 20);
+            maxz = *(int32_t *)(shape + 24);
+            px = (int32_t)other[9] + maxx + (*(int32_t *)(player + 0x54) >> 1);
+            py = (int32_t)other[10] + ((miny + maxy) >> 1);
+            pz = (int32_t)other[11] + ((minz + maxz) >> 1);
+            vx = -0x40000;
+        }
+        *(uint32_t *)(player + 0x24) = (uint32_t)px;
+        *(uint32_t *)(player + 0x28) = (uint32_t)py;
+        *(uint32_t *)(player + 0x2c) = (uint32_t)pz;
+        *(uint32_t *)(player + 0x48) = (uint32_t)px;
+        *(uint32_t *)(player + 0x4c) = (uint32_t)py;
+        *(uint32_t *)(player + 0x50) = (uint32_t)pz;
+        *(uint32_t *)(player + 0x80) = (uint32_t)vx;
+        *(uint32_t *)(player + 0x84) = 0;
+        *(uint32_t *)(player + 0x88) = (uint32_t)vz;
+        fprintf(stderr,
+                "v8: static_collision_probe test=%d side=%d other=%p flags=0x%x kind=%u layer=%d probe=(0x%x,0x%x,0x%x) vel=(%d,%d) pos=(0x%x,0x%x,0x%x) r=0x%x shape=0x%x child=0x%x\n",
+                i, side_probe, (void *)other, (unsigned)other[0],
+                (unsigned)*(uint8_t *)((uint8_t *)other + 4),
+                (int)*(int16_t *)((uint8_t *)other + 6),
+                (unsigned)px, (unsigned)py, (unsigned)pz, vx, vz,
+                (unsigned)other[9], (unsigned)other[10], (unsigned)other[11],
+                (unsigned)other[0x15], (unsigned)other[0x17],
+                (unsigned)other[0x0e]);
+        uint32_t direct_result = FUN_8001edb4((intptr_t)player, other);
+        memcpy(direct_after, player, sizeof(direct_after));
+        fprintf(stderr,
+                "v8: static_collision_probe direct test=%d result=%u vel=(%d,%d,%d) ang=(%d,%d,%d) pos=(0x%x,0x%x,0x%x) contacts=(0x%x,0x%x)\n",
+                i, (unsigned)direct_result,
+                *(int32_t *)(direct_after + 0x80),
+                *(int32_t *)(direct_after + 0x84),
+                *(int32_t *)(direct_after + 0x88),
+                *(int32_t *)(direct_after + 0x90),
+                *(int32_t *)(direct_after + 0x94),
+                *(int32_t *)(direct_after + 0x98),
+                *(uint32_t *)(direct_after + 0x24),
+                *(uint32_t *)(direct_after + 0x28),
+                *(uint32_t *)(direct_after + 0x2c),
+                *(uint32_t *)(direct_after + 0x74),
+                *(uint32_t *)(direct_after + 0x78));
+        if (side_probe && uRam000006fc != 0) {
+            memcpy(player, saved, sizeof(saved));
+            *(uint32_t *)(player + 0x24) = (uint32_t)px;
+            *(uint32_t *)(player + 0x28) = (uint32_t)py;
+            *(uint32_t *)(player + 0x2c) = (uint32_t)pz;
+            *(uint32_t *)(player + 0x48) = (uint32_t)px;
+            *(uint32_t *)(player + 0x4c) = (uint32_t)py;
+            *(uint32_t *)(player + 0x50) = (uint32_t)pz;
+            *(uint32_t *)(player + 0x80) = (uint32_t)vx;
+            *(uint32_t *)(player + 0x84) = 0;
+            *(uint32_t *)(player + 0x88) = (uint32_t)vz;
+            uint32_t tree_result =
+                FUN_80020f14((int *)(uintptr_t)uRam000006fc, (intptr_t)player);
+            memcpy(tree_after, player, sizeof(tree_after));
+            fprintf(stderr,
+                    "v8: static_collision_probe tree test=%d result=%u vel=(%d,%d,%d) ang=(%d,%d,%d) pos=(0x%x,0x%x,0x%x) contacts=(0x%x,0x%x)\n",
+                    i, (unsigned)tree_result,
+                    *(int32_t *)(tree_after + 0x80),
+                    *(int32_t *)(tree_after + 0x84),
+                    *(int32_t *)(tree_after + 0x88),
+                    *(int32_t *)(tree_after + 0x90),
+                    *(int32_t *)(tree_after + 0x94),
+                    *(int32_t *)(tree_after + 0x98),
+                    *(uint32_t *)(tree_after + 0x24),
+                    *(uint32_t *)(tree_after + 0x28),
+                    *(uint32_t *)(tree_after + 0x2c),
+                    *(uint32_t *)(tree_after + 0x74),
+                    *(uint32_t *)(tree_after + 0x78));
+        }
+    }
+    memcpy(player, saved, sizeof(saved));
+}
+
 typedef struct HostObjListNode {
     struct HostObjListNode *next;
     struct HostObjListNode *prev;
@@ -135,9 +260,74 @@ static int host_list_populated(uint8_t *listHead)
     return sentinel != NULL && sentinel->prev != NULL && sentinel->next != NULL;
 }
 
+static int trace_tick_list_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *env = getenv("V8_TRACE_TICK_LIST");
+        cached = (env != NULL && env[0] != 0 && env[0] != '0');
+    }
+    return cached;
+}
+
+static void trace_tick_list(uint8_t *listHead, uint8_t *player,
+                            uint8_t *opponent, int frame)
+{
+    HostObjListNode *sentinel = (HostObjListNode *)listHead;
+    HostObjListNode *node;
+    uint8_t *player_wheels[4] = { 0, 0, 0, 0 };
+    uint8_t *opponent_wheels[4] = { 0, 0, 0, 0 };
+    int count = 0;
+    int player_count = 0;
+    int opponent_count = 0;
+    int player_wheel_count[4] = { 0, 0, 0, 0 };
+    int opponent_wheel_count[4] = { 0, 0, 0, 0 };
+
+    if (!trace_tick_list_enabled() || sentinel == NULL || sentinel->prev == NULL)
+        return;
+    if (!(frame <= 8 || frame == 60 || frame == 120 || frame == 240 ||
+          frame == 600 || frame == 1200 || (frame > 1200 && (frame % 600) == 0)))
+        return;
+
+    if (player != NULL) {
+        for (int i = 0; i < 4; i++)
+            player_wheels[i] = (uint8_t *)(uintptr_t)*(uint32_t *)(player + 0xfc + i * 4);
+    }
+    if (opponent != NULL) {
+        for (int i = 0; i < 4; i++)
+            opponent_wheels[i] = (uint8_t *)(uintptr_t)*(uint32_t *)(opponent + 0xfc + i * 4);
+    }
+
+    for (node = sentinel->next; node != NULL; node = node->next) {
+        uint8_t *payload = (uint8_t *)node->payload;
+        count++;
+        if (payload == player) {
+            player_count++;
+        } else if (payload == opponent) {
+            opponent_count++;
+        }
+        for (int i = 0; i < 4; i++) {
+            if (payload == player_wheels[i])
+                player_wheel_count[i]++;
+            if (payload == opponent_wheels[i])
+                opponent_wheel_count[i]++;
+        }
+    }
+
+    fprintf(stderr,
+            "v8: tick_list frame=%d total=%d player=%d opponent=%d "
+            "pw=(%d,%d,%d,%d) ow=(%d,%d,%d,%d) head_next=%p head_prev=%p\n",
+            frame, count, player_count, opponent_count,
+            player_wheel_count[0], player_wheel_count[1],
+            player_wheel_count[2], player_wheel_count[3],
+            opponent_wheel_count[0], opponent_wheel_count[1],
+            opponent_wheel_count[2], opponent_wheel_count[3],
+            (void *)sentinel->next, (void *)sentinel->prev);
+}
+
 void Physics_Step(uint32_t catchupFlag)
 {
-    static int call_count = 0;
+    static uint32_t call_count = 0;
     static int log_first = 1;
     static uint32_t player_prev_after[13];
     static uint32_t opponent_prev_after[13];
@@ -150,10 +340,10 @@ void Physics_Step(uint32_t catchupFlag)
                 puRam000007d0);
         log_first = 0;
     }
-    call_count++;
-    iRam0000000c = call_count;
-    DAT_80065310 = call_count;
-    _DAT_80065310 = (uint32_t)call_count;
+    call_count = uRam0000000c;
+    iRam0000000c = (int32_t)call_count;
+    DAT_80065310 = (int32_t)call_count;
+    _DAT_80065310 = call_count;
     uint8_t *player = (uint8_t *)puRam000007d0;
     uint8_t *opponent = (uint8_t *)puRam000007d4;
     int list_has_player = host_list_contains(DAT_80065a60, player);
@@ -161,6 +351,9 @@ void Physics_Step(uint32_t catchupFlag)
     int ticked = host_list_populated(DAT_80065a60);
     uint32_t player_before[13], player_after[13];
     uint32_t opponent_before[13], opponent_after[13];
+
+    run_static_collision_probe(player);
+    trace_tick_list(DAT_80065a60, player, opponent, (int)call_count);
 
     snapshot_motion(player, player_before);
     snapshot_motion(opponent, opponent_before);
@@ -195,7 +388,7 @@ void Physics_Step(uint32_t catchupFlag)
         if (!logged_player_fallback) {
             fprintf(stderr,
                     "v8: Physics_Step player missing from source tick list at frame %d; direct fallback disabled\n",
-                    call_count);
+                    (int)call_count);
             logged_player_fallback = 1;
         }
 #if 0
@@ -223,7 +416,7 @@ void Physics_Step(uint32_t catchupFlag)
         if (!logged_opponent_fallback) {
             fprintf(stderr,
                     "v8: Physics_Step opponent missing from source tick list at frame %d; direct fallback disabled\n",
-                    call_count);
+                    (int)call_count);
             logged_opponent_fallback = 1;
         }
 #if 0
@@ -244,16 +437,16 @@ void Physics_Step(uint32_t catchupFlag)
     }
 
     /* Match timer: fire match-end exactly once when timer expires. */
-    if (g_v8_match_timer > 0 && call_count == g_v8_match_timer && iRam00000624 == 0) {
+    if (g_v8_match_timer > 0 && call_count == (uint32_t)g_v8_match_timer && iRam00000624 == 0) {
         fprintf(stderr, "v8: match timer expired at frame %d -- triggering ResultScreen\n",
-                call_count);
+                (int)call_count);
         iRam00000624 = 1;
     }
     if (player_same_pos_frames >= 180 && input_active_for_vehicle(player) &&
         (player_same_pos_frames % 180) == 0) {
         fprintf(stderr,
                 "v8: Physics_Step player position unchanged for 180 frames while input is active at frame %d pos=(0x%x,0x%x,0x%x) vel=(%d,%d,%d)\n",
-                call_count,
+                (int)call_count,
                 player_after[1], player_after[2], player_after[3],
                 (int32_t)player_after[4], (int32_t)player_after[5],
                 (int32_t)player_after[6]);
@@ -262,7 +455,7 @@ void Physics_Step(uint32_t catchupFlag)
         (opponent_same_pos_frames % 180) == 0) {
         fprintf(stderr,
                 "v8: Physics_Step opponent position unchanged for 180 frames while input is active at frame %d pos=(0x%x,0x%x,0x%x) vel=(%d,%d,%d)\n",
-                call_count,
+                (int)call_count,
                 opponent_after[1], opponent_after[2], opponent_after[3],
                 (int32_t)opponent_after[4], (int32_t)opponent_after[5],
                 (int32_t)opponent_after[6]);
@@ -285,7 +478,7 @@ void Physics_Step(uint32_t catchupFlag)
             int16_t steer = *(int16_t *)(v + 0xa4);
             int16_t input = *(int16_t *)(v + 0xa6);
             fprintf(stderr, "v8: Physics_Step @%d ticked=%d saw=(%d,%d) cb=%p flags=0x%x  +24=(0x%x,0x%x,0x%x)  +ec=(0x%x,0x%x,0x%x) vel=(%d,%d,%d) ang=(%d,%d,%d) branch18=%d status=%d state=%u lut_flags=0x%x steer=%d input=%d\n",
-                    call_count, ticked, list_has_player, list_has_opponent,
+                    (int)call_count, ticked, list_has_player, list_has_opponent,
                     (void *)Object_CallbackFromPsxSlot(v),
                     (unsigned)*(uint32_t *)(v + 0x00),
                     px24, py24, pz24, pxec, pyec, pzec,
@@ -326,7 +519,7 @@ void Physics_Step(uint32_t catchupFlag)
             if (ai) {
                 fprintf(stderr,
                         "v8: AI source @%d +24=(0x%x,0x%x,0x%x) status=%d kind=%u state=%u path=%d steer=%d input=%d cb=%p\n",
-                        call_count,
+                        (int)call_count,
                         (unsigned)*(uint32_t *)(ai + 0x24),
                         (unsigned)*(uint32_t *)(ai + 0x28),
                         (unsigned)*(uint32_t *)(ai + 0x2c),

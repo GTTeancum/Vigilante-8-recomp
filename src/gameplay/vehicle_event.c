@@ -15,8 +15,8 @@
  *   bit 17 (0x020000): projectile-hit -- dispatch mode 9 to matching node
  *   bit 21 (0x200000): target-cycle -- call FindNextTarget, store new target
  *   bit 18 (0x040000): weapon-fired -- play fire SFX, update lock-on
- *   bit  2 (0x000004): lock-on activate (forwarded to Reticle_UpdateLock)
- *   bit  1 (0x000002): hit by projectile (mode 0xB to chassis sub-object)
+ *   bit  2 (0x000004): attached-weapon activate (forwarded to Reticle_UpdateLock)
+ *   bit  1 (0x000002): built-in gun activate (mode 0xB to chassis sub-object)
  *
  * Supporting sub-functions (all defined in this translation unit's deps):
  *   FUN_8002cf90  Vehicle_CycleNodeSlot
@@ -117,10 +117,10 @@ void FUN_8002d494(uint32_t *self, uint32_t *event_node)
             uint32_t off = ((uint32_t)db + 9u) << 2;
             uint32_t *node = (uint32_t *)(uintptr_t)*(uint32_t *)(s + off + 0xec);
             if (node) {
-                typedef int (*TickFn)(uint32_t *, int, uint32_t *);
+                typedef int (*TickFn)(intptr_t, int, intptr_t);
                 TickFn cb = (TickFn)Object_CallbackFromPsxSlot(node);
                 if (cb)
-                    cb(node, 0xa, self);
+                    cb((intptr_t)node, 0xa, (intptr_t)self);
             }
         }
     }
@@ -178,7 +178,7 @@ void FUN_8002d494(uint32_t *self, uint32_t *event_node)
     }
 
     /* ----------------------------------------------------------------
-     * 6. Always: update lock-on reticle (activate if bit 2 set).
+     * 6. Always: update attached-weapon/lock-on node (activate if bit 2 set).
      * ---------------------------------------------------------------- */
     FUN_8002ce68(self, (int)(ev_flags & 0x4u));
 
@@ -206,10 +206,10 @@ void FUN_8002d494(uint32_t *self, uint32_t *event_node)
             if (node && *(uint16_t *)((uint8_t *)node + 0x0c) != 0) {
                 /* Call node tick with mode 9 (take-hit). */
                 int s0 = 0;
-                typedef int (*TickFn)(uint32_t *, int, uint32_t);
+                typedef int (*TickFn)(intptr_t, int, intptr_t);
                 TickFn cb = (TickFn)Object_CallbackFromPsxSlot(node);
                 if (cb)
-                    s0 = cb(node, 9, event_node[1]);
+                    s0 = cb((intptr_t)node, 9, (intptr_t)event_node[1]);
 
                 if (s0 != 0) {
                     /* Node responded: play 3D SFX at player position. */
@@ -235,16 +235,16 @@ void FUN_8002d494(uint32_t *self, uint32_t *event_node)
 chassis_notify:
     /* ----------------------------------------------------------------
      * 9. Chassis sub-object notification: dispatch mode 4 (idle) or
-     *    0xB (hit-by-projectile) to the chassis node at self+0x10c.
+     *    0xB (built-in gun fire) to the chassis node at self+0x10c.
      * ---------------------------------------------------------------- */
     {
         int mode = (ev_flags & 0x2u) ? 0xb : 4;
         uint32_t *chassis = (uint32_t *)(uintptr_t)*(uint32_t *)(s + 0x10c);
         if (chassis) {
-            typedef int (*TickFn)(uint32_t *, int, uint32_t *);
+            typedef int (*TickFn)(intptr_t, int, intptr_t);
             TickFn cb = (TickFn)Object_CallbackFromPsxSlot(chassis);
             if (cb)
-                cb(chassis, mode, self);
+                cb((intptr_t)chassis, mode, (intptr_t)self);
         }
     }
 

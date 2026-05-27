@@ -15,8 +15,8 @@
 #include <stdint.h>
 #include "structs.h"
 
-extern void   *FUN_80031300(int parent, int subBin, int kind, uint32_t kindB,
-                             int parentSlot);    /* Object_SpawnAttached */
+extern void   *FUN_80031300(intptr_t parent, intptr_t subBin, int kind, uint32_t kindB,
+                             intptr_t parentSlot); /* Object_SpawnAttached */
 extern uint32_t *FUN_8003fd24(const int32_t *xyz, int arg); /* Debris_AttachTrack (returns alloc'd particle) */
 extern void    FUN_80017594(uint32_t *obj, const int32_t *impulse,
                              const int32_t *pos);            /* Object_ApplyImpulse */
@@ -33,17 +33,17 @@ extern void    FUN_80043358(const void *matIn, const int32_t *src,
 extern int     FUN_8004410c(void);                           /* Audio_AllocVoice */
 extern void    FUN_800447e8(int voice, uint32_t bank,
                              int sfxId, const void *pos3d); /* Audio_Play3D */
-extern void    FUN_8002cb7c(int slot);                       /* WeaponSlot_OnChildDestroy */
+extern void    FUN_8002cb7c(intptr_t slot);                  /* WeaponSlot_OnChildDestroy */
 extern void   *FUN_8001bda0(int *pool, uint32_t kind);       /* WorldReg_AllocSlot */
 extern void    FUN_800116f4(uint32_t size);                  /* Heap_AllocOrRetry */
 
-extern uint32_t DAT_800737d8;   /* world-object pool handle  */
+extern uintptr_t DAT_800737d8;  /* world-object pool handle  */
 extern uint32_t uRam000005f8;   /* global audio bank         */
 extern int32_t  DAT_8006576c[3];  /* impulse vector (FUN_80031dfc) */
 extern int32_t  DAT_80065778[4];  /* matrix vector (FUN_8003351c)  */
 extern int32_t  DAT_80065788[4];  /* matrix vector (FUN_800346cc)  */
 extern int32_t  DAT_800657a4[4];  /* impulse vector (FUN_800354e0) */
-extern uint32_t DAT_800737d4;     /* world bone-bank           */
+extern uintptr_t DAT_800737d4;    /* world bone-bank           */
 extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 
 static inline int32_t mips_addu_i32(int32_t a, int32_t b)
@@ -74,7 +74,7 @@ static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
  * clears flag bit 4 in the projectile's flags word, sets position,
  * applies impulse, plays SFX 0x2f.
  * ================================================================ */
-void *FUN_80031dfc(int param_1, int param_2, int16_t param_3)
+void *FUN_80031dfc(intptr_t param_1, intptr_t param_2, int16_t param_3)
 {
     void *puVar1;
     uint32_t *puVar2;
@@ -151,7 +151,7 @@ void *FUN_80031dfc(int param_1, int param_2, int16_t param_3)
  * minus bounding-box half-extents scaled by 0x6d6/4096 (RTZ >>12).
  * Decrements self's ammo counter; destroys slot on zero.
  * ================================================================ */
-void *FUN_80032e48(int param_1, int param_2, int16_t param_3)
+void *FUN_80032e48(intptr_t param_1, intptr_t param_2, int16_t param_3)
 {
     int16_t sVar1;
     void *puVar2;
@@ -214,19 +214,19 @@ void *FUN_80032e48(int param_1, int param_2, int16_t param_3)
  * installs LAB_80033290 as tick. Applies matrix-transformed impulse
  * from DAT_80065778. Decrements ammo; destroys slot on zero.
  * ================================================================ */
-void *FUN_8003351c(int param_1, uint32_t *param_2, int16_t param_3,
+void *FUN_8003351c(intptr_t param_1, uint32_t *param_2, int16_t param_3,
                    uint16_t param_4)
 {
     int16_t sVar1;
-    int iVar2;
+    intptr_t iVar2;
     void *puVar3;
     uint32_t uVar4, uVar5;
     int32_t auStack_30[4];
-    int iVar6;
+    intptr_t iVar6;
 
-    iVar6 = *(int32_t *)(uintptr_t)(param_1 + 0x38);
-    iVar2 = (int)(uintptr_t)FUN_8001ac44((void *)(uintptr_t)DAT_800737d8, 4, 0x80, 8);
-    puVar3 = FUN_80031300((int)(uintptr_t)param_2, iVar6, (int)param_3, 0x98, iVar2);
+    iVar6 = (intptr_t)(uintptr_t)*(uint32_t *)(uintptr_t)(param_1 + 0x38);
+    iVar2 = (intptr_t)FUN_8001ac44((void *)(uintptr_t)DAT_800737d8, 4, 0x80, 8);
+    puVar3 = FUN_80031300((intptr_t)param_2, iVar6, (int)param_3, 0x98, iVar2);
     ((uint32_t *)puVar3)[0] = 0x800094;
     *(uint16_t *)((uintptr_t)puVar3 + 0xc) = param_4;
     {
@@ -286,7 +286,7 @@ void *FUN_8003351c(int param_1, uint32_t *param_2, int16_t param_3,
  * Scales initial velocity by distance-clamped factor [0x1000, 0x2000].
  * Applies matrix-transformed impulse from DAT_80065788.
  * ================================================================ */
-void *FUN_800346cc(int param_1, uint32_t *param_2, int16_t param_3,
+void *FUN_800346cc(intptr_t param_1, uint32_t *param_2, int16_t param_3,
                    uint16_t param_4, uint16_t param_5)
 {
     char cVar1;
@@ -296,12 +296,12 @@ void *FUN_800346cc(int param_1, uint32_t *param_2, int16_t param_3,
     uint32_t uVar6;
     uint32_t *puVar7;
     int32_t auStack_30[4];
-    int iVar8;
+    intptr_t iVar8;
 
-    iVar8 = *(int32_t *)(uintptr_t)(param_1 + 0x38);
+    iVar8 = (intptr_t)(uintptr_t)*(uint32_t *)(uintptr_t)(param_1 + 0x38);
     puVar2 = (uint32_t *)FUN_8001ac44((void *)(uintptr_t)DAT_800737d8, 10, 0x80, 8);
-    puVar3 = FUN_80031300((int)(uintptr_t)param_2, iVar8, (int)param_3, 0x98,
-                          (int)(uintptr_t)puVar2);
+    puVar3 = FUN_80031300((intptr_t)param_2, iVar8, (int)param_3, 0x98,
+                          (intptr_t)puVar2);
     *(uint16_t *)((uintptr_t)puVar3 + 10) = param_4;
     ((uint32_t *)puVar3)[0] = 0x800490;
     *(uint16_t *)((uintptr_t)puVar3 + 0xc) = param_5;
@@ -370,7 +370,7 @@ void *FUN_800346cc(int param_1, uint32_t *param_2, int16_t param_3,
  * 300 if hard-mode. Tick from param_4. Calls FUN_8001dc1c
  * (Object_RandomizeRotation) after registering. Plays SFX 0x31.
  * ================================================================ */
-void *FUN_800354e0(int param_1, int param_2, int16_t param_3,
+void *FUN_800354e0(intptr_t param_1, intptr_t param_2, int16_t param_3,
                    void *param_4)
 {
     void *puVar1;

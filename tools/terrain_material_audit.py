@@ -54,13 +54,18 @@ def audit_file(exp: Path) -> list[str]:
     )
     if tinf:
         payload = tinf[0][4]
+        rec_size = 0x28
         for mid in used[:16]:
-            off = mid * 0x20
-            if off + 0x20 <= len(payload):
-                words_be = [be16(payload, off + i) for i in range(0, 0x20, 2)]
-                words_le = [le16(payload, off + i) for i in range(0, 0x20, 2)]
+            off = mid * rec_size
+            if off + rec_size <= len(payload):
+                words_be = [be16(payload, off + i) for i in range(0, rec_size, 2)]
+                words_le = [le16(payload, off + i) for i in range(0, rec_size, 2)]
+                tile_word = words_be[3]
+                flags_word = words_le[0]
                 lines.append(
-                    f"  mat[{mid:03}] raw_be={words_be[:8]} raw_le={words_le[:8]}"
+                    f"  mat[{mid:03}] tinf28_be={words_be[:10]} "
+                    f"tinf28_le={words_le[:4]} tile={tile_word & 7} "
+                    f"flip={(tile_word >> 3) & 1} hidden={(flags_word & 0x1000) != 0}"
                 )
     lines.append("")
     return lines

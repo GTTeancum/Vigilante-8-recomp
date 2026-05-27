@@ -88,6 +88,15 @@ texture, color, environment, or audio-adjacent seams.
   `LOAD 80104a94`. Each chunk appends one 0x34-byte runtime descriptor to
   `_DAT_80065bd4`; the first 12 payload bytes are `i32 width16`, `i32 step16`,
   `i16 texture_id`, `u16 flags`. RSEG `type` indexes this descriptor array.
+  If a TIM payload is present, `800187e4` fills the descriptor's PSX texture
+  rectangle fields (`width_pixels`, `height_pixels`, base UV, tpage, clut).
+  `LOAD 8010246c` then builds route primitive templates: flags bit `0x0002`
+  selects textured `POLY_GT4` packets (`80106214` stamps packet length/code
+  `0x0c/0x3c`), while the clear path builds untextured `POLY_FT4`-sized
+  templates (`801061f4` stamps `0x09/0x2c`). Flags bit `0x0100` ORs the PSX
+  semitrans bit into the primitive code. The template code also creates four
+  quadrant UV variants per texture rectangle, so route drawing is packet-based
+  and semitransparent; it is not an opaque host decal layer.
 - `FORM XOBF/BIN`: level visual geometry, slot tree, and obstacle leaf tables.
 - `FORM OBJ/HEAD`: placed object records consumed by `LOAD 80100e98 ->
   801006f0`. HEAD X/Z are 16.16 cell coordinates; HEAD Y is stored in the
@@ -184,6 +193,15 @@ All terrain XOBF BINs audited so far share this header:
 The older derived slot count `(group_table - 0x1c) / 0x1c` happens to match
 the audited files, but `+0x18` is the field the format actually carries.
 
+## XOBF Polygon Packets
+
+`FUN_8001b49c` builds cached PSX draw packets from raw BIN polygon packets.
+The source packet kind is `(type_byte >> 2) & 0x0f`; the low two bits are
+preserved into the PSX primitive code. The current host renderer still reads
+raw BIN packets directly for display, so the exact renderer-facing fix is to
+decode the cached packets emitted by `FUN_8001b49c`, not to substitute the
+source packet kind into the raw-packet reader.
+
 ## XOBF Slot Record
 
 `FUN_8001ac44` walks slots recursively from HEAD `slot`:
@@ -221,8 +239,9 @@ Physics still keeps the original integer height units for `Terrain_HeightAt`
 and obstacle tests.
 
 Cross-level audit shows most terrain XOBF render groups use scale 8, with
-smaller counts at 9, 10, and 12. The older host `/16` visual scale was only a
-fallback guess and made placed groups too large relative to source matrices.
+smaller counts at 9, 10, and 12. The older host `/16` visual scale was a
+pre-source placeholder and made placed groups too large relative to source
+matrices.
 
 Vehicle BINs also carry descriptor scale bytes. `tools/scale_audit.py` compares
 the current descriptor-scale vehicle rendering against placed OilField
@@ -289,9 +308,31 @@ and writes the current cross-level report to
 `analysis/terrain_runtime_decode_latest.txt`.
 
 RSEG/XRTP route strips decode cleanly using Bezier control offsets, route
-widths, and route steps. They are retained for headless audits, but are no
-longer uploaded as default visible terrain because the original game does not
-draw the route graph as a surface.
+widths, and route steps. The host renderer now uploads only route types with
+decoded TIM payloads and treats XRTP `0x0100` as source semitransparency. Route
+types without a payload are left audit-only until their material source is
+identified; drawing them as flat fallback geometry produces unsupported slabs
+that are not source evidence.
+
+`tools/terrain_visual_format_audit.py` is the durable visual ownership audit.
+For Wild West it currently reports:
+
+- XOBF banks: 2. Bank 0 has 223 render groups, 699 slots, and 131 texture
+  slots; bank 1 has 15 render groups, 15 slots, and 16 texture slots.
+- Raw XOBF packet iteration must use `FUN_8001b49c` source kind
+  `(packet[3] >> 2) & 0x0f`, not the low nibble. Low-nibble decoding is only a
+  diagnostic column in the audit because it aliases unrelated packet fields.
+- The eight JUNC visual patches are not flat route polygons. They resolve to
+  bank 0 groups 215 (`JUNCTION_TSection`) and 216 (`JUNCTION_Ending`), and both
+  groups contain only source kind `5` textured triangle packets with valid
+  texture refs. Rendering those as flat colored geometry is a renderer bug.
+- Wild West XRTP type 0 carries the rail/track TIM payload, type 1 carries the
+  dirt road TIM payload, and type 2 has no TIM payload. Type 2 is therefore not
+  the train-track texture source.
+- XRTP `0x0100` belongs to PSX primitive semitransparency/blending. It should
+  not be translated into blanket per-texel OpenGL alpha for every nonzero
+  palette entry; doing so creates pale route strips instead of readable road and
+  rail textures. Transparent black remains per-texel alpha.
 
 `tools/terrain_route_surface_audit.py` independently rebuilds the ZMAP/ZONE
 runtime height table and samples `Terrain_HeightAt` along JUNC/RSEG route data

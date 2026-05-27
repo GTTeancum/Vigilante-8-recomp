@@ -32,7 +32,7 @@ extern void Spawner_Promote(uint32_t target);                         /* func_0x
 extern void Damage_ImpulsePropagate(int self, uint32_t mode, uint32_t **arg); /* func_0x800223dc */
 extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t _DAT_800659fc;
-extern uint32_t FUN_80101050;
+extern uint32_t FUN_80101050(uint32_t *obj, int mode);
 
 void SK_LiftChairGrab(int self, uint32_t mode, uint32_t **arg)
 {

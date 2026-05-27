@@ -64,6 +64,25 @@ static LONG WINAPI V8_UnhandledExceptionFilter(EXCEPTION_POINTERS *info)
                 (unsigned long long)c->R12, (unsigned long long)c->R13,
                 (unsigned long long)c->R14, (unsigned long long)c->R15,
                 (unsigned long long)c->Rbp, (unsigned long long)c->Rsp);
+        {
+            ULONG_PTR *sp = (ULONG_PTR *)(uintptr_t)c->Rsp;
+            fprintf(stderr, "v8: FATAL stack");
+            for (int i = 0; i < 24; i++) {
+                ULONG_PTR word = 0;
+                __try {
+                    word = sp[i];
+                } __except (EXCEPTION_EXECUTE_HANDLER) {
+                    break;
+                }
+                if (word >= base && word < base + 0x2000000) {
+                    fprintf(stderr, " [%d]=%p/rva=0x%Ix",
+                            i, (void *)word, (size_t)(word - base));
+                } else {
+                    fprintf(stderr, " [%d]=%p", i, (void *)word);
+                }
+            }
+            fputc('\n', stderr);
+        }
     }
 #endif
     return EXCEPTION_EXECUTE_HANDLER;
@@ -130,6 +149,8 @@ typedef struct {
     int   vehicle_template_probe;
     int   vehicle_construct_probe;
     int   vehicle_spawn_probe;
+    int   weapon_probe;
+    int   weapon_probe_state;
     int   vehicle_construct_kind;
 } V8Opts;
 
@@ -140,6 +161,8 @@ int g_v8_auto_drive_frames = 0;
 int g_v8_auto_fire_period = 0;
 int g_v8_match_timer = 0;       /* if >0, set iRam00000624=1 at this frame count */
 int g_v8_vehicle_construct_probe_kind = 5;
+int g_v8_weapon_probe = 0;
+int g_v8_weapon_probe_state = -1;
 
 /* Optional output paths from CLI. exit handlers consume these. */
 const char *g_screenshot_path = NULL;
@@ -189,6 +212,8 @@ static void print_help(void) {
          "  --vehicle-template-probe  headless Vehicles.exp object-template audit, then exit\n"
          "  --vehicle-construct-probe  headless Common.exp Vehicle_Construct audit, then exit\n"
          "  --vehicle-spawn-probe  headless LOAD spawn-record to vehicle audit, then exit\n"
+         "  --weapon-probe      headless source weapon/pickup callback audit, then exit\n"
+         "  --weapon-probe-state N  fire one attached weapon state in a fresh probe run\n"
          "  --vehicle-construct-kind N  kind index for construct probe (default 5)\n"
          "  --report-heap        alloc/free balance on exit\n"
          "  -h, --help           this message\n");
@@ -197,6 +222,7 @@ static void print_help(void) {
 static int parse_args(int argc, char **argv, V8Opts *o) {
     memset(o, 0, sizeof(*o));
     o->vehicle_construct_kind = -1;
+    o->weapon_probe_state = -1;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
         if      (!strcmp(a, "--selftest"))    o->want_selftest = 1;
@@ -218,6 +244,8 @@ static int parse_args(int argc, char **argv, V8Opts *o) {
         else if (!strcmp(a, "--vehicle-template-probe"))       o->vehicle_template_probe = 1;
         else if (!strcmp(a, "--vehicle-construct-probe"))      o->vehicle_construct_probe = 1;
         else if (!strcmp(a, "--vehicle-spawn-probe"))          o->vehicle_spawn_probe = 1;
+        else if (!strcmp(a, "--weapon-probe"))                 o->weapon_probe = 1;
+        else if (!strcmp(a, "--weapon-probe-state") && i+1 < argc) { o->weapon_probe = 1; o->weapon_probe_state = atoi(argv[++i]); }
         else if (!strcmp(a, "--vehicle-construct-kind") && i+1 < argc) o->vehicle_construct_kind = atoi(argv[++i]);
         else if (!strcmp(a, "-h") || !strcmp(a, "--help"))    { print_help(); return -1; }
         else { fprintf(stderr, "unknown arg: %s\n", a); print_help(); return -2; }
@@ -261,6 +289,10 @@ int main(int argc, char **argv)
 
     extern int Host_LoadExeDataTables(void);
     Host_LoadExeDataTables();
+    /* Host enters below the original FUN_80015098 bootstrap, so seed the
+     * source RNG before level/pickup constructors can call FUN_80017160. */
+    extern void V8_SeedRng(uint32_t seed);
+    V8_SeedRng(0xbb40e64du);
 
     if (opts.want_selftest) return Smoke_RunSelfTest();
 
@@ -288,6 +320,8 @@ int main(int argc, char **argv)
     if (g_screenshot_path) atexit(on_exit_screenshot);
     g_v8_auto_drive_frames = opts.auto_drive_frames;
     g_v8_auto_fire_period  = opts.auto_fire_period;
+    g_v8_weapon_probe      = opts.weapon_probe;
+    g_v8_weapon_probe_state = opts.weapon_probe_state;
     if (opts.vehicle_construct_kind >= 0) {
         g_v8_vehicle_construct_probe_kind = opts.vehicle_construct_kind;
     }

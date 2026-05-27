@@ -41,7 +41,7 @@ extern void Damage_RetireSelfAlt(int self);                         /* func_0x80
 extern int  Damage_AccumulateOrFire(uint32_t *self, uint16_t a);    /* FUN_80020778 */
 extern void Damage_Apply_AgainstSelf(void *self, void *param);
 extern int  *_DAT_80065a18;
-extern uint32_t FUN_8010076c;
+extern uint32_t FUN_8010076c(uint32_t *self, uint32_t mode, int *impulse);
 extern int LAB_8003e80c(int obj, int event, int param3);
 
 uint32_t SB_TurretTrack(int self, uint32_t mode, int *imp)
@@ -90,7 +90,7 @@ uint32_t SB_TurretTrack(int self, uint32_t mode, int *imp)
         *(int16_t *)(fp + 0x25) = 8;
         Object_BindLifecycle(fp);
         *(uint32_t *)(uintptr_t)parent_fx = 0x10u;
-        *(uintptr_t *)(uintptr_t)(parent_fx + 0x19 * 4) = (uintptr_t)&LAB_8003e80c;
+        Object_SetCallbackPsxSlot((void *)(uintptr_t)parent_fx, (uintptr_t)&LAB_8003e80c);
         Object_BindFinalize();
         uint32_t h = Pool_AllocSFX();
         Pool_BindFXOnObject(h, *(uint32_t *)(*(int *)(self + 0x58) + 8), 0, fp + 9);

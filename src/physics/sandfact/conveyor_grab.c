@@ -35,7 +35,7 @@ extern void GTE_RotateLongMatTrans(uint32_t *mat, int *src, int *dst);   /* FUN_
 extern void Conveyor_RebuildLocalFrame(uint8_t out[20], int self, int slot); /* FUN_8001d68c */
 extern void Damage_Apply_AgainstSelf(void *self, void *param);           /* FUN_80020890 */
 extern void Damage_StandardVehicle(int self, int *imp);                  /* func_0x80022320 */
-extern uint32_t FUN_80100c6c;  /* per-segment drag tick */
+extern uint32_t FUN_80100c6c(uint32_t *obj, int mode);  /* per-segment drag tick */
 
 static int32_t mips_addu_i32(int32_t a, int32_t b)
 {

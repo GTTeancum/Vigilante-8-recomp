@@ -18,7 +18,7 @@ extern void Audio_PlaySfxRelative(uint32_t bank, int sfxId, void *pos);  /* func
 extern void FUN_80020890(uint32_t *obj, int sub);
 extern void Object_DefaultDispatch(int obj, int mode, uint32_t arg);     /* func_0x800223dc */
 
-void WW_ShackTick(int obj, int mode, uint32_t arg)
+uint32_t WW_ShackTick(int obj, int mode, uint32_t arg)
 {
     if (mode != 1) {
         if (mode != 2) goto fallthrough;
@@ -32,11 +32,12 @@ void WW_ShackTick(int obj, int mode, uint32_t arg)
 
 fallthrough:
     Object_DefaultDispatch(obj, mode, arg);
+    return 0;
 }
 
-void FUN_801005e4(int obj, int mode, uint32_t arg)
+uint32_t FUN_801005e4(int obj, int mode, uint32_t arg)
 {
-    WW_ShackTick(obj, mode, arg);
+    return WW_ShackTick(obj, mode, arg);
 }
 
 /* ============================================================

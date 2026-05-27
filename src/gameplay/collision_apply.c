@@ -31,16 +31,16 @@
  * Pass 3 should rename Vehicle.statusFlags accordingly.
  */
 #include <stdint.h>
-#include <stdio.h>
 
 extern int  Effects_SpawnExplosion(int obj);                /* FUN_8003fc50 */
+extern int  FUN_8003fc94(int obj);
 extern void (*pcRam00000730)(void *self, int eventId, int);  /* world callback */
+
+uint32_t uRam000006f4;
+uint32_t uRam00000708;
 
 int Damage_AccumulateOrFire(uint32_t *self, uint16_t amount)
 {
-    fprintf(stderr, "v8: Damage_AccumulateOrFire(self=%p, amount=%u, hp=%u)\n",
-            (void *)self, (unsigned)amount,
-            (unsigned)((uint16_t *)self)[6]);
     if ((self[0] & 0x8000u) != 0) return 0;
 
     uint16_t hp = ((uint16_t *)self)[6];        /* +0xc, lo u16 of self[3] */
@@ -59,8 +59,9 @@ int Damage_AccumulateOrFire(uint32_t *self, uint16_t amount)
 
 int Damage_FromImpulse(uint32_t *self, int *impulse)
 {
-    if (*(int8_t *)(*impulse + 4) != 7) return 0;
-    uint16_t weaponStrength = *(uint16_t *)(*impulse + 0xc);
+    uintptr_t hitObj = (uintptr_t)(uint32_t)*impulse;
+    if (*(int8_t *)(hitObj + 4) != 7) return 0;
+    uint16_t weaponStrength = *(uint16_t *)(hitObj + 0xc);
     return Damage_AccumulateOrFire(self, weaponStrength);
 }
 
@@ -69,6 +70,37 @@ uint32_t FUN_80022320(uint32_t *self, uint32_t amount)
     { return (uint32_t)Damage_AccumulateOrFire(self, (uint16_t)amount); }
 int FUN_8002239c(uint32_t *self, int32_t *impulse)
     { return Damage_FromImpulse(self, impulse); }
+
+uint32_t Object_DefaultDispatch(uint32_t *self, int mode, intptr_t arg)
+{
+    uint32_t ret = 0;
+
+    if (mode == 3) {
+        ret = (uint32_t)FUN_8002239c(self, (int32_t *)arg);
+    } else if (mode == 8) {
+        ret = FUN_80022320(self, (uint32_t)arg);
+    } else if (mode == 1) {
+        int effect = FUN_8003fc94((int)(intptr_t)self);
+        uRam000006f4 += (uint32_t)((uint16_t *)self)[6] * (uint32_t)effect;
+        return 0;
+    } else {
+        return 0;
+    }
+
+    if (ret != 0)
+        uRam00000708 += ((uint16_t *)self)[7];
+    return 0;
+}
+
+uint32_t FUN_800223dc(uint32_t *self, int mode, intptr_t arg)
+{
+    return Object_DefaultDispatch(self, mode, arg);
+}
+
+uint32_t SUB_800223dc(uint32_t *self, int mode, intptr_t arg)
+{
+    return Object_DefaultDispatch(self, mode, arg);
+}
 
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)

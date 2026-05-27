@@ -51,6 +51,8 @@ intptr_t FUN_80021c6c(uint32_t *placeholder)
     uint32_t flags = (*(uint32_t *)src << 1) & 8u;
 
     uint8_t *dst = (uint8_t *)FUN_80021b80(cb, bank, kind, flags);
+    if (dst == 0)
+        return 0;
 
     uint16_t health = *(uint16_t *)(src + 0x0c);
     uint16_t maxHealth = *(uint16_t *)(src + 0x0e);
@@ -68,9 +70,10 @@ intptr_t FUN_80021c6c(uint32_t *placeholder)
 
     if (health != 0 || maxHealth != 0) {
         uint32_t child = *(uint32_t *)(dst + 0x38);
+        int childGuard = 0;
         *(uint16_t *)(dst + 0x0c) = health;
         *(uint16_t *)(dst + 0x0e) = maxHealth;
-        while (child != 0) {
+        while (child != 0 && childGuard++ < 256) {
             *(uint16_t *)((uintptr_t)child + 0x0c) = health;
             child = *(uint32_t *)((uintptr_t)child + 0x34);
         }
@@ -84,6 +87,29 @@ intptr_t FUN_80021c6c(uint32_t *placeholder)
 intptr_t func_0x80021c6c(uint32_t *placeholder)
 {
     return FUN_80021c6c(placeholder);
+}
+
+/* HIGH: clone the spawn placeholder with the given id through its own
+ * callback/bank/kind fields.  This is the 0x80021d6c helper used by level
+ * destructible callbacks to materialise a DAT_80065a50 placeholder without
+ * replacing it with a vehicle callback. */
+intptr_t FUN_80021d6c(int spawnId)
+{
+    uint32_t *placeholder =
+        (uint32_t *)FUN_8001ffd4((intptr_t)DAT_80065a50, spawnId);
+    if (placeholder == 0)
+        return 0;
+    return FUN_80021c6c(placeholder);
+}
+
+intptr_t func_0x80021d6c(int spawnId)
+{
+    return FUN_80021d6c(spawnId);
+}
+
+intptr_t Object_BroadcastTreeEvent(uint32_t event)
+{
+    return FUN_80021d6c((int)event);
 }
 
 /* HIGH: find nearest spawn placeholder with id in [1, 31]. */

@@ -44,10 +44,10 @@ extern int FUN_80025400(int x, int z);
 /* FUN_8003fd24 -- Debris_Spawn: allocate and place a debris/impact particle.
  * Returns the spawned object handle.  Declared void elsewhere but the
  * return value is used by this caller (confirmed via Ghidra analysis). */
-extern int FUN_8003fd24(const int32_t *xyz, int kind);
+extern intptr_t FUN_8003fd24(const int32_t *xyz, int kind);
 
 /* FUN_8001d708 -- Object_ScheduleEvent: post an event to an object. */
-extern void FUN_8001d708(int obj);
+extern void FUN_8001d708(intptr_t obj);
 
 /* FUN_80017160 -- Rand16: return a 16-bit pseudo-random value. */
 extern int FUN_80017160(void);
@@ -60,10 +60,11 @@ extern int FUN_8004410c(void);
 extern void FUN_8004483c(int voice, uint32_t sound_bank, int pitch, const void *pos);
 
 /* FUN_800205f8 -- Object_RetireDeferred: queue object for deletion. */
-extern void FUN_800205f8(int obj);
+extern void FUN_800205f8(intptr_t obj);
 
 /* DAT_800658FC -- bullet ricochet sound bank (gp+1528). */
 extern uint32_t DAT_800658FC;
+extern uintptr_t Collision_QueryHostWord(const void *query, uint32_t index);
 
 /* ------------------------------------------------------------------ */
 
@@ -88,9 +89,9 @@ static int bullet_pitch_from_hp(uint16_t hp)
 
 /* ------------------------------------------------------------------ */
 
-int LAB_80031634(int obj, int event, int param3)
+intptr_t LAB_80031634(intptr_t obj, int event, intptr_t param3)
 {
-    uint8_t *s2 = (uint8_t *)(uintptr_t)(uint32_t)obj;
+    uint8_t *s2 = (uint8_t *)(uintptr_t)obj;
 
     if (event == 0) {
         /* ----- Tick ----- */
@@ -102,9 +103,9 @@ int LAB_80031634(int obj, int event, int param3)
         if (terrain_y < pos_y) {
             /* Bullet has gone below terrain: terrain impact. */
             const int32_t *pos_field = (const int32_t *)(s2 + 0x48);
-            int particle = FUN_8003fd24(pos_field, 1);
+            intptr_t particle = FUN_8003fd24(pos_field, 1);
             int rnd      = FUN_80017160();
-            *(int16_t *)(uintptr_t)(uint32_t)(particle + 0x44) = (int16_t)rnd;
+            *(int16_t *)(uintptr_t)(particle + 0x44) = (int16_t)rnd;
             FUN_8001d708(particle);
 
             int voice = FUN_8004410c();
@@ -142,7 +143,7 @@ int LAB_80031634(int obj, int event, int param3)
     if (event == 3) {
         /* ----- Collision ----- */
         /* s1 = *param3 = collider object */
-        uint8_t *s1 = (uint8_t *)(uintptr_t)(uint32_t)(*(int32_t *)(uintptr_t)(uint32_t)param3);
+        uint8_t *s1 = (uint8_t *)Collision_QueryHostWord((void *)(uintptr_t)param3, 0);
         uint8_t collider_type = s1[4];
 
         /* Terrain colliders (type 3): ignore. */
@@ -151,10 +152,10 @@ int LAB_80031634(int obj, int event, int param3)
 
         /* Spawn impact particle at bullet position. */
         const int32_t *pos_field = (const int32_t *)(s2 + 0x48);
-        int particle = FUN_8003fd24(pos_field, 1);
-        *(int32_t *)(uintptr_t)(uint32_t)particle |= 0x400; /* set particle flag */
+        intptr_t particle = FUN_8003fd24(pos_field, 1);
+        *(int32_t *)(uintptr_t)particle |= 0x400; /* set particle flag */
         int rnd = FUN_80017160();
-        *(int16_t *)(uintptr_t)(uint32_t)(particle + 0x44) = (int16_t)rnd;
+        *(int16_t *)(uintptr_t)(particle + 0x44) = (int16_t)rnd;
         FUN_8001d708(particle);
 
         /* If vehicle with special flag: retire without sound. */

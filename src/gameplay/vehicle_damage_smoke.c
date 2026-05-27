@@ -37,7 +37,7 @@ extern void     FUN_80020890(uint32_t *obj, int frames);
 extern int      FUN_8004410c(void);
 extern void     FUN_8004483c(int, uint32_t, int, uint32_t *);
 
-extern uint32_t DAT_800737d8;
+extern uintptr_t DAT_800737d8;
 extern uint32_t uRam000005f8;
 
 extern int LAB_8002c210(int obj, int event, int param3);
@@ -59,7 +59,7 @@ void FUN_8002c3ac(uint32_t *param_1)
         puVar2[9]    = 0;
         *puVar2 |= 0xa4u;
 
-        uVar1 = DAT_800737d8;
+        uVar1 = (uint32_t)DAT_800737d8;
         *(uint16_t *)((uint8_t *)puVar2 + 0x96) = 0x22;
         *(uint16_t *)((uint8_t *)puVar2 + 0x82) = 4;
         *(uint16_t *)(puVar2 + 3) = 2;

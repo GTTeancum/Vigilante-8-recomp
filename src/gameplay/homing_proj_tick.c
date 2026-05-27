@@ -38,7 +38,7 @@
 extern int FUN_80025400(int x, int z);
 
 /* FUN_8003fd24 -- Debris_Spawn: spawn impact/explosion particle. */
-extern int FUN_8003fd24(const int32_t *xyz, int kind);
+extern intptr_t FUN_8003fd24(const int32_t *xyz, int kind);
 
 /* FUN_8004410c -- Audio_AllocVoice. */
 extern int FUN_8004410c(void);
@@ -47,19 +47,19 @@ extern int FUN_8004410c(void);
 extern void FUN_8004483c(int voice, uint32_t bank, int pitch, const void *pos);
 
 /* FUN_80020620 -- ColEvent_Dispatch. */
-extern void FUN_80020620(uint32_t obj, uint32_t event);
+extern void FUN_80020620(intptr_t obj, uint32_t event);
 
 /* FUN_800205f8 -- Object_RetireDeferred. */
-extern void FUN_800205f8(int obj);
+extern void FUN_800205f8(intptr_t obj);
 
 /* FUN_80031454 -- WeaponHit_Apply. */
-extern int FUN_80031454(int obj, int *collider, uint16_t radius, int strength);
+extern int FUN_80031454(intptr_t obj, intptr_t *collider, uint16_t radius, int strength);
 
 /* FUN_8001ac44 -- BoneObj_BuildTree: allocate and build a bone-tree object. */
-extern int FUN_8001ac44(int bank, uint16_t slot, uint32_t size, uint32_t flags);
+extern int FUN_8001ac44(int *bank, uint16_t slot, uint32_t size, uint32_t flags);
 
 /* FUN_8002036c -- Object_PostUpdate2: register object in active list. */
-extern uint32_t FUN_8002036c(uint32_t *obj);
+extern uint32_t FUN_8002036c(void *obj);
 
 /* FUN_800176f8 -- Object_ApplyImpulseFrom: apply impulse vector at position. */
 extern void FUN_800176f8(intptr_t obj, int32_t *vec, int32_t *pos);
@@ -68,16 +68,17 @@ extern void FUN_800176f8(intptr_t obj, int32_t *vec, int32_t *pos);
 extern void FUN_80012068(int idx, uint8_t b5, uint8_t b6, uint8_t b7);
 
 /* LAB_8003e80c -- explosion debris main tick (in effect_death_ticks.c). */
-extern int LAB_8003e80c(int obj, int event, int param3);
+extern intptr_t LAB_8003e80c(intptr_t obj, int event, intptr_t param3);
 /* LAB_8003e7b4 -- explosion debris child tick (in effect_death_ticks.c). */
-extern int LAB_8003e7b4(int obj, int event, int param3);
+extern intptr_t LAB_8003e7b4(intptr_t obj, int event, intptr_t param3);
 extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+extern uintptr_t Collision_QueryHostWord(const void *query, uint32_t index);
 
 /* DAT_800658FC -- sound bank (gp+1528). */
 extern uint32_t DAT_800658FC;
 
 /* DAT_800737d8 -- bone bank pool handle. */
-extern uint32_t DAT_800737d8;
+extern uintptr_t DAT_800737d8;
 
 /* ------------------------------------------------------------------ */
 
@@ -91,9 +92,9 @@ static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
     return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
 }
 
-int LAB_80033290(int obj, int event, int param3)
+intptr_t LAB_80033290(intptr_t obj, int event, intptr_t param3)
 {
-    uint8_t *s1 = (uint8_t *)(uintptr_t)(uint32_t)obj;
+    uint8_t *s1 = (uint8_t *)(uintptr_t)obj;
     /* s3 = param3 (collider descriptor pointer on event 3) */
 
     if (event == 0) {
@@ -133,13 +134,12 @@ int LAB_80033290(int obj, int event, int param3)
 
         if (armed == 0) {
             /* Unarmed: standard hit. */
-            return FUN_80031454(obj, (int *)(uintptr_t)(uint32_t)param3,
+            return FUN_80031454(obj, (intptr_t *)(uintptr_t)param3,
                                 26u, 57);
         }
 
         /* Armed: full explosion. */
-        uint8_t *s0_collider = (uint8_t *)(uintptr_t)(uint32_t)
-                               (*(int32_t *)(uintptr_t)(uint32_t)param3);
+        uint8_t *s0_collider = (uint8_t *)Collision_QueryHostWord((void *)(uintptr_t)param3, 0);
         uint8_t collider_type = s0_collider[4];
 
         /* Terrain: no-op. */
@@ -147,15 +147,16 @@ int LAB_80033290(int obj, int event, int param3)
             return 0;
 
         /* Spawn explosion debris object. */
-        int new_obj = FUN_8001ac44((int)DAT_800737d8, 43u, 128u, 8u);
-        uint8_t *nobj = (uint8_t *)(uintptr_t)(uint32_t)new_obj;
+        intptr_t new_obj = (intptr_t)(uint32_t)FUN_8001ac44((int *)(uintptr_t)DAT_800737d8,
+                                                            43u, 128u, 8u);
+        uint8_t *nobj = (uint8_t *)(uintptr_t)new_obj;
         *(int32_t *)nobj = 52;
         /* Copy position from self. */
         *(int32_t *)(nobj + 0x48) = *(int32_t *)(s1 + 0x48);
         *(int32_t *)(nobj + 0x4c) = *(int32_t *)(s1 + 0x4c);
         *(int32_t *)(nobj + 0x50) = *(int32_t *)(s1 + 0x50);
         /* Install tick callbacks. */
-        int child = *(int32_t *)(nobj + 0x38);
+        intptr_t child = (intptr_t)(uint32_t)*(uint32_t *)(nobj + 0x38);
         Object_SetCallbackPsxSlot((void *)(uintptr_t)nobj, (uintptr_t)&LAB_8003e80c);
         if (child)
             Object_SetCallbackPsxSlot((void *)(uintptr_t)child, (uintptr_t)&LAB_8003e7b4);
@@ -178,7 +179,7 @@ int LAB_80033290(int obj, int event, int param3)
             impulse[1] = mips_mult_lo_i32(vel[1], 96);
             impulse[2] = mips_mult_lo_i32(vel[2], 96);
 
-            int collider_obj = *(int32_t *)(uintptr_t)(uint32_t)param3;
+            intptr_t collider_obj = (intptr_t)Collision_QueryHostWord((void *)(uintptr_t)param3, 0);
             FUN_800176f8(collider_obj, impulse, render_pos);
 
             /* Damage flash for negative HP targets. */

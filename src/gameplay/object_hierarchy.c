@@ -22,10 +22,10 @@
  */
 #include <stdint.h>
 
-void Object_DetachFromParent(int self)
+void Object_DetachFromParent(intptr_t self)
 {
-    int parent  = *(int *)(uintptr_t)(self + 0x3c);
-    int sibling = *(int *)(uintptr_t)(self + 0x34);
+    intptr_t parent  = (intptr_t)(uintptr_t)*(uint32_t *)(uintptr_t)(self + 0x3c);
+    intptr_t sibling = (intptr_t)(uintptr_t)*(uint32_t *)(uintptr_t)(self + 0x34);
     if (*(int *)(uintptr_t)(parent + 0x38) == self) {
         *(int *)(uintptr_t)(parent + 0x38) = sibling;
     } else {
@@ -38,19 +38,19 @@ void Object_DetachFromParent(int self)
     *(int *)(uintptr_t)(self + 0x3c) = 0;   /* original clears parent ptr too; was missing */
 }
 
-int Object_Parent(int self)
+intptr_t Object_Parent(intptr_t self)
 {
-    int parent = *(int *)(uintptr_t)(self + 0x3c);
+    intptr_t parent = (intptr_t)(uintptr_t)*(uint32_t *)(uintptr_t)(self + 0x3c);
     while (parent != 0 && *(int *)(uintptr_t)(parent + 0x38) != self) {
-        self   = *(int *)(uintptr_t)(self + 0x3c);
-        parent = *(int *)(uintptr_t)(self + 0x3c);
+        self   = (intptr_t)(uintptr_t)*(uint32_t *)(uintptr_t)(self + 0x3c);
+        parent = (intptr_t)(uintptr_t)*(uint32_t *)(uintptr_t)(self + 0x3c);
     }
     return parent;
 }
 
 /* Hex-name aliases (callers use PSX addresses). */
-int FUN_8001d564(int self)  { Object_DetachFromParent(self); return self; }
-int FUN_8001d5a0(int self)  { return Object_Parent(self); }
+intptr_t FUN_8001d564(intptr_t self)  { Object_DetachFromParent(self); return self; }
+intptr_t FUN_8001d5a0(intptr_t self)  { return Object_Parent(self); }
 
 /* ================================================================
  * FUN_8001d5e0 -- Object_FindRoot
@@ -60,17 +60,17 @@ int FUN_8001d5a0(int self)  { return Object_Parent(self); }
  *
  * HIGH confidence (direct Ghidra port).
  * ================================================================ */
-int FUN_8001d5e0(int param_1)
+intptr_t FUN_8001d5e0(intptr_t param_1)
 {
-    int iVar1 = *(int *)(uintptr_t)(param_1 + 0x3c);
+    intptr_t iVar1 = (intptr_t)(uintptr_t)*(uint32_t *)(uintptr_t)(param_1 + 0x3c);
     while (iVar1 != 0) {
         param_1 = FUN_8001d5a0(param_1);
-        iVar1   = *(int *)(uintptr_t)(param_1 + 0x3c);
+        iVar1   = (intptr_t)(uintptr_t)*(uint32_t *)(uintptr_t)(param_1 + 0x3c);
     }
     return param_1;
 }
 
-int Object_FindRoot(int self) { return FUN_8001d5e0(self); }
+intptr_t Object_FindRoot(intptr_t self) { return FUN_8001d5e0(self); }
 
 /* ============================================================
  * // GHIDRA REF (audit ground truth — DO NOT EDIT MANUALLY)

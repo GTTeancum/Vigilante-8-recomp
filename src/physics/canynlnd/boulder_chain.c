@@ -38,7 +38,7 @@ spawn_dust:
         FUN_80020890(self, 0x708);
         *(int8_t *)((uint8_t *)self + 8) = 0;
         self[0] |= 0x20u;
-    } else if (sub == 0 || sub == 2) {
+    } else if (sub != 2) {
         /* Spawn a fresh boulder. */
         uint32_t bank = self[0x16];
         uint32_t *boulder = Object_Pool_AllocFromBank((void *)(uintptr_t)bank, 0x2bf, 0x80, 8);
@@ -55,7 +55,9 @@ spawn_dust:
     }
 
     /* Common tail: spawn dust cloud at boulder's current pos. */
-    uint32_t boulderHandle = self[0x1d];
+    uintptr_t boulderHandle = (uintptr_t)self[0x1d];
+    if (boulderHandle == 0)
+        return 0;
     uint32_t *dust = Object_Pool_AllocFromBank((void *)(uintptr_t)self[0x16],
                                                 *(uint16_t *)((uint8_t *)self + 0xa), 0x80, 8);
     dust[0] = 0x24;

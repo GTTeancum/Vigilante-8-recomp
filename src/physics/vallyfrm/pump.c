@@ -18,7 +18,8 @@
 extern int  Damage_FromImpulse(uint32_t *self, int *impulse);
 extern int  Damage_AccumulateOrFire(uint32_t *self, uint16_t amount);
 extern uint8_t Effects_QueueSnow(int obj);    /* FUN_8003fc94 */
-extern void Object_BroadcastTreeEvent(uint32_t event);  /* func_0x80021d6c */
+extern intptr_t Object_BroadcastTreeEvent(uint32_t event);  /* func_0x80021d6c */
+extern uint32_t FUN_8002036c(uint32_t *obj);
 extern int32_t DAT_80101308;
 
 uint32_t VF_PumpTick(int obj, uint32_t mode, void *impact)
@@ -30,14 +31,18 @@ uint32_t VF_PumpTick(int obj, uint32_t mode, void *impact)
         circularOnly:
         if ((hit = Damage_AccumulateOrFire((uint32_t *)(intptr_t)obj, (uint16_t)(uintptr_t)impact)) != 0) goto fired;
     }
-    *(uint8_t *)(obj + 8) = Effects_QueueSnow(obj);
+    *(uint8_t *)(uintptr_t)(obj + 8) = Effects_QueueSnow(obj);
 fired:
     {
-        int8_t counter = *(int8_t *)(obj + 8);
-        *(int8_t *)(obj + 8) = (int8_t)(counter - 1);
+        int8_t counter = *(int8_t *)(uintptr_t)(obj + 8);
+        *(int8_t *)(uintptr_t)(obj + 8) = (int8_t)(counter - 1);
         if (counter == 1 && DAT_80101308 < 2) {
             DAT_80101308++;
-            Object_BroadcastTreeEvent(1000);
+            {
+                intptr_t spawned = Object_BroadcastTreeEvent(1000);
+                if (spawned != 0)
+                    FUN_8002036c((uint32_t *)(uintptr_t)spawned);
+            }
         }
     }
     return 0;

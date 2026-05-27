@@ -284,6 +284,9 @@ void FUN_8003e2c4(uint32_t *param_1)
  * ================================================================ */
 void FUN_80020540(uint32_t *param_1)
 {
+    if (param_1 == NULL)
+        return;
+
     if (param_1[0x1a] != 0 && host_low_heap_ptr(param_1[0x1a])) {
         FUN_8001bddc((int)(uintptr_t)param_1[0x1a]);
     }

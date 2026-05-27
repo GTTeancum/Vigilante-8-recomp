@@ -33,7 +33,7 @@ extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern uint32_t V8_RandNext(void);
 extern uint32_t *Object_Pool_AllocFromBank(void *bank, uint16_t kind, int u, int flags);  /* FUN_8001ac44 */
 extern void  Object_RandomizeRotation(uint32_t *obj);   /* FUN_8001dc1c */
-extern uint32_t FUN_80100244;                            /* per-tick callback */
+extern uint32_t FUN_80100244(uint32_t *self, uint32_t mode, uint32_t *arg); /* per-tick callback */
 /* PSY-Q (sin, cos) interleaved LUT at SLUS:0x800607b4 -- 4096 i16 pairs.
  * Ghidra's pseudo-C named this "DAT_80060db4" (a hex misinterpretation
  * of the signed-i32 form -0x7ff9f84c, which is the real address

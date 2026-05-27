@@ -1,9 +1,8 @@
 /* terrain_mesh.c -- load and upload the visual level mesh from the EXP.
  *
- * The terrain EXP (e.g. OILFIELD.EXP) contains a FORM XOBF block with two
- * BIN chunks.  The first BIN is the level visual geometry -- ground, props,
- * buildings, oil derricks, etc.  The second BIN appears to be shadow/LOD data
- * and is skipped for now.
+ * The terrain EXP (e.g. OILFIELD.EXP) contains FORM XOBF banks.  The runtime
+ * HEAD records select a bank and slot; FUN_8001ac44 walks the slot tree and
+ * FUN_8001be5c draws the render group cached by FUN_8001b49c.
  *
  * The BIN uses the same bone/poly format as the vehicle meshes in mesh_loader.c:
  *   Header:  num_bones(u32 LE), bone_table_off(u32 LE), ...
@@ -55,11 +54,10 @@
  * Confirmed: all 165 bones parse with 0 invalid packets using vehicle packet table.
  * Total triangles (OilField): ~4114.
  *
- * Renderer note: all triangles are retained in the CPU store for diagnostics.
- * The GL upload draws every placed triangle so object/occluder placement is
- * visible during RE.  TerrainMesh_HeightAt() still filters the CPU store to
- * upward ground-like faces, so walls and props do not become driveable merely
- * because they are visible in the diagnostic renderer.
+ * Renderer note: all triangles are retained in the CPU store for source-path
+ * verification.  TerrainMesh_HeightAt() still filters the CPU store to upward
+ * ground-like faces, so walls and props do not become driveable merely because
+ * they are visible in the renderer.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,6 +66,7 @@
 #include <limits.h>
 #include <stddef.h>
 #include <math.h>
+#include <ctype.h>
 #include "gte.h"
 #if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
 #include "xobf_texture.h"
@@ -110,7 +109,7 @@ typedef struct {
 static TmObstacleObj *g_obstacle_objs = NULL;
 static int            g_obstacle_nobjs = 0;
 static uint8_t       *g_obstacle_raw = NULL;
-static uint8_t       *g_spawn_placeholders = NULL;
+static uint8_t      **g_spawn_placeholders = NULL;
 static int            g_spawn_nplaceholders = 0;
 static TmObjectBspNode *g_object_bsp = NULL;
 static int              g_object_bsp_nnodes = 0;
@@ -118,13 +117,109 @@ static int              g_object_bsp_root = -1;
 
 extern void  Heap_Free(void *p);
 extern void *FUN_8001178c(uint32_t size, uint32_t mode);
+extern uint32_t *Object_BuildFromBin(int *templateBody, void *animPtr);
+extern intptr_t FUN_80021b80(intptr_t (*cb)(intptr_t, int, int),
+                             intptr_t bank, uint16_t kind, uint32_t flags);
+extern uint32_t FUN_800223dc(uint32_t *self, int mode, intptr_t arg);
+extern void     FUN_8001d708(uint32_t *obj);
+extern int      FUN_8001dc1c(intptr_t obj);
+extern int      FUN_8001b0c4(uint32_t *obj);
+extern uint32_t FUN_8001ec48(uint32_t *obj);
+extern uint32_t FUN_8002036c(uint32_t *obj);
+extern intptr_t FUN_80021c6c(uint32_t *placeholder);
+extern void    *FUN_8001d470(uint32_t size);
+extern void     FUN_8001fe50(uintptr_t listSentinel, uintptr_t payload);
+extern void     FUN_80101574(intptr_t obj, void *parentMatrix);
+extern uint8_t  DAT_80065a50[];
+extern int8_t   cRam00000016;
+extern char     g_v8_level_exp_path[128];
+extern uintptr_t iRam000006fc;
+extern uintptr_t uRam000006fc;
 extern void RotMatrixYXZ_gte(const SVECTOR *r, MATRIX *m);
 extern long CompMatrixLV(const MATRIX *m0, const MATRIX *m1, MATRIX *m2);
 extern int32_t Terrain_HeightAt(uint32_t x, uint32_t z);
+extern uintptr_t DAT_800911a0[32 * 32];
 extern int rsin(int a);
 extern int rcos(int a);
 extern int Object_FindObstacleAt(int *parent_obj, int terrain_y,
                                  int *posXyz, int16_t *normalOut);
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+
+uintptr_t g_v8_static_collision_objs[512];
+int g_v8_static_collision_obj_count;
+
+typedef struct {
+    uintptr_t obj;
+    char name[48];
+    int head_index;
+    int slot;
+} TmStaticDebugInfo;
+
+static TmStaticDebugInfo g_static_debug[512];
+static int g_static_debug_count;
+
+extern uint32_t AG_TrackerDish(uint32_t *self, int mode, int *impulse);
+extern uint32_t AG_CruiseMissile(uint32_t *self, int mode, int *impulse);
+extern uint32_t AG_B17HitTick(uint32_t *self, int mode, uint32_t *impulse);
+extern uint32_t CL_Launcher(uint32_t *self, int mode, int *impulse);
+extern uint32_t FUN_80100cbc(uint32_t *self, uint32_t mode, uint32_t *impulse);
+extern uint32_t CC_BlimpTick(uint32_t *self, int mode, int arg);
+extern uint32_t FUN_801004e8(uint32_t *parent, uint32_t mode, int *impulse);
+extern uint32_t CC_BlimpMain(uint32_t *self, int mode, uint32_t *impulse);
+extern uint32_t FUN_80101ca8(uint32_t obj, int mode);
+extern uint32_t FUN_80101fe0(int obj, int mode);
+extern uint32_t FUN_8010036c(void *obj, int mode);
+extern uint32_t HD_TransformerAim(uint32_t *self, int mode, int arg);
+extern uint32_t HD_SirenStrobe(uint32_t *self, int mode, uint32_t *impulse);
+extern uint32_t FUN_80101118(int obj, uint32_t mode, int *impulse);
+extern uint32_t HD_WaterBob(uint32_t *self, int mode, int *impulse);
+extern uint32_t FUN_8010135c(int obj, uint32_t mode, void *impactCtx);
+extern uint32_t FUN_801013e0(int obj, uint32_t mode, void *impactCtx);
+extern uint32_t FUN_80101580(uint32_t *self, int mode);
+extern uint32_t HD_SpillwayGrab(uint32_t *self, uint32_t mode, uint32_t *impulse);
+extern uint32_t FUN_80101a98(int obj, uint32_t mode, void *impactCtx);
+extern void     FUN_801001cc(uint32_t *self, int mode, uint32_t arg);
+extern uint32_t FUN_80100870(uint32_t *parent, uint32_t mode, int32_t *impulse);
+extern uint32_t FUN_80100540(int obj, uint32_t mode, void *impact);
+extern void     FUN_80100e78(int self, uint32_t mode, void *impactCtx);
+extern uint32_t OF_RigDestroy(int self, int mode, uint32_t arg);
+extern uint32_t SF_ElevatorFullTick(int obj, int mode, void *arg);
+extern uint32_t FUN_80100b34(int obj, int mode);
+extern uint32_t SF_ConveyorGrab(int obj, int mode, int *impulse);
+extern void     FUN_801010c4(int obj, int mode, int impact);
+extern uint32_t SB_RadarSweep(int obj, int mode, int *impulse);
+extern uint32_t SCRT_RadarTick(uint32_t *self, int mode, int *impulse);
+extern uint32_t FUN_801006f4(int obj, uint32_t mode, void *impact);
+extern uint32_t SB_TurretTrack(int obj, int mode, int *impulse);
+extern uint32_t SB_SecurityDoor(int obj, uint32_t mode, int *impulse);
+extern uint32_t FUN_80101acc(int self, uint32_t mode, int *impulse);
+extern uint32_t SB_BunkerDoor(uint32_t *self, int mode, int *impulse);
+extern uint32_t FUN_801025ec(int obj, uint32_t mode, int *impulse);
+extern uint32_t SB_SiloDoor(uint32_t *self, int mode, int *impulse);
+extern uint32_t SK_PowderBoulder(uint32_t *self, int mode, int arg);
+extern uint32_t SR_LiftStation(uint32_t *self, int mode, uint32_t *impulse);
+extern uint32_t FUN_80101424(int obj, int mode);
+extern uint32_t SK_LiftChairGrab(uint32_t *self, int mode, int *impulse);
+extern uint32_t SK_SnowPulse(uint32_t *self, int mode, int arg);
+extern uint32_t SR_BallDestroy(int obj, int mode, uint32_t arg);
+extern uint32_t SR_SnowEmit(uint32_t *self, int mode, int arg);
+extern uint32_t FUN_80102094(int obj, uint32_t mode, void *impact);
+extern uint32_t VF_GenericCleanup(uint32_t obj, int mode);
+extern uint32_t VF_WindmillAlarm(uint32_t *self, int mode, uint32_t *impulse);
+extern uint32_t VF_SiloRotate(int obj, int mode, int arg);
+extern uint32_t FUN_80100c1c(uint32_t *self, int mode, int *impulse);
+extern uint32_t VF_SiloSlide(uint32_t *self, int mode, int *impulse);
+extern uint32_t VF_PumpTick(int obj, uint32_t mode, uint32_t arg);
+extern uint32_t FUN_8010035c(int obj, uint32_t mode, int *impulse);
+extern uint32_t FUN_801003ec(int obj, uint32_t mode, void *impactCtx);
+extern uint32_t WW_TrainInit(uint32_t *self, int mode, uint32_t *impulse);
+extern uint32_t WW_ShackTick(int obj, int mode, uint32_t arg);
+extern uint32_t WW_DynamiteKeg(uint32_t *self, int mode, uint32_t *impulse);
+extern uint32_t WW_GallowTick(uint32_t *self, int mode, uint32_t *impulse);
+extern uint32_t WW_BridgeCollapse(uint32_t *self, int mode, int *impulse);
+extern uint32_t WW_StageCoach(uint32_t *self, int mode, int *impulse);
+extern uint32_t WW_SaloonDestruct(uint32_t *self, int mode, int *impulse);
+extern intptr_t LAB_8003c61c(intptr_t obj, int event, intptr_t param3);
 
 static int32_t tm_q12_mul_i32(int32_t a, int32_t b)
 {
@@ -135,6 +230,27 @@ static int32_t tm_q12_dot3_i32(int32_t a0, int32_t a1, int32_t a2,
                                int32_t b0, int32_t b1, int32_t b2)
 {
     return (int32_t)(((int64_t)a0 * b0 + (int64_t)a1 * b1 + (int64_t)a2 * b2) >> 12);
+}
+
+static uintptr_t tm_resolve_head_callback(const char *levelPath,
+                                          const char *headName,
+                                          int *resolved);
+
+static uintptr_t tm_resolve_global_head_callback(const char *headName)
+{
+    static const char *const pickup_names[] = {
+        "PU_WeaponUpgrade", "PU_RadarJammer", "PU_Shield", "PU_Health",
+        "I_RocktL", "I_MisslL", "I_Cannon", "I_Mortar", "I_MineDr",
+        "I_Special", "I_Surprise", NULL
+    };
+
+    if (headName == NULL)
+        return 0;
+    for (int i = 0; pickup_names[i] != NULL; i++) {
+        if (strcmp(headName, pickup_names[i]) == 0)
+            return (uintptr_t)LAB_8003c61c;
+    }
+    return 0;
 }
 
 static void tm_clear_obstacles(void)
@@ -151,6 +267,7 @@ static void tm_clear_obstacles(void)
     g_object_bsp = NULL;
     g_object_bsp_nnodes = 0;
     g_object_bsp_root = -1;
+    g_static_debug_count = 0;
 }
 
 static int tm_object_bsp_find_leaf(int32_t x, int32_t z)
@@ -250,13 +367,55 @@ int TerrainMesh_ObstacleProbeAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
                                 int32_t terrain_y, int16_t *out_normal,
                                 int32_t *out_y)
 {
-    if (g_obstacle_objs == NULL || g_obstacle_nobjs <= 0) return 0;
-
     int pos[3] = { pos_x, pos_y, pos_z };
     int16_t normal[4] = { 0, 0, 0, 0 };
     int16_t best_normal[4] = { 0, -4096, 0, 0 };
     int32_t best_y = 0;
     int found = 0;
+
+    if (uRam000006fc != 0) {
+        int32_t *node = (int32_t *)(uintptr_t)uRam000006fc;
+        int guard = 0;
+
+        while (node != NULL && guard++ < 4096) {
+            if (node[0] == 0)
+                break;
+            if (node[0] == 1) {
+                node = (int32_t *)(uintptr_t)(uint32_t)
+                    node[node[1] < pos_x ? 3 : 2];
+            } else if (node[0] == 2) {
+                node = (int32_t *)(uintptr_t)(uint32_t)
+                    node[node[1] < pos_z ? 3 : 2];
+            } else {
+                node = NULL;
+            }
+        }
+
+        if (node != NULL && node[0] == 0 && node[1] != 0 && node[2] == 0) {
+            int32_t *list = (int32_t *)(uintptr_t)(uint32_t)node[1];
+            while (list != NULL && list[0] != 0) {
+                int32_t *obj = (int32_t *)(uintptr_t)(uint32_t)list[2];
+                if (obj != NULL && ((*(uint32_t *)obj & 0x20u) == 0)) {
+                    int32_t hit = Object_FindObstacleAt((int *)obj,
+                                                        terrain_y, pos, normal);
+                    if (hit != 0 && (!found || hit < best_y)) {
+                        best_y = hit;
+                        best_normal[0] = normal[0];
+                        best_normal[1] = normal[1];
+                        best_normal[2] = normal[2];
+                        best_normal[3] = normal[3];
+                        found = 1;
+                    }
+                }
+                list = (int32_t *)(uintptr_t)(uint32_t)list[0];
+            }
+        }
+    }
+
+    if (found)
+        goto done;
+
+    if (g_obstacle_objs == NULL || g_obstacle_nobjs <= 0) return 0;
 
     int leaf = tm_object_bsp_find_leaf(pos_x, pos_z);
     int i = (leaf >= 0) ? g_object_bsp[leaf].first_obj : 0;
@@ -278,6 +437,7 @@ int TerrainMesh_ObstacleProbeAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
         }
         i = (leaf >= 0) ? g_obstacle_objs[i].next_in_leaf : i + 1;
     }
+done:
     if (found && out_normal != NULL) {
         out_normal[0] = best_normal[0];
         out_normal[1] = best_normal[1];
@@ -286,104 +446,6 @@ int TerrainMesh_ObstacleProbeAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
     }
     if (found && out_y != NULL) *out_y = best_y;
     return found;
-}
-
-uint32_t TerrainMesh_CollidePropObjects(intptr_t obj)
-{
-    if (g_obstacle_objs == NULL || g_obstacle_nobjs <= 0) return 1;
-    static int disabled_cached = -1;
-    static int trace_cached = -1;
-    static int trace_count = 0;
-    if (disabled_cached < 0) {
-        const char *env = getenv("V8_DISABLE_PROP_COLLISION");
-        disabled_cached = (env != NULL && env[0] != 0 && env[0] != '0');
-    }
-    if (disabled_cached) return 1;
-    if (trace_cached < 0) {
-        const char *env = getenv("V8_TRACE_PROP_COLLISION");
-        trace_cached = (env != NULL && env[0] != 0 && env[0] != '0');
-    }
-
-    int32_t pos_x = *(int32_t *)(uintptr_t)(obj + 0x24);
-    int32_t pos_z = *(int32_t *)(uintptr_t)(obj + 0x2c);
-    int leaf = tm_object_bsp_find_leaf(pos_x, pos_z);
-    int i = (leaf >= 0) ? g_object_bsp[leaf].first_obj : 0;
-
-    while (i >= 0 && i < g_obstacle_nobjs) {
-        uint32_t *prop = (uint32_t *)g_obstacle_objs[i].obj;
-        *(uint32_t *)(g_obstacle_objs[i].obj + 0x5c) =
-            (uint32_t)(uintptr_t)g_obstacle_objs[i].coll_shape;
-        if (trace_cached && trace_count < 240) {
-            fprintf(stderr,
-                    "v8: prop_collide obj=%p prop=%p idx=%d leaf=%d pos=(0x%x,0x%x) ppos=(0x%x,0x%x) r=0x%x shape=%p kind=%d\n",
-                    (void *)obj, (void *)prop, i, leaf,
-                    (unsigned)pos_x, (unsigned)pos_z,
-                    (unsigned)*(int32_t *)(g_obstacle_objs[i].obj + 0x24),
-                    (unsigned)*(int32_t *)(g_obstacle_objs[i].obj + 0x2c),
-                    (unsigned)*(int32_t *)(g_obstacle_objs[i].obj + 0x54),
-                    (void *)g_obstacle_objs[i].coll_shape,
-                    (int)*(int16_t *)g_obstacle_objs[i].coll_shape);
-            fflush(stderr);
-            trace_count++;
-        }
-        if ((*prop & 0x20u) == 0) {
-            const int32_t *box = (const int32_t *)(g_obstacle_objs[i].coll_shape + 4);
-            const MATRIX *m = (const MATRIX *)(g_obstacle_objs[i].obj + 0x10);
-            int32_t radius = *(int32_t *)(uintptr_t)(obj + 0x54);
-            int32_t dx = *(int32_t *)(uintptr_t)(obj + 0x24) - m->t[0];
-            int32_t dy = *(int32_t *)(uintptr_t)(obj + 0x28) - m->t[1];
-            int32_t dz = *(int32_t *)(uintptr_t)(obj + 0x2c) - m->t[2];
-            int32_t lx = tm_q12_dot3_i32(m->m[0][0], m->m[1][0], m->m[2][0], dx, dy, dz);
-            int32_t ly = tm_q12_dot3_i32(m->m[0][1], m->m[1][1], m->m[2][1], dx, dy, dz);
-            int32_t lz = tm_q12_dot3_i32(m->m[0][2], m->m[1][2], m->m[2][2], dx, dy, dz);
-            int32_t minx = box[0] - radius, miny = box[1] - radius, minz = box[2] - radius;
-            int32_t maxx = box[3] + radius, maxy = box[4] + radius, maxz = box[5] + radius;
-
-            if (lx > minx && lx < maxx && ly > miny && ly < maxy &&
-                lz > minz && lz < maxz) {
-                int axis = 0;
-                int32_t pen = lx - minx;
-                int sign = -1;
-                int32_t d = maxx - lx;
-                if (d < pen) { pen = d; axis = 0; sign = 1; }
-                d = ly - miny;
-                if (d < pen) { pen = d; axis = 1; sign = -1; }
-                d = maxy - ly;
-                if (d < pen) { pen = d; axis = 1; sign = 1; }
-                d = lz - minz;
-                if (d < pen) { pen = d; axis = 2; sign = -1; }
-                d = maxz - lz;
-                if (d < pen) { pen = d; axis = 2; sign = 1; }
-                pen += 0x1000;
-
-                int32_t nx = (axis == 0) ? sign * m->m[0][0] :
-                             (axis == 1) ? sign * m->m[0][1] : sign * m->m[0][2];
-                int32_t ny = (axis == 0) ? sign * m->m[1][0] :
-                             (axis == 1) ? sign * m->m[1][1] : sign * m->m[1][2];
-                int32_t nz = (axis == 0) ? sign * m->m[2][0] :
-                             (axis == 1) ? sign * m->m[2][1] : sign * m->m[2][2];
-
-                *(int32_t *)(uintptr_t)(obj + 0x24) += tm_q12_mul_i32(nx, pen);
-                *(int32_t *)(uintptr_t)(obj + 0x28) += tm_q12_mul_i32(ny, pen);
-                *(int32_t *)(uintptr_t)(obj + 0x2c) += tm_q12_mul_i32(nz, pen);
-                *(int32_t *)(uintptr_t)(obj + 0x48) = *(int32_t *)(uintptr_t)(obj + 0x24);
-                *(int32_t *)(uintptr_t)(obj + 0x4c) = *(int32_t *)(uintptr_t)(obj + 0x28);
-                *(int32_t *)(uintptr_t)(obj + 0x50) = *(int32_t *)(uintptr_t)(obj + 0x2c);
-
-                int32_t *vel = (int32_t *)(uintptr_t)(obj + 0x80);
-                int32_t vn = tm_q12_dot3_i32(vel[0], vel[1], vel[2], nx, ny, nz);
-                if (vn < 0) {
-                    vel[0] -= tm_q12_mul_i32(nx, vn);
-                    vel[1] -= tm_q12_mul_i32(ny, vn);
-                    vel[2] -= tm_q12_mul_i32(nz, vn);
-                }
-                *(uint32_t *)(uintptr_t)(obj + 0x74) = (uint32_t)(uintptr_t)prop;
-                return 0;
-            }
-        }
-        i = (leaf >= 0) ? g_obstacle_objs[i].next_in_leaf : i + 1;
-    }
-    return 1;
 }
 
 int TerrainMesh_ObstacleHeightAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
@@ -396,6 +458,370 @@ int TerrainMesh_ObstacleHeightAt(int32_t pos_x, int32_t pos_y, int32_t pos_z,
 static int32_t tm_abs_i32(int32_t v)
 {
     return (v < 0) ? (int32_t)(0u - (uint32_t)v) : v;
+}
+
+static const TmStaticDebugInfo *tm_static_debug_for_obj(uintptr_t obj)
+{
+    for (int i = 0; i < g_static_debug_count; i++) {
+        if (g_static_debug[i].obj == obj)
+            return &g_static_debug[i];
+    }
+    return NULL;
+}
+
+static void tm_debug_transform_point_mat(const MATRIX *mat,
+                                         int32_t lx, int32_t ly, int32_t lz,
+                                         float *x, float *y, float *z)
+{
+    int64_t wx = (int64_t)mat->t[0]
+               + ((int64_t)mat->m[0][0] * lx +
+                  (int64_t)mat->m[0][1] * ly +
+                  (int64_t)mat->m[0][2] * lz) / 4096;
+    int64_t wy = (int64_t)mat->t[1]
+               + ((int64_t)mat->m[1][0] * lx +
+                  (int64_t)mat->m[1][1] * ly +
+                  (int64_t)mat->m[1][2] * lz) / 4096;
+    int64_t wz = (int64_t)mat->t[2]
+               + ((int64_t)mat->m[2][0] * lx +
+                  (int64_t)mat->m[2][1] * ly +
+                  (int64_t)mat->m[2][2] * lz) / 4096;
+
+    *x = (float)wx / 65536.0f;
+    *y = -(float)wy / 65536.0f;
+    *z = (float)wz / 65536.0f;
+}
+
+static void tm_debug_transform_point(const uint8_t *obj,
+                                     int32_t lx, int32_t ly, int32_t lz,
+                                     float *x, float *y, float *z)
+{
+    tm_debug_transform_point_mat((const MATRIX *)(obj + 0x10), lx, ly, lz,
+                                 x, y, z);
+}
+
+static void tm_debug_local_point_mat(const MATRIX *mat,
+                                     int32_t wx, int32_t wy, int32_t wz,
+                                     int32_t *lx, int32_t *ly, int32_t *lz)
+{
+    int32_t dx = wx - mat->t[0];
+    int32_t dy = wy - mat->t[1];
+    int32_t dz = wz - mat->t[2];
+
+    *lx = (int32_t)(((int64_t)mat->m[0][0] * dx +
+                    (int64_t)mat->m[1][0] * dy +
+                    (int64_t)mat->m[2][0] * dz) / 4096);
+    *ly = (int32_t)(((int64_t)mat->m[0][1] * dx +
+                    (int64_t)mat->m[1][1] * dy +
+                    (int64_t)mat->m[2][1] * dz) / 4096);
+    *lz = (int32_t)(((int64_t)mat->m[0][2] * dx +
+                    (int64_t)mat->m[1][2] * dy +
+                    (int64_t)mat->m[2][2] * dz) / 4096);
+}
+
+static void tm_debug_local_point(const uint8_t *obj,
+                                 int32_t wx, int32_t wy, int32_t wz,
+                                 int32_t *lx, int32_t *ly, int32_t *lz)
+{
+    tm_debug_local_point_mat((const MATRIX *)(obj + 0x10), wx, wy, wz,
+                             lx, ly, lz);
+}
+
+static int tm_debug_obj_has_inside_box_mat(const uint8_t *obj,
+                                           const MATRIX *mat,
+                                           int32_t px, int32_t py, int32_t pz,
+                                           int32_t *out_lx, int32_t *out_ly, int32_t *out_lz,
+                                           int32_t *out_minx, int32_t *out_miny, int32_t *out_minz,
+                                           int32_t *out_maxx, int32_t *out_maxy, int32_t *out_maxz)
+{
+    const uint8_t *shape = (const uint8_t *)(uintptr_t)*(const uint32_t *)(obj + 0x5c);
+    int32_t lx, ly, lz;
+    int guard = 0;
+
+    if (shape == NULL)
+        return 0;
+    tm_debug_local_point_mat(mat, px, py, pz, &lx, &ly, &lz);
+    while (guard++ < 128) {
+        int16_t kind = *(const int16_t *)shape;
+        if (kind == 0)
+            break;
+        if (kind == 1) {
+            int32_t minx = *(const int32_t *)(shape + 4);
+            int32_t miny = *(const int32_t *)(shape + 8);
+            int32_t minz = *(const int32_t *)(shape + 12);
+            int32_t maxx = *(const int32_t *)(shape + 16);
+            int32_t maxy = *(const int32_t *)(shape + 20);
+            int32_t maxz = *(const int32_t *)(shape + 24);
+            if (lx > minx && lx < maxx &&
+                ly > miny && ly < maxy &&
+                lz > minz && lz < maxz) {
+                if (out_lx) *out_lx = lx;
+                if (out_ly) *out_ly = ly;
+                if (out_lz) *out_lz = lz;
+                if (out_minx) *out_minx = minx;
+                if (out_miny) *out_miny = miny;
+                if (out_minz) *out_minz = minz;
+                if (out_maxx) *out_maxx = maxx;
+                if (out_maxy) *out_maxy = maxy;
+                if (out_maxz) *out_maxz = maxz;
+                return 1;
+            }
+            shape += 0x1c;
+        } else if (kind == 2) {
+            shape += 4 + (size_t)*(const uint16_t *)(shape + 2) * 12;
+        } else {
+            break;
+        }
+    }
+    return 0;
+}
+
+static int tm_debug_obj_has_inside_box(const uint8_t *obj,
+                                       int32_t px, int32_t py, int32_t pz,
+                                       int32_t *out_lx, int32_t *out_ly, int32_t *out_lz,
+                                       int32_t *out_minx, int32_t *out_miny, int32_t *out_minz,
+                                       int32_t *out_maxx, int32_t *out_maxy, int32_t *out_maxz)
+{
+    return tm_debug_obj_has_inside_box_mat(obj, (const MATRIX *)(obj + 0x10),
+                                           px, py, pz,
+                                           out_lx, out_ly, out_lz,
+                                           out_minx, out_miny, out_minz,
+                                           out_maxx, out_maxy, out_maxz);
+}
+
+static int tm_debug_obj_first_box(const uint8_t *obj,
+                                  int32_t *out_minx, int32_t *out_miny, int32_t *out_minz,
+                                  int32_t *out_maxx, int32_t *out_maxy, int32_t *out_maxz)
+{
+    const uint8_t *shape = (const uint8_t *)(uintptr_t)*(const uint32_t *)(obj + 0x5c);
+    int guard = 0;
+
+    while (shape != NULL && guard++ < 128) {
+        int16_t kind = *(const int16_t *)shape;
+        if (kind == 0)
+            return 0;
+        if (kind == 1) {
+            if (out_minx) *out_minx = *(const int32_t *)(shape + 4);
+            if (out_miny) *out_miny = *(const int32_t *)(shape + 8);
+            if (out_minz) *out_minz = *(const int32_t *)(shape + 12);
+            if (out_maxx) *out_maxx = *(const int32_t *)(shape + 16);
+            if (out_maxy) *out_maxy = *(const int32_t *)(shape + 20);
+            if (out_maxz) *out_maxz = *(const int32_t *)(shape + 24);
+            return 1;
+        }
+        if (kind == 2) {
+            shape += 4 + (size_t)*(const uint16_t *)(shape + 2) * 12;
+        } else {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+static int tm_debug_append_line(float *out, int max_vertices, int n,
+                                float ax, float ay, float az,
+                                float bx, float by, float bz,
+                                float r, float g, float b)
+{
+    if (n + 2 > max_vertices)
+        return n;
+    out[n * 9 + 0] = ax; out[n * 9 + 1] = ay; out[n * 9 + 2] = az;
+    out[n * 9 + 3] = r;  out[n * 9 + 4] = g;  out[n * 9 + 5] = b;
+    out[n * 9 + 6] = -1.0f; out[n * 9 + 7] = -1.0f; out[n * 9 + 8] = 0.0f;
+    n++;
+    out[n * 9 + 0] = bx; out[n * 9 + 1] = by; out[n * 9 + 2] = bz;
+    out[n * 9 + 3] = r;  out[n * 9 + 4] = g;  out[n * 9 + 5] = b;
+    out[n * 9 + 6] = -1.0f; out[n * 9 + 7] = -1.0f; out[n * 9 + 8] = 0.0f;
+    return n + 1;
+}
+
+static int tm_debug_append_box_mat(const MATRIX *mat, const uint8_t *shape,
+                               float *out, int max_vertices, int n,
+                               float r, float g, float b)
+{
+    static const uint8_t edges[12][2] = {
+        {0,1},{1,3},{3,2},{2,0}, {4,5},{5,7},{7,6},{6,4},
+        {0,4},{1,5},{2,6},{3,7}
+    };
+    int32_t minx = *(const int32_t *)(shape + 4);
+    int32_t miny = *(const int32_t *)(shape + 8);
+    int32_t minz = *(const int32_t *)(shape + 12);
+    int32_t maxx = *(const int32_t *)(shape + 16);
+    int32_t maxy = *(const int32_t *)(shape + 20);
+    int32_t maxz = *(const int32_t *)(shape + 24);
+    int32_t p[8][3] = {
+        {minx,miny,minz}, {maxx,miny,minz}, {minx,maxy,minz}, {maxx,maxy,minz},
+        {minx,miny,maxz}, {maxx,miny,maxz}, {minx,maxy,maxz}, {maxx,maxy,maxz}
+    };
+    float w[8][3];
+
+    for (int i = 0; i < 8; i++)
+        tm_debug_transform_point_mat(mat, p[i][0], p[i][1], p[i][2],
+                                     &w[i][0], &w[i][1], &w[i][2]);
+    for (int e = 0; e < 12; e++) {
+        const float *a = w[edges[e][0]];
+        const float *c = w[edges[e][1]];
+        n = tm_debug_append_line(out, max_vertices, n,
+                                 a[0], a[1], a[2], c[0], c[1], c[2], r, g, b);
+    }
+    return n;
+}
+
+static int tm_debug_append_obj_shapes(const uint8_t *obj,
+                                      const MATRIX *parent_mat,
+                                      int32_t px, int32_t py, int32_t pz,
+                                      float *out, int max_vertices, int n,
+                                      int depth)
+{
+    const uint8_t *shape;
+    MATRIX composed;
+    int32_t lx, ly, lz;
+    int inside_any = 0;
+    int guard = 0;
+
+    if (obj == NULL || depth > 16)
+        return n;
+
+    if (parent_mat != NULL) {
+        CompMatrixLV(parent_mat, (const MATRIX *)(obj + 0x10), &composed);
+    } else {
+        memcpy(&composed, obj + 0x10, sizeof(composed));
+    }
+
+    inside_any = tm_debug_obj_has_inside_box_mat(obj, &composed, px, py, pz,
+                                                 &lx, &ly, &lz,
+                                                 NULL, NULL, NULL, NULL, NULL, NULL);
+    shape = (const uint8_t *)(uintptr_t)*(const uint32_t *)(obj + 0x5c);
+    while (shape != NULL && guard++ < 128) {
+        int16_t kind = *(const int16_t *)shape;
+        if (kind == 0)
+            break;
+        if (kind == 1) {
+            n = tm_debug_append_box_mat(&composed, shape, out, max_vertices, n,
+                                        inside_any ? 0.1f : 1.0f,
+                                        inside_any ? 1.0f : 0.15f,
+                                        0.1f);
+            shape += 0x1c;
+        } else if (kind == 2) {
+            float x, y, z;
+            tm_debug_transform_point_mat(&composed, 0, 0, 0, &x, &y, &z);
+            n = tm_debug_append_line(out, max_vertices, n,
+                                     x - 0.35f, y, z, x + 0.35f, y, z,
+                                     1.0f, 0.0f, 1.0f);
+            n = tm_debug_append_line(out, max_vertices, n,
+                                     x, y - 0.35f, z, x, y + 0.35f, z,
+                                     1.0f, 0.0f, 1.0f);
+            n = tm_debug_append_line(out, max_vertices, n,
+                                     x, y, z - 0.35f, x, y, z + 0.35f,
+                                     1.0f, 0.0f, 1.0f);
+            shape += 4 + (size_t)*(const uint16_t *)(shape + 2) * 12;
+        } else {
+            break;
+        }
+    }
+
+    for (uint8_t *child = (uint8_t *)(uintptr_t)*(const uint32_t *)(obj + 0x38);
+         child != NULL;
+         child = (uint8_t *)(uintptr_t)*(const uint32_t *)(child + 0x34)) {
+        n = tm_debug_append_obj_shapes(child, &composed, px, py, pz,
+                                       out, max_vertices, n, depth + 1);
+    }
+    return n;
+}
+
+int TerrainMesh_DebugCollisionLines(int32_t player_x, int32_t player_y, int32_t player_z,
+                                    float *out_vertices, int max_vertices)
+{
+    int n = 0;
+
+    if (out_vertices == NULL || max_vertices <= 0)
+        return 0;
+    for (int i = 0; i < g_v8_static_collision_obj_count; i++) {
+        uint8_t *obj = (uint8_t *)(uintptr_t)g_v8_static_collision_objs[i];
+        int32_t dx, dz;
+        int64_t dist2;
+        if (obj == NULL)
+            continue;
+        dx = player_x - *(int32_t *)(obj + 0x24);
+        dz = player_z - *(int32_t *)(obj + 0x2c);
+        dist2 = (int64_t)dx * dx + (int64_t)dz * dz;
+        if (dist2 > (int64_t)(12 * 65536) * (12 * 65536))
+            continue;
+        n = tm_debug_append_obj_shapes(obj, NULL, player_x, player_y, player_z,
+                                       out_vertices, max_vertices, n, 0);
+        if (n >= max_vertices - 64)
+            break;
+    }
+    return n;
+}
+
+void TerrainMesh_DebugCollisionLog(int32_t player_x, int32_t player_y, int32_t player_z,
+                                   int frame_idx)
+{
+    typedef struct {
+        const uint8_t *obj;
+        int64_t dist2;
+        int32_t dx, dz;
+    } Candidate;
+    Candidate best[6] = {0};
+    static int last_frame = -9999;
+
+    if (frame_idx - last_frame < 30)
+        return;
+    last_frame = frame_idx;
+
+    for (int i = 0; i < g_v8_static_collision_obj_count; i++) {
+        const uint8_t *obj = (const uint8_t *)(uintptr_t)g_v8_static_collision_objs[i];
+        int32_t dx, dz;
+        int64_t dist2;
+        if (obj == NULL)
+            continue;
+        dx = player_x - *(const int32_t *)(obj + 0x24);
+        dz = player_z - *(const int32_t *)(obj + 0x2c);
+        dist2 = (int64_t)dx * dx + (int64_t)dz * dz;
+        if (dist2 > (int64_t)(16 * 65536) * (16 * 65536))
+            continue;
+        for (int k = 0; k < 6; k++) {
+            if (best[k].obj == NULL || dist2 < best[k].dist2) {
+                memmove(&best[k + 1], &best[k], (size_t)(5 - k) * sizeof(best[0]));
+                best[k].obj = obj;
+                best[k].dist2 = dist2;
+                best[k].dx = dx;
+                best[k].dz = dz;
+                break;
+            }
+        }
+    }
+
+    for (int k = 0; k < 6 && best[k].obj != NULL; k++) {
+        const uint8_t *obj = best[k].obj;
+        const TmStaticDebugInfo *info = tm_static_debug_for_obj((uintptr_t)obj);
+        int32_t lx = 0, ly = 0, lz = 0;
+        int32_t minx = 0, miny = 0, minz = 0, maxx = 0, maxy = 0, maxz = 0;
+        int inside;
+        tm_debug_local_point(obj, player_x, player_y, player_z, &lx, &ly, &lz);
+        (void)tm_debug_obj_first_box(obj, &minx, &miny, &minz,
+                                     &maxx, &maxy, &maxz);
+        inside = tm_debug_obj_has_inside_box(obj, player_x, player_y, player_z,
+                                             NULL, NULL, NULL,
+                                             NULL, NULL, NULL,
+                                             NULL, NULL, NULL);
+        const uint8_t *shape = (const uint8_t *)(uintptr_t)*(const uint32_t *)(obj + 0x5c);
+        int kind = shape ? *(const int16_t *)shape : -1;
+        fprintf(stderr,
+                "v8: coll_dbg frame=%d rank=%d name=%s obj=%p flags=0x%x layer=%d kind=%d child=%p dist_m=%.2f local=(%.2f,%.2f,%.2f) box=(%.2f,%.2f,%.2f..%.2f,%.2f,%.2f) inside=%d\n",
+                frame_idx, k,
+                info ? info->name : "?",
+                (const void *)obj,
+                (unsigned)*(const uint32_t *)obj,
+                (int)*(const int16_t *)(obj + 0x06),
+                kind,
+                (void *)(uintptr_t)*(const uint32_t *)(obj + 0x38),
+                sqrt((double)best[k].dist2) / 65536.0,
+                (double)lx / 65536.0, (double)ly / 65536.0, (double)lz / 65536.0,
+                (double)minx / 65536.0, (double)miny / 65536.0, (double)minz / 65536.0,
+                (double)maxx / 65536.0, (double)maxy / 65536.0, (double)maxz / 65536.0,
+                inside);
+    }
 }
 
 static int32_t tm_radius_from_obstacle_stream(const uint8_t *stream)
@@ -475,8 +901,12 @@ static void tm_collision_shape_from_obstacle_stream(const uint8_t *stream,
 /* ---- Public GL globals ---- */
 GLuint g_terrainmesh_vao = 0;
 GLuint g_terrainmesh_tex = 0;
+GLuint g_terrainmesh_tex_bank1 = 0;
 GLuint g_terrainmesh_xbmp_tex = 0;
 GLuint g_terrainmesh_sky_tex = 0;
+GLuint g_terrainmesh_route_tex0 = 0;
+GLuint g_terrainmesh_route_tex1 = 0;
+static int g_tm_allow_gl_upload = 1;
 int    g_terrainmesh_vtx = 0;
 int    g_terrainmesh_tex_w = 0;
 int    g_terrainmesh_tex_h = 0;
@@ -491,6 +921,9 @@ static int g_tm_uv_ground_xbmp_oob = 0;
 static int g_tm_uv_ground_none = 0;
 static int g_tm_uv_xobf = 0;
 static int g_tm_uv_none = 0;
+static int g_tm_pkt_kind[16] = {0};
+static int g_tm_pkt_uv_kind[16] = {0};
+static int g_tm_pkt_no_uv_kind[16] = {0};
 
 /* ---- Config ---- */
 #define TERR_SCALE      (1.0f / 16.0f)   /* fallback unplaced BIN scale */
@@ -500,6 +933,7 @@ static int g_tm_uv_none = 0;
  *   - Converted ZONE runtime terrain is around gl_y=-22.5m.
  *   - Solve: -(0/16) + TERR_Y_ORIGIN = -22.5 -> TERR_Y_ORIGIN = -22.5. */
 #define TERR_Y_ORIGIN   (-22.5f)         /* OpenGL Y of BIN Y=0 */
+#define TM_ROUTE_VISUAL_Y_BIAS (0.025f)
 
 /* ---- Binary helpers ---- */
 static uint32_t tm_rd32be(const uint8_t *b, uint32_t o)
@@ -533,8 +967,15 @@ static int32_t tm_rd32be_s(const uint8_t *b, uint32_t o)
 static const int TM_PKT_SIZE[16] = {
     12,28,20,28, 12,20,12,20, 16,24,12,24, 20,20,0,20
 };
+static const int TM_SOURCE_PKT_SIZE[16] = {
+    12,28,20,28, 12,20,12,20, 16,24,12,24, 20,20,0,20
+};
+/* Source draw handlers at SLUS 8001c100..8001cbd8 emit one indexed
+ * polygon from raw terrain packet kinds 4/5/7.  The extra word in those
+ * packets is renderer metadata, not a fourth vertex for host-side triangle
+ * fabrication; emitting it as (0,2,3) draws a reversed coplanar duplicate. */
 static const int TM_IS_QUAD[16] = {
-    0,0,0,0, 1,1,0,1, 0,0,0,0, 0,0,0,0
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0
 };
 
 #define TM_DISPLAY_XZ_SCALE (1.0f / 65536.0f)
@@ -546,12 +987,14 @@ typedef struct { float x,y,z,r,g,b,u,v,tex; } TmVert;
 typedef struct {
     const uint8_t *data;
     uint32_t size;
+    uintptr_t source_bank;
     uint32_t group_count;
     uint32_t group_table;
     uint32_t obstacle_count;
     uint32_t obstacle_table;
     uint32_t obstacle_end;
     uint32_t slot_count;
+    int texture_kind;
 #if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
     V8XobfTexAtlas atlas;
 #endif
@@ -596,6 +1039,10 @@ typedef struct {
     int32_t step;
     int16_t tex_id;
     int16_t flags;
+    const uint8_t *tex_payload;
+    uint32_t tex_size;
+    int tex_slot;
+    int tex_w, tex_h;
 } TmRouteType;
 
 typedef struct {
@@ -635,6 +1082,19 @@ static uint8_t *tm_load_exp_blob(const char *exp_path, uint32_t *out_size,
     uint32_t form_size = tm_rd32be(raw, 4);
     *out_size = form_size + 8u;
     return raw;
+}
+
+static uintptr_t tm_build_source_bank(const uint8_t *bin, uint32_t size)
+{
+    uint8_t *copy;
+
+    if (bin == NULL || size < 0x1c)
+        return 0;
+    copy = (uint8_t *)FUN_8001178c(size, 1);
+    if (copy == NULL)
+        return 0;
+    memcpy(copy, bin, size);
+    return (uintptr_t)Object_BuildFromBin((int *)copy, NULL);
 }
 
 static void tm_psx555_rgba(uint16_t c, uint8_t *out)
@@ -800,6 +1260,107 @@ static GLuint tm_upload_xbgm_texture(const uint8_t *raw, uint32_t raw_size)
     return tex;
 }
 
+static GLuint tm_upload_tim8_texture(const uint8_t *p, uint32_t size,
+                                     int semi_trans, int *out_w, int *out_h)
+{
+    (void)semi_trans;
+    if (out_w) *out_w = 0;
+    if (out_h) *out_h = 0;
+    if (p == NULL || size < 0x20)
+        return 0;
+    if (tm_rd32le(p, 0) != 0x10u || tm_rd32le(p, 4) != 0x09u)
+        return 0;
+
+    uint32_t clut_len = tm_rd32le(p, 8);
+    if (clut_len < 12 || 8u + clut_len + 12u > size)
+        return 0;
+
+    int clut_w = tm_rds16le(p, 16);
+    int clut_h = tm_rds16le(p, 18);
+    int clut_count = clut_w * clut_h;
+    if (clut_count <= 0 || 20u + (uint32_t)clut_count * 2u > 8u + clut_len)
+        return 0;
+
+    uint32_t image = 8u + clut_len;
+    uint32_t image_len = tm_rd32le(p, image);
+    if (image_len < 12 || image + image_len > size)
+        return 0;
+
+    int image_words = tm_rds16le(p, image + 8);
+    int image_h = tm_rds16le(p, image + 10);
+    int image_w = tm_pixel_width_from_words(image_words, 1);
+    uint32_t pix_off = image + 12u;
+    uint32_t pix_size = (uint32_t)(image_w * image_h);
+    if (image_w <= 0 || image_h <= 0 || pix_off + pix_size > image + image_len)
+        return 0;
+
+    uint8_t palette[256][4];
+    memset(palette, 0, sizeof(palette));
+    for (int i = 0; i < clut_count && i < 256; i++) {
+        uint16_t c = tm_rd16le(p, 20u + (uint32_t)i * 2u);
+        tm_psx555_rgba(c, palette[i]);
+        if ((c & 0x7fffu) == 0 && (c & 0x8000u) == 0)
+            palette[i][3] = 0;
+        else
+            palette[i][3] = 255;
+    }
+
+    uint8_t *rgba = (uint8_t *)malloc((size_t)image_w * (size_t)image_h * 4u);
+    if (rgba == NULL)
+        return 0;
+    const uint8_t *pix = p + pix_off;
+    for (int i = 0; i < image_w * image_h; i++) {
+        uint8_t idx = pix[i];
+        rgba[i * 4 + 0] = palette[idx][0];
+        rgba[i * 4 + 1] = palette[idx][1];
+        rgba[i * 4 + 2] = palette[idx][2];
+        rgba[i * 4 + 3] = palette[idx][3];
+    }
+
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, image_w, image_h, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    free(rgba);
+
+    if (out_w) *out_w = image_w;
+    if (out_h) *out_h = image_h;
+    return tex;
+}
+
+static void tm_upload_route_textures(TmRouteType *rtypes, int nrtypes)
+{
+    int slot = 0;
+    for (int i = 0; i < nrtypes && slot < 2; i++) {
+        TmRouteType *rt = &rtypes[i];
+        if (rt->tex_payload == NULL || rt->tex_size == 0)
+            continue;
+        int w = 0, h = 0;
+        GLuint tex = tm_upload_tim8_texture(rt->tex_payload, rt->tex_size,
+                                            (rt->flags & 0x100) != 0,
+                                            &w, &h);
+        if (tex == 0)
+            continue;
+        rt->tex_slot = slot;
+        rt->tex_w = w;
+        rt->tex_h = h;
+        if (slot == 0)
+            g_terrainmesh_route_tex0 = tex;
+        else
+            g_terrainmesh_route_tex1 = tex;
+        fprintf(stderr,
+                "v8: TerrainMesh -- uploaded XRTP route texture type=%d slot=%d %dx%d payload=%u\n",
+                i, slot, w, h, (unsigned)rt->tex_size);
+        slot++;
+    }
+}
+
 static int tm_decode_packet_uv(const uint8_t *B, uint32_t po,
                                int nib, float uv[4][2])
 {
@@ -869,6 +1430,48 @@ static int tm_upload_ground_visual(float ax, float ay, float az,
     (void)ay; (void)by; (void)cy;
     if (!ground) return 1;
     return tm_area_xz(ax, az, bx, bz, cx, cz) < 4.0f;
+}
+
+static int tm_trace_visual_collision_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *env = getenv("V8_TRACE_VISUAL_COLLISION");
+        cached = (env != NULL && env[0] != 0 && env[0] != '0');
+    }
+    return cached;
+}
+
+static void tm_trace_head_visual_extent(const TmHead *h,
+                                        const TmTri *tris,
+                                        int first, int last)
+{
+    float minx, miny, minz, maxx, maxy, maxz;
+
+    if (!tm_trace_visual_collision_enabled() || h == NULL || first >= last)
+        return;
+
+    minx = miny = minz =  1.0e30f;
+    maxx = maxy = maxz = -1.0e30f;
+    for (int ti = first; ti < last; ti++) {
+        const TmTri *t = &tris[ti];
+        const float xs[3] = { t->ax, t->bx, t->cx };
+        const float ys[3] = { t->ay, t->by, t->cy };
+        const float zs[3] = { t->az, t->bz, t->cz };
+        for (int vi = 0; vi < 3; vi++) {
+            if (xs[vi] < minx) minx = xs[vi];
+            if (ys[vi] < miny) miny = ys[vi];
+            if (zs[vi] < minz) minz = zs[vi];
+            if (xs[vi] > maxx) maxx = xs[vi];
+            if (ys[vi] > maxy) maxy = ys[vi];
+            if (zs[vi] > maxz) maxz = zs[vi];
+        }
+    }
+    fprintf(stderr,
+            "v8: visual_head name=%s type=%d bank=%d slot=%d tris=%d raw=(0x%x,0x%x,0x%x) ext_m=(%.3f,%.3f,%.3f..%.3f,%.3f,%.3f)\n",
+            h->name, h->type, h->bank, h->slot, last - first,
+            (unsigned)h->raw_x, (unsigned)h->raw_y, (unsigned)h->raw_z,
+            minx, miny, minz, maxx, maxy, maxz);
 }
 
 static const uint8_t *tm_obstacle_stream(const TmBank *bank, int index)
@@ -1151,9 +1754,54 @@ static TmHead *tm_decode_obj_head(const uint8_t *h, uint32_t hsz,
     return dst;
 }
 
-static void tm_build_spawn_placeholders(const TmHead *heads, int nheads)
+static int16_t tm_type5_scaled_strength(const TmHead *h)
+{
+    int32_t strength = h->initial_strength;
+    if (h->id >= 0) {
+        int32_t scaled = strength * ((int32_t)cRam00000016 + 2);
+        if (scaled < 0)
+            scaled += 3;
+        strength = scaled >> 2;
+    }
+    return (int16_t)strength;
+}
+
+static void tm_type5_insert_source_list(uint8_t *obj)
+{
+    int16_t id = *(int16_t *)(obj + 0x06);
+    uint8_t *prev_same = NULL;
+
+    for (int i = 0; i < g_spawn_nplaceholders; i++) {
+        uint8_t *cur = g_spawn_placeholders[i];
+        if (cur == NULL || *(int16_t *)(cur + 0x06) != id)
+            continue;
+        int guard = 0;
+        while (*(uint32_t *)(cur + 0x34) != 0 && guard++ < g_spawn_nplaceholders) {
+            uint8_t *next = (uint8_t *)(uintptr_t)(uint32_t)*(uint32_t *)(cur + 0x34);
+            if (next == obj)
+                break;
+            cur = next;
+        }
+        prev_same = cur;
+        break;
+    }
+
+    if (prev_same != NULL) {
+        *(uint32_t *)(prev_same + 0x34) = (uint32_t)(uintptr_t)obj;
+        *(uint32_t *)(obj + 0x3c) = (uint32_t)(uintptr_t)prev_same;
+        return;
+    }
+
+    FUN_8001fe50((uintptr_t)DAT_80065a50, (uintptr_t)obj);
+}
+
+static void tm_build_spawn_placeholders(const TmBank *banks, int nbanks,
+                                        const TmHead *heads, int nheads)
 {
     int count = 0;
+    int resolved = 0;
+    int table_fallback = 0;
+    int materialized = 0;
     for (int i = 0; i < nheads; i++) {
         if (heads[i].type == 5)
             count++;
@@ -1165,7 +1813,7 @@ static void tm_build_spawn_placeholders(const TmHead *heads, int nheads)
     if (count == 0)
         return;
 
-    g_spawn_placeholders = (uint8_t *)calloc((size_t)count, 0x80);
+    g_spawn_placeholders = (uint8_t **)calloc((size_t)count, sizeof(g_spawn_placeholders[0]));
     if (g_spawn_placeholders == NULL)
         return;
 
@@ -1173,31 +1821,59 @@ static void tm_build_spawn_placeholders(const TmHead *heads, int nheads)
         const TmHead *h = &heads[i];
         if (h->type != 5)
             continue;
-
-        uint8_t *obj = g_spawn_placeholders + (size_t)g_spawn_nplaceholders * 0x80;
+        uint8_t *obj = (uint8_t *)FUN_8001d470(0x80);
+        int16_t strength = tm_type5_scaled_strength(h);
+        int did_resolve = 0;
+        uintptr_t callback = tm_resolve_global_head_callback(h->name);
+        if (callback != 0)
+            did_resolve = 1;
+        else
+            callback = tm_resolve_head_callback(g_v8_level_exp_path,
+                                                h->name, &did_resolve);
+        if (did_resolve) resolved++;
+        else table_fallback++;
+        if (obj == NULL)
+            continue;
         *(uint32_t *)(obj + 0x00) = h->flags & 0xfff867feu;
         *(uint8_t  *)(obj + 0x04) = (uint8_t)h->type;
         *(int16_t  *)(obj + 0x06) = h->id;
         *(uint8_t  *)(obj + 0x08) = h->script;
         *(int16_t  *)(obj + 0x0a) = h->slot;
-        *(int16_t  *)(obj + 0x0c) = (int16_t)h->initial_strength;
-        *(int16_t  *)(obj + 0x0e) = (int16_t)h->initial_strength;
+        *(int16_t  *)(obj + 0x0c) = strength;
+        *(int16_t  *)(obj + 0x0e) = strength;
         *(int16_t  *)(obj + 0x40) = h->ry;
         *(int16_t  *)(obj + 0x42) = h->rx;
         *(int16_t  *)(obj + 0x44) = h->rz;
         *(int32_t  *)(obj + 0x48) = h->raw_x;
         *(int32_t  *)(obj + 0x4c) = h->raw_y;
         *(int32_t  *)(obj + 0x50) = h->raw_z;
-        *(uint32_t *)(obj + 0x58) = 0;
-        *(uint8_t  *)(obj + 0x09) = 0;
+        if (h->bank >= 0 && h->bank < nbanks)
+            *(uint32_t *)(obj + 0x58) = (uint32_t)banks[h->bank].source_bank;
+        Object_SetCallbackPsxSlot(obj, callback);
+        FUN_8001d708((uint32_t *)obj);
+        tm_type5_insert_source_list(obj);
+        g_spawn_placeholders[g_spawn_nplaceholders] = obj;
         g_spawn_nplaceholders++;
+
+        if (callback == (uintptr_t)LAB_8003c61c &&
+            h->bank >= 0 && h->bank < nbanks && banks[h->bank].source_bank != 0) {
+            uint8_t *live = (uint8_t *)(uintptr_t)FUN_80021c6c((uint32_t *)obj);
+            if (live != NULL && FUN_8002036c((uint32_t *)live) != 0)
+                materialized++;
+        }
     }
+
+    fprintf(stderr,
+            "v8: TerrainMesh -- source spawn placeholders=%d live_pickups=%d callbacks=%d fallback=%d\n",
+            g_spawn_nplaceholders, materialized, resolved, table_fallback);
 }
 
 intptr_t Host_TerrainFindPlaceholderById(int spawn_id)
 {
     for (int i = 0; i < g_spawn_nplaceholders; i++) {
-        uint8_t *obj = g_spawn_placeholders + (size_t)i * 0x80;
+        uint8_t *obj = g_spawn_placeholders[i];
+        if (obj == NULL)
+            continue;
         if (*(int16_t *)(obj + 0x06) == (int16_t)spawn_id)
             return (intptr_t)obj;
     }
@@ -1208,7 +1884,9 @@ int Host_TerrainCountPlaceholdersWithFlag(uint32_t flag)
 {
     int count = 0;
     for (int i = 0; i < g_spawn_nplaceholders; i++) {
-        uint8_t *obj = g_spawn_placeholders + (size_t)i * 0x80;
+        uint8_t *obj = g_spawn_placeholders[i];
+        if (obj == NULL || *(uint32_t *)(obj + 0x3c) != 0)
+            continue;
         uint32_t obj_flags = *(uint32_t *)(obj + 0x00);
         if (*(int16_t *)(obj + 0x06) > 0x1f &&
             (obj_flags & flag) != 0 &&
@@ -1222,7 +1900,9 @@ int Host_TerrainCountPlaceholdersWithFlag(uint32_t flag)
 intptr_t Host_TerrainNthPlaceholderWithFlag(uint32_t flag, int n)
 {
     for (int i = 0; i < g_spawn_nplaceholders; i++) {
-        uint8_t *obj = g_spawn_placeholders + (size_t)i * 0x80;
+        uint8_t *obj = g_spawn_placeholders[i];
+        if (obj == NULL || *(uint32_t *)(obj + 0x3c) != 0)
+            continue;
         uint32_t obj_flags = *(uint32_t *)(obj + 0x00);
         if (*(int16_t *)(obj + 0x06) > 0x1f &&
             (obj_flags & flag) != 0 &&
@@ -1350,9 +2030,12 @@ static void tm_collect_level_r(const uint8_t *data, uint32_t off, uint32_t end,
         } else if (memcmp(parent, "XOBF", 4) == 0 &&
                    memcmp(data + p, "BIN ", 4) == 0) {
             if (*nbanks < max_banks && csz >= 8) {
+                int bank_index = *nbanks;
                 TmBank *b = &banks[(*nbanks)++];
                 b->data        = data + body;
                 b->size        = csz;
+                b->texture_kind = (bank_index == 1) ? 2 : 0;
+                b->source_bank = tm_build_source_bank(b->data, b->size);
                 b->group_count = tm_rd32le(b->data, 0);
                 b->group_table = tm_rd32le(b->data, 4);
                 b->obstacle_count = tm_rd32le(b->data, 0x08) + 1u;
@@ -1368,7 +2051,8 @@ static void tm_collect_level_r(const uint8_t *data, uint32_t off, uint32_t end,
                     b->slot_count = 0;
                 }
 #if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
-                V8_XobfTexAtlas_BuildFromBin(&b->atlas, b->data, b->size);
+                if (g_tm_allow_gl_upload)
+                    V8_XobfTexAtlas_BuildFromBin(&b->atlas, b->data, b->size);
 #endif
                 if (b->obstacle_count > 4096 ||
                     b->obstacle_table >= b->size ||
@@ -1430,6 +2114,11 @@ static void tm_collect_level_r(const uint8_t *data, uint32_t off, uint32_t end,
                 dst->step = tm_rd32be_s(h, 4);
                 dst->tex_id = tm_rd16be_s(h, 8);
                 dst->flags = tm_rd16be_s(h, 10);
+                dst->tex_payload = (csz > 12) ? h + 12 : NULL;
+                dst->tex_size = (csz > 12) ? csz - 12u : 0u;
+                dst->tex_slot = -1;
+                dst->tex_w = 0;
+                dst->tex_h = 0;
             }
         } else if (memcmp(data + p, "BSP ", 4) == 0) {
             *bsp_payload = data + body;
@@ -1476,6 +2165,44 @@ static int32_t tm_bezier_coord_q12(int32_t p0, int32_t p1,
     return p0 + (int32_t)(v >> 8);
 }
 
+static int32_t tm_route_deriv_component_q8(int32_t p0, int32_t p1,
+                                           int32_t p2, int32_t p3,
+                                           int32_t t)
+{
+    int32_t a = tm_trunc_shift32((p1 * 3 - p0) - p2 * 3 + p3, 4) * 3;
+    int32_t b = tm_trunc_shift32(p0 * 3 - p1 * 6 + p2 * 3, 4) * 2;
+    int32_t c = tm_trunc_shift32(p1 * 3 - p0 * 3, 4);
+    int32_t t2 = tm_trunc_shift32((int32_t)((int64_t)t * t), 12);
+    int64_t v = (int64_t)a * t2 + (int64_t)b * t;
+    if (v < 0)
+        v += 0xfff;
+    v = (v >> 12) + c;
+    if (v < 0)
+        v += 0xff;
+    return (int32_t)(v >> 8);
+}
+
+static uint16_t tm_terrain_word_at_fixed(int32_t fx, int32_t fz)
+{
+    int x_cell = fx >> 16;
+    int z_cell = fz >> 16;
+    int chunk_x = (x_cell >> 6) & 0x1f;
+    int chunk_z = (z_cell >> 6) & 0x1f;
+    uintptr_t base = DAT_800911a0[chunk_x * 32 + chunk_z];
+
+    if (base == 0)
+        return 0;
+    return *(uint16_t *)(base + (((uint32_t)(x_cell & 0x3f) << 7) |
+                                ((uint32_t)(z_cell & 0x3f) << 1)));
+}
+
+static float tm_route_source_light(int32_t fx, int32_t fz)
+{
+    uint16_t word = tm_terrain_word_at_fixed(fx, fz);
+    int shade = (int)(word >> 11) << 2;
+    return (float)shade * (1.0f / 128.0f);
+}
+
 static void tm_emit_flat_face(float vx[4], float vy[4], float vz[4],
                               int ia, int ib, int ic,
                               float base_r, float base_g, float base_b,
@@ -1517,6 +2244,98 @@ static void tm_emit_flat_face(float vx[4], float vy[4], float vz[4],
     *ntris_io = ntris;
 }
 
+static void tm_emit_route_face(float vx[4], float vy[4], float vz[4],
+                               float uv[4][2], float tex_kind,
+                               int ia, int ib, int ic,
+                               float base_r, float base_g, float base_b,
+                               TmVert *vbuf, int vcap, int *nvtx_io,
+                               TmTri *tribuf, int tcap, int *ntris_io)
+{
+    int nvtx = *nvtx_io;
+    int ntris = *ntris_io;
+    static const float LX = 0.408f, LY = 0.816f, LZ = -0.408f;
+
+    float ex = vx[ib]-vx[ia], ey = vy[ib]-vy[ia], ez = vz[ib]-vz[ia];
+    float fx = vx[ic]-vx[ia], fy = vy[ic]-vy[ia], fz = vz[ic]-vz[ia];
+    float tnx = ey*fz-ez*fy, tny = ez*fx-ex*fz, tnz = ex*fy-ey*fx;
+    float nl = sqrtf(tnx*tnx + tny*tny + tnz*tnz);
+    if (nl > 1e-6f) { tnx/=nl; tny/=nl; tnz/=nl; }
+    tnx=-tnx; tny=-tny; tnz=-tnz;
+
+    float ndotl = tnx*LX + tny*LY + tnz*LZ;
+    float lit = 0.45f + 0.42f * (ndotl > 0 ? ndotl : 0);
+    float lr = base_r * lit;
+    float lg = base_g * lit;
+    float lb = base_b * lit;
+
+    if (ntris < tcap) {
+        TmTri *tt = &tribuf[ntris++];
+        tt->ax=vx[ia]; tt->ay=vy[ia]; tt->az=vz[ia];
+        tt->bx=vx[ib]; tt->by=vy[ib]; tt->bz=vz[ib];
+        tt->cx=vx[ic]; tt->cy=vy[ic]; tt->cz=vz[ic];
+        tt->nx=tnx; tt->ny=tny; tt->nz=tnz;
+        tt->pd = tnx*vx[ia] + tny*vy[ia] + tnz*vz[ia];
+    }
+    if (nvtx + 3 <= vcap) {
+        vbuf[nvtx++] = (TmVert){vx[ia],vy[ia],vz[ia],lr,lg,lb,uv[ia][0],uv[ia][1],tex_kind};
+        vbuf[nvtx++] = (TmVert){vx[ib],vy[ib],vz[ib],lr,lg,lb,uv[ib][0],uv[ib][1],tex_kind};
+        vbuf[nvtx++] = (TmVert){vx[ic],vy[ic],vz[ic],lr,lg,lb,uv[ic][0],uv[ic][1],tex_kind};
+    }
+
+    *nvtx_io = nvtx;
+    *ntris_io = ntris;
+}
+
+static void tm_emit_route_tri_shaded(float vx[9], float vy[9], float vz[9],
+                                     float uv[9][2], float shade[9],
+                                     float tex_kind, int ia, int ib, int ic,
+                                     TmVert *vbuf, int vcap, int *nvtx_io,
+                                     TmTri *tribuf, int tcap, int *ntris_io)
+{
+    int nvtx = *nvtx_io;
+    int ntris = *ntris_io;
+
+    float ex = vx[ib] - vx[ia], ey = vy[ib] - vy[ia], ez = vz[ib] - vz[ia];
+    float fx = vx[ic] - vx[ia], fy = vy[ic] - vy[ia], fz = vz[ic] - vz[ia];
+    float tnx = ey * fz - ez * fy;
+    float tny = ez * fx - ex * fz;
+    float tnz = ex * fy - ey * fx;
+    float nl = sqrtf(tnx * tnx + tny * tny + tnz * tnz);
+    if (nl > 1e-6f) { tnx /= nl; tny /= nl; tnz /= nl; }
+    tnx = -tnx; tny = -tny; tnz = -tnz;
+
+    if (ntris < tcap) {
+        TmTri *tt = &tribuf[ntris++];
+        tt->ax = vx[ia]; tt->ay = vy[ia]; tt->az = vz[ia];
+        tt->bx = vx[ib]; tt->by = vy[ib]; tt->bz = vz[ib];
+        tt->cx = vx[ic]; tt->cy = vy[ic]; tt->cz = vz[ic];
+        tt->nx = tnx; tt->ny = tny; tt->nz = tnz;
+        tt->pd = tnx * vx[ia] + tny * vy[ia] + tnz * vz[ia];
+    }
+    if (nvtx + 3 <= vcap) {
+        float sa = shade[ia], sb = shade[ib], sc = shade[ic];
+        vbuf[nvtx++] = (TmVert){vx[ia], vy[ia], vz[ia], sa, sa, sa, uv[ia][0], uv[ia][1], tex_kind};
+        vbuf[nvtx++] = (TmVert){vx[ib], vy[ib], vz[ib], sb, sb, sb, uv[ib][0], uv[ib][1], tex_kind};
+        vbuf[nvtx++] = (TmVert){vx[ic], vy[ic], vz[ic], sc, sc, sc, uv[ic][0], uv[ic][1], tex_kind};
+    }
+
+    *nvtx_io = nvtx;
+    *ntris_io = ntris;
+}
+
+static void tm_emit_route_subquad(float vx[9], float vy[9], float vz[9],
+                                  float uv[9][2], float shade[9],
+                                  float tex_kind,
+                                  int a, int b, int c, int d,
+                                  TmVert *vbuf, int vcap, int *nvtx,
+                                  TmTri *tribuf, int tcap, int *ntris)
+{
+    tm_emit_route_tri_shaded(vx, vy, vz, uv, shade, tex_kind,
+                             a, c, b, vbuf, vcap, nvtx, tribuf, tcap, ntris);
+    tm_emit_route_tri_shaded(vx, vy, vz, uv, shade, tex_kind,
+                             b, c, d, vbuf, vcap, nvtx, tribuf, tcap, ntris);
+}
+
 static void tm_emit_group(const TmBank *bank, uint32_t group,
                           const TmXform *xf,
                           TmVert *vbuf, int vcap, int *nvtx_io,
@@ -1552,9 +2371,19 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
         uint8_t typ = B[po + 3];
         int nib = typ & 0xf;
         int sz  = TM_PKT_SIZE[nib];
+        g_tm_pkt_kind[nib]++;
         if (sz == 0 || po + (uint32_t)sz > bsz) {
             (*bad_io)++;
             po += 4;
+            continue;
+        }
+        if (nib == 10) {
+            /* FUN_8001b49c expands kind 0xa as a run of textured tile/sprite
+             * primitives from texture-slot records, not as indexed triangle
+             * geometry.  The old raw reader interpreted those fields as
+             * vertex indices and could emit garbage faces through props. */
+            g_tm_pkt_no_uv_kind[nib]++;
+            po += sz;
             continue;
         }
 
@@ -1607,36 +2436,21 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
             int has_uv = 0;
             float tex_kind = 0.0f;
 #if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
+            has_uv = V8_XobfTex_DecodePacketUv(&bank->atlas, B + po, nib,
+                                                (int)tex_base, uv);
+            tex_kind = has_uv ? (float)bank->texture_kind : 0.0f;
             if (ground0) {
-                has_uv = tm_decode_packet_uv(B, po, nib, uv);
-                tex_kind = has_uv ? 1.0f : 0.0f;
-            }
-            if (!has_uv) {
-                has_uv = V8_XobfTex_DecodePacketUv(&bank->atlas, B + po, nib,
-                                                    (int)tex_base, uv);
-                tex_kind = 0.0f;
-            }
-            if (ground0) {
-                if (has_uv && tex_kind > 0.5f) g_tm_uv_ground_xbmp++;
-                else if (has_uv) g_tm_uv_xobf++;
+                if (has_uv) g_tm_uv_xobf++;
                 else g_tm_uv_ground_none++;
             } else {
                 if (has_uv) g_tm_uv_xobf++;
                 else g_tm_uv_none++;
             }
+            if (has_uv) g_tm_pkt_uv_kind[nib]++;
+            else g_tm_pkt_no_uv_kind[nib]++;
 #else
             has_uv = tm_decode_packet_uv(B, po, nib, uv);
 #endif
-
-            if (ground0) {
-                float gy = (vy[0] + vy[1] + vy[2]) * (1.0f / 3.0f);
-                float ht = (gy + 64.0f) / 137.0f;
-                if (ht < 0.0f) ht = 0.0f;
-                if (ht > 1.0f) ht = 1.0f;
-                lr = 0.22f + 0.20f * ht;
-                lg = 0.30f + 0.18f * ht;
-                lb = 0.24f + 0.12f * (1.0f - ht);
-            }
 
             if (ntris < tcap) {
                 TmTri *tt = &tribuf[ntris++];
@@ -1665,31 +2479,14 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                 int has_uv1 = has_uv;
                 float tex_kind1 = tex_kind;
                 if (ground1) {
-                    has_uv1 = tm_decode_packet_uv(B, po, nib, uv1);
-                    tex_kind1 = has_uv1 ? 1.0f : 0.0f;
-                    if (!has_uv1) {
-                        has_uv1 = has_uv;
-                        memcpy(uv1, uv, sizeof(uv1));
-                        tex_kind1 = tex_kind;
-                    }
-                }
-                if (ground1) {
-                    if (has_uv1 && tex_kind1 > 0.5f) g_tm_uv_ground_xbmp++;
-                    else if (has_uv1) g_tm_uv_xobf++;
+                    if (has_uv1) g_tm_uv_xobf++;
                     else g_tm_uv_ground_none++;
                 } else {
                     if (has_uv1) g_tm_uv_xobf++;
                     else g_tm_uv_none++;
                 }
-                if (ground1) {
-                    float gy = (vy[0] + vy[2] + vy[3]) * (1.0f / 3.0f);
-                    float ht = (gy + 64.0f) / 137.0f;
-                    if (ht < 0.0f) ht = 0.0f;
-                    if (ht > 1.0f) ht = 1.0f;
-                    lr1 = 0.22f + 0.20f * ht;
-                    lg1 = 0.30f + 0.18f * ht;
-                    lb1 = 0.24f + 0.12f * (1.0f - ht);
-                }
+                if (has_uv1) g_tm_pkt_uv_kind[nib]++;
+                else g_tm_pkt_no_uv_kind[nib]++;
                 if (ntris < tcap) {
                     TmTri *tt = &tribuf[ntris++];
                     tt->ax=vx[0]; tt->ay=vy[0]; tt->az=vz[0];
@@ -1737,6 +2534,7 @@ static void tm_emit_junc_patch_group(const TmBank *bank,
     uint32_t vc = tm_rd32le(B, bd + 0x00);
     uint32_t vr = tm_rd32le(B, bd + 0x04);
     uint16_t pc = tm_rd16le(B, bd + 0x10);
+    int16_t tex_base = tm_rds16le(B, bd + 0x12);
     uint32_t pr = tm_rd32le(B, bd + 0x14);
     uint32_t vo = bd + vr;
     uint32_t po = bd + pr;
@@ -1773,11 +2571,15 @@ static void tm_emit_junc_patch_group(const TmBank *bank,
     for (uint16_t pi = 0; pi < pc; pi++) {
         if (po + 4 > bsz) break;
         uint8_t typ = B[po + 3];
-        int nib = typ & 0xf;
-        int sz = TM_PKT_SIZE[nib];
+        int source_kind = (typ >> 2) & 0xf;
+        int sz = TM_SOURCE_PKT_SIZE[source_kind];
         if (sz == 0 || po + (uint32_t)sz > bsz) {
             (*bad_io)++;
             po += 4;
+            continue;
+        }
+        if (source_kind == 10) {
+            po += sz;
             continue;
         }
 
@@ -1785,8 +2587,8 @@ static void tm_emit_junc_patch_group(const TmBank *bank,
         vi[0] = tm_rd16le(B, po + 4);
         vi[1] = tm_rd16le(B, po + 6);
         vi[2] = tm_rd16le(B, po + 8);
-        vi[3] = TM_IS_QUAD[nib] ? tm_rd16le(B, po + 10) : vi[2];
-        int nv = TM_IS_QUAD[nib] ? 4 : 3;
+        vi[3] = TM_IS_QUAD[source_kind] ? tm_rd16le(B, po + 10) : vi[2];
+        int nv = TM_IS_QUAD[source_kind] ? 4 : 3;
         int ok = 1;
         for (int k = 0; k < nv; k++) {
             if (vi[k] >= vc) { ok = 0; break; }
@@ -1798,12 +2600,40 @@ static void tm_emit_junc_patch_group(const TmBank *bank,
                 vy[k] = wy[vi[k]];
                 vz[k] = wz[vi[k]];
             }
-            tm_emit_flat_face(vx, vy, vz, 0, 1, 2, 0.38f, 0.42f, 0.34f,
-                              vbuf, vcap, nvtx_io, tribuf, tcap, ntris_io);
-            if (TM_IS_QUAD[nib]) {
-                tm_emit_flat_face(vx, vy, vz, 0, 2, 3, 0.38f, 0.42f, 0.34f,
+            float cr = B[po + 0] / 255.0f;
+            float cg = B[po + 1] / 255.0f;
+            float cb = B[po + 2] / 255.0f;
+            float uv[4][2] = {
+                {-1.0f, -1.0f}, {-1.0f, -1.0f},
+                {-1.0f, -1.0f}, {-1.0f, -1.0f}
+            };
+            int has_uv = 0;
+            float tex_kind = 0.0f;
+#if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
+            has_uv = V8_XobfTex_DecodePacketUv(&bank->atlas, B + po,
+                                                source_kind, (int)tex_base,
+                                                uv);
+            tex_kind = has_uv ? (float)bank->texture_kind : 0.0f;
+#endif
+            if (has_uv) {
+                tm_emit_route_face(vx, vy, vz, uv, tex_kind, 0, 1, 2,
+                                   cr, cg, cb, vbuf, vcap, nvtx_io,
+                                   tribuf, tcap, ntris_io);
+            } else {
+                tm_emit_flat_face(vx, vy, vz, 0, 1, 2, cr, cg, cb,
                                   vbuf, vcap, nvtx_io, tribuf, tcap,
                                   ntris_io);
+            }
+            if (TM_IS_QUAD[source_kind]) {
+                if (has_uv) {
+                    tm_emit_route_face(vx, vy, vz, uv, tex_kind, 0, 2, 3,
+                                       cr, cg, cb, vbuf, vcap, nvtx_io,
+                                       tribuf, tcap, ntris_io);
+                } else {
+                    tm_emit_flat_face(vx, vy, vz, 0, 2, 3, cr, cg, cb,
+                                      vbuf, vcap, nvtx_io, tribuf, tcap,
+                                      ntris_io);
+                }
             }
         }
         po += sz;
@@ -1819,6 +2649,18 @@ static int tm_emit_route_strips(const TmJuncNode *juncs, int njuncs,
                                 TmTri *tribuf, int tcap, int *ntris)
 {
     int before = *ntris;
+    int type_tris[16] = {0};
+    int type_vtx[16] = {0};
+    float type_minx[16], type_miny[16], type_minz[16];
+    float type_maxx[16], type_maxy[16], type_maxz[16];
+    int trace = getenv("V8_TRACE_ROUTE_VISUAL") != NULL;
+
+    if (trace) {
+        for (int i = 0; i < 16; i++) {
+            type_minx[i] = type_miny[i] = type_minz[i] =  1.0e30f;
+            type_maxx[i] = type_maxy[i] = type_maxz[i] = -1.0e30f;
+        }
+    }
 
     for (int ri = 0; ri < nrsegs; ri++) {
         const TmRseg *seg = &rsegs[ri];
@@ -1830,7 +2672,7 @@ static int tm_emit_route_strips(const TmJuncNode *juncs, int njuncs,
         const TmJuncNode *a = &juncs[seg->node_a];
         const TmJuncNode *b = &juncs[seg->node_b];
         const TmRouteType *rt = &rtypes[seg->type];
-        if (rt->width <= 0 || rt->step <= 0) continue;
+        if (rt->width <= 0 || rt->step <= 0 || rt->tex_slot < 0) continue;
 
         int32_t px[4] = {
             a->raw_x,
@@ -1845,74 +2687,155 @@ static int tm_emit_route_strips(const TmJuncNode *juncs, int njuncs,
             b->raw_z
         };
 
-        double length = 0.0;
-        int32_t last_x = px[0], last_z = pz[0];
-        for (int i = 1; i <= 24; i++) {
-            int32_t t = (int32_t)((i * 0x1000) / 24);
-            int32_t x = tm_bezier_coord_q12(px[0], px[1], px[2], px[3], t);
-            int32_t z = tm_bezier_coord_q12(pz[0], pz[1], pz[2], pz[3], t);
-            double dx = (double)x - (double)last_x;
-            double dz = (double)z - (double)last_z;
-            length += sqrt(dx * dx + dz * dz);
-            last_x = x;
-            last_z = z;
-        }
-
-        int steps = (int)ceil(length / (double)rt->step);
-        if (steps < 2) steps = 2;
-        if (steps > 256) steps = 256;
-
         float prev_lx = 0, prev_ly = 0, prev_lz = 0;
         float prev_rx = 0, prev_ry = 0, prev_rz = 0;
+        float prev_lshade = 0.0f, prev_rshade = 0.0f;
         int have_prev = 0;
 
-        for (int i = 0; i <= steps; i++) {
-            int32_t t = (int32_t)((i * 0x1000) / steps);
-            int32_t t_prev = (i == 0) ? 0 : (int32_t)(((i - 1) * 0x1000) / steps);
-            int32_t t_next = (i == steps) ? 0x1000 : (int32_t)(((i + 1) * 0x1000) / steps);
+        int32_t t = 0;
+        int sample = 0;
+        while (t <= 0x1000 && sample < 512) {
+            int32_t draw_t = t;
+            if (draw_t > 0x1000)
+                draw_t = 0x1000;
             int32_t x = tm_bezier_coord_q12(px[0], px[1], px[2], px[3], t);
             int32_t z = tm_bezier_coord_q12(pz[0], pz[1], pz[2], pz[3], t);
-            int32_t x0 = tm_bezier_coord_q12(px[0], px[1], px[2], px[3], t_prev);
-            int32_t z0 = tm_bezier_coord_q12(pz[0], pz[1], pz[2], pz[3], t_prev);
-            int32_t x1 = tm_bezier_coord_q12(px[0], px[1], px[2], px[3], t_next);
-            int32_t z1 = tm_bezier_coord_q12(pz[0], pz[1], pz[2], pz[3], t_next);
-            double dx = (double)x1 - (double)x0;
-            double dz = (double)z1 - (double)z0;
-            double dlen = sqrt(dx * dx + dz * dz);
-            if (dlen < 1.0) continue;
+            int32_t dx_q8 = tm_route_deriv_component_q8(px[0], px[1], px[2], px[3], draw_t);
+            int32_t dz_q8 = tm_route_deriv_component_q8(pz[0], pz[1], pz[2], pz[3], draw_t);
+            int32_t speed = (int32_t)sqrt((double)dx_q8 * (double)dx_q8 +
+                                          (double)dz_q8 * (double)dz_q8);
+            if (speed <= 0)
+                break;
 
-            double half = (double)rt->width * 0.5;
-            int32_t ox = (int32_t)lrint(dz * half / dlen);
-            int32_t oz = (int32_t)lrint(dx * half / dlen);
+            int32_t ox = (int32_t)(((int64_t)dz_q8 * (int64_t)rt->width / 2) / speed);
+            int32_t oz = (int32_t)(((int64_t)dx_q8 * (int64_t)rt->width / 2) / speed);
             int32_t lx = x - ox;
             int32_t lz = z + oz;
             int32_t rx = x + ox;
             int32_t rz = z - oz;
             int32_t ly = Terrain_HeightAt((uint32_t)lx, (uint32_t)lz);
             int32_t ry = Terrain_HeightAt((uint32_t)rx, (uint32_t)rz);
+            float lshade = tm_route_source_light(lx, lz);
+            float rshade = tm_route_source_light(rx, rz);
 
             float cur_lx = (float)lx * (1.0f / 65536.0f);
-            float cur_ly = (float)-ly * TM_DISPLAY_Y_SCALE;
+            float cur_ly = (float)-ly * TM_DISPLAY_Y_SCALE + TM_ROUTE_VISUAL_Y_BIAS;
             float cur_lz = (float)lz * (1.0f / 65536.0f);
             float cur_rx = (float)rx * (1.0f / 65536.0f);
-            float cur_ry = (float)-ry * TM_DISPLAY_Y_SCALE;
+            float cur_ry = (float)-ry * TM_DISPLAY_Y_SCALE + TM_ROUTE_VISUAL_Y_BIAS;
             float cur_rz = (float)rz * (1.0f / 65536.0f);
 
             if (have_prev) {
-                float vx[4] = { prev_lx, prev_rx, cur_lx, cur_rx };
-                float vy[4] = { prev_ly, prev_ry, cur_ly, cur_ry };
-                float vz[4] = { prev_lz, prev_rz, cur_lz, cur_rz };
-                tm_emit_flat_face(vx, vy, vz, 0, 1, 2,
-                                  0.30f, 0.32f, 0.28f,
-                                  vbuf, vcap, nvtx, tribuf, tcap, ntris);
-                tm_emit_flat_face(vx, vy, vz, 1, 3, 2,
-                                  0.30f, 0.32f, 0.28f,
-                                  vbuf, vcap, nvtx, tribuf, tcap, ntris);
+                int prev_ntris = *ntris;
+                int prev_nvtx = *nvtx;
+
+                if (rt->tex_slot >= 0) {
+                    float vx[9] = {
+                        prev_lx, prev_rx, cur_lx, cur_rx,
+                        (prev_lx + prev_rx) * 0.5f,
+                        (prev_lx + cur_lx) * 0.5f,
+                        (prev_lx + prev_rx + cur_lx + cur_rx) * 0.25f,
+                        (prev_rx + cur_rx) * 0.5f,
+                        (cur_lx + cur_rx) * 0.5f
+                    };
+                    float vy[9] = {
+                        prev_ly, prev_ry, cur_ly, cur_ry,
+                        (prev_ly + prev_ry) * 0.5f,
+                        (prev_ly + cur_ly) * 0.5f,
+                        (prev_ly + prev_ry + cur_ly + cur_ry) * 0.25f,
+                        (prev_ry + cur_ry) * 0.5f,
+                        (cur_ly + cur_ry) * 0.5f
+                    };
+                    float vz[9] = {
+                        prev_lz, prev_rz, cur_lz, cur_rz,
+                        (prev_lz + prev_rz) * 0.5f,
+                        (prev_lz + cur_lz) * 0.5f,
+                        (prev_lz + prev_rz + cur_lz + cur_rz) * 0.25f,
+                        (prev_rz + cur_rz) * 0.5f,
+                        (cur_lz + cur_rz) * 0.5f
+                    };
+                    float shade[9] = {
+                        prev_lshade, prev_rshade, lshade, rshade,
+                        (prev_lshade + prev_rshade) * 0.5f,
+                        (prev_lshade + lshade) * 0.5f,
+                        (prev_lshade + prev_rshade + lshade + rshade) * 0.25f,
+                        (prev_rshade + rshade) * 0.5f,
+                        (lshade + rshade) * 0.5f
+                    };
+                    for (int si = 0; si < 9; si++) {
+                        if (shade[si] < 0.08f)
+                            shade[si] = 0.08f;
+                    }
+                    float u0 = (rt->tex_w > 0) ? (0.5f / (float)rt->tex_w) : 0.0f;
+                    float u1 = (rt->tex_w > 0) ? (((float)rt->tex_w - 0.5f) / (float)rt->tex_w) : 1.0f;
+                    float v0 = (rt->tex_h > 0) ? (0.5f / (float)rt->tex_h) : 0.0f;
+                    float v1 = (rt->tex_h > 0) ? (((float)rt->tex_h - 0.5f) / (float)rt->tex_h) : 1.0f;
+                    float um = (u0 + u1) * 0.5f;
+                    float vm = (v0 + v1) * 0.5f;
+                    float uv[9][2] = {
+                        { u0, v0 }, { u1, v0 },
+                        { u0, v1 }, { u1, v1 },
+                        { um, v0 }, { u0, vm },
+                        { um, vm }, { u1, vm },
+                        { um, v1 }
+                    };
+                    float tex_kind = 3.0f + (float)rt->tex_slot;
+                    tm_emit_route_subquad(vx, vy, vz, uv, shade, tex_kind,
+                                          0, 4, 5, 6,
+                                          vbuf, vcap, nvtx, tribuf, tcap, ntris);
+                    tm_emit_route_subquad(vx, vy, vz, uv, shade, tex_kind,
+                                          4, 1, 6, 7,
+                                          vbuf, vcap, nvtx, tribuf, tcap, ntris);
+                    tm_emit_route_subquad(vx, vy, vz, uv, shade, tex_kind,
+                                          5, 6, 2, 8,
+                                          vbuf, vcap, nvtx, tribuf, tcap, ntris);
+                    tm_emit_route_subquad(vx, vy, vz, uv, shade, tex_kind,
+                                          6, 7, 8, 3,
+                                          vbuf, vcap, nvtx, tribuf, tcap, ntris);
+                }
+                if (trace && seg->type >= 0 && seg->type < 16) {
+                    type_tris[seg->type] += *ntris - prev_ntris;
+                    type_vtx[seg->type] += *nvtx - prev_nvtx;
+                    float bx[4] = { prev_lx, prev_rx, cur_lx, cur_rx };
+                    float by[4] = { prev_ly, prev_ry, cur_ly, cur_ry };
+                    float bz[4] = { prev_lz, prev_rz, cur_lz, cur_rz };
+                    for (int k = 0; k < 4; k++) {
+                        if (bx[k] < type_minx[seg->type]) type_minx[seg->type] = bx[k];
+                        if (by[k] < type_miny[seg->type]) type_miny[seg->type] = by[k];
+                        if (bz[k] < type_minz[seg->type]) type_minz[seg->type] = bz[k];
+                        if (bx[k] > type_maxx[seg->type]) type_maxx[seg->type] = bx[k];
+                        if (by[k] > type_maxy[seg->type]) type_maxy[seg->type] = by[k];
+                        if (bz[k] > type_maxz[seg->type]) type_maxz[seg->type] = bz[k];
+                    }
+                }
             }
 
             prev_lx = cur_lx; prev_ly = cur_ly; prev_lz = cur_lz;
             prev_rx = cur_rx; prev_ry = cur_ry; prev_rz = cur_rz;
+            prev_lshade = lshade;
+            prev_rshade = rshade;
             have_prev = 1;
+            sample++;
+            if (draw_t >= 0x1000)
+                break;
+            t += rt->step / speed;
+            if (t <= draw_t)
+                t = draw_t + 1;
+        }
+    }
+
+    if (trace) {
+        for (int i = 0; i < nrtypes && i < 16; i++) {
+            if (type_tris[i] == 0)
+                continue;
+            fprintf(stderr,
+                    "v8: route_visual type=%d tris=%d gpu_vtx=%d tex_slot=%d tex=%dx%d flags=0x%x bounds=(%.3f..%.3f, %.3f..%.3f, %.3f..%.3f)\n",
+                    i, type_tris[i], type_vtx[i], rtypes[i].tex_slot,
+                    rtypes[i].tex_w, rtypes[i].tex_h,
+                    (unsigned)(uint16_t)rtypes[i].flags,
+                    type_minx[i], type_maxx[i],
+                    type_miny[i], type_maxy[i],
+                    type_minz[i], type_maxz[i]);
         }
     }
 
@@ -1947,10 +2870,10 @@ static void tm_build_slot_like_original(const TmBank *bank, int slot,
     if (key < 0 && (key != -1 || ((flags & 4) != 0))) {
         /* FUN_8001b0c4 scans an object's first-child/next-sibling slot chain for
          * key0 values in the 0xcxxx range and builds one extra render group
-         * at obj+0x68. Static HEAD placement does not automatically render
-         * those alternates; drawing every one creates large grey state/LOD
-         * panels around Wild West buildings. Keep walking siblings exactly
-         * like FUN_8001ac44, but do not emit the state-controlled group here. */
+         * at obj+0x68. FUN_8001de08 renders obj+0x30 normally and selects
+         * obj+0x68 only when the camera-space Z distance exceeds obj+0x6c.
+         * Static upload therefore walks siblings like FUN_8001ac44 but does
+         * not render these distance-selected alternates unconditionally. */
         if ((flags & 1) != 0 && next_sibling != -1) {
             tm_build_slot_like_original(bank, next_sibling, parent_xf, 0, flags,
                                         depth + 1, seen, vbuf, vcap,
@@ -2093,6 +3016,436 @@ static int tm_build_obstacle_instances(const TmBank *banks, int nbanks,
     return count;
 }
 
+static int tm_str_ieq(const char *a, const char *b)
+{
+    while (*a != 0 && *b != 0) {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
+            return 0;
+        a++;
+        b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
+static uint32_t tm_rd32le_mem(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8)
+        | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static intptr_t tm_ww_warehouse_init(intptr_t self, int mode, int arg)
+{
+    uint32_t *obj = (uint32_t *)(uintptr_t)self;
+    (void)arg;
+    if (obj != NULL && mode == 1) {
+        uint8_t *geom = (uint8_t *)(uintptr_t)obj[0x0c];
+        if (geom != NULL)
+            *(uint16_t *)(geom + 0x28) = 0x14;
+        Object_SetCallbackPsxSlot(obj, (uintptr_t)FUN_800223dc);
+    }
+    return 0;
+}
+
+static uintptr_t tm_host_level_callback_by_offset(const char *stem, uint32_t off)
+{
+    if (tm_str_ieq(stem, "WILDWEST")) {
+        switch (off) {
+        case 0x04a0: return (uintptr_t)tm_ww_warehouse_init;
+        default: break;
+        }
+    }
+    return 0;
+}
+
+static uintptr_t tm_resolve_head_callback(const char *levelPath,
+                                          const char *headName,
+                                          int *resolved)
+{
+    char stem[32];
+    char path[128];
+    const char *base;
+    const char *dot;
+    FILE *f;
+    uint8_t hdr[8];
+    uint8_t *dll;
+    long len;
+    uintptr_t cb = 0;
+
+    if (resolved != NULL)
+        *resolved = 0;
+    if (headName == NULL || headName[0] == 0)
+        return (uintptr_t)FUN_800223dc;
+
+    base = strrchr(levelPath, '\\');
+    if (base == NULL) base = strrchr(levelPath, '/');
+    base = (base != NULL) ? base + 1 : levelPath;
+    dot = strrchr(base, '.');
+    size_t n = (dot != NULL) ? (size_t)(dot - base) : strlen(base);
+    if (n >= sizeof(stem)) n = sizeof(stem) - 1;
+    memcpy(stem, base, n);
+    stem[n] = 0;
+
+    snprintf(path, sizeof(path), "TERRAIN\\%s.DLL", stem);
+    f = fopen(path, "rb");
+    if (f == NULL) {
+        snprintf(path, sizeof(path), "Terrain\\%s.DLL", stem);
+        f = fopen(path, "rb");
+    }
+    if (f == NULL)
+        return (uintptr_t)FUN_800223dc;
+
+    if (fread(hdr, 1, sizeof(hdr), f) != sizeof(hdr)) {
+        fclose(f);
+        return (uintptr_t)FUN_800223dc;
+    }
+    fseek(f, 0, SEEK_END);
+    len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (len <= 0 || len > 256 * 1024) {
+        fclose(f);
+        return (uintptr_t)FUN_800223dc;
+    }
+    dll = (uint8_t *)malloc((size_t)len);
+    if (dll == NULL) {
+        fclose(f);
+        return (uintptr_t)FUN_800223dc;
+    }
+    if (fread(dll, 1, (size_t)len, f) != (size_t)len) {
+        free(dll);
+        fclose(f);
+        return (uintptr_t)FUN_800223dc;
+    }
+    fclose(f);
+
+    for (uint32_t off = 8; off + 8 <= (uint32_t)len; off += 8) {
+        uint32_t strOff = tm_rd32le_mem(dll + off);
+        uint32_t fnOff = tm_rd32le_mem(dll + off + 4);
+        if (strOff == 0 && fnOff == 0)
+            break;
+        if (strOff >= (uint32_t)len || fnOff == 0 || fnOff >= (uint32_t)len)
+            break;
+        const char *s = (const char *)dll + strOff;
+        if (memchr(s, 0, (size_t)len - strOff) == NULL)
+            break;
+        if (strcmp(s, headName) == 0) {
+            cb = tm_host_level_callback_by_offset(stem, fnOff);
+            if (cb != 0 && resolved != NULL)
+                *resolved = 1;
+            break;
+        }
+    }
+    free(dll);
+    return cb != 0 ? cb : (uintptr_t)FUN_800223dc;
+}
+
+static uint8_t *tm_source_build_placed_object(const TmBank *bank,
+                                              const TmHead *h,
+                                              uintptr_t callback)
+{
+    uint8_t *obj;
+    uint32_t flags;
+
+    flags = (h->flags & 4u) << 1;
+    obj = (uint8_t *)FUN_80021b80((intptr_t (*)(intptr_t, int, int))callback,
+                                  (intptr_t)bank->source_bank,
+                                  (uint16_t)h->slot, flags);
+    if (obj == NULL)
+        return NULL;
+
+    *(uint32_t *)(obj + 0x00) = h->flags & 0xfff867feu;
+    *(uint8_t  *)(obj + 0x04) = (uint8_t)h->type;
+    *(int16_t  *)(obj + 0x06) = h->id;
+    *(uint8_t  *)(obj + 0x08) = h->script;
+    *(int16_t  *)(obj + 0x0c) = (int16_t)h->initial_strength;
+    *(int16_t  *)(obj + 0x0e) = (int16_t)h->initial_strength;
+    /* LOAD 801006f0 copies HEAD rotation halfwords 0x14/0x16 as one
+     * unaligned word into obj+0x40..0x43, then HEAD 0x18 into +0x44.
+     * In host terms that leaves rot0 at +0x40 and rot1 at +0x42. */
+    *(int16_t  *)(obj + 0x40) = h->ry;
+    *(int16_t  *)(obj + 0x42) = h->rx;
+    *(int16_t  *)(obj + 0x44) = h->rz;
+    *(int32_t  *)(obj + 0x48) = h->raw_x;
+    *(int32_t  *)(obj + 0x4c) = h->raw_y;
+    *(int32_t  *)(obj + 0x50) = h->raw_z;
+    Object_SetCallbackPsxSlot(obj, callback);
+    return obj;
+}
+
+static void tm_source_propagate_strength_to_children(uint8_t *obj,
+                                                     int16_t strength)
+{
+    uint8_t *child = (uint8_t *)(uintptr_t)(uint32_t)*(uint32_t *)(obj + 0x38);
+    while (child != NULL) {
+        *(int16_t *)(child + 0x0c) = strength;
+        *(int16_t *)(child + 0x0e) = strength;
+        child = (uint8_t *)(uintptr_t)(uint32_t)*(uint32_t *)(child + 0x34);
+    }
+}
+
+static void tm_build_source_dynamic_objects(const TmBank *banks, int nbanks,
+                                            const TmHead *heads, int nheads)
+{
+    int built = 0;
+    int resolved = 0;
+    int table_fallback = 0;
+
+    for (int hi = 0; hi < nheads; hi++) {
+        const TmHead *h = &heads[hi];
+        uintptr_t callback;
+        int did_resolve = 0;
+        uint8_t *obj;
+
+        /* LOAD.DLL's switch table routes HEAD types 2, 3, and 4 to the
+         * default live-object path at 80100a08.  Type 0 is inserted into the
+         * static BSP, type 5 into the placeholder/path list, and type 6 into
+         * the light/object cleanup list. */
+        if (h->type != 2 && h->type != 3 && h->type != 4)
+            continue;
+        if (h->bank < 0 || h->bank >= nbanks || h->slot < 0)
+            continue;
+        if (banks[h->bank].source_bank == 0)
+            continue;
+
+        callback = tm_resolve_head_callback(g_v8_level_exp_path, h->name,
+                                            &did_resolve);
+        if (did_resolve) resolved++;
+        else table_fallback++;
+
+        obj = tm_source_build_placed_object(&banks[h->bank], h, callback);
+        if (obj == NULL)
+            continue;
+
+        tm_source_propagate_strength_to_children(obj,
+                                                 (int16_t)h->initial_strength);
+        if (FUN_8002036c((uint32_t *)obj) != 0) {
+            FUN_8001b0c4((uint32_t *)obj);
+        }
+        built++;
+    }
+
+    fprintf(stderr,
+            "v8: TerrainMesh -- source dynamic collision objects=%d callbacks=%d fallback=%d\n",
+            built, resolved, table_fallback);
+}
+
+static int32_t *tm_source_list_node(uint32_t *obj)
+{
+    int32_t *node = (int32_t *)FUN_8001178c(0x0c, 1);
+    if (node == NULL)
+        return NULL;
+    node[0] = 0;
+    node[1] = 0;
+    node[2] = (int32_t)(uintptr_t)obj;
+    return node;
+}
+
+static int32_t *tm_source_bsp_parse_node(const uint8_t *payload,
+                                         uint32_t size, uint32_t *pos)
+{
+    int32_t *node;
+    int32_t kind;
+
+    if (*pos + 2 > size)
+        return NULL;
+
+    kind = tm_rd16be_s(payload, *pos);
+    *pos += 2;
+
+    if (kind == 0) {
+        node = (int32_t *)FUN_8001178c(0x10, 1);
+        if (node == NULL)
+            return NULL;
+        node[0] = 0;
+        node[1] = (int32_t)(uintptr_t)(node + 2);
+        node[2] = 0;
+        node[3] = (int32_t)(uintptr_t)(node + 1);
+        return node;
+    }
+
+    if (kind != 1 && kind != 2)
+        return NULL;
+    if (*pos + 4 > size)
+        return NULL;
+
+    node = (int32_t *)FUN_8001178c(0x10, 1);
+    if (node == NULL)
+        return NULL;
+    node[0] = kind;
+    node[1] = tm_rd32be_s(payload, *pos);
+    *pos += 4;
+    node[2] = (int32_t)(uintptr_t)tm_source_bsp_parse_node(payload, size, pos);
+    node[3] = (int32_t)(uintptr_t)tm_source_bsp_parse_node(payload, size, pos);
+    if (node[2] == 0 || node[3] == 0)
+        return NULL;
+    return node;
+}
+
+static void tm_source_bsp_insert_object(int32_t *node, int32_t *child)
+{
+    int32_t kind;
+    uint8_t *obj;
+    int32_t *tail;
+
+    if (node == NULL || child == NULL)
+        return;
+    kind = node[0];
+    if (kind == 1) {
+        obj = (uint8_t *)(uintptr_t)(uint32_t)child[2];
+        tm_source_bsp_insert_object((int32_t *)(uintptr_t)(uint32_t)
+                                    node[node[1] < *(int32_t *)(obj + 0x48) ? 3 : 2],
+                                    child);
+        return;
+    }
+    if (kind == 2) {
+        obj = (uint8_t *)(uintptr_t)(uint32_t)child[2];
+        tm_source_bsp_insert_object((int32_t *)(uintptr_t)(uint32_t)
+                                    node[node[1] < *(int32_t *)(obj + 0x50) ? 3 : 2],
+                                    child);
+        return;
+    }
+    if (kind != 0)
+        return;
+
+    tail = (int32_t *)(uintptr_t)(uint32_t)node[3];
+    node[3] = (int32_t)(uintptr_t)child;
+    tail[0] = (int32_t)(uintptr_t)child;
+    child[1] = (int32_t)(uintptr_t)tail;
+    child[0] = (int32_t)(uintptr_t)(node + 2);
+}
+
+static void tm_build_source_static_tree(const uint8_t *bsp_payload,
+                                        uint32_t bsp_size,
+                                        const TmBank *banks, int nbanks,
+                                        const TmHead *heads, int nheads)
+{
+    int32_t *root;
+    int inserted = 0;
+    int resolved = 0;
+    int table_fallback = 0;
+    int trace_static = 0;
+    int trace_printed = 0;
+
+    iRam000006fc = 0;
+    uRam000006fc = 0;
+    g_v8_static_collision_obj_count = 0;
+    if (bsp_payload == NULL)
+        return;
+
+    uint32_t pos = 0;
+    root = tm_source_bsp_parse_node(bsp_payload, bsp_size, &pos);
+    if (root == NULL)
+        return;
+
+    iRam000006fc = (uintptr_t)root;
+    uRam000006fc = (uintptr_t)root;
+    {
+        const char *env = getenv("V8_TRACE_STATIC_OBJECTS");
+        trace_static = (env != NULL && env[0] != 0 && env[0] != '0');
+    }
+
+    for (int hi = 0; hi < nheads; hi++) {
+        const TmHead *h = &heads[hi];
+        uint8_t *obj;
+        int32_t *node;
+        MATRIX identity;
+        uintptr_t callback;
+        int did_resolve = 0;
+
+        /* LOAD.DLL inserts only DAT_80107da0 entries into the terrain BSP.
+         * FUN_801006f0 appends that list from its case-0 HEAD path; the
+         * default/type-5/type-6 paths feed other runtime lists instead. */
+        if (h->type != 0)
+            continue;
+        if (h->bank < 0 || h->bank >= nbanks || h->slot < 0)
+            continue;
+        if (banks[h->bank].source_bank == 0)
+            continue;
+
+        callback = tm_resolve_head_callback(g_v8_level_exp_path, h->name,
+                                            &did_resolve);
+        if (did_resolve) resolved++;
+        else table_fallback++;
+
+        obj = tm_source_build_placed_object(&banks[h->bank], h, callback);
+        if (obj == NULL)
+            continue;
+
+        FUN_8001d708((uint32_t *)obj);
+        FUN_8001dc1c((intptr_t)obj);
+        if (callback != 0 &&
+            ((intptr_t (*)(intptr_t, int, int))callback)((intptr_t)obj, 1, 0) < 0)
+            continue;
+        FUN_8001b0c4((uint32_t *)obj);
+        (void)FUN_8001ec48((uint32_t *)obj);
+
+        memset(&identity, 0, sizeof(identity));
+        identity.m[0][0] = 0x1000;
+        identity.m[1][1] = 0x1000;
+        identity.m[2][2] = 0x1000;
+        FUN_80101574((intptr_t)obj, &identity);
+
+        node = tm_source_list_node((uint32_t *)obj);
+        if (node == NULL)
+            continue;
+        tm_source_bsp_insert_object(root, node);
+        if (g_v8_static_collision_obj_count <
+            (int)(sizeof g_v8_static_collision_objs / sizeof g_v8_static_collision_objs[0])) {
+            g_v8_static_collision_objs[g_v8_static_collision_obj_count++] = (uintptr_t)obj;
+        }
+        if (g_static_debug_count <
+            (int)(sizeof g_static_debug / sizeof g_static_debug[0])) {
+            TmStaticDebugInfo *dbg = &g_static_debug[g_static_debug_count++];
+            dbg->obj = (uintptr_t)obj;
+            dbg->head_index = hi;
+            dbg->slot = h->slot;
+            snprintf(dbg->name, sizeof(dbg->name), "%s", h->name);
+        }
+        if (trace_static && trace_printed < 160) {
+            uint8_t *child = (uint8_t *)(uintptr_t)(uint32_t)*(uint32_t *)(obj + 0x38);
+            uint32_t child_flags = child ? *(uint32_t *)(child + 0x00) : 0;
+            uint32_t child_shape = child ? *(uint32_t *)(child + 0x5c) : 0;
+            int32_t child_radius = child ? *(int32_t *)(child + 0x54) : 0;
+            uint8_t *shape = (uint8_t *)(uintptr_t)*(uint32_t *)(obj + 0x5c);
+            int shape_type = shape ? *(uint16_t *)shape : 0;
+            int32_t sx0 = 0, sy0 = 0, sz0 = 0, sx1 = 0, sy1 = 0, sz1 = 0;
+            if (shape != NULL && shape_type == 1) {
+                sx0 = *(int32_t *)(shape + 4);
+                sy0 = *(int32_t *)(shape + 8);
+                sz0 = *(int32_t *)(shape + 12);
+                sx1 = *(int32_t *)(shape + 16);
+                sy1 = *(int32_t *)(shape + 20);
+                sz1 = *(int32_t *)(shape + 24);
+            }
+            fprintf(stderr,
+                    "v8: static_obj %03d name=%s slot=%d flags=0x%x layer=%d pos24=(0x%x,0x%x,0x%x) pos48=(0x%x,0x%x,0x%x) r=0x%x shape=0x%x stype=%d saabb=(0x%x,0x%x,0x%x..0x%x,0x%x,0x%x) child=%p child_flags=0x%x child_r=0x%x child_shape=0x%x\n",
+                    inserted, h->name, h->slot,
+                    (unsigned)*(uint32_t *)(obj + 0x00),
+                    (int)*(int16_t *)(obj + 0x06),
+                    (unsigned)*(uint32_t *)(obj + 0x24),
+                    (unsigned)*(uint32_t *)(obj + 0x28),
+                    (unsigned)*(uint32_t *)(obj + 0x2c),
+                    (unsigned)*(uint32_t *)(obj + 0x48),
+                    (unsigned)*(uint32_t *)(obj + 0x4c),
+                    (unsigned)*(uint32_t *)(obj + 0x50),
+                    (unsigned)*(uint32_t *)(obj + 0x54),
+                    (unsigned)*(uint32_t *)(obj + 0x5c),
+                    shape_type,
+                    (unsigned)sx0, (unsigned)sy0, (unsigned)sz0,
+                    (unsigned)sx1, (unsigned)sy1, (unsigned)sz1,
+                    (void *)child,
+                    (unsigned)child_flags,
+                    (unsigned)child_radius,
+                    (unsigned)child_shape);
+            trace_printed++;
+        }
+        inserted++;
+    }
+
+    fprintf(stderr,
+            "v8: TerrainMesh -- source static collision objects=%d callbacks=%d fallback=%d\n",
+            inserted, resolved, table_fallback);
+}
+
 static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
                                     TmVert *vbuf, int vcap,
                                     TmTri *tribuf, int tcap, int *out_ntris)
@@ -2131,9 +3484,17 @@ static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
         fprintf(stderr, "v8: TerrainMesh -- XOBF texture atlas %dx%d slots=%d\n",
                 banks[0].atlas.w, banks[0].atlas.h, banks[0].atlas.slots);
     }
+    if (nbanks > 1 && banks[1].atlas.tex != 0) {
+        g_terrainmesh_tex_bank1 = banks[1].atlas.tex;
+        fprintf(stderr, "v8: TerrainMesh -- XOBF texture atlas bank1 %dx%d slots=%d\n",
+                banks[1].atlas.w, banks[1].atlas.h, banks[1].atlas.slots);
+    }
+    tm_upload_route_textures(rtypes, nrtypes);
 #endif
     tm_log_head_name_summary(heads, nheads);
-    tm_build_spawn_placeholders(heads, nheads);
+    tm_build_spawn_placeholders(banks, nbanks, heads, nheads);
+    tm_build_source_static_tree(bsp_payload, bsp_size, banks, nbanks, heads, nheads);
+    tm_build_source_dynamic_objects(banks, nbanks, heads, nheads);
 
     {
         int obstacle_cap = 8192;
@@ -2161,12 +3522,10 @@ static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
 
     for (int hi = 0; hi < nheads; hi++) {
         const TmHead *h = &heads[hi];
-        /* Source: LOAD 801006f0 switch table maps HEAD type 5 to a real
-         * 0x80 runtime object allocation, matrix init, and DAT_80065a50
-         * insertion, but it does not call the slot-tree constructor
-         * FUN_80021b80/FUN_8001ac44.  Until that runtime callback path is
-         * decoded, do not draw it as a static slot-tree visual. */
-        if (h->type == 1 || h->type == 5 || h->type == 6 || h->type > 6) continue;
+        if (h->type == 1 || h->type == 6 || h->type > 6) continue;
+        if (h->type == 5 &&
+            tm_resolve_global_head_callback(h->name) != (uintptr_t)LAB_8003c61c)
+            continue;
         if (h->bank < 0 || h->bank >= nbanks || h->slot < 0) continue;
         if (banks[h->bank].slot_count == 0) continue;
         uint8_t *seen = (uint8_t *)calloc((size_t)banks[h->bank].slot_count, 1);
@@ -2179,10 +3538,12 @@ static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
         root_xf.z = h->z;
         tm_matrix_from_raw(h->raw_x, h->raw_y, h->raw_z,
                            h->ry, h->rx, h->rz, &root_xf.raw);
+        int head_first_tri = ntris;
         tm_build_slot_like_original(&banks[h->bank], h->slot,
                                     &root_xf, 1, (h->flags & 4u) << 1,
                                     0, seen, vbuf, vcap, &nvtx,
                                     tribuf, tcap, &ntris, &bad);
+        tm_trace_head_visual_extent(h, tribuf, head_first_tri, ntris);
         free(seen);
     }
 
@@ -2198,11 +3559,14 @@ static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
         junc_patch_tris += ntris - before;
     }
 
-    /* RSEG/XRTP records describe the route/navigation surface used by source
-     * loaders and audits. The authored placed XOBF/JUNC geometry already
-     * provides the visible props/surfaces, so uploading synthetic route strips
-     * here draws a second coplanar layer through fences, bridges, and roads. */
-    route_tris = 0;
+    /* LOAD 80104550 dispatches RSEG edges through 801036bc/80102bd4 after
+     * selecting the XRTP descriptor.  Wild West's rail bed is the textured
+     * type-0 route loop; type 2 is only a narrow connector and carries no TIM
+     * payload of its own. */
+    route_tris = tm_emit_route_strips(juncs, njuncs, rsegs, nrsegs,
+                                      rtypes, nrtypes,
+                                      vbuf, vcap, &nvtx,
+                                      tribuf, tcap, &ntris);
 
     fprintf(stderr, "v8: TerrainMesh -- instanced XOBF banks=%d heads=%d roots=%d junc_nodes=%d rsegs=%d rtypes=%d junc_tris=%d route_tris=%d cpu_tris=%d gpu_vtx=%d bad_pkts=%d\n",
             nbanks, nheads, roots, njuncs, nrsegs, nrtypes,
@@ -2210,6 +3574,14 @@ static int tm_parse_level_instances(const uint8_t *raw, uint32_t raw_size,
     fprintf(stderr, "v8: TerrainMesh -- texture uv ground_xbmp=%d ground_none=%d xobf=%d untextured=%d\n",
             g_tm_uv_ground_xbmp, g_tm_uv_ground_none,
             g_tm_uv_xobf, g_tm_uv_none);
+    fprintf(stderr, "v8: TerrainMesh -- packet kinds");
+    for (int i = 0; i < 16; i++) {
+        if (g_tm_pkt_kind[i] != 0)
+            fprintf(stderr, " %x=%d/%d/%d",
+                    i, g_tm_pkt_kind[i], g_tm_pkt_uv_kind[i],
+                    g_tm_pkt_no_uv_kind[i]);
+    }
+    fprintf(stderr, "\n");
     fprintf(stderr, "v8: TerrainMesh -- placed obstacle leaf objects=%d\n",
             g_obstacle_nobjs);
     if (g_object_bsp != NULL) {
@@ -2561,6 +3933,10 @@ void TerrainMesh_Load(const char *exp_path,
                       float world_x_centre, float world_z_centre)
 {
     tm_clear_obstacles();
+    g_terrainmesh_tex = 0;
+    g_terrainmesh_tex_bank1 = 0;
+    g_terrainmesh_route_tex0 = 0;
+    g_terrainmesh_route_tex1 = 0;
     g_terrainmesh_xbmp_w = 0;
     g_terrainmesh_xbmp_h = 0;
     g_terrainmesh_xbmp_x = 0;
@@ -2570,6 +3946,9 @@ void TerrainMesh_Load(const char *exp_path,
     g_tm_uv_ground_none = 0;
     g_tm_uv_xobf = 0;
     g_tm_uv_none = 0;
+    memset(g_tm_pkt_kind, 0, sizeof(g_tm_pkt_kind));
+    memset(g_tm_pkt_uv_kind, 0, sizeof(g_tm_pkt_uv_kind));
+    memset(g_tm_pkt_no_uv_kind, 0, sizeof(g_tm_pkt_no_uv_kind));
     g_terrainmesh_sky_w = 0;
     g_terrainmesh_sky_h = 0;
 
@@ -2672,6 +4051,10 @@ void TerrainMesh_LoadCpuOnly(const char *exp_path,
                              float world_x_centre, float world_z_centre)
 {
     tm_clear_obstacles();
+    g_terrainmesh_tex = 0;
+    g_terrainmesh_tex_bank1 = 0;
+    g_terrainmesh_route_tex0 = 0;
+    g_terrainmesh_route_tex1 = 0;
     g_terrainmesh_xbmp_w = 0;
     g_terrainmesh_xbmp_h = 0;
     g_terrainmesh_xbmp_x = 0;
@@ -2700,9 +4083,12 @@ void TerrainMesh_LoadCpuOnly(const char *exp_path,
     }
 
     int ntris = 0;
+    int old_allow_gl = g_tm_allow_gl_upload;
+    g_tm_allow_gl_upload = 0;
     int nvtx = tm_parse_level_instances(raw, fsz,
                                         vbuf, cap,
                                         tribuf, tricap, &ntris);
+    g_tm_allow_gl_upload = old_allow_gl;
     if (nvtx == 0) {
         uint32_t bin_off = 0, bin_sz = 0;
         if (tm_find_xobf_bin(raw, fsz, &bin_off, &bin_sz)) {

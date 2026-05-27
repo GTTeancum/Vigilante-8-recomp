@@ -23,7 +23,7 @@ extern void GameEvent_State2(void);   /* FUN_8002c3ac */
 extern void Object_DefaultDispatch(uint32_t *obj, int mode, uint32_t *impulse);
 extern uint32_t _DAT_800737d8;
 
-void WW_TrainInit(uint32_t *self, int mode, uint32_t *impulse)
+uint32_t WW_TrainInit(uint32_t *self, int mode, uint32_t *impulse)
 {
     if (mode == 1 || mode != 3) {
         uint32_t *child = Object_Pool_AllocFromBank((void *)(uintptr_t)_DAT_800737d8,
@@ -40,6 +40,7 @@ void WW_TrainInit(uint32_t *self, int mode, uint32_t *impulse)
         GameEvent_State2();
     }
     Object_DefaultDispatch(self, mode, impulse);
+    return 0;
 }
 
 /* ============================================================

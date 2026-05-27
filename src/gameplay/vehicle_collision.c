@@ -39,6 +39,8 @@
  * Ghidra pseudo-C at analysis/SLUS_005.10/decomp/8002d82c.c.
  */
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 /* ---- in-tree helpers (live definitions) ---------------------------- */
 extern void  *FUN_8001f5a0(intptr_t self_int, intptr_t collision_node_int); /* SAT axis setup */
@@ -63,6 +65,7 @@ extern int     FUN_80016a20(const int32_t *v);
 extern int     FUN_8002d44c(uint32_t *linked_obj);
 extern int     FUN_800129e8(int mode, const char *msg);
 extern int     FUN_80053004(char *buf, const char *fmt, ...);
+extern void   *puRam000007d0;
 
 /* ---- globals (gp-relative; declared in platform/panic_stubs.c) ----- */
 extern int32_t  iRam00000010;     /* "show damage" UI flag (gp+0x10)   */
@@ -115,6 +118,42 @@ static inline int32_t dot_q13(int64_t r)
     return (int32_t)(r >> 13);
 }
 
+static int vehicle_collision_trace_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *env = getenv("V8_TRACE_VEHICLE_COLLISION");
+        cached = (env != NULL && env[0] != 0 && env[0] != '0');
+    }
+    return cached;
+}
+
+static void trace_player_vehicle_collision(uint32_t *self, const char *stage,
+                                           uint32_t *other, uint8_t *node,
+                                           int32_t approach, int32_t response,
+                                           const int32_t *impulse)
+{
+    if (!vehicle_collision_trace_enabled() || (void *)self != puRam000007d0)
+        return;
+    fprintf(stderr,
+            "v8: vehicle_collision player stage=%s other=%p kind=%u flags=0x%x layer=%d other_pos=(0x%x,0x%x,0x%x) normal=(%d,%d,%d) pen=%d approach=%d resp=%d",
+            stage, (void *)other,
+            other ? (unsigned)*(uint8_t *)((uint8_t *)other + 0x04) : 0,
+            other ? (unsigned)other[0] : 0,
+            other ? (int)*(int16_t *)((uint8_t *)other + 0x06) : 0,
+            other ? (unsigned)other[9] : 0,
+            other ? (unsigned)other[10] : 0,
+            other ? (unsigned)other[11] : 0,
+            node ? (int)*(int16_t *)(node + 0x20) : 0,
+            node ? (int)*(int16_t *)(node + 0x22) : 0,
+            node ? (int)*(int16_t *)(node + 0x24) : 0,
+            node ? *(int32_t *)(node + 0x30) : 0,
+            approach, response);
+    if (impulse != NULL)
+        fprintf(stderr, " impulse=(%d,%d,%d)", impulse[0], impulse[1], impulse[2]);
+    fprintf(stderr, "\n");
+}
+
 /* ==================================================================== */
 int FUN_8002d82c(uint32_t *self, intptr_t collision_node_int)
 {
@@ -125,6 +164,7 @@ int FUN_8002d82c(uint32_t *self, intptr_t collision_node_int)
     /* Sub-object kind == 3 -> short-circuit (no collision response). */
     uint32_t sub_obj = *(uint32_t *)(s7 + 0x10);
     if (sub_obj != 0 && *(uint8_t *)(uintptr_t)(sub_obj + 4) == 3) {
+        trace_player_vehicle_collision(self, "sub-kind3-skip", NULL, s7, 0, 0, NULL);
         return 0;
     }
 
@@ -340,12 +380,16 @@ int FUN_8002d82c(uint32_t *self, intptr_t collision_node_int)
     if ((*(uint32_t *)(s5 + 0x74) == (uint32_t)(uintptr_t)other
       || *(uint32_t *)(s5 + 0x78) == (uint32_t)(uintptr_t)other)
         && *(int16_t *)(s7 + 0x22) < -0x800) {
+        trace_player_vehicle_collision(self, "floor-contact-skip", other, s7, 0, 0, NULL);
         return 0;
     }
 
     int32_t s4 = dot_q13(FUN_80017240((const int32_t *)(s5 + 0x80),
                                        (const void *)(s7 + 0x20)));
-    if (s4 >= 0) return 0;
+    if (s4 >= 0) {
+        trace_player_vehicle_collision(self, "moving-away-skip", other, s7, s4, 0, NULL);
+        return 0;
+    }
 
     int32_t neg_s4 = mips_subu_i32(0, s4);
     if (neg_s4 < 0) neg_s4 = mips_addu_i32(neg_s4, 0x3fff);
@@ -359,7 +403,10 @@ int FUN_8002d82c(uint32_t *self, intptr_t collision_node_int)
         typedef int (*TickFn)(uint32_t *, int, intptr_t);
         TickFn cb = (TickFn)Object_CallbackFromPsxSlot(s3);
         int response = cb ? cb(other, 8, pen >> 12) : 0;
-        if (response != 0) return 0;
+        if (response != 0) {
+            trace_player_vehicle_collision(self, "mode8-skip", other, s7, s4, response, NULL);
+            return 0;
+        }
     }
 
     /* Apply impulse to self only (other handled it via callback or had
@@ -372,6 +419,7 @@ int FUN_8002d82c(uint32_t *self, intptr_t collision_node_int)
         tmp[0] = q12_mul(tmp[0], mag);
         tmp[1] = q12_mul(tmp[1], mag);
         tmp[2] = q12_mul(tmp[2], mag);
+        trace_player_vehicle_collision(self, "impulse", other, s7, s4, 0, tmp);
         FUN_80017594(self, tmp, (const int32_t *)(s7 + 0x14));
     }
 

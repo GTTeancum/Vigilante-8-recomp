@@ -2,7 +2,7 @@
  *
  * Source: LOAD.DLL  FUN_80101574.
  *
- * Walks the sibling chain at obj+0x34. For each node:
+ * Walks the object hierarchy exactly as LOAD.DLL does. For each node:
  *   1. CompMatrixLV(parent_world_matrix, node->local_matrix @ +0x10,
  *                   scratch_matrix)
  *   2. GTE_LoadTransform(scratch_matrix)
@@ -11,11 +11,11 @@
  *      texPair at +0x68. This signals "geometry is live -- consume it
  *      now, mark as taken".
  *
- * The traversal moves to the next sibling via +0x34. Used during
- * per-frame draw to push every leaf's transform onto the GTE for
- * rendering.
+ * Children at +0x38 are recursively processed with the composed scratch
+ * matrix. Siblings at +0x34 are then processed with the original parent
+ * matrix.
  *
- * HIGH-MED confidence.
+ * HIGH confidence.
  */
 #include <stdint.h>
 
@@ -27,7 +27,7 @@ static inline uintptr_t obj_ptr32(uintptr_t base, uint32_t off)
     return (uintptr_t)*(uint32_t *)(base + off);
 }
 
-void Hierarchy_TransformChain(int obj, void *parentMatrix)
+void Hierarchy_TransformChain(intptr_t obj, void *parentMatrix)
 {
     uint32_t scratch[8];
     while (obj != 0) {
@@ -41,8 +41,17 @@ void Hierarchy_TransformChain(int obj, void *parentMatrix)
         if (tex != NULL && (tex[0] & 1u) != 0) {
             tex[0] = (uint16_t)((tex[0] & 0xfffeu) | 4u);
         }
-        obj = (int)obj_ptr32((uintptr_t)obj, 0x34);
+        uintptr_t child = obj_ptr32((uintptr_t)obj, 0x38);
+        if (child != 0) {
+            Hierarchy_TransformChain((intptr_t)child, scratch);
+        }
+        obj = (intptr_t)obj_ptr32((uintptr_t)obj, 0x34);
     }
+}
+
+void FUN_80101574(intptr_t obj, void *parentMatrix)
+{
+    Hierarchy_TransformChain(obj, parentMatrix);
 }
 
 /* ============================================================

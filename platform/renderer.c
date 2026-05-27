@@ -26,7 +26,11 @@ static GLint  g_loc_tint   = -1;
 static GLint  g_loc_useTex = -1;
 static GLint  g_loc_tex    = -1;
 static GLint  g_loc_tex2   = -1;
+static GLint  g_loc_tex3   = -1;
+static GLint  g_loc_tex4   = -1;
+static GLint  g_loc_tex5   = -1;
 static GLuint g_sky_vao    = 0, g_sky_vbo = 0;
+static GLuint g_coll_dbg_vao = 0, g_coll_dbg_vbo = 0;
 /* Vehicle mesh VAOs (loaded from VEHICLES.EXP by MeshLoader_Init). */
 extern GLuint g_mesh_vao[14];
 extern int    g_mesh_vtx[14];
@@ -52,6 +56,11 @@ extern uint8_t   g_terrain_tile_z_min, g_terrain_tile_z_max;
 extern int       g_terrain_xbmp_w, g_terrain_xbmp_h;
 typedef struct {
     uint8_t valid;
+    uint8_t flip;
+    uint8_t tpageHidden;
+    uint8_t pad;
+    uint16_t uv_word[4];
+    uint16_t tpage[4];
     uint16_t u[4], v[4];
 } HostTerrainMaterialRender;
 extern HostTerrainMaterialRender g_terrain_material_render[256];
@@ -76,9 +85,12 @@ static const char *FS_SRC =
     "uniform vec3 uTint;\n"
     "uniform sampler2D uTex;\n"
     "uniform sampler2D uTex2;\n"
+    "uniform sampler2D uTex3;\n"
+    "uniform sampler2D uTex4;\n"
+    "uniform sampler2D uTex5;\n"
     "uniform int uUseTex;\n"
     "out vec4 oCol;\n"
-    "void main(){ vec3 c = vCol; if (uUseTex != 0 && vTex.x >= 0.0) { vec4 t = (vTexKind > 0.5) ? texture(uTex2, vTex) : texture(uTex, vTex); if (t.a < 0.10) discard; c *= t.rgb * 1.45; } oCol = vec4(c * uTint, 1.0); }\n";
+    "void main(){ vec3 c = vCol; float a = 1.0; if (uUseTex != 0 && vTex.x >= 0.0) { vec4 t = (vTexKind > 3.5) ? texture(uTex5, vTex) : ((vTexKind > 2.5) ? texture(uTex4, vTex) : ((vTexKind > 1.5) ? texture(uTex3, vTex) : ((vTexKind > 0.5) ? texture(uTex2, vTex) : texture(uTex, vTex)))); if (t.a < 0.10) discard; c *= t.rgb; a = (vTexKind > 2.5) ? 0.45 : t.a; } oCol = vec4(c * uTint, a); }\n";
 
 static GLuint compile(GLenum kind, const char *src) {
     GLuint s = glCreateShader(kind);
@@ -100,13 +112,27 @@ extern void TerrainMesh_Load(const char *exp_path,
 extern int  TerrainMesh_HeightAt(float wx, float wz, float *out_gl_y);
 extern GLuint g_terrainmesh_vao;
 extern GLuint g_terrainmesh_tex;
+extern GLuint g_terrainmesh_tex_bank1;
 extern GLuint g_terrainmesh_xbmp_tex;
 extern GLuint g_terrainmesh_sky_tex;
+extern GLuint g_terrainmesh_route_tex0;
+extern GLuint g_terrainmesh_route_tex1;
 extern int    g_terrainmesh_vtx;
 extern int    g_terrainmesh_sky_w, g_terrainmesh_sky_h;
+extern int TerrainMesh_DebugCollisionLines(int32_t player_x, int32_t player_y, int32_t player_z,
+                                           float *out_vertices, int max_vertices);
+extern void TerrainMesh_DebugCollisionLog(int32_t player_x, int32_t player_y, int32_t player_z,
+                                          int frame_idx);
 extern char   g_v8_level_exp_path[128];
 extern void  *Host_HeapBase(void);
 extern uint32_t Host_HeapSize(void);
+extern void *puRam000007d0;
+extern void *puRam000007d4;
+extern uint8_t DAT_80065a18[];
+extern uintptr_t Object_CallbackFromPsxSlot(const void *obj);
+extern intptr_t LAB_80031634(intptr_t obj, int event, intptr_t param3);
+extern uint16_t DAT_800568fc[];
+static void mat4_mul(const float A[16], const float B[16], float out[16]);
 
 /* Convert engine coordinates to display metres.
  * Level HEAD/object placement and terrain sampling use 16.16 X/Z cell
@@ -121,14 +147,17 @@ static float fixed_y_to_m(int32_t v)  { return (float)v / 65536.0f; }
  * Host_TerrainLoad expands on-disc ZONE data using LOAD.DLL's original
  * conversion, so the renderer samples the same 11-bit height words as
  * Terrain_HeightAt. */
-static uint32_t terr_sample(int x_cell, int z_cell) {
+static uint16_t terr_sample_word(int x_cell, int z_cell) {
     int chunk_x = (x_cell >> 6) & 0x1f;
     int chunk_z = (z_cell >> 6) & 0x1f;
     uintptr_t base = DAT_800911a0[chunk_x * 32 + chunk_z];
     if (!base) return 0;
     uint32_t off = ((x_cell & 0x3f) << 7) | ((z_cell & 0x3f) << 1);
-    uint16_t raw = *(uint16_t *)(base + off);
-    return (uint32_t)(raw & 0x7ff);
+    return *(uint16_t *)(base + off);
+}
+
+static uint32_t terr_sample(int x_cell, int z_cell) {
+    return (uint32_t)(terr_sample_word(x_cell, z_cell) & 0x7ffu);
 }
 
 static uint8_t terr_material_id(int x_cell, int z_cell)
@@ -147,6 +176,325 @@ static int host_heap_contains_ptr(uintptr_t p, size_t need)
     uintptr_t base = (uintptr_t)Host_HeapBase();
     uintptr_t size = (uintptr_t)Host_HeapSize();
     return p >= base && need <= size && p + need >= p && p + need <= base + size;
+}
+
+typedef struct ObjListHostNode {
+    struct ObjListHostNode *next;
+    struct ObjListHostNode *prev;
+    uintptr_t payload;
+    uint32_t deadline;
+} ObjListHostNode;
+
+typedef struct {
+    float x, y, z, r, g, b, u, v, kind;
+} RuntimeMeshVert;
+
+typedef struct {
+    uintptr_t group;
+    GLuint vao;
+    GLuint vbo;
+    int vtx;
+} RuntimeGroupMesh;
+
+#define RUNTIME_GROUP_CACHE_MAX 96
+#define RUNTIME_GROUP_VERT_MAX  4096
+#define MACHINE_GUN_TRACER_MAX  2048
+
+static RuntimeGroupMesh g_runtime_group_cache[RUNTIME_GROUP_CACHE_MAX];
+static GLuint g_machine_gun_tracer_vao = 0;
+static GLuint g_machine_gun_tracer_vbo = 0;
+
+static const int RUNTIME_PKT_SIZE[16] = {
+    12, 28, 20, 28,
+    12, 20, 12, 20,
+    16, 24, 12, 24,
+    20, 20,  0, 20
+};
+
+static const int RUNTIME_IS_QUAD[16] = {
+    0,0,0,0, 1,1,0,1, 0,0,0,0, 0,0,0,0
+};
+
+static uint16_t rd16p(const void *p)
+{
+    const uint8_t *b = (const uint8_t *)p;
+    return (uint16_t)b[0] | ((uint16_t)b[1] << 8);
+}
+
+static int16_t rds16p(const void *p)
+{
+    return (int16_t)rd16p(p);
+}
+
+static uintptr_t rdptr32p(const void *p)
+{
+    return (uintptr_t)*(const uint32_t *)p;
+}
+
+static int object_world_list_is_plausible(const ObjListHostNode *sentinel,
+                                          const ObjListHostNode *node)
+{
+    return node != NULL &&
+           node != sentinel &&
+           node->prev != NULL &&
+           (node->prev == sentinel || node->prev->next == node);
+}
+
+static uintptr_t runtime_object_group_from_bank(const uint8_t *obj)
+{
+    uintptr_t bank = rdptr32p(obj + 0x58);
+    if (!host_heap_contains_ptr(bank, 4))
+        return 0;
+
+    uintptr_t tmpl = rdptr32p((const void *)bank);
+    if (!host_heap_contains_ptr(tmpl, 0x20))
+        return 0;
+
+    uint16_t slot = rd16p(obj + 0x0a);
+    uintptr_t entry = tmpl + 0x1c + (uintptr_t)slot * 0x1c;
+    if (!host_heap_contains_ptr(entry, 0x1c))
+        return 0;
+
+    int16_t key = rds16p((const void *)entry);
+    if (key < 0)
+        return 0;
+
+    uintptr_t group_table = rdptr32p((const void *)(tmpl + 4));
+    uintptr_t group_slot = group_table + (uintptr_t)(key & 0x7ff) * 4u;
+    if (!host_heap_contains_ptr(group_table, 4) || !host_heap_contains_ptr(group_slot, 4))
+        return 0;
+
+    uintptr_t group = rdptr32p((const void *)group_slot);
+    if (!host_heap_contains_ptr(group, 0x1a))
+        return 0;
+    return group;
+}
+
+static int runtime_group_fields(uintptr_t group, uintptr_t *verts,
+                                uintptr_t *packets, uint16_t *prim_count,
+                                uint8_t *scale_shift)
+{
+    uintptr_t v0 = rdptr32p((const void *)(group + 0x04));
+    uintptr_t p0 = rdptr32p((const void *)(group + 0x14));
+    uint16_t pc0 = rd16p((const void *)(group + 0x10));
+
+    if (host_heap_contains_ptr(v0, 8) &&
+        host_heap_contains_ptr(p0, 4) &&
+        pc0 > 0 && pc0 < 2048) {
+        *verts = v0;
+        *packets = p0;
+        *prim_count = pc0;
+        *scale_shift = *(const uint8_t *)(group + 0x18);
+        return 1;
+    }
+
+    /* Bone_AllocLevel consumes the same host-patched group in a slightly
+     * different field view on some banks: +0x08 primitive count, +0x14 packet
+     * pointer, +0x18 scale.  Accept it only when the pointer/count pair is
+     * coherent in the source heap. */
+    {
+        uint16_t pc1 = rd16p((const void *)(group + 0x08));
+        if (host_heap_contains_ptr(v0, 8) &&
+            host_heap_contains_ptr(p0, 4) &&
+            pc1 > 0 && pc1 < 2048) {
+            *verts = v0;
+            *packets = p0;
+            *prim_count = pc1;
+            *scale_shift = *(const uint8_t *)(group + 0x18);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void runtime_mesh_emit_tri(RuntimeMeshVert *vbuf, int *nvtx, int cap,
+                                  float vx[4], float vy[4], float vz[4],
+                                  float cr, float cg, float cb,
+                                  int a, int b, int c)
+{
+    if (*nvtx + 3 > cap)
+        return;
+
+    float ex = vx[b] - vx[a], ey = vy[b] - vy[a], ez = vz[b] - vz[a];
+    float fx = vx[c] - vx[a], fy = vy[c] - vy[a], fz = vz[c] - vz[a];
+    float nx = ey * fz - ez * fy;
+    float ny = ez * fx - ex * fz;
+    float nz = ex * fy - ey * fx;
+    float nl = sqrtf(nx * nx + ny * ny + nz * nz);
+    if (nl > 1e-6f) {
+        nx /= nl;
+        ny /= nl;
+        nz /= nl;
+    }
+    float ndotl = nx * 0.408f + ny * 0.816f + nz * -0.408f;
+    float lit = 0.45f + 0.55f * (ndotl > 0.0f ? ndotl : 0.0f);
+    float r = cr * lit, g = cg * lit, bcol = cb * lit;
+
+    vbuf[*nvtx] = (RuntimeMeshVert){ vx[a], vy[a], vz[a], r, g, bcol, -1.0f, -1.0f, 0.0f }; (*nvtx)++;
+    vbuf[*nvtx] = (RuntimeMeshVert){ vx[b], vy[b], vz[b], r, g, bcol, -1.0f, -1.0f, 0.0f }; (*nvtx)++;
+    vbuf[*nvtx] = (RuntimeMeshVert){ vx[c], vy[c], vz[c], r, g, bcol, -1.0f, -1.0f, 0.0f }; (*nvtx)++;
+}
+
+static int runtime_group_build_mesh(RuntimeGroupMesh *mesh)
+{
+    uintptr_t verts = 0, packets = 0;
+    uint16_t prim_count = 0;
+    uint8_t scale_shift = 0;
+    RuntimeMeshVert *vbuf;
+    int nvtx = 0;
+
+    if (!runtime_group_fields(mesh->group, &verts, &packets,
+                              &prim_count, &scale_shift))
+        return 0;
+
+    vbuf = (RuntimeMeshVert *)calloc(RUNTIME_GROUP_VERT_MAX, sizeof(*vbuf));
+    if (vbuf == NULL)
+        return 0;
+
+    float model_scale = scale_shift <= 15 ? (1.0f / (float)(1u << scale_shift))
+                                          : (1.0f / 160.0f);
+    uintptr_t po = packets;
+    for (uint16_t pi = 0; pi < prim_count; pi++) {
+        if (!host_heap_contains_ptr(po, 4))
+            break;
+
+        const uint8_t *pkt = (const uint8_t *)po;
+        int nib = (pkt[3] >> 2) & 0x0f;
+        int sz = RUNTIME_PKT_SIZE[nib];
+        if (sz == 0 || !host_heap_contains_ptr(po, (size_t)sz))
+            break;
+
+        uint16_t vi[4];
+        vi[0] = rd16p(pkt + 4);
+        vi[1] = rd16p(pkt + 6);
+        vi[2] = rd16p(pkt + 8);
+        vi[3] = RUNTIME_IS_QUAD[nib] ? rd16p(pkt + 10) : vi[2];
+        int nverts = RUNTIME_IS_QUAD[nib] ? 4 : 3;
+
+        int ok = 1;
+        float vx[4], vy[4], vz[4];
+        for (int k = 0; k < nverts; k++) {
+            uintptr_t vp = verts + vi[k];
+            if ((vi[k] & 7u) != 0 || !host_heap_contains_ptr(vp, 6)) {
+                ok = 0;
+                break;
+            }
+            vx[k] =  (float)rds16p((const void *)(vp + 0)) * model_scale;
+            vy[k] = -(float)rds16p((const void *)(vp + 2)) * model_scale;
+            vz[k] =  (float)rds16p((const void *)(vp + 4)) * model_scale;
+        }
+        if (ok) {
+            float cr = pkt[0] / 255.0f;
+            float cg = pkt[1] / 255.0f;
+            float cb = pkt[2] / 255.0f;
+            runtime_mesh_emit_tri(vbuf, &nvtx, RUNTIME_GROUP_VERT_MAX,
+                                  vx, vy, vz, cr, cg, cb, 0, 1, 2);
+            if (RUNTIME_IS_QUAD[nib]) {
+                runtime_mesh_emit_tri(vbuf, &nvtx, RUNTIME_GROUP_VERT_MAX,
+                                      vx, vy, vz, cr, cg, cb, 0, 2, 3);
+            }
+        }
+
+        if (nib == 10) {
+            po += (uintptr_t)rd16p(pkt + 0x0a) * 4u;
+        }
+        po += (uintptr_t)DAT_800568fc[(pkt[3] & 0x3c) / 2];
+    }
+
+    if (nvtx <= 0) {
+        free(vbuf);
+        return 0;
+    }
+
+    glGenVertexArrays(1, &mesh->vao);
+    glBindVertexArray(mesh->vao);
+    glGenBuffers(1, &mesh->vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, mesh->vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(*vbuf) * (size_t)nvtx, vbuf, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(*vbuf), (void *)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(*vbuf), (void *)(sizeof(float) * 3));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(*vbuf), (void *)(sizeof(float) * 6));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(*vbuf), (void *)(sizeof(float) * 8));
+    mesh->vtx = nvtx;
+    free(vbuf);
+    return 1;
+}
+
+static RuntimeGroupMesh *runtime_group_mesh(uintptr_t group)
+{
+    int free_slot = -1;
+    for (int i = 0; i < RUNTIME_GROUP_CACHE_MAX; i++) {
+        if (g_runtime_group_cache[i].group == group)
+            return g_runtime_group_cache[i].vao ? &g_runtime_group_cache[i] : NULL;
+        if (g_runtime_group_cache[i].group == 0 && free_slot < 0)
+            free_slot = i;
+    }
+    if (free_slot < 0)
+        return NULL;
+
+    RuntimeGroupMesh *mesh = &g_runtime_group_cache[free_slot];
+    memset(mesh, 0, sizeof(*mesh));
+    mesh->group = group;
+    if (!runtime_group_build_mesh(mesh)) {
+        mesh->group = 0;
+        return NULL;
+    }
+    return mesh;
+}
+
+static void ensure_machine_gun_tracer_buffer(void)
+{
+    if (g_machine_gun_tracer_vao != 0)
+        return;
+
+    glGenVertexArrays(1, &g_machine_gun_tracer_vao);
+    glBindVertexArray(g_machine_gun_tracer_vao);
+    glGenBuffers(1, &g_machine_gun_tracer_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, g_machine_gun_tracer_vbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 sizeof(RuntimeMeshVert) * MACHINE_GUN_TRACER_MAX,
+                 NULL, GL_STREAM_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
+                          sizeof(RuntimeMeshVert), (void *)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE,
+                          sizeof(RuntimeMeshVert), (void *)(sizeof(float) * 3));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE,
+                          sizeof(RuntimeMeshVert), (void *)(sizeof(float) * 6));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE,
+                          sizeof(RuntimeMeshVert), (void *)(sizeof(float) * 8));
+    glBindVertexArray(0);
+}
+
+static void ensure_collision_debug_buffer(void)
+{
+    if (g_coll_dbg_vao != 0)
+        return;
+    glGenVertexArrays(1, &g_coll_dbg_vao);
+    glGenBuffers(1, &g_coll_dbg_vbo);
+    glBindVertexArray(g_coll_dbg_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, g_coll_dbg_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 9 * 8192, NULL, GL_STREAM_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
+                          sizeof(float) * 9, (void *)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE,
+                          sizeof(float) * 9, (void *)(sizeof(float) * 3));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE,
+                          sizeof(float) * 9, (void *)(sizeof(float) * 6));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE,
+                          sizeof(float) * 9, (void *)(sizeof(float) * 8));
+    glBindVertexArray(0);
 }
 
 static void build_terrain_mesh(void) {
@@ -174,48 +522,69 @@ static void build_terrain_mesh(void) {
         for (int gx = 0; gx < cells_x; gx++) {
             int x_cell = col0 * 64 + gx * step;
             int z_cell = row0 * 64 + gz * step;
-            uint32_t h00 = terr_sample(x_cell, z_cell);
-            uint32_t h10 = terr_sample(x_cell + step, z_cell);
-            uint32_t h01 = terr_sample(x_cell, z_cell + step);
-            uint32_t h11 = terr_sample(x_cell + step, z_cell + step);
+            uint16_t w00 = terr_sample_word(x_cell, z_cell);
+            uint16_t w10 = terr_sample_word(x_cell + step, z_cell);
+            uint16_t w01 = terr_sample_word(x_cell, z_cell + step);
+            uint16_t w11 = terr_sample_word(x_cell + step, z_cell + step);
+            uint32_t h00 = (uint32_t)(w00 & 0x7ffu);
+            uint32_t h10 = (uint32_t)(w10 & 0x7ffu);
+            uint32_t h01 = (uint32_t)(w01 & 0x7ffu);
+            uint32_t h11 = (uint32_t)(w11 & 0x7ffu);
             int detail = x_cell >= (int)g_terrain_tile_x_min * 64
                       && x_cell <= ((int)g_terrain_tile_x_max + 1) * 64
                       && z_cell >= (int)g_terrain_tile_z_min * 64
                       && z_cell <= ((int)g_terrain_tile_z_max + 1) * 64;
-            float t = (float)h00 / 2047.0f;
-            float col[3];
-            if (detail) {
-                if (is_ski) {
-                    col[0] = 0.70f + 0.22f * t;
-                    col[1] = 0.78f + 0.17f * t;
-                    col[2] = 0.82f + 0.13f * t;
+            uint32_t heights[4] = { h00, h10, h01, h11 };
+            uint16_t words[4] = { w00, w10, w01, w11 };
+            float vcol[4][3];
+            for (int ci = 0; ci < 4; ci++) {
+                float t = (float)heights[ci] / 2047.0f;
+                if (detail) {
+                    if (is_ski) {
+                        vcol[ci][0] = 0.70f + 0.22f * t;
+                        vcol[ci][1] = 0.78f + 0.17f * t;
+                        vcol[ci][2] = 0.82f + 0.13f * t;
+                    } else {
+                        vcol[ci][0] = 0.28f + 0.20f * t;
+                        vcol[ci][1] = 0.23f + 0.17f * t;
+                        vcol[ci][2] = 0.15f + 0.08f * (1.0f - t);
+                    }
                 } else {
-                    col[0] = 0.28f + 0.20f * t;
-                    col[1] = 0.23f + 0.17f * t;
-                    col[2] = 0.15f + 0.08f * (1.0f - t);
+                    if (is_ski) {
+                        vcol[ci][0] = 0.54f;
+                        vcol[ci][1] = 0.58f;
+                        vcol[ci][2] = 0.62f;
+                    } else {
+                        vcol[ci][0] = 0.20f;
+                        vcol[ci][1] = 0.18f;
+                        vcol[ci][2] = 0.13f;
+                    }
                 }
-            } else {
-                if (is_ski) {
-                    col[0] = 0.54f;
-                    col[1] = 0.58f;
-                    col[2] = 0.62f;
-                } else {
-                    col[0] = 0.20f;
-                    col[1] = 0.18f;
-                    col[2] = 0.13f;
-                }
+                float src_light = (float)(words[ci] >> 11) * (1.0f / 31.0f);
+                float light = 0.42f + 0.70f * src_light;
+                vcol[ci][0] *= light;
+                vcol[ci][1] *= light;
+                vcol[ci][2] *= light;
             }
 
             uint8_t mat_id = terr_material_id(x_cell, z_cell);
             HostTerrainMaterialRender *mat = &g_terrain_material_render[mat_id];
             float uv[4][2] = {{-1.0f,-1.0f},{-1.0f,-1.0f},{-1.0f,-1.0f},{-1.0f,-1.0f}};
             float tex_kind = 0.0f;
-            if (mat->valid && g_terrain_xbmp_w > 0 && g_terrain_xbmp_h > 0) {
+            if (mat->valid && !mat->tpageHidden &&
+                g_terrain_xbmp_w > 0 && g_terrain_xbmp_h > 0) {
                 for (int i = 0; i < 4; i++) {
                     uv[i][0] = ((float)mat->u[i] + 0.5f) / (float)g_terrain_xbmp_w;
                     uv[i][1] = ((float)mat->v[i] + 0.5f) / (float)g_terrain_xbmp_h;
                 }
                 tex_kind = 1.0f;
+                for (int ci = 0; ci < 4; ci++) {
+                    float src_light = (float)(words[ci] >> 11) * (1.0f / 31.0f);
+                    float light = 0.34f + 0.48f * src_light;
+                    vcol[ci][0] = light;
+                    vcol[ci][1] = light * 0.92f;
+                    vcol[ci][2] = light * 0.80f;
+                }
             }
 
             float pos[4][3] = {
@@ -224,12 +593,20 @@ static void build_terrain_mesh(void) {
                 { (float)x_cell,          -fixed_y_to_m((int32_t)(h01 << 11)), (float)(z_cell + step) },
                 { (float)(x_cell + step), -fixed_y_to_m((int32_t)(h11 << 11)), (float)(z_cell + step) }
             };
-            int order[6] = { 0, 2, 1, 1, 2, 3 };
+            /* SLUS 8002623c selects the GT3 diagonal from DAT_8008f020+0x1e. */
+            int order[6];
+            if (mat->flip) {
+                int flipped[6] = { 1, 0, 3, 3, 0, 2 };
+                memcpy(order, flipped, sizeof(order));
+            } else {
+                int normal[6] = { 0, 2, 1, 1, 2, 3 };
+                memcpy(order, normal, sizeof(order));
+            }
             for (int oi = 0; oi < 6; oi++) {
                 int k = order[oi];
                 float *dst = vbuf + outv * 9;
                 dst[0] = pos[k][0]; dst[1] = pos[k][1]; dst[2] = pos[k][2];
-                dst[3] = col[0]; dst[4] = col[1]; dst[5] = col[2];
+                dst[3] = vcol[k][0]; dst[4] = vcol[k][1]; dst[5] = vcol[k][2];
                 dst[6] = uv[k][0]; dst[7] = uv[k][1]; dst[8] = tex_kind;
                 ibuf[outv] = (uint32_t)outv;
                 outv++;
@@ -282,6 +659,9 @@ static void init_once(void) {
     g_loc_useTex = glGetUniformLocation(g_prog, "uUseTex");
     g_loc_tex = glGetUniformLocation(g_prog, "uTex");
     g_loc_tex2 = glGetUniformLocation(g_prog, "uTex2");
+    g_loc_tex3 = glGetUniformLocation(g_prog, "uTex3");
+    g_loc_tex4 = glGetUniformLocation(g_prog, "uTex4");
+    g_loc_tex5 = glGetUniformLocation(g_prog, "uTex5");
     glDeleteShader(vs); glDeleteShader(fs);
     {
         static const float sky[] = {
@@ -569,9 +949,128 @@ static void draw_vehicle_wheels(uint8_t *veh, const float parentM[16],
     glEnable(GL_CULL_FACE);
 }
 
-/* Engine's player Vehicle and AI opponent. */
-extern void *puRam000007d0;
-extern void *puRam000007d4;
+static int draw_machine_gun_projectiles(const float VP[16], float MVP[16])
+{
+    ObjListHostNode *sentinel = (ObjListHostNode *)DAT_80065a18;
+    ObjListHostNode *node;
+    RuntimeMeshVert tracer[MACHINE_GUN_TRACER_MAX];
+    int tracer_vtx = 0;
+    int drawn = 0;
+    int tracer_drawn = 0;
+    int type7 = 0;
+    int cb_match = 0;
+    int group_ok = 0;
+    int mesh_ok = 0;
+    int guard = 0;
+    static int logged = 0;
+    static int trace_logged = 0;
+    int trace = getenv("V8_TRACE_WEAPONS") != NULL;
+
+    if (sentinel == NULL || sentinel->prev == NULL)
+        return 0;
+
+    glDisable(GL_CULL_FACE);
+    glUniform3f(g_loc_tint, 1.55f, 1.45f, 0.85f);
+    glUniform1i(g_loc_useTex, 0);
+
+    for (node = sentinel->next; node != NULL && guard++ < 1024; node = node->next) {
+        if (!object_world_list_is_plausible(sentinel, node))
+            break;
+
+        uintptr_t op = node->payload;
+        if (!host_heap_contains_ptr(op, 0x98))
+            continue;
+
+        uint8_t *obj = (uint8_t *)op;
+        if (obj[4] != 7)
+            continue;
+        type7++;
+        if (Object_CallbackFromPsxSlot(obj) == (uintptr_t)&LAB_80031634)
+            cb_match++;
+
+        if (tracer_vtx + 2 <= MACHINE_GUN_TRACER_MAX) {
+            int32_t px = *(int32_t *)(obj + 0x48);
+            int32_t py = *(int32_t *)(obj + 0x4c);
+            int32_t pz = *(int32_t *)(obj + 0x50);
+            int32_t vx = *(int32_t *)(obj + 0x88);
+            int32_t vy = *(int32_t *)(obj + 0x8c);
+            int32_t vz = *(int32_t *)(obj + 0x90);
+            float x1 = fixed_xz_to_m(px);
+            float y1 = -fixed_y_to_m(py);
+            float z1 = fixed_xz_to_m(pz);
+            /* Source bullets advance by +velocity once per tick.  The visible
+             * tracer is the last source tick of travel, in world space. */
+            float x0 = fixed_xz_to_m((int32_t)((uint32_t)px - (uint32_t)vx));
+            float y0 = -fixed_y_to_m((int32_t)((uint32_t)py - (uint32_t)vy));
+            float z0 = fixed_xz_to_m((int32_t)((uint32_t)pz - (uint32_t)vz));
+            tracer[tracer_vtx++] = (RuntimeMeshVert){
+                x0, y0, z0, 1.00f, 0.84f, 0.30f, -1.0f, -1.0f, 0.0f
+            };
+            tracer[tracer_vtx++] = (RuntimeMeshVert){
+                x1, y1, z1, 1.00f, 0.96f, 0.55f, -1.0f, -1.0f, 0.0f
+            };
+        }
+
+        uintptr_t group = runtime_object_group_from_bank(obj);
+        if (group == 0)
+            continue;
+        group_ok++;
+
+        RuntimeGroupMesh *mesh = runtime_group_mesh(group);
+        if (mesh == NULL || mesh->vao == 0 || mesh->vtx <= 0)
+            continue;
+        mesh_ok++;
+
+        float M[16];
+        make_model_from_obj(M, obj,
+                            fixed_xz_to_m(*(int32_t *)(obj + 0x24)),
+                            -fixed_y_to_m(*(int32_t *)(obj + 0x28)),
+                            fixed_xz_to_m(*(int32_t *)(obj + 0x2c)));
+        mat4_mul(VP, M, MVP);
+        glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        glBindVertexArray(mesh->vao);
+        glDrawArrays(GL_TRIANGLES, 0, mesh->vtx);
+        drawn++;
+
+        if (!logged) {
+            fprintf(stderr,
+                    "v8: renderer source projectile mesh group=%p vtx=%d obj=%p cb=%p\n",
+                    (void *)group, mesh->vtx, (void *)obj,
+                    (void *)Object_CallbackFromPsxSlot(obj));
+            logged = 1;
+        }
+    }
+
+    if (tracer_vtx > 0) {
+        float I[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+        ensure_machine_gun_tracer_buffer();
+        mat4_mul(VP, I, MVP);
+        glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+        glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
+        glUniform1i(g_loc_useTex, 0);
+        glBindVertexArray(g_machine_gun_tracer_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, g_machine_gun_tracer_vbo);
+        glBufferData(GL_ARRAY_BUFFER,
+                     sizeof(RuntimeMeshVert) * (size_t)tracer_vtx,
+                     tracer, GL_STREAM_DRAW);
+        glDisable(GL_CULL_FACE);
+        glLineWidth(3.0f);
+        glDrawArrays(GL_LINES, 0, tracer_vtx);
+        glLineWidth(1.0f);
+        glEnable(GL_CULL_FACE);
+        tracer_drawn = tracer_vtx / 2;
+    }
+
+    glEnable(GL_CULL_FACE);
+    if (trace && !trace_logged && type7 > 0) {
+        fprintf(stderr,
+                "v8: renderer machine-gun trace world type7=%d cb_match=%d group_ok=%d mesh_ok=%d drawn=%d tracers=%d lab=%p\n",
+                type7, cb_match, group_ok, mesh_ok, drawn, tracer_drawn,
+                (void *)&LAB_80031634);
+        trace_logged = 1;
+    }
+    return drawn + tracer_drawn;
+}
 
 void Renderer_DrawFrame(int w, int h, int frame_idx)
 {
@@ -683,7 +1182,7 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
         glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
         glBindVertexArray(g_terr_vao);
         glEnable(GL_POLYGON_OFFSET_FILL);
-        glPolygonOffset(-1.0f, -1.0f);
+        glPolygonOffset(1.0f, 1.0f);
         glDrawElements(GL_TRIANGLES, g_terr_idxCount, GL_UNSIGNED_INT, 0);
         glUniform1i(g_loc_useTex, 0);
         glDisable(GL_POLYGON_OFFSET_FILL);
@@ -707,20 +1206,36 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
     /* Draw the placed level visual mesh (XOBF BIN: terrain patches, props,
      * buildings, and occluders).  Vertices are already in world space. */
     if (V8_RENDER_XOBF_VISUALS && g_terrainmesh_vao && g_terrainmesh_vtx > 0) {
-        glUniform3f(g_loc_tint, 1.35f, 1.35f, 1.35f);
-        if (g_terrainmesh_tex || g_terrainmesh_xbmp_tex) {
+        glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
+        if (g_terrainmesh_tex || g_terrainmesh_xbmp_tex ||
+            g_terrainmesh_tex_bank1 || g_terrainmesh_route_tex0 ||
+            g_terrainmesh_route_tex1) {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, g_terrainmesh_tex);
             glUniform1i(g_loc_tex, 0);
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, g_terrainmesh_xbmp_tex);
             glUniform1i(g_loc_tex2, 1);
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, g_terrainmesh_tex_bank1);
+            glUniform1i(g_loc_tex3, 2);
+            glActiveTexture(GL_TEXTURE3);
+            glBindTexture(GL_TEXTURE_2D, g_terrainmesh_route_tex0);
+            glUniform1i(g_loc_tex4, 3);
+            glActiveTexture(GL_TEXTURE4);
+            glBindTexture(GL_TEXTURE_2D, g_terrainmesh_route_tex1);
+            glUniform1i(g_loc_tex5, 4);
             glUniform1i(g_loc_useTex, 1);
         }
         mat4_mul(VP, I, MVP);
         glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
         glBindVertexArray(g_terrainmesh_vao);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthFunc(GL_LEQUAL);
         glDrawArrays(GL_TRIANGLES, 0, g_terrainmesh_vtx);
+        glDepthFunc(GL_LESS);
+        glDisable(GL_BLEND);
         glUniform1i(g_loc_useTex, 0);
 #if V8_TERRAIN_WIREFRAME_OVERLAY
         glUniform3f(g_loc_tint, 0.02f, 0.02f, 0.02f);
@@ -738,6 +1253,8 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
         glEnable(GL_CULL_FACE);
 #endif
     }
+
+    draw_machine_gun_projectiles(VP, MVP);
 
     /* Draw the player vehicle (vehicle 0) with a warm tint so the
      * red-orange smoke-test threshold is met and the model looks good. */
@@ -794,6 +1311,40 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
         }
         glUniform3f(g_loc_tint, 0.75f, 0.85f, 1.2f);
         draw_vehicle_wheels(ai, aiM, VP, MVP);
+    }
+
+    {
+        static int coll_dbg_cached = -1;
+        static float coll_dbg_vtx[8192 * 9];
+        if (coll_dbg_cached < 0) {
+            const char *env = getenv("V8_COLLISION_DEBUG");
+            coll_dbg_cached = !(env != NULL && env[0] == '0');
+        }
+        if (coll_dbg_cached) {
+            int n = TerrainMesh_DebugCollisionLines(fx, fy, fz,
+                                                    coll_dbg_vtx, 8192);
+            TerrainMesh_DebugCollisionLog(fx, fy, fz, frame_idx);
+            if (n > 0) {
+                ensure_collision_debug_buffer();
+                mat4_mul(VP, I, MVP);
+                glUniformMatrix4fv(g_loc_mvp, 1, GL_FALSE, MVP);
+                glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
+                glUniform1i(g_loc_useTex, 0);
+                glBindVertexArray(g_coll_dbg_vao);
+                glBindBuffer(GL_ARRAY_BUFFER, g_coll_dbg_vbo);
+                glBufferSubData(GL_ARRAY_BUFFER, 0,
+                                sizeof(float) * 9 * (size_t)n, coll_dbg_vtx);
+                glDisable(GL_CULL_FACE);
+                glDisable(GL_DEPTH_TEST);
+                glDepthMask(GL_FALSE);
+                glLineWidth(3.0f);
+                glDrawArrays(GL_LINES, 0, n);
+                glLineWidth(1.0f);
+                glDepthMask(GL_TRUE);
+                glEnable(GL_DEPTH_TEST);
+                glEnable(GL_CULL_FACE);
+            }
+        }
     }
 
 }

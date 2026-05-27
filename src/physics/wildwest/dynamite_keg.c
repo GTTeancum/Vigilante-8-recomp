@@ -58,7 +58,7 @@ extern uint8_t SFX_PlayWorldXY(uint32_t *posXyz);
 extern void SFX_Update(int h, int posVoxel);
 extern uint32_t _DAT_80065310, _DAT_800737d8, _DAT_800658fc;
 extern uint8_t  DAT_80100130, DAT_80060000;
-extern uint32_t FUN_80100950;
+extern uint32_t FUN_80100950(int obj, int mode);
 
 uint32_t WW_DynamiteKeg(uint32_t *self, uint32_t mode, int *imp)
 {

@@ -13,6 +13,8 @@
  * HIGH confidence: direct Ghidra ref port.
  */
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "structs.h"
 
 extern void   *FUN_8001ac44(void *pool, int kind, int flags,
@@ -31,10 +33,10 @@ extern void    FUN_8004483c(int voice, uint32_t bank,
                               int sfxId, const void *pos3d); /* Audio_PlaySfx3D */
 extern void    Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 
-extern uint32_t  DAT_800737d8;    /* world-object pool      */
+extern uintptr_t DAT_800737d8;    /* world-object pool      */
 extern uint32_t  uRam000005f8;    /* audio bank             */
 extern int32_t   DAT_80065864[];  /* anchor point (int[3])  */
-extern uint8_t   DAT_8005ec84[];  /* vehicle info table     */
+extern int16_t   DAT_8005ec84[];  /* vehicle info table     */
 
 /* PTR_s_6789__8005ed14: pointer table indexed by (*opcode >> 6 & 0x3c).
  * Each entry points to an SFX-id byte table. */
@@ -42,11 +44,21 @@ extern uintptr_t PTR_s_6789__8005ed14[];
 
 /* DAT_8005ece4: SFX opcode → sfxId map for 0x8400..0x8409 range.
  * Indexed as (uint16_t)((*opcode - 0x8400) * 2). */
-extern uint8_t   DAT_8005ece4[];
+extern uint16_t  DAT_8005ece4[];
 
 /* DAT_8005ecf8: effect-type table for 0x8800..0x8807.
  * 4-byte entries indexed by (*opcode - 0x8800). */
 extern uint32_t  DAT_8005ecf8[];
+
+static int weapon_script_trace_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *env = getenv("V8_TRACE_WEAPON_SCRIPT");
+        cached = (env != NULL && env[0] != 0 && env[0] != '0');
+    }
+    return cached;
+}
 
 /* ================================================================
  * FUN_8003f0b4  -- WeaponScript_ExecEntry
@@ -68,14 +80,20 @@ void FUN_8003f0b4(int *param_1, uint32_t param_2, uint32_t *param_3)
     uVar1  = *puVar8;
     uVar2  = (uint16_t)(uVar1 >> 0xc);
 
+    if (weapon_script_trace_enabled()) {
+        fprintf(stderr,
+                "v8: weapon_script base=%p table=%p entry=%u opcode=0x%04x owner=%p\n",
+                (void *)param_1, (void *)(uintptr_t)*param_1,
+                (unsigned)(param_2 & 0xffff), (unsigned)uVar1, (void *)param_3);
+    }
+
     if (uVar2 == 9) {
         /* SFX play: look up sfxId from pointer table */
         {
             int voice = FUN_8004410c();
-            uint8_t sfxId = *(uint8_t *)(
-                *(uintptr_t *)((uintptr_t)PTR_s_6789__8005ed14
-                               + ((*puVar8 >> 6) & 0x3c) * sizeof(uintptr_t))
-                + (*puVar8 & 0xff));
+            uint32_t tableByteOff = ((*puVar8 >> 6) & 0x3cu);
+            uint8_t sfxId = *(uint8_t *)(PTR_s_6789__8005ed14[tableByteOff >> 2]
+                                         + (*puVar8 & 0xffu));
             FUN_8004483c(voice, uRam000005f8, sfxId, param_3 + 5);
         }
         goto LAB_8003f420;
@@ -141,7 +159,7 @@ void FUN_8003f0b4(int *param_1, uint32_t param_2, uint32_t *param_3)
         *puVar8 = *puVar8 | 0xe000u;
         *(uint8_t *)(puVar3 + 1) = 1;
         {
-            extern void *LAB_8003ed38;
+            extern int LAB_8003ed38(int obj, int event, int param3);
             Object_SetCallbackPsxSlot(puVar3, (uintptr_t)&LAB_8003ed38);
         }
         *puVar3 = *puVar3 | 0x10080u;

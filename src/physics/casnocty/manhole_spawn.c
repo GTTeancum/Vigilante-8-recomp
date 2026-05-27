@@ -32,7 +32,7 @@ extern void FUN_8001d708(uint32_t *obj);             /* Object_RefitAABB */
 extern void FUN_800207f8(uint32_t *obj);             /* Object_UnbindFromWorldBind */
 extern int FUN_8004410c(void);
 extern void FUN_8004483c(int voice, uint32_t bank, int sfx, const void *pos);
-extern uint32_t FUN_801002bc;
+extern uint32_t FUN_801002bc(int obj, uint32_t mode, int *impulse);
 extern uint32_t _DAT_800658fc;
 extern uint8_t  DAT_80100094[];
 

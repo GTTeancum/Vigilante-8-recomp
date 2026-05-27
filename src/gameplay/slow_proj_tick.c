@@ -62,7 +62,7 @@ extern void FUN_80020620(uint32_t obj, uint32_t event);
 extern void FUN_800205f8(int obj);
 
 /* FUN_80031454 -- WeaponHit_Apply. */
-extern int FUN_80031454(int obj, int *collider, uint16_t radius, int strength);
+extern int FUN_80031454(intptr_t obj, intptr_t *collider, uint16_t radius, int strength);
 
 /* FUN_80043248 -- GTE_RotateLong: rotate a 3-element int vector by
  * the current GTE matrix.  (a0=src, a1=dst) */
@@ -83,7 +83,8 @@ extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 
 /* LAB_80031AFC -- Bomb_AttachedTick: tick callback for a bomb stuck to
  * a vehicle.  Installed at obj[0x64] when the projectile lands on a vehicle. */
-extern int LAB_80031AFC(int obj, int event, int param3);
+extern intptr_t LAB_80031AFC(intptr_t obj, int event, intptr_t param3);
+extern uintptr_t Collision_QueryHostWord(const void *query, uint32_t index);
 
 /* DAT_800658FC -- sound bank (gp+1528). */
 extern uint32_t DAT_800658FC;
@@ -103,9 +104,9 @@ static inline int32_t mips_subu_i32(int32_t a, int32_t b)
     return (int32_t)((uint32_t)a - (uint32_t)b);
 }
 
-int LAB_80031bbc(int obj, int event, int param3)
+intptr_t LAB_80031bbc(intptr_t obj, int event, intptr_t param3)
 {
-    uint8_t *s1 = (uint8_t *)(uintptr_t)(uint32_t)obj;
+    uint8_t *s1 = (uint8_t *)(uintptr_t)obj;
 
     if (event == 0) {
         /* ----- Tick ----- */
@@ -161,7 +162,7 @@ int LAB_80031bbc(int obj, int event, int param3)
     if (event == 3) {
         /* ----- Collision ----- */
         int flags = *(int32_t *)s1;
-        uint8_t *s2 = (uint8_t *)(uintptr_t)(uint32_t)(*(int32_t *)(uintptr_t)(uint32_t)param3);
+        uint8_t *s2 = (uint8_t *)Collision_QueryHostWord((void *)(uintptr_t)param3, 0);
         uint8_t collider_type = s2[4];
 
         if ((flags & 0x10000) && collider_type == 2) {
@@ -194,7 +195,7 @@ int LAB_80031bbc(int obj, int event, int param3)
         }
 
         /* Non-vehicle or non-sticky: apply weapon hit. */
-        return FUN_80031454(obj, (int *)(uintptr_t)(uint32_t)param3,
+        return FUN_80031454(obj, (intptr_t *)(uintptr_t)param3,
                             12u, 54);
     }
 

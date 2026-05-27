@@ -24,6 +24,8 @@
 /* ---- dead-node recycler (shared with frame_tick.c, object_lifecycle_extra.c) ---- */
 extern int32_t  *piRam00000774;    /* dead-node pool tail */
 extern uint8_t   DAT_80065a74[];   /* dead-node pool sentinel value */
+extern void *Host_HeapBase(void);
+extern uint32_t Host_HeapSize(void);
 
 /* ---- object destructor ---- */
 extern void FUN_80020540(int param_1);  /* Object_Free */
@@ -34,6 +36,15 @@ typedef struct ObjectTreeHostNode {
     uintptr_t payload;
     uint32_t deadline;
 } ObjectTreeHostNode;
+
+static int object_tree_host_ptr_valid(const void *p)
+{
+    uintptr_t base = (uintptr_t)Host_HeapBase();
+    uintptr_t end = base + Host_HeapSize();
+    uintptr_t v = (uintptr_t)p;
+
+    return v == 0 || (v >= base && v < end);
+}
 
 /* ================================================================
  * FUN_80020658  -- Tree_Free
@@ -56,7 +67,14 @@ void FUN_80020658(uint32_t *param_1)
 
     node = sentinel->next;
     while (node != NULL && node != sentinel) {
-        ObjectTreeHostNode *next = node->next;
+        ObjectTreeHostNode *next;
+        if (!object_tree_host_ptr_valid(node)) {
+            break;
+        }
+        next = node->next;
+        if (!object_tree_host_ptr_valid(next) ||
+            !object_tree_host_ptr_valid(node->prev))
+            break;
         if (node->payload != 0)
             FUN_80020540((int)node->payload);
         node->next = NULL;
@@ -85,11 +103,44 @@ void Tree_Free(void *root) { FUN_80020658((uint32_t *)root); }
  * ================================================================ */
 extern void Heap_Free(void *p);                                 /* FUN_80045088 */
 
+static void Tree_FreeSourceLeafList(uint32_t *list)
+{
+    uint32_t sentinel;
+
+    if (list == NULL)
+        return;
+    sentinel = (uint32_t)(uintptr_t)list;
+    while (list[2] != sentinel) {
+        uint32_t nodeAddr = list[0];
+        uint32_t *node = (uint32_t *)(uintptr_t)nodeAddr;
+        uint32_t next;
+        uint32_t prev;
+
+        if (node == NULL)
+            break;
+        next = node[0];
+        prev = node[1];
+        if (node[2] != 0)
+            FUN_80020540((int)node[2]);
+        if (next != 0)
+            *(uint32_t *)(uintptr_t)(next + 4u) = prev;
+        if (prev != 0)
+            *(uint32_t *)(uintptr_t)prev = next;
+        node[0] = 0;
+        node[1] = 0;
+        node[2] = 0;
+        Heap_Free(node);
+    }
+    list[0] = (uint32_t)(uintptr_t)(list + 1);
+    list[1] = 0;
+    list[2] = sentinel;
+}
+
 void FUN_80020968(int *param_1)
 {
     if (param_1 != (int *)0) {
         if (*param_1 == 0) {
-            FUN_80020658((uint32_t *)(param_1 + 1));
+            Tree_FreeSourceLeafList((uint32_t *)(param_1 + 1));
         } else {
             FUN_80020968((int *)(uintptr_t)param_1[2]);
             FUN_80020968((int *)(uintptr_t)param_1[3]);

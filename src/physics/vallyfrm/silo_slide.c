@@ -39,7 +39,7 @@ extern int  RandChaff(uint32_t *self);                              /* func_0x80
 extern void Object_Suspend(void);
 extern uint32_t Object_SpawnFromBank(uint32_t bin, int kind, int prio, int flag);
 extern int  Rand255(void);
-extern uint32_t FUN_80100e70;
+extern uint32_t FUN_80100e70(int self);
 extern void Object_BumpSubstate_Or_FX(uint32_t *self);              /* FUN_8001d4f0 */
 extern uint8_t SFX_PlayWorldXY(uint32_t *posXyz);
 extern void SFX_Update(int h, int posVoxel);

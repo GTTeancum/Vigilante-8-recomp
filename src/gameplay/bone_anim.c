@@ -123,7 +123,9 @@ int FUN_8001b0c4(uint32_t *param_1)
     if (bank != NULL) {
         uintptr_t tmpl = (uintptr_t)*(uint32_t *)bank;
         uint16_t next = *(uint16_t *)(tmpl + (uint32_t)*(uint16_t *)(obj + 0x0a) * 0x1cu + 0x36u);
-        while (next != 0xffffu) {
+        uint32_t slot_count = *(uint32_t *)(tmpl + 0x18);
+        int guard = 0;
+        while (next != 0xffffu && next < slot_count && guard++ < 4096) {
             uintptr_t node = tmpl + (uint32_t)next * 0x1cu;
             uint16_t flags = *(uint16_t *)(node + 0x1c);
             if ((flags & 0xf000u) == 0xc000u) {

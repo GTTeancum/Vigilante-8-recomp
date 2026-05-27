@@ -17,14 +17,17 @@
  *   Vertex: i16 x, y, z, pad  (8 bytes each)
  *   Polygon packet: [0]R [1]G [2]B [3]type_byte, then u16 vertex indices
  *
- * Packet sizes by (type_byte & 0xf) nibble:
+ * Packet sizes by the host raw-BIN renderer's packet index.  Source draw
+ * first converts these through FUN_8001b49c; replacing this raw path requires
+ * decoding that cached packet layout end-to-end.
  *   0->12  1->28  2->20  3->28
  *   4->12  5->20  6->12  7->20
  *   8->16  9->24  10->12 11->24
  *   12->20 13->20 14->0  15->20
  *
- * Quad nibbles (4 vertex indices at +4,+6,+8,+10): 4, 5, 7
- * All other handled nibbles: 3 vertex indices at +4,+6,+8
+ * Quad raw indices with a fourth vertex index at +10: 4, 5, 7.
+ * Other currently rendered raw packet indices use three vertex indices at
+ * +4,+6,+8.
  *
  * Scale: source group descriptor byte at +0x18, matching the XOBF render
  * path used by SLUS 8001be5c and platform/terrain_mesh.c.
@@ -62,12 +65,12 @@ GLuint g_wheel_mesh_tex[10];
 #define MAX_TRIS_PER_WHEEL 128
 
 static const int PKT_SIZE[16] = {
-    12, 28, 20, 28,   /* nibble 0-3  */
-    12, 20, 12, 20,   /* nibble 4-7  */
-    16, 24, 12, 24,   /* nibble 8-11 */
-    20, 20,  0, 20,   /* nibble 12-15 */
+    12, 28, 20, 28,   /* raw index 0-3  */
+    12, 20, 12, 20,   /* raw index 4-7  */
+    16, 24, 12, 24,   /* raw index 8-11 */
+    20, 20,  0, 20,   /* raw index 12-15 */
 };
-/* 1 = nibble has 4th vertex index at packet+10 (quad) */
+/* 1 = raw packet index has 4th vertex index at packet+10 (quad) */
 static const int IS_QUAD[16] = {
     0,0,0,0, 1,1,0,1, 0,0,0,0, 0,0,0,0
 };
@@ -196,6 +199,13 @@ static void parse_group_desc(const uint8_t *B, uint32_t bsz, uint32_t bd,
         int     nib = typ & 0xf;
         int     sz  = PKT_SIZE[nib];
         if (sz == 0 || po + (uint32_t)sz > bsz) { po += 4; continue; }
+        if (nib == 10) {
+            /* Source FUN_8001b49c emits kind 0xa as PSX tile/sprite packets,
+             * not indexed mesh triangles.  Skip it in the raw triangle path
+             * until the tile primitive path is mirrored explicitly. */
+            po += sz;
+            continue;
+        }
 
         /* Flat polygon colour (8-bit, stored directly) */
         float cr = B[po+0] / 255.0f;

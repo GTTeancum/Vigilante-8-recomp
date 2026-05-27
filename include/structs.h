@@ -71,7 +71,7 @@ typedef enum {
  * Tag legend:
  *   HIGH = field role unambiguous across multiple call sites
  *   MED  = clear *type*, role inferred from a few sites
- *   LOW  = best guess
+ *   LOW  = unresolved/inferred from partial evidence
  *
  *   +0x00  u32       inputFlags        HIGH  bit 0x2 = button held; 0x1000000 = held-latch;
  *                                            0x20000000 = late-bind; 0x4000 = active;

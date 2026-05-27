@@ -65,7 +65,7 @@ Every named function, struct, and field carries a confidence tag in a comment.
 
 - **HIGH** — Name is verified. The function matches a known PSY-Q signature, or the name comes from a string in the binary, or behavior was traced end-to-end and is unambiguous.
 - **MED** — Name reflects clear behavior but is inferred. The function does what the name says, but the exact name is the decompiler's choice.
-- **LOW** — Best guess. Behavior is partially understood. Name is plausible but might be off.
+- **LOW** — Partially evidenced. Behavior is not fully resolved. Names must state the known evidence without inventing purpose.
 - **UNKNOWN** — Couldn't determine purpose. Keep an `sub_<address>` style name. Document what is known in a comment.
 
 ### Format
@@ -78,7 +78,7 @@ int CdRead(int sector, void *buffer, int mode);
 void Vehicle_UpdatePhysics(Vehicle *v, int deltaTime);
 
 // LOW: fires a projectile based on context, weapon type inference uncertain
-void Weapon_FireProjectile_GUESS(Vehicle *shooter, int weaponSlot);
+void Weapon_FireProjectile_Unresolved(Vehicle *shooter, int weaponSlot);
 
 // UNKNOWN: called from main loop, modifies global at 0x800a1240, no other context
 void sub_8001f200(int *p1, int p2);

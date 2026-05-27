@@ -54,16 +54,25 @@ int      g_terrain_loaded = 0;
 uint8_t  g_terrain_tile_x_min = 0, g_terrain_tile_x_max = 0;
 uint8_t  g_terrain_tile_z_min = 0, g_terrain_tile_z_max = 0;
 int      g_terrain_xbmp_w = 0, g_terrain_xbmp_h = 0;
+int      g_terrain_xbmp_depth = 0;
+int      g_terrain_xbmp_vram_x = 0, g_terrain_xbmp_vram_y = 0;
 
 typedef struct {
     uint8_t valid;
+    uint8_t flip;
+    uint8_t tpageHidden;
+    uint8_t pad;
+    uint16_t uv_word[4];
+    uint16_t tpage[4];
     uint16_t u[4], v[4];
 } HostTerrainMaterialRender;
 
 HostTerrainMaterialRender g_terrain_material_render[256];
 
-/* LOAD.DLL data at 0x80106dbc. FUN_80105550 uses (tinf[+6] & 7) to
- * select one row, then adds these four UV pairs to the material base. */
+/* LOAD.DLL data at 0x80106dbc after FUN_80105550 normalizes the nonzero
+ * sentinels to the terrain tile edge.  The source writes these as byte UVs
+ * into GT3 packets, so the host expands each TINF material over the same
+ * 32x32 texture cell instead of stretching across the whole XBMP page. */
 static const uint8_t g_tinf_uv_corners[8][8] = {
     { 0,31, 31,31,  0, 0, 31, 0 },
     {31,31,  0,31, 31, 0,  0, 0 },
@@ -168,6 +177,8 @@ static uint8_t *convert_zone_to_runtime_chunk(const uint8_t *zone, uint32_t zone
     return dst;
 }
 
+static uint16_t psx_get_tpage(int tp, int abr, int x, int y);
+
 /* HIGH-MED: LOAD.DLL FUN_80105550 TINF material table, physics subset.
  * Runtime DAT_8008f020 is 256 records * 0x20.  The first half of each record
  * is renderer texture/color state; driving physics consumes the seven swapped
@@ -179,29 +190,59 @@ static void load_tinf_materials(const uint8_t *tinf, uint32_t tinf_size)
     uint32_t n = tinf_size / 0x28u;
     if (n > 256u)
         n = 256u;
+    uint32_t flip_count = 0;
+    uint32_t tpage_hidden_count = 0;
     for (uint32_t i = 0; i < n; i++) {
         const uint8_t *src = tinf + i * 0x28u;
         uint8_t *dst = DAT_8008f020 + i * 0x20u;
+        uint16_t flags_word = (uint16_t)src[0] | (uint16_t)((uint16_t)src[1] << 8);
         uint16_t base_word = be16(src + 2);
         uint16_t base_v = be16(src + 4);
         uint16_t tile_word = be16(src + 6);
         uint16_t base_u = (uint16_t)(base_word & 0x7fu);
+        uint16_t page_step = (uint16_t)(base_word >> 7);
         uint32_t tile = (uint32_t)(tile_word & 7u);
+        uint16_t flip = (uint16_t)((tile_word >> 3) & 1u);
+        uint16_t tpage = 0;
+
+        if (flip)
+            flip_count++;
+        if (flags_word & 0x1000u) {
+            tpage_hidden_count++;
+        } else {
+            int page_x = g_terrain_xbmp_vram_x +
+                         ((int)page_step << ((g_terrain_xbmp_depth & 3) + 5));
+            tpage = psx_get_tpage(g_terrain_xbmp_depth, 0,
+                                  page_x, g_terrain_xbmp_vram_y);
+        }
+
+        g_terrain_material_render[i].valid = 1;
+        g_terrain_material_render[i].flip = (uint8_t)flip;
+        g_terrain_material_render[i].tpageHidden = (uint8_t)(tpage == 0);
         for (uint32_t j = 0; j < 7; j++) {
             uint16_t v = be16(src + (4u + j) * 2u);
             *(uint16_t *)(dst + 0x10u + j * 2u) = v;
         }
-        *(uint16_t *)(dst + 0x1eu) = (uint16_t)((tile_word >> 11) & 1u);
+        *(uint16_t *)(dst + 0x1eu) = flip;
 
-        g_terrain_material_render[i].valid = 1;
         for (uint32_t j = 0; j < 4; j++) {
-            g_terrain_material_render[i].u[j] =
-                (uint16_t)(base_u + g_tinf_uv_corners[tile][j * 2u + 0u]);
-            g_terrain_material_render[i].v[j] =
-                (uint16_t)(base_v + g_tinf_uv_corners[tile][j * 2u + 1u]);
+            uint16_t local_u = (uint16_t)((base_u + g_tinf_uv_corners[tile][j * 2u + 0u]) & 0xffu);
+            uint16_t local_v = (uint16_t)((base_v + g_tinf_uv_corners[tile][j * 2u + 1u]) & 0xffu);
+            uint16_t uv_word = (uint16_t)(local_u | (uint16_t)(local_v << 8));
+            uint16_t render_u = (uint16_t)(page_step * (64u << (uint32_t)g_terrain_xbmp_depth) + local_u);
+            uint32_t dst_off = j * 4u;
+
+            *(uint16_t *)(dst + dst_off + 0u) = uv_word;
+            *(uint16_t *)(dst + dst_off + 2u) = tpage;
+
+            g_terrain_material_render[i].uv_word[j] = uv_word;
+            g_terrain_material_render[i].tpage[j] = tpage;
+            g_terrain_material_render[i].u[j] = render_u;
+            g_terrain_material_render[i].v[j] = local_v;
         }
     }
-    fprintf(stderr, "v8: TINF materials loaded -- %u records\n", (unsigned)n);
+    fprintf(stderr, "v8: TINF materials loaded -- %u records, flip=%u, tpage_hidden=%u\n",
+            (unsigned)n, (unsigned)flip_count, (unsigned)tpage_hidden_count);
 }
 
 static int psx_pixel_width_from_words(int words, int depth)
@@ -211,10 +252,22 @@ static int psx_pixel_width_from_words(int words, int depth)
     return words;
 }
 
+static uint16_t psx_get_tpage(int tp, int abr, int x, int y)
+{
+    return (uint16_t)((((uint32_t)tp & 3u) << 7) |
+                      (((uint32_t)abr & 3u) << 5) |
+                      (((uint32_t)x & 0x3ffu) >> 6) |
+                      (((uint32_t)y & 0x100u) >> 4) |
+                      (((uint32_t)y & 0x200u) << 2));
+}
+
 static void load_xbmp_meta(const uint8_t *xbmp, uint32_t xbmp_size)
 {
     g_terrain_xbmp_w = 0;
     g_terrain_xbmp_h = 0;
+    g_terrain_xbmp_depth = 0;
+    g_terrain_xbmp_vram_x = 0;
+    g_terrain_xbmp_vram_y = 0;
     if (xbmp == NULL || xbmp_size < 0x220)
         return;
     uint32_t flags = (uint32_t)xbmp[4] | ((uint32_t)xbmp[5] << 8)
@@ -228,10 +281,16 @@ static void load_xbmp_meta(const uint8_t *xbmp, uint32_t xbmp_size)
                              | ((uint16_t)xbmp[image_off + 0x11] << 8));
     int h = (int)(int16_t)((uint16_t)xbmp[image_off + 0x12]
                          | ((uint16_t)xbmp[image_off + 0x13] << 8));
+    g_terrain_xbmp_vram_x = (int)(int16_t)((uint16_t)xbmp[image_off + 0x0c]
+                             | ((uint16_t)xbmp[image_off + 0x0d] << 8));
+    g_terrain_xbmp_vram_y = (int)(int16_t)((uint16_t)xbmp[image_off + 0x0e]
+                             | ((uint16_t)xbmp[image_off + 0x0f] << 8));
+    g_terrain_xbmp_depth = depth;
     g_terrain_xbmp_w = psx_pixel_width_from_words(words, depth);
     g_terrain_xbmp_h = h;
-    fprintf(stderr, "v8: XBMP terrain texture meta -- %dx%d depth=%d\n",
-            g_terrain_xbmp_w, g_terrain_xbmp_h, depth);
+    fprintf(stderr, "v8: XBMP terrain texture meta -- %dx%d depth=%d vram=(%d,%d)\n",
+            g_terrain_xbmp_w, g_terrain_xbmp_h, depth,
+            g_terrain_xbmp_vram_x, g_terrain_xbmp_vram_y);
 }
 
 /* Public: load + parse + wire-up. Path is a V8-style "TRACK\\Foo.TER";
@@ -278,6 +337,12 @@ int Host_TerrainLoad(const char *exp_path)
         return -1;
     }
 
+    {
+        uint32_t xbmp_size = 0;
+        const uint8_t *xbmp = find_chunk(form_body, form_inner_size, "XBMP", &xbmp_size);
+        load_xbmp_meta(xbmp, xbmp_size);
+    }
+
     uint32_t tinf_size = 0;
     const uint8_t *tinf = find_chunk(form_body, form_inner_size, "TINF", &tinf_size);
     if (tinf && tinf_size >= 0x28) {
@@ -286,12 +351,6 @@ int Host_TerrainLoad(const char *exp_path)
         memset(DAT_8008f020, 0, 0x2000);
         memset(g_terrain_material_render, 0, sizeof(g_terrain_material_render));
         fprintf(stderr, "v8: TINF materials not found\n");
-    }
-
-    {
-        uint32_t xbmp_size = 0;
-        const uint8_t *xbmp = find_chunk(form_body, form_inner_size, "XBMP", &xbmp_size);
-        load_xbmp_meta(xbmp, xbmp_size);
     }
 
     /* LOAD.DLL FUN_801005e8 raw-copies AIMP and exposes it via the

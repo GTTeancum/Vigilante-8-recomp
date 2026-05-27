@@ -11,6 +11,8 @@
  */
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "structs.h"
 
 extern void    FUN_800176f8(intptr_t obj, int32_t *vec, int32_t *pos);  /* Object_ApplyImpulseFrom */
@@ -22,12 +24,12 @@ extern void    FUN_4483c(int voice, uint32_t bank, int sfxId,
 extern void    FUN_8004483c(int voice, uint32_t bank, int sfxId,
                              const void *pos3d);                   /* Audio_PlaySfx3D */
 extern void    FUN_8003fd24(const int32_t *xyz, int arg);          /* Debris_AttachTrack */
-extern void    FUN_8003c538(uint32_t *proj, uint32_t dist);        /* WeaponProjectile_Dispatch */
+extern int     FUN_8003c538(uint32_t *proj, intptr_t dist);        /* WeaponProjectile_Dispatch */
 extern void    FUN_800205f8(void *obj);                            /* Object_RetireDeferred */
 extern void   *FUN_8001ac44(void *pool, int kind, int flags,
                              int align);                           /* BoneBank_AllocByKind */
-extern void   *FUN_80031300(int parent, int subBin, int kind,
-                             uint32_t kindB, int parentSlot);      /* Object_SpawnAttached */
+extern void   *FUN_80031300(intptr_t parent, intptr_t subBin, int kind,
+                             uint32_t kindB, intptr_t parentSlot); /* Object_SpawnAttached */
 extern void    FUN_800202f4(void *obj);                            /* Object_RegisterInScene */
 extern void    FUN_800207c4(void *obj);                            /* Object_BindFinalize */
 extern void    FUN_800447e8(int voice, uint32_t bank,
@@ -52,7 +54,7 @@ extern void   *FUN_8001ac44_v(void *pool, int kind, int flags,
                                int align);                         /* BoneBank_AllocByKind returning ptr */
 extern int     FUN_80025400(int x, int z);
 
-extern uint32_t  DAT_800737d8;    /* world-object pool */
+extern uintptr_t DAT_800737d8;    /* world-object pool */
 extern uint32_t  uRam000005f8;    /* audio bank        */
 extern uint32_t  DAT_80010588;    /* debris particle data table */
 extern int32_t   iRam00000758;    /* missile tracker active count */
@@ -62,6 +64,18 @@ extern void (*pcRam00000730)(void *obj, int eventId, int arg);   /* world event 
 
 extern int16_t DAT_8005ec84[];    /* vehicle info table (12 entries × int16) */
 extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+extern uintptr_t Collision_QueryHostWord(const void *query, uint32_t index);
+
+static int weapon_trace_enabled(void)
+{
+    static int checked = 0;
+    static int enabled = 0;
+    if (!checked) {
+        enabled = getenv("V8_TRACE_WEAPONS") != NULL;
+        checked = 1;
+    }
+    return enabled;
+}
 
 static inline int32_t mips_addu_i32(int32_t a, int32_t b)
 {
@@ -94,16 +108,16 @@ static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
  *
  * Returns 0 if target is kind==3 (player), -1 otherwise.
  * ================================================================ */
-int FUN_80031454(int param_1, int *param_2, uint16_t param_3, int param_4)
+int FUN_80031454(intptr_t param_1, intptr_t *param_2, uint16_t param_3, int param_4)
 {
     int iVar1;
     uint32_t uVar2;
-    int iVar3;
+    intptr_t iVar3;
     uint32_t uVar4;
     int32_t local_28, local_24, local_20;
 
     if (param_2 != NULL) {
-        iVar3 = *param_2;
+        iVar3 = (intptr_t)Collision_QueryHostWord((const void *)param_2, 0);
         if (*(int8_t *)(uintptr_t)(iVar3 + 4) == 3) {
             return 0;
         }
@@ -167,12 +181,12 @@ int FUN_80031454(int param_1, int *param_2, uint16_t param_3, int param_4)
  * case 0xc = aim check: angle to target < 0x70 && in range
  * case 0xe = return HUD flags 0x8010
  * ================================================================ */
-uint32_t FUN_80031864(int param_1, uint32_t param_2, uint32_t *param_3)
+intptr_t FUN_80031864(intptr_t param_1, uint32_t param_2, intptr_t param_3)
 {
     int8_t cVar1;
     uint32_t *puVar2;
     int32_t local_vec[3];
-    int iVar4;
+    intptr_t iVar4;
     uint16_t uVar5;
     uint32_t uVar6;
     int iVar7;
@@ -180,7 +194,7 @@ uint32_t FUN_80031864(int param_1, uint32_t param_2, uint32_t *param_3)
 
     switch ((int)param_2) {
     case 0:
-        FUN_8003c538((uint32_t *)(uintptr_t)param_1, (uint32_t)(uintptr_t)param_3);
+        FUN_8003c538((uint32_t *)(uintptr_t)param_1, param_3);
         return 0;
     case 1:
         *(uint16_t *)(uintptr_t)(param_1 + 0xc) = 0x500;
@@ -198,50 +212,77 @@ uint32_t FUN_80031864(int param_1, uint32_t param_2, uint32_t *param_3)
             int8_t cVar1b;
             cVar1b = (int8_t)mips_addu_i32(*(int8_t *)(uintptr_t)(param_1 + 8), -1);
             *(int8_t *)(uintptr_t)(param_1 + 8) = cVar1b;
-            if (cVar1b != -1) return 0;
+            if (cVar1b != -1) {
+                if (weapon_trace_enabled()) {
+                    fprintf(stderr,
+                            "v8: weapon fire cooldown self=%p owner=%p cooldown=%d ammo=%u\n",
+                            (void *)(uintptr_t)(uint32_t)param_1,
+                            (void *)(uintptr_t)param_3,
+                            (int)cVar1b,
+                            (unsigned)*(uint16_t *)(uintptr_t)(param_1 + 0xc));
+                }
+                return 0;
+            }
         }
-        iVar4 = (int)(uintptr_t)FUN_8001ac44((void *)(uintptr_t)DAT_800737d8, 3, 0x80, 8);
-        puVar2 = (uint32_t *)FUN_80031300((int)(uintptr_t)param_3, param_1, 4, 0x98, iVar4);
+        iVar4 = (intptr_t)FUN_8001ac44((void *)(uintptr_t)DAT_800737d8, 3, 0x80, 8);
+        puVar2 = (uint32_t *)FUN_80031300(param_3, param_1, 4, 0x98, iVar4);
         puVar2[0] = 0x280;
         uVar5 = 7;
-        if ((int16_t)param_3[0x47] != 0) uVar5 = 0xe;
+        if (*(int16_t *)(uintptr_t)(param_3 + 0x11c) != 0) uVar5 = 0xe;
         *(uint16_t *)((uint32_t *)puVar2 + 3) = uVar5;
         {
             extern void *LAB_80031634;
             Object_SetCallbackPsxSlot(puVar2, (uintptr_t)&LAB_80031634);
         }
-        uVar6 = param_3[0x20];
+        uVar6 = *(uint32_t *)(uintptr_t)(param_3 + 0x80);
         if ((int)uVar6 < 0) uVar6 = (uint32_t)mips_addu_i32((int32_t)uVar6, 0x7f);
         puVar2[0x22] = mips_addu_i32((int32_t)uVar6 >> 7,
                                      mips_sll_i32(*(int16_t *)((uint32_t *)puVar2 + 5), 2));
 
-        uVar6 = param_3[0x21];
+        uVar6 = *(uint32_t *)(uintptr_t)(param_3 + 0x84);
         if ((int)uVar6 < 0) uVar6 = (uint32_t)mips_addu_i32((int32_t)uVar6, 0x7f);
         puVar2[0x23] = mips_addu_i32((int32_t)uVar6 >> 7,
                                      mips_sll_i32(*(int16_t *)((uintptr_t)puVar2 + 0x1a), 2));
 
-        uVar6 = param_3[0x22];
+        uVar6 = *(uint32_t *)(uintptr_t)(param_3 + 0x88);
         if ((int)uVar6 < 0) uVar6 = (uint32_t)mips_addu_i32((int32_t)uVar6, 0x7f);
         puVar2[0x24] = mips_addu_i32((int32_t)uVar6 >> 7,
                                      mips_sll_i32(*(int16_t *)((uint32_t *)puVar2 + 8), 2));
 
         *(uint16_t *)((uintptr_t)puVar2 + 0x94) = 0x2d;
         FUN_800202f4(puVar2);
+        if (weapon_trace_enabled()) {
+            fprintf(stderr,
+                    "v8: weapon projectile spawned weapon=%p owner=%p proj=%p flags=0x%x "
+                    "pos=(0x%x,0x%x,0x%x) vel=(0x%x,0x%x,0x%x) life=%u cb=%p\n",
+                    (void *)(uintptr_t)(uint32_t)param_1,
+                    (void *)(uintptr_t)param_3,
+                    (void *)puVar2,
+                    (unsigned)puVar2[0],
+                    (unsigned)puVar2[0x12],
+                    (unsigned)puVar2[0x13],
+                    (unsigned)puVar2[0x14],
+                    (unsigned)puVar2[0x22],
+                    (unsigned)puVar2[0x23],
+                    (unsigned)puVar2[0x24],
+                    (unsigned)*(uint16_t *)((uintptr_t)puVar2 + 0x94),
+                    (void *)(uintptr_t)*(uint32_t *)((uintptr_t)puVar2 + 0x64));
+        }
         {
             extern int LAB_8003e80c(int,int,int); /* effect_death_ticks.c */
             Object_SetCallbackPsxSlot((void *)(uintptr_t)iVar4, (uintptr_t)&LAB_8003e80c);
         }
-        if ((*param_3 & 4u) == 0) {
+        if ((*(uint32_t *)(uintptr_t)param_3 & 4u) == 0) {
             FUN_800207c4((void *)(uintptr_t)iVar4);
         }
 
-        iVar4 = (int)*(int8_t *)(uintptr_t)(param_1 + 5);
-        if (iVar4 == 0) {
+        int voice_or_slot = (int)*(int8_t *)(uintptr_t)(param_1 + 5);
+        if (voice_or_slot == 0) {
             cVar1 = (int8_t)FUN_8004410c();
             *(int8_t *)(uintptr_t)(param_1 + 5) = cVar1;
-            iVar4 = (int)cVar1;
+            voice_or_slot = (int)cVar1;
         }
-        FUN_800447e8(iVar4, uRam000005f8, 0x24,
+        FUN_800447e8(voice_or_slot, uRam000005f8, 0x24,
                      (void *)((uintptr_t)puVar2 + 0x48));
         *(int8_t *)(uintptr_t)(param_1 + 8) =
             (int8_t)((uint16_t)*(uint16_t *)(uintptr_t)(param_1 + 0xc) >> 8);
@@ -249,8 +290,8 @@ uint32_t FUN_80031864(int param_1, uint32_t param_2, uint32_t *param_3)
             (int16_t)mips_addu_i32(*(int16_t *)(uintptr_t)(param_1 + 0xc), 0x20);
         break;
     case 0xc:
-        FUN_800435c0(param_3 + 4,
-                     (int32_t *)(uintptr_t)((uintptr_t)param_3[0x39] + 0x24),
+        FUN_800435c0((uint32_t *)(uintptr_t)(param_3 + 0x10),
+                     (int32_t *)(uintptr_t)((uintptr_t)*(uint32_t *)(uintptr_t)(param_3 + 0xe4) + 0x24),
                      local_vec);
         lVar3 = ratan2(local_vec[0], local_vec[2]);
         iVar4 = (int)((lVar3 << 0x14) >> 0x14);
@@ -278,7 +319,7 @@ uint32_t FUN_80031864(int param_1, uint32_t param_2, uint32_t *param_3)
  * case 0xd = return 4
  * case 0xe = return HUD flags 0x8014
  * ================================================================ */
-uint32_t FUN_80034920(uint32_t *param_1, uint32_t param_2, uint32_t param_3)
+intptr_t FUN_80034920(uint32_t *param_1, uint32_t param_2, intptr_t param_3)
 {
     uint16_t uVar1;
     uint32_t uVar2;
@@ -287,9 +328,9 @@ uint32_t FUN_80034920(uint32_t *param_1, uint32_t param_2, uint32_t param_3)
     uint32_t uVar6;
     uint32_t uVar3;
 
-    extern void *FUN_800346cc(int, uint32_t *, int16_t, uint16_t, uint16_t);
-    extern void  FUN_8002cb7c(int);
-    extern int   FUN_8001d5a0(int);
+    extern void *FUN_800346cc(intptr_t, uint32_t *, int16_t, uint16_t, uint16_t);
+    extern void  FUN_8002cb7c(intptr_t);
+    extern intptr_t FUN_8001d5a0(intptr_t);
     extern int   FUN_80016aac(const int32_t *, const int32_t *);
 
     switch ((int)param_2) {
@@ -308,8 +349,8 @@ uint32_t FUN_80034920(uint32_t *param_1, uint32_t param_2, uint32_t param_3)
     case 9:
         if ((param_3 & 0xfff) == 0x222) {
             if ((uint16_t)param_1[3] < 2) return 0xffffffff;
-            uVar2 = (uint32_t)FUN_8001d5a0((int)(uintptr_t)param_1);
-            puVar4 = (uint32_t *)FUN_800346cc((int)(uintptr_t)param_1,
+            uVar2 = (uint32_t)(uintptr_t)FUN_8001d5a0((intptr_t)param_1);
+            puVar4 = (uint32_t *)FUN_800346cc((intptr_t)param_1,
                                                (uint32_t *)(uintptr_t)uVar2,
                                                0x24, 0x1c, 0x25);
             *(uint8_t *)((uint32_t *)puVar4 + 2) = 1;
@@ -320,10 +361,10 @@ uint32_t FUN_80034920(uint32_t *param_1, uint32_t param_2, uint32_t param_3)
         } else {
             if ((param_3 & 0xfff) != 0x224) return 0;
             if ((uint16_t)param_1[3] < 2) return 0xffffffff;
-            uVar2 = (uint32_t)FUN_8001d5a0((int)(uintptr_t)param_1);
+            uVar2 = (uint32_t)(uintptr_t)FUN_8001d5a0((intptr_t)param_1);
             uVar6 = 5;
             if ((uint16_t)param_1[3] < 5) uVar6 = (uint32_t)(uint16_t)param_1[3];
-            puVar4 = (uint32_t *)FUN_800346cc((int)(uintptr_t)param_1,
+            puVar4 = (uint32_t *)FUN_800346cc((intptr_t)param_1,
                                                (uint32_t *)(uintptr_t)uVar2,
                                                0x25, 0x23, (uint16_t)mips_mult_lo_i32((int32_t)uVar6, 0x4b));
             *(uint8_t *)((uint32_t *)puVar4 + 2) = 2;
@@ -339,7 +380,7 @@ uint32_t FUN_80034920(uint32_t *param_1, uint32_t param_2, uint32_t param_3)
         {
             uint32_t uVar2b = (*(int16_t *)(uintptr_t)((uintptr_t)param_3 + 0x11c) == 0)
                               ? 0x4b : 0x96;
-            FUN_800346cc((int)(uintptr_t)param_1,
+            FUN_800346cc((intptr_t)param_1,
                           (uint32_t *)(uintptr_t)param_3,
                           0x10, 8, (uint16_t)uVar2b);
         }
@@ -349,7 +390,7 @@ uint32_t FUN_80034920(uint32_t *param_1, uint32_t param_2, uint32_t param_3)
     LAB_80034adc:
         uVar6 = 0x78;
         if (uVar3 == 0) {
-            FUN_8002cb7c((int)(uintptr_t)param_1);
+            FUN_8002cb7c((intptr_t)param_1);
             uVar6 = 0x78;
         }
         break;
@@ -367,10 +408,10 @@ uint32_t FUN_80034920(uint32_t *param_1, uint32_t param_2, uint32_t param_3)
     return uVar6;
 }
 
-int LAB_80034920(int obj, int event, int param3)
+intptr_t LAB_80034920(intptr_t obj, int event, intptr_t param3)
 {
-    return (int)FUN_80034920((uint32_t *)(uintptr_t)(uint32_t)obj,
-                             (uint32_t)event, (uint32_t)param3);
+    return FUN_80034920((uint32_t *)(uintptr_t)obj,
+                        (uint32_t)event, param3);
 }
 
 /* ================================================================

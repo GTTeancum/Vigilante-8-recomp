@@ -190,7 +190,7 @@ undefined4 * FUN_8003fd24(undefined4 *param_1,undefined2 param_2)
   puVar1[0x13] = uVar3;
   puVar1[0x14] = uVar4;
   iVar2 = puVar1[0xe];
-  *(uintptr_t *)((uint8_t *)puVar1 + 0x64) = (uintptr_t)&LAB_8003e80c;
+  Object_SetCallbackPsxSlot(puVar1, (uintptr_t)&LAB_8003e80c);
   for (; iVar2 != 0; iVar2 = *(int *)(iVar2 + 0x34)) {
     *(undefined1 **)(iVar2 + 100) = &LAB_8003e7b4;
   }

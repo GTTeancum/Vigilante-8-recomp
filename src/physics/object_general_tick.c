@@ -55,6 +55,8 @@
 extern int     Terrain_HeightAndProbe(intptr_t self, int *posXyz, void *normalOut, uintptr_t *materialOut);  /* FUN_8001d748 */
 extern int32_t Vec3_Length(const int32_t *v);                                  /* FUN_80016a20 */
 extern void    Object_IntegrateAndOrient(uint8_t *obj);                        /* FUN_80017324 */
+extern void   *Host_HeapBase(void);
+extern uint32_t Host_HeapSize(void);
 
 /* PSY-Q rounded right shift: matches the engine's idiom
  *   if (x < 0) x += (1<<n)-1;
@@ -90,6 +92,15 @@ static inline int32_t rsa(int32_t x, int n)
 {
     if (x < 0) x = mips_addu_i32(x, (1 << n) - 1);
     return x >> n;
+}
+
+static int object_general_is_host_object_ptr(uint32_t ptr)
+{
+    uintptr_t base = (uintptr_t)Host_HeapBase();
+    uintptr_t end = base + (uintptr_t)Host_HeapSize();
+    uintptr_t addr = (uintptr_t)ptr;
+
+    return addr >= base && addr + 8u <= end && ((addr & 3u) == 0);
 }
 
 /* HIGH: per-tick step for any movable object that routes through the
@@ -165,7 +176,9 @@ void Object_GeneralTick(uint32_t *obj)
     /* --- 7. Three-slot i32-keyed timer array at +0x110 (entries are
      * pointers; deref to access the i16 at +6 inside the target). --- */
     for (int i = 0; i < 3; i++) {
-        uint8_t *node = (uint8_t *)(uintptr_t)*(uint32_t *)(b + 0x110 + i * 4);
+        uint32_t nodeWord = *(uint32_t *)(b + 0x110 + i * 4);
+        uint8_t *node = object_general_is_host_object_ptr(nodeWord) ?
+                        (uint8_t *)(uintptr_t)nodeWord : 0;
         if (node && *(int16_t *)(node + 6) != 0) {
             *(int16_t *)(node + 6) = (int16_t)mips_addu_i32(*(int16_t *)(node + 6), -1);
         }

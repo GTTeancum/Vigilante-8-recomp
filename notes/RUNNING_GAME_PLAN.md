@@ -40,7 +40,8 @@ CLAUDE.md operating rules.
 
   Nothing else justifies pausing. Hit a confusing Ghidra block?
   Pick the likely interpretation, log it, move on. Vehicle struct
-  size guess turns out wrong? Adjust the padding, log it, continue.
+  recovered size turns out wrong? Re-audit the allocation/stride evidence,
+  adjust the padding, log it, continue.
 
 - **Commit cadence:** as agreed — per logical unit of work, never
   commit a non-building tree after Phase 1, `phaseN:` prefix in

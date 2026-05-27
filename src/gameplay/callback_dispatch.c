@@ -16,6 +16,17 @@
  * HIGH confidence.
  */
 #include <stdint.h>
+#include <stdio.h>
+
+/* __builtin_return_address / __builtin_frame_address are GCC intrinsics.
+ * Provide MSVC-compatible equivalents that return something safe. */
+#if defined(_MSC_VER) && !defined(__builtin_return_address)
+#  include <intrin.h>
+#  define __builtin_return_address(n) _ReturnAddress()
+#  define __builtin_frame_address(n)  _AddressOfReturnAddress()
+#endif
+
+extern int32_t iRam0000000c;
 
 /* DAT_1f8003f8 / DAT_1f8003fc: PSX BIOS scratchpad stack-unwind slots.
  * On host: written but never read (exception path never taken).
@@ -25,13 +36,57 @@
 uintptr_t DAT_1f8003f8 = 0;
 uint8_t  *DAT_1f8003fc = 0;
 
-/* __builtin_return_address / __builtin_frame_address are GCC intrinsics.
- * Provide MSVC-compatible equivalents that return something safe. */
-#if defined(_MSC_VER) && !defined(__builtin_return_address)
-#  include <intrin.h>
-#  define __builtin_return_address(n) _ReturnAddress()
-#  define __builtin_frame_address(n)  _AddressOfReturnAddress()
-#endif
+typedef struct {
+    const void *obj;
+    uint32_t  psxSlot;
+    uintptr_t nativeFn;
+} CallbackMapEntry;
+
+#define CALLBACK_MAP_CAP 4096
+static CallbackMapEntry s_callbackMap[CALLBACK_MAP_CAP];
+static int s_callbackMapCount = 0;
+static int s_unresolvedCallbackWarns = 0;
+
+static void Callback_RegisterNative(const void *obj, uintptr_t callback)
+{
+    uint32_t low;
+    int i;
+
+    if (obj == 0)
+        return;
+    if (callback == 0)
+        return;
+
+    low = (uint32_t)callback;
+    if (low == 0)
+        return;
+
+    for (i = 0; i < s_callbackMapCount; i++) {
+        if (s_callbackMap[i].obj == obj) {
+            s_callbackMap[i].psxSlot = low;
+            s_callbackMap[i].nativeFn = callback;
+            return;
+        }
+    }
+
+    if (s_callbackMapCount < CALLBACK_MAP_CAP) {
+        s_callbackMap[s_callbackMapCount].obj = obj;
+        s_callbackMap[s_callbackMapCount].psxSlot = low;
+        s_callbackMap[s_callbackMapCount].nativeFn = callback;
+        s_callbackMapCount++;
+    }
+}
+
+static uintptr_t Callback_LookupNative(const void *obj, uint32_t low)
+{
+    int i;
+
+    for (i = 0; i < s_callbackMapCount; i++) {
+        if (s_callbackMap[i].obj == obj && s_callbackMap[i].psxSlot == low)
+            return s_callbackMap[i].nativeFn;
+    }
+    return 0;
+}
 
 uintptr_t Object_CallbackFromPsxSlot(const void *obj)
 {
@@ -42,14 +97,26 @@ uintptr_t Object_CallbackFromPsxSlot(const void *obj)
     low = *(const uint32_t *)((const uint8_t *)obj + 0x64);
     if (low == 0)
         return 0;
-    return ((uintptr_t)&Object_CallbackFromPsxSlot & ~(uintptr_t)0xffffffffu) |
-           (uintptr_t)low;
+    {
+        uintptr_t nativeFn = Callback_LookupNative(obj, low);
+        if (nativeFn != 0)
+            return nativeFn;
+    }
+    if (s_unresolvedCallbackWarns < 16) {
+        fprintf(stderr,
+                "v8: unresolved object callback slot obj=%p low=0x%08x\n",
+                obj, low);
+        s_unresolvedCallbackWarns++;
+    }
+    return 0;
 }
 
 void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback)
 {
-    if (obj != 0)
+    if (obj != 0) {
         *(uint32_t *)((uint8_t *)obj + 0x64) = (uint32_t)callback;
+        Callback_RegisterNative(obj, callback);
+    }
 }
 
 uint32_t Object_TickCallback(intptr_t obj, int mode, intptr_t arg2, intptr_t arg3)

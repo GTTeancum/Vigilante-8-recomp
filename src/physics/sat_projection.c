@@ -120,11 +120,11 @@ int SAT_ProjectAxis(int32_t *obstacle_aabb, MATRIX *vehicle_mat,
      * vehicle_mat^T.  Reuse axis_world buffer as the output (matches
      * MIPS which feeds &axis_world to FUN_8004316c with a1=a0 in-place).
      *
-     * GTE_LoadMatrixTransposed updates the rotation regs only; V0 is
-     * preserved from the prior ApplyMatrixSV.  We then load V0 from
-     * the *original* local axis (NOT the world version) and RTV0. */
+     * GTE_LoadMatrixTransposed updates the rotation regs only; the source
+     * then calls FUN_8004316c with the already world-rotated axis buffer
+     * (sp+0x30) as both input and output. */
     GTE_LoadMatrixTransposed((uint32_t *)vehicle_mat);
-    gte_ldv0((const SVECTOR *)axis_query);
+    gte_ldv0(&axis_world);
     gte_rtv0();
     axis_world.vx = (int16_t)gte_stIR1();
     axis_world.vy = (int16_t)gte_stIR2();

@@ -49,6 +49,29 @@ typedef struct ObjListHostNode {
     uint32_t deadline;
 } ObjListHostNode;
 
+static int *ObjList_SourceFindByPayload(uint32_t *listHead, uintptr_t payload)
+{
+    uint32_t cur;
+    uint32_t next;
+
+    if (listHead == NULL)
+        return NULL;
+
+    cur = listHead[0];
+    if (cur == 0)
+        return NULL;
+
+    next = *(uint32_t *)(uintptr_t)cur;
+    while (next != 0) {
+        uint32_t nodePayload = *(uint32_t *)(uintptr_t)(cur + 8u);
+        if ((uintptr_t)nodePayload == (payload & 0xffffffffu))
+            return (int *)(uintptr_t)cur;
+        cur = next;
+        next = *(uint32_t *)(uintptr_t)cur;
+    }
+    return NULL;
+}
+
 /* HIGH: find the list node whose payload pointer equals `payload`. */
 int *ObjList_FindByPayload(int **listSentinel, int payload)
 {
@@ -110,6 +133,7 @@ uint32_t ObjectList_RemoveFromBackbuf(void *listHead, void *obj)
 intptr_t ObjectList_RemoveFromChain(void *root, void *obj)
 {
     uint32_t *node = (uint32_t *)root;
+    uintptr_t payload = (uintptr_t)obj;
 
     if (node == NULL)
         return 0;
@@ -125,7 +149,7 @@ intptr_t ObjectList_RemoveFromChain(void *root, void *obj)
         if (node == NULL)
             return 0;
     }
-    return ObjectList_RemoveTraverse((void *)(node + 1), obj);
+    return (intptr_t)ObjList_SourceFindByPayload(node + 1, payload);
 }
 
 /* HIGH: recurse into a spatial-tree (kind 0=leaf, 1/2=split). At a

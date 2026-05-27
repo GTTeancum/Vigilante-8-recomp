@@ -41,7 +41,7 @@ extern void Spawner_Promote(uint32_t target);                        /* func_0x8
 extern void Damage_FromImpulse(uint32_t *self, uint32_t *imp);       /* func_0x8002239c */
 extern void Damage_StandardVehicle(void *self, uint32_t *imp);       /* func_0x80022320 */
 extern uint32_t _DAT_1f80000c;
-extern uint32_t FUN_801006cc;
+extern uint32_t FUN_801006cc(uint32_t *obj, int mode, int impulse);
 
 static inline int32_t mips_addu_i32(int32_t a, int32_t b)
 {

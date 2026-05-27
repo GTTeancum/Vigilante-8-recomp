@@ -23,13 +23,9 @@ extern uint8_t ImpactSparks_Spawn_R(void);    /* FUN_8001d708 -- returns id */
 uint32_t Boulder_Tick(uint32_t *obj, int mode, int impulse)
 {
     uint8_t newSub = 3;
-    if (mode != 0 && mode != 1) {
-        /* mode == anything else: fall into the "external impulse" path
-         * regardless of obj pointer -- preserve the Ghidra-observed
-         * `obj = 1` clobber as a no-op since the subsequent writes use
-         * obj+0x10 etc. which are scratchpad in the original. */
-        obj = (uint32_t *)1;
-    } else if (mode == 1) {
+    if (mode != 0) {
+        if (mode != 1)
+            return 0;
         goto applyStateBump;
     }
 
@@ -40,7 +36,6 @@ uint32_t Boulder_Tick(uint32_t *obj, int mode, int impulse)
     if (impulse == 0) return 0;
 
     newSub = ImpactSparks_Spawn_R();
-    obj = (uint32_t *)1;
 
 applyStateBump:
     *(int8_t *)((uint8_t *)obj + 4) = (int8_t)newSub;

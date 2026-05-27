@@ -41,16 +41,16 @@
 #include "structs.h"
 
 /* ---- Hierarchy helpers ---- */
-extern int       FUN_8001d5a0(int parent);                  /* Object_FindFirstChild */
-extern MATRIX   *FUN_8001d624(int obj);                     /* Object_GetWorldMatrix */
-extern int       FUN_8001d564(int obj);                     /* Object_ResetParentChain */
+extern intptr_t  FUN_8001d5a0(intptr_t parent);             /* Object_FindFirstChild */
+extern MATRIX   *FUN_8001d624(intptr_t obj);                /* Object_GetWorldMatrix */
+extern intptr_t  FUN_8001d564(intptr_t obj);                /* Object_ResetParentChain */
 
 /* ---- Object-list management ---- */
 extern uint32_t *FUN_800203fc(uint32_t *obj);               /* Object_UnregisterFromScene */
 extern void      FUN_8002036c(int obj);                     /* Object_PostUpdate2 */
 
 /* ---- Heap + RNG + GTE ---- */
-extern int       FUN_80045134(void *p, int newSize);        /* Heap_Shrink */
+extern void     *FUN_80045134(void *p, int newSize);        /* Heap_Shrink */
 extern int       FUN_80017160(void);                        /* v8_rand */
 extern void      FUN_80043358(uint32_t *m,
                               int32_t *src, int32_t *dst);  /* Mat_RotateVec */
@@ -65,25 +65,25 @@ extern void      Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
  *
  * Returns the (possibly relocated) projectile record pointer.
  * ================================================================ */
-int FUN_8003ff28(uint32_t *param_1)
+void *FUN_8003ff28(uint32_t *param_1)
 {
     uint16_t  uVar1;
-    int       uVar2;
+    intptr_t  uVar2;
     MATRIX   *m0;
-    int       iVar3;
+    intptr_t  iVar3;
 
-    uVar2 = FUN_8001d5a0((int)(uintptr_t)param_1);
+    uVar2 = FUN_8001d5a0((intptr_t)param_1);
     m0    = FUN_8001d624(uVar2);
 
     FUN_800203fc(param_1);
     CompMatrixLV(m0, (MATRIX *)(param_1 + 4), (MATRIX *)(param_1 + 4));
-    FUN_8001d564((int)(uintptr_t)param_1);
+    FUN_8001d564((intptr_t)param_1);
 
     *(uint8_t *)(param_1 + 1) = 1;
     Object_SetCallbackPsxSlot(param_1, (uintptr_t)&FUN_8003eab0);
     *param_1 = (*param_1 & 0xffffbfffu) | 0x80u;
 
-    iVar3 = FUN_80045134(param_1, 0x94);
+    iVar3 = (intptr_t)FUN_80045134(param_1, 0x94);
 
     /* If still has a child, repair the child's parent back-link. */
     if (*(int *)(uintptr_t)(iVar3 + 0x38) != 0) {
@@ -119,8 +119,8 @@ int FUN_8003ff28(uint32_t *param_1)
     FUN_80043358((uint32_t *)m0,
                  (int32_t *)(uintptr_t)(iVar3 + 0x88),
                  (int32_t *)(uintptr_t)(iVar3 + 0x88));
-    FUN_8002036c(iVar3);
-    return iVar3;
+    FUN_8002036c((int)(uintptr_t)iVar3);
+    return (void *)(uintptr_t)iVar3;
 }
 
 /* ============================================================

@@ -49,6 +49,31 @@ typedef struct DamageHostObjListNode {
     uint32_t deadline;
 } DamageHostObjListNode;
 
+static int damage_is_source_node(intptr_t nodePtr)
+{
+    return nodePtr != 0 && ((uintptr_t)nodePtr >> 32) == 0;
+}
+
+static void damage_retire_source_node(intptr_t nodePtr)
+{
+    uint32_t node = (uint32_t)(uintptr_t)nodePtr;
+    uint32_t next = *(uint32_t *)(uintptr_t)node;
+    uint32_t prevLink = *(uint32_t *)(uintptr_t)(node + 4u);
+    uint32_t payload = *(uint32_t *)(uintptr_t)(node + 8u);
+
+    if (next != 0)
+        *(uint32_t *)(uintptr_t)(next + 4u) = prevLink;
+    if (prevLink != 0)
+        *(uint32_t *)(uintptr_t)prevLink = next;
+
+    *(uint32_t *)(uintptr_t)node = 0;
+    *(uint32_t *)(uintptr_t)(node + 4u) = 0;
+    *(uint32_t *)(uintptr_t)(node + 8u) = 0;
+
+    if (payload != 0)
+        FreeAfterNFrames((int)payload);
+}
+
 /* Forward declarations -- definitions below. */
 intptr_t Damage_RouteByTree(void *obj);
 void Object_RetireToDeadList(intptr_t node);
@@ -73,7 +98,7 @@ void Damage_Apply(void *obj)
 }
 
 /* Hex-name alias -- callers (effect_death_ticks.c etc.) use PSX address. */
-void FUN_800205f8(int obj) { Damage_Apply((void *)(uintptr_t)(uint32_t)obj); }
+void FUN_800205f8(intptr_t obj) { Damage_Apply((void *)(uintptr_t)obj); }
 
 /* HIGH: try removing the object from the level-wide list; if it
  * wasn't there, fall back to the terrain kd-tree's containing chunk. */
@@ -94,6 +119,10 @@ void Object_RetireToDeadList(intptr_t nodePtr)
     uintptr_t payload;
 
     if (node == NULL) return;
+    if (damage_is_source_node(nodePtr)) {
+        damage_retire_source_node(nodePtr);
+        return;
+    }
 
     payload = node->payload;
     DamageHostObjListNode *prev = node->prev;

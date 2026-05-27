@@ -59,35 +59,36 @@
 #include <stdint.h>
 
 /* FUN_8001ac44 -- BoneObj_BuildTree: allocate and build a bone-tree object. */
-extern int FUN_8001ac44(int bank, uint16_t slot, uint32_t size, uint32_t flags);
+extern int FUN_8001ac44(int *bank, uint16_t slot, uint32_t size, uint32_t flags);
 
 /* FUN_8001f9cc -- Object_PreTickRecurse: advance animation state of trail obj. */
-extern int FUN_8001f9cc(int obj, int16_t param2);
+extern int FUN_8001f9cc(intptr_t obj, int16_t param2);
 
 /* FUN_8001d544 -- Object_PrependChild: head-insert child into parent child list. */
-extern void FUN_8001d544(uint32_t *parent, uint32_t *child);
+extern void FUN_8001d544(void *parent, void *child);
 
 /* FUN_8001dc1c -- Object_RecomputeBoundingRadius: rebuild rotation / bounding data. */
-extern int FUN_8001dc1c(int obj);
+extern int FUN_8001dc1c(intptr_t obj);
 
 /* FUN_8001d840 -- Object_AlignToTerrainNormal: probe terrain, build orientation.
  *   param_1: object handle (uint32_t), param_2: pos array ptr, param_3: dest ptr (as int). */
-extern void FUN_8001d840(uint32_t param_1, uint32_t *param_2, int param_3);
+extern void FUN_8001d840(intptr_t param_1, uint32_t *param_2, intptr_t param_3);
 
 /* FUN_8002036c -- Object_PostUpdate2: register object in active list. */
-extern uint32_t FUN_8002036c(uint32_t *obj);
+extern uint32_t FUN_8002036c(void *obj);
 
 /* FUN_80020620 -- ColEvent_Dispatch: dispatch a collision event. */
-extern void FUN_80020620(uint32_t obj, uint32_t event);
+extern void FUN_80020620(intptr_t obj, uint32_t event);
 
 /* FUN_800205f8 -- Object_RetireDeferred: queue object for removal. */
-extern void FUN_800205f8(int obj);
+extern void FUN_800205f8(intptr_t obj);
 
 /* FUN_80025400 -- Terrain_HeightAt: return terrain Y at (X, Z). */
 extern int FUN_80025400(int x, int z);
 
 /* FUN_80031454 -- WeaponHit_Apply: apply impulse + damage to collider. */
-extern int FUN_80031454(int obj, int *collider, uint16_t radius, int strength);
+extern int FUN_80031454(intptr_t obj, intptr_t *collider, uint16_t radius, int strength);
+extern uintptr_t Collision_QueryHostWord(const void *query, uint32_t index);
 
 /* FUN_80033db4 -- TerrainDamage_Apply: deform terrain in radius. */
 extern void FUN_80033db4(int x, int z, int radius, int intensity);
@@ -103,7 +104,7 @@ extern int FUN_8003fd24(const int32_t *xyz, int kind);
 
 /* FUN_8003fdcc -- WeaponSpawn_TrailObject: allocate a typed trail/effect object.
  *   param1: world pos ptr (uint32_t*), param2: bone index (uint16_t), param3: trail seed. */
-extern uint32_t *FUN_8003fdcc(uint32_t *param_1, uint16_t param_2, int param_3);
+extern uint32_t *FUN_8003fdcc(uint32_t *param_1, uint16_t param_2, intptr_t param_3);
 
 /* FUN_8003fea8 -- RocketExhaust_Emit: emit rocket-exhaust glow particle. */
 extern void FUN_8003fea8(const int32_t *pos, uint32_t flags);
@@ -119,9 +120,9 @@ extern void FUN_8004483c(int voice, uint32_t bank, int pitch, const void *pos);
 extern void FUN_800447e8(int param1, uint32_t bank, int pitch, const void *pos);
 
 /* LAB_8003e80c -- explosion debris main tick (in effect_death_ticks.c). */
-extern int LAB_8003e80c(int obj, int event, int param3);
+extern intptr_t LAB_8003e80c(intptr_t obj, int event, intptr_t param3);
 /* LAB_8003e7b4 -- explosion debris child tick (in effect_death_ticks.c). */
-extern int LAB_8003e7b4(int obj, int event, int param3);
+extern intptr_t LAB_8003e7b4(intptr_t obj, int event, intptr_t param3);
 extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 
 /* DAT_800658FC -- sound bank (gp+1528). */
@@ -131,7 +132,7 @@ extern uint32_t DAT_800658FC;
 extern int16_t DAT_800659D0;
 
 /* DAT_800737d8 -- bone bank pool handle. */
-extern uint32_t DAT_800737d8;
+extern uintptr_t DAT_800737d8;
 
 /* ------------------------------------------------------------------ */
 
@@ -150,9 +151,9 @@ static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
     return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
 }
 
-int LAB_8003403c(int obj, int event, int param3)
+intptr_t LAB_8003403c(intptr_t obj, int event, intptr_t param3)
 {
-    uint8_t *s1 = (uint8_t *)(uintptr_t)(uint32_t)obj;
+    uint8_t *s1 = (uint8_t *)(uintptr_t)obj;
 
     /* ----- Event dispatch ----- */
     if (event == 3)
@@ -174,10 +175,10 @@ int LAB_8003403c(int obj, int event, int param3)
         int16_t phase = *(int16_t *)(s1 + 0x94);
         if (phase < 20) {
             /* Allocate a bone-tree trail object. */
-            int trail = FUN_8001ac44((int)DAT_800737d8,
-                                     *(uint16_t *)(s1 + 10),
-                                     152u, 8u);
-            uint8_t *tobj = (uint8_t *)(uintptr_t)(uint32_t)trail;
+            intptr_t trail = (intptr_t)(uint32_t)FUN_8001ac44((int *)(uintptr_t)DAT_800737d8,
+                                                              *(uint16_t *)(s1 + 10),
+                                                              152u, 8u);
+            uint8_t *tobj = (uint8_t *)(uintptr_t)trail;
             *(int32_t *)tobj |= 0x410;
 
             /* Set animation phase relative to global counter. */
@@ -187,7 +188,7 @@ int LAB_8003403c(int obj, int event, int param3)
             FUN_8001f9cc(trail, base);
 
             /* Attach trail object as child of self. */
-            FUN_8001d544((uint32_t *)s1, (uint32_t *)tobj);
+            FUN_8001d544(s1, tobj);
 
             /* Advance phase counter. */
             *(int16_t *)(s1 + 0x94) = (int16_t)mips_addu_i32((int32_t)phase, 1);
@@ -327,8 +328,7 @@ int LAB_8003403c(int obj, int event, int param3)
     /* ===== Event 3: Collision ===== */
 ev_collision:
     {
-        uint8_t *collider = (uint8_t *)(uintptr_t)(uint32_t)
-                            (*(int32_t *)(uintptr_t)(uint32_t)param3);
+        uint8_t *collider = (uint8_t *)Collision_QueryHostWord((void *)(uintptr_t)param3, 0);
         uint8_t collider_type = collider[4];
 
         /* Terrain collider: ignore. */
@@ -343,8 +343,9 @@ ev_collision:
 
         if (armed == 1) {
             /* ----- Full explosion ----- */
-            int new_obj_h = FUN_8001ac44((int)DAT_800737d8, 43u, 128u, 8u);
-            uint8_t *nobj = (uint8_t *)(uintptr_t)(uint32_t)new_obj_h;
+            intptr_t new_obj_h = (intptr_t)(uint32_t)FUN_8001ac44((int *)(uintptr_t)DAT_800737d8,
+                                                                  43u, 128u, 8u);
+            uint8_t *nobj = (uint8_t *)(uintptr_t)new_obj_h;
             *(int32_t *)nobj = 52;
 
             /* Copy world position from self. */
@@ -353,7 +354,7 @@ ev_collision:
             *(int32_t *)(nobj + 0x50) = pos[2];
 
             /* Install tick callbacks. */
-            int child = *(int32_t *)(nobj + 0x38);
+            intptr_t child = (intptr_t)(uint32_t)*(uint32_t *)(nobj + 0x38);
             Object_SetCallbackPsxSlot((void *)(uintptr_t)nobj, (uintptr_t)&LAB_8003e80c);
             if (child)
                 Object_SetCallbackPsxSlot((void *)(uintptr_t)child, (uintptr_t)&LAB_8003e7b4);
@@ -388,9 +389,9 @@ ev_collision:
                 (*(int32_t *)collider & 0x100000)) {
                 /* Vehicle with special flag: spawn trail effect + WeaponHit. */
                 uint32_t *tep = FUN_8003fdcc((uint32_t *)rpos, 39u, 0);
-                FUN_8001d840((uint32_t)(uintptr_t)tep,
+                FUN_8001d840((intptr_t)tep,
                              (uint32_t *)((uint8_t *)tep + 0x48),
-                             (int)(uintptr_t)((uint8_t *)tep + 0x10));
+                             (intptr_t)((uint8_t *)tep + 0x10));
                 *tep |= 0x10u;
                 FUN_80033db4(pos[0], pos[2], 0x20000,
                              (int)*(uint16_t *)(s1 + 12) << 8);
@@ -405,13 +406,13 @@ ev_collision:
                 return -1;
             }
             /* Shared armed==2 weapon-hit path. */
-            return FUN_80031454(obj, (int *)(uintptr_t)(uint32_t)param3,
+            return FUN_80031454(obj, (intptr_t *)(uintptr_t)param3,
                                 26u, 57);
         }
 
         if (armed == 0) {
             /* ----- Unarmed: standard hit ----- */
-            return FUN_80031454(obj, (int *)(uintptr_t)(uint32_t)param3,
+            return FUN_80031454(obj, (intptr_t *)(uintptr_t)param3,
                                 26u, 57);
         }
 
@@ -421,7 +422,7 @@ ev_collision:
     /* ===== Event 9: Target unlock ===== */
 ev_target_unlock:
     {
-        if (*(int32_t *)(s1 + 0x84) == param3)
+        if ((intptr_t)*(int32_t *)(s1 + 0x84) == param3)
             *(int32_t *)(s1 + 0x84) = *(int32_t *)(s1 + 0x80);
         return 0;
     }

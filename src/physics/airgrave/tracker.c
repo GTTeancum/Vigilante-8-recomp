@@ -54,6 +54,7 @@ extern void Object_RefitAABB(void *self);          /* FUN_8001d708 */
 extern void Object_ClearBackBufferFlag(uint32_t *self); /* FUN_80020778 */
 extern void FUN_80020744(uint32_t *self);          /* Object_RegisterPostUpdate */
 extern void Damage_Apply_AgainstSelf(void *self, int ticks); /* FUN_80020890 */
+extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 extern int  Terrain_HeightAt(uint32_t x, uint32_t z); /* FUN_80025400 */
 extern int  FUN_8001fd08(uint32_t x, uint32_t z);  /* terrain/object probe */
 extern uint8_t SFX_PlayWorld(int32_t *posXyz);     /* FUN_800449bc */
@@ -156,7 +157,7 @@ uint32_t AGTracker_Tick(AGTracker *t, int mode, int unused)
                     uint32_t *p = (uint32_t *)Projectile_Spawn_AG(self[0x16], 0xdb, 0x98, 0);
                     *(uint8_t *)(p + 1) = 7;
                     *p |= 0x80;
-                    p[0x19] = (uint32_t)(uintptr_t)&FUN_8010059c;
+                    Object_SetCallbackPsxSlot(p, (uintptr_t)&FUN_8010059c);
                     *(uint16_t *)(p + 3) = 100;
                     *(uint16_t *)((uint8_t *)p + 6) = *(uint16_t *)((uint8_t *)self + 6);
                     p[0x12] = self[0x12];

@@ -50,10 +50,10 @@
 #include "structs.h"
 
 /* Implemented elsewhere -- use real C symbol names (not hex aliases). */
-extern int      FUN_8001d5a0(int param_1);               /* Object_FindFirstChild   (weapon_slot.c)       */
-extern MATRIX  *Matrix_ComposeParentChain(int param_1);  /* FUN_8001d624            (matrix_chain.c)      */
-extern void     Object_DetachFromParent(int self);       /* FUN_8001d564            (object_hierarchy.c)  */
-extern void     FUN_800204dc(int param_1);               /* Object_HeapFree         (object_list.c)       */
+extern intptr_t FUN_8001d5a0(intptr_t param_1);          /* Object_FindFirstChild   (weapon_slot.c)       */
+extern MATRIX  *Matrix_ComposeParentChain(intptr_t param_1); /* FUN_8001d624         (matrix_chain.c)      */
+extern void     Object_DetachFromParent(intptr_t self);  /* FUN_8001d564            (object_hierarchy.c)  */
+extern void     FUN_800204dc(intptr_t param_1);          /* Object_HeapFree         (object_list.c)       */
 extern uint32_t Object_ClearBackBufferFlag(uint32_t *obj); /* FUN_80020778          (damage_apply.c)      */
 extern int      FUN_8004410c(void);                      /* Audio_AllocVoice        (panic_stubs.c)       */
 extern int      FUN_8004483c(int voice, uint32_t bank,
@@ -61,6 +61,24 @@ extern int      FUN_8004483c(int voice, uint32_t bank,
 extern uint32_t uRam000005f8;                            /* SFX bank ptr            (panic_stubs.c)       */
 extern int32_t  iRam0000000c;                            /* frame counter           (panic_stubs.c)       */
 extern uintptr_t Object_CallbackFromPsxSlot(const void *obj);
+
+static intptr_t weapon_projectile_owner_for_slots(intptr_t obj)
+{
+    intptr_t owner = FUN_8001d5a0(obj);
+    intptr_t parent;
+
+    /* FUN_8003c288 immediately indexes owner+0x110 as a vehicle weapon-slot
+     * table.  On PSX, the hierarchy path for these active child weapons
+     * satisfies that invariant.  The host can expose the attached weapon child
+     * as the first parent in this stress path, so lift one level only when the
+     * source invariant is visibly broken and the next ancestor is a vehicle. */
+    if (owner != 0 && *(uint8_t *)(uintptr_t)(owner + 4) != 2) {
+        parent = FUN_8001d5a0(owner);
+        if (parent != 0 && *(uint8_t *)(uintptr_t)(parent + 4) == 2)
+            owner = parent;
+    }
+    return owner;
+}
 
 static inline int32_t mips_addu_i32(int32_t a, int32_t b)
 {
@@ -82,16 +100,16 @@ static inline int32_t mips_subu_i32(int32_t a, int32_t b)
  * HIGH confidence: direct Ghidra ref port with uintptr_t casts and
  * MIPS-confirmed dropped arg for FUN_8001d5a0(param_1).
  * ================================================================ */
-int FUN_8003c288(int param_1, int param_2)
+int FUN_8003c288(intptr_t param_1, intptr_t param_2)
 {
     /* Slot callback function-pointer type (host-width, stored at obj+0x64). */
-    typedef int (*SlotTickFn)(int slot_obj, int a1, int proj);
+    typedef int (*SlotTickFn)(intptr_t slot_obj, int a1, intptr_t proj);
 
     uint16_t uVar1;
     int16_t  sVar2;
-    int      iVar3;
+    intptr_t iVar3;
     int      iVar4;
-    int      iVar5;
+    intptr_t iVar5;
     int      uVar6;
     int      iVar7;
     int      iVar8;
@@ -175,7 +193,7 @@ int FUN_8003c288(int param_1, int param_2)
                          (int32_t)(uint32_t)*(uint8_t *)(uintptr_t)(param_1 + 9)) & 3) == 0))) {
 
         /* Get parent vehicle by walking the sibling/parent chain. */
-        iVar3 = FUN_8001d5a0(param_1);
+        iVar3 = weapon_projectile_owner_for_slots(param_1);
 
         /* Iterate weapon slots at parent + 0xec + {0x24, 0x28, 0x2c}
          * (slots 9, 10, 11 in the 32-entry descriptor table). */
@@ -183,11 +201,13 @@ int FUN_8003c288(int param_1, int param_2)
         iVar4 = 0x24;
         do {
             /* Slot obj ptr stored at parent + 0xec + slot_offset. */
-            iVar5 = *(int *)(uintptr_t)(iVar3 + iVar4 + 0xec);
+            iVar5 = (intptr_t)*(uint32_t *)(uintptr_t)(iVar3 + iVar4 + 0xec);
 
-            /* Only process if slot kind == negated projectile kind. */
-            if ((int)*(int8_t *)(uintptr_t)(iVar5 + 8) ==
-                mips_subu_i32(0, (int)*(int8_t *)(uintptr_t)(param_1 + 8))) {
+            /* On PSX a null slot read probes low RAM; the host has no native
+             * object there, so treat it as a non-matching empty slot. */
+            if ((iVar5 != 0) &&
+                ((int)*(int8_t *)(uintptr_t)(iVar5 + 8) ==
+                mips_subu_i32(0, (int)*(int8_t *)(uintptr_t)(param_1 + 8)))) {
 
                 /* Callback is stored as a host function pointer at slot+0x64. */
                 SlotTickFn fn = (SlotTickFn)Object_CallbackFromPsxSlot((const void *)(uintptr_t)iVar5);
@@ -199,7 +219,7 @@ int FUN_8003c288(int param_1, int param_2)
 
                 /* If callback returned 0, increment slot ammo counter (cap at 98). */
                 if (iVar5 == 0) {
-                    iVar5 = *(int *)(uintptr_t)(iVar3 + iVar4 + 0xec);
+                    iVar5 = (intptr_t)*(uint32_t *)(uintptr_t)(iVar3 + iVar4 + 0xec);
                     uVar1 = *(uint16_t *)(uintptr_t)(iVar5 + 0xc);
                     if (uVar1 < 99) {
                         *(uint16_t *)(uintptr_t)(iVar5 + 0xc) = (uint16_t)(uVar1 + 1);
@@ -242,7 +262,7 @@ int FUN_8003c288(int param_1, int param_2)
  * Dropped arg: FUN_80020778(param_1) -- Ghidra shows no args.
  * HIGH confidence.
  * ================================================================ */
-int FUN_8003c538(uint32_t *param_1, uint32_t param_2)
+int FUN_8003c538(uint32_t *param_1, intptr_t param_2)
 {
     int      uVar1;
     int      iVar2;
@@ -258,15 +278,15 @@ int FUN_8003c538(uint32_t *param_1, uint32_t param_2)
          * Branch to explosion if param_2 > 0x10000u;
          * otherwise call the projectile position tick. */
         if ((param_2 <= 0x10000u) &&
-            (iVar2 = FUN_8003c288((int)(uintptr_t)param_1,
-                                   (int)param_1[0x20]),
+            (iVar2 = FUN_8003c288((intptr_t)param_1,
+                                   (intptr_t)(uintptr_t)param_1[0x20]),
              iVar2 == 0)) {
             return 0;
         }
 
         /* Explosion path: play SFX 0x2c at matrix +0x14. */
         uVar1  = FUN_8004410c();
-        matPtr = Matrix_ComposeParentChain((int)(uintptr_t)param_1);
+        matPtr = Matrix_ComposeParentChain((intptr_t)param_1);
         FUN_8004483c(uVar1, uRam000005f8, 0x2c, (uint8_t *)matPtr + 0x14);
 
         /* Snap projectile position to target pos, then clear active bit. */

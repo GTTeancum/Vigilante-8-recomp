@@ -236,29 +236,17 @@ uint32_t *Vehicle_Construct(int *bank, uint16_t kind, intptr_t template_p)
         FUN_8001b2fc(obj, (const void *)(uintptr_t)extraJoint, (uint32_t *)(uintptr_t)extra);
     }
 
-    /* Template-block copy at template+0x14..0x17 (4 bytes) and +0x17
-     * (1 byte), spliced across word boundaries into obj+0x9c..+0x9f.
-     * MIPS uses the same bit-twiddle pattern as the wheel loop. */
+    /* Template-block copy at template+0x14..0x17 into obj+0x9c..+0x9f.
+     * SLUS uses lwl/lwr on tpl+0x17/+0x14 followed by swl/swr on
+     * obj+0x9f/+0x9c, which is an exact unaligned 4-byte copy on PSX.
+     * The following sh copies tpl+0x18..+0x19 into obj+0xa0. */
     {
-        uintptr_t tp17 = (uintptr_t)(tpl + 0x17);
-        uintptr_t tp14 = (uintptr_t)(tpl + 0x14);
-        uint32_t offA = (uint32_t)(tp17 & 3);
-        uint32_t offB = (uint32_t)(tp14 & 3);
-        uint32_t lhs = (*(uint32_t *)(tp17 - offA) << (3 - offA) * 8
-                      | rng_last & 0xffffffffu >> (offA + 1) * 8);
-        uint32_t spliced = (lhs & 0xffffffffu << (4 - offB) * 8)
-                         | *(uint32_t *)(tp14 - offB) >> offB * 8;
-        uint16_t ts18 = *(uint16_t *)(tpl + 0x18);
-
-        uint32_t off1 = ((uintptr_t)obj + 0x9f) & 3;
-        uint32_t *p1  = (uint32_t *)((uintptr_t)obj + 0x9f - off1);
-        *p1 = (*p1 & (uint32_t)0xffffffffu << (off1 + 1) * 8) | (spliced >> (3 - off1) * 8);
-
-        uint32_t off2 = ((uintptr_t)(obj + 0x27)) & 3;
-        uint32_t *p2  = (uint32_t *)((uintptr_t)(obj + 0x27) - off2);
-        *p2 = (*p2 & (uint32_t)0xffffffffu >> (4 - off2) * 8) | (spliced << off2 * 8);
-
-        *(uint16_t *)(obj + 0x28) = ts18;
+        uint8_t *dst = (uint8_t *)obj;
+        dst[0x9c] = tpl[0x14];
+        dst[0x9d] = tpl[0x15];
+        dst[0x9e] = tpl[0x16];
+        dst[0x9f] = tpl[0x17];
+        *(uint16_t *)(obj + 0x28) = *(uint16_t *)(tpl + 0x18);
         *(uint16_t *)((uint8_t *)obj + 0xa2) = *(uint16_t *)(tpl + 0x1a);
     }
 

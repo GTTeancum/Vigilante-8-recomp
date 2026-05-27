@@ -29,20 +29,35 @@
  */
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 /* Implemented elsewhere */
 extern void  FUN_8001d4f0(uint32_t *parent, uint32_t *child);  /* Object_AppendChild */
-extern int   FUN_8003ff28(uint32_t *weaponDesc);               /* Weapon_SpawnFromDesc */
+extern void *FUN_8003ff28(uint32_t *weaponDesc);               /* Weapon_SpawnFromDesc */
 extern void  FUN_80044c44(void *dst, void *src, int bytes);    /* PSX_Memmove */
 extern int   FUN_8004410c(void);                               /* Audio_AllocVoice */
 extern int   FUN_8004483c(int voice, uint32_t bank, int sfxId, void *pos3d); /* Audio_PlaySfx3DPos */
 extern void  LAB_8003cb64(void);                               /* weapon projectile tick callback */
 extern uint32_t uRam000005f8;                                  /* audio bank / SFX config ptr */
 extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+extern uintptr_t Object_CallbackFromPsxSlot(const void *obj);
 
 /* FUN_8001d5a0 -- Object_FindFirstChild.
  * Canonical definition is in object_hierarchy.c. */
-extern int FUN_8001d5a0(int param_1);
+extern intptr_t FUN_8001d5a0(intptr_t param_1);
+
+static int weapon_slot_trace_enabled(void)
+{
+    static int checked = 0;
+    static int enabled = 0;
+    if (!checked) {
+        enabled = getenv("V8_TRACE_WEAPON_SLOTS") != NULL ||
+                  getenv("V8_TRACE_WEAPONS") != NULL;
+        checked = 1;
+    }
+    return enabled;
+}
 
 static inline int32_t mips_addu_i32(int32_t a, int32_t b)
 {
@@ -76,15 +91,15 @@ static inline int32_t mips_mult_lo_i32(int32_t a, int32_t b)
  * MIPS confirmed args: a0=param_1, a1=param_2 (saved as s1 in delay slot).
  * HIGH confidence.
  * ================================================================ */
-void FUN_8002c99c(int param_1, int param_2)
+void FUN_8002c99c(intptr_t param_1, int param_2)
 {
-    int      iVar1;   /* spawned weapon sub-object ptr */
+    intptr_t iVar1;   /* spawned weapon sub-object ptr */
     int      iVar3;   /* velocity component (sign-extended) */
     int      uVar2;   /* voice channel */
 
     /* Look up descriptor (32-bit PSX ptr stored at slot table) and spawn.
      * PSX: a1 = param_1 + (param_2+9)*4; a0 = lw [a1 + 0xec]; jal FUN_8003ff28 */
-    iVar1 = FUN_8003ff28((uint32_t *)(uintptr_t)
+    iVar1 = (intptr_t)FUN_8003ff28((uint32_t *)(uintptr_t)
                 *(int32_t *)(uintptr_t)(param_1 + mips_mult_lo_i32(mips_addu_i32(param_2, 9), 4) + 0xec));
 
     /* Copy parent's spawnId → sub-object. */
@@ -133,11 +148,11 @@ void FUN_8002c99c(int param_1, int param_2)
  * MIPS confirmed args: a0=s4=param_1, a1→s1=param_2 (in delay slot).
  * HIGH confidence.
  * ================================================================ */
-void FUN_8002ca94(int param_1, uint32_t param_2)
+void FUN_8002ca94(intptr_t param_1, uint32_t param_2)
 {
     uint8_t  bVar1;   /* original damageBits */
     int16_t  sVar2;   /* clamp temp */
-    int      iVar3;   /* param_1 + param_2*4 */
+    intptr_t iVar3;   /* param_1 + param_2*4 */
     uint32_t uVar4;   /* damageBits as uint */
 
     bVar1 = *(uint8_t *)(uintptr_t)(param_1 + 0xb3);
@@ -190,9 +205,9 @@ LAB_8002cb18:
  *       FUN_8002ca94(a0=iVar1, a1=iVar3) (slot index).
  * HIGH confidence.
  * ================================================================ */
-void FUN_8002cb7c(int param_1)
+void FUN_8002cb7c(intptr_t param_1)
 {
-    int iVar1;   /* owning vehicle ptr */
+    intptr_t iVar1;   /* owning vehicle ptr */
     int iVar2;   /* offset within slot table */
     int iVar3;   /* slot index */
 
@@ -234,9 +249,9 @@ void FUN_8002cb7c(int param_1)
  *   FUN_8002c99c(a0=param_1, a1=s0).
  * HIGH confidence.
  * ================================================================ */
-void FUN_8002cbe8(int param_1, int param_2)
+void FUN_8002cbe8(intptr_t param_1, intptr_t param_2)
 {
-    int      iVar1;   /* slot weapon object ptr */
+    intptr_t iVar1;   /* slot weapon object ptr */
     int      iVar2;   /* slot descriptor offset (0x24..0x2c) */
     uint32_t uVar3;   /* slot iterator / eject index */
     uint32_t uVar4;   /* damageBits */
@@ -244,6 +259,19 @@ void FUN_8002cbe8(int param_1, int param_2)
     /* Append child and clear its spawnId. */
     *(int16_t *)(uintptr_t)(param_2 + 6) = 0;
     FUN_8001d4f0((uint32_t *)(uintptr_t)param_1, (uint32_t *)(uintptr_t)param_2);
+    if (weapon_slot_trace_enabled()) {
+        fprintf(stderr,
+                "v8: weapon slot attach vehicle=%p child=%p kind=%d active=%u "
+                "cb=%p raw=0x%08x slots=(%p,%p,%p)\n",
+                (void *)(uintptr_t)param_1, (void *)(uintptr_t)param_2,
+                (int)*(int8_t *)(uintptr_t)(param_2 + 8),
+                (unsigned)*(uint8_t *)(uintptr_t)(param_1 + 0xb3),
+                (void *)Object_CallbackFromPsxSlot((const void *)(uintptr_t)param_2),
+                (unsigned)*(uint32_t *)(uintptr_t)(param_2 + 0x64),
+                (void *)(uintptr_t)*(uint32_t *)(uintptr_t)(param_1 + 0x110),
+                (void *)(uintptr_t)*(uint32_t *)(uintptr_t)(param_1 + 0x114),
+                (void *)(uintptr_t)*(uint32_t *)(uintptr_t)(param_1 + 0x118));
+    }
 
     uVar3 = 0;
     if (*(int *)(uintptr_t)(param_1 + 0x110) != 0) {
@@ -258,6 +286,14 @@ void FUN_8002cbe8(int param_1, int param_2)
             {
                 *(int8_t *)(uintptr_t)(param_2 + 8) =
                     (int8_t)mips_subu_i32(0, (int32_t)(uint32_t)*(uint8_t *)(uintptr_t)(param_2 + 8));
+                if (weapon_slot_trace_enabled()) {
+                    fprintf(stderr,
+                            "v8: weapon slot attach duplicate-toggle vehicle=%p "
+                            "child=%p new_kind=%d\n",
+                            (void *)(uintptr_t)param_1,
+                            (void *)(uintptr_t)param_2,
+                            (int)*(int8_t *)(uintptr_t)(param_2 + 8));
+                }
                 return;
             }
             iVar1  = mips_addu_i32(iVar1, 4);
@@ -281,6 +317,16 @@ void FUN_8002cbe8(int param_1, int param_2)
 
     /* Write new weapon into the chosen (or first available) slot. */
     *(int *)(uintptr_t)(param_1 + mips_mult_lo_i32(mips_addu_i32((int32_t)uVar3, 9), 4) + 0xec) = param_2;
+    if (weapon_slot_trace_enabled()) {
+        fprintf(stderr,
+                "v8: weapon slot attach stored vehicle=%p slot=%u child=%p "
+                "slots=(%p,%p,%p)\n",
+                (void *)(uintptr_t)param_1, (unsigned)uVar3,
+                (void *)(uintptr_t)param_2,
+                (void *)(uintptr_t)*(uint32_t *)(uintptr_t)(param_1 + 0x110),
+                (void *)(uintptr_t)*(uint32_t *)(uintptr_t)(param_1 + 0x114),
+                (void *)(uintptr_t)*(uint32_t *)(uintptr_t)(param_1 + 0x118));
+    }
 }
 
 /* ============================================================

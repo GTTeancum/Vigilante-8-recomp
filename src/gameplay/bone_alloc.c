@@ -35,14 +35,12 @@
  * misaligned byte copies preserved exactly.
  */
 #include <stdint.h>
-#include <stdio.h>
 
 /* Dependencies */
 extern void    *FUN_8001178c(uint32_t size, uint32_t mode);  /* Heap_AllocOrRetry */
 extern int      FUN_8001b49c(int *bank, unsigned key);        /* Bone_AllocLevel */
 extern int      FUN_8001ab98(int *bank, uint16_t slot);       /* BoneBank_FindByKey */
 extern void     FUN_8001d708(uint32_t *obj);                  /* Object_InitBoneMatrix */
-extern int      g_v8_vehicle_spawn_probe_trace;
 
 /* Global: PSX gp-relative, render-slot sequence counter */
 extern uint32_t uRam000006cc;
@@ -128,14 +126,6 @@ int FUN_8001ac44(int *param_1, uint16_t param_2,
 
     /* Bone entry: base = *param_1, stride = 0x1c, index = param_2 */
     psVar4 = (int16_t *)((uintptr_t)*(uint32_t *)param_1 + (uint32_t)param_2 * 0x1c + 0x1c);
-    if (g_v8_vehicle_spawn_probe_trace) {
-        fprintf(stderr,
-                "v8: bone_alloc trace bank=%p slot=%u size=0x%x flags=0x%x "
-                "e0=%d sib=%d child=%d\n",
-                (void *)param_1, (unsigned)param_2, (unsigned)param_3,
-                (unsigned)param_4, (int)psVar4[0], (int)psVar4[0xc],
-                (int)psVar4[0xd]);
-    }
 
     if ((*psVar4 < 0) && (*psVar4 != -1 || ((param_4 & 4) != 0))) {
         /* Bone is "skipped" */
@@ -162,19 +152,13 @@ int FUN_8001ac44(int *param_1, uint16_t param_2,
             *(uint32_t *)((uint8_t *)iVar1 + 0x60) = uVar2;
         }
 
-        *(uint32_t *)((uint8_t *)iVar1 + 0x46) = uRam000006cc;
+        *(uint16_t *)((uint8_t *)iVar1 + 0x46) = (uint16_t)uRam000006cc;
 
         if (((param_4 & 1) == 0) || (psVar4[0xc] == -1)) {
             *(uint32_t *)((uint8_t *)iVar1 + 0x34) = 0;
         } else {
             iVar3 = FUN_8001ac44(param_1, (uint16_t)psVar4[0xc],
                                   0x80u, param_4);
-            if (g_v8_vehicle_spawn_probe_trace && iVar3 == 0) {
-                fprintf(stderr,
-                        "v8: bone_alloc trace null sibling parent_slot=%u "
-                        "child_slot=%d flags=0x%x\n",
-                        (unsigned)param_2, (int)psVar4[0xc], (unsigned)param_4);
-            }
             *(int *)((uint8_t *)iVar1 + 0x34) = iVar3;
             if (iVar3 != 0)
                 *(int *)((uint8_t *)iVar3 + 0x3c) = iVar1;
@@ -183,12 +167,6 @@ int FUN_8001ac44(int *param_1, uint16_t param_2,
         if (((param_4 & 2) == 0) && (psVar4[0xd] != -1)) {
             iVar3 = FUN_8001ac44(param_1, (uint16_t)psVar4[0xd],
                                   0x80u, param_4 | 1u);
-            if (g_v8_vehicle_spawn_probe_trace && iVar3 == 0) {
-                fprintf(stderr,
-                        "v8: bone_alloc trace null child parent_slot=%u "
-                        "child_slot=%d flags=0x%x\n",
-                        (unsigned)param_2, (int)psVar4[0xd], (unsigned)(param_4 | 1u));
-            }
             *(int *)((uint8_t *)iVar1 + 0x38) = iVar3;
             if (iVar3 != 0)
                 *(int *)((uint8_t *)iVar3 + 0x3c) = iVar1;

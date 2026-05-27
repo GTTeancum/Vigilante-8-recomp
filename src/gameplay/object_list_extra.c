@@ -59,7 +59,8 @@ void ObjList_TickListWith3Args(int **listHead, uint32_t arg2, uint32_t arg3)
         typedef int (*TickFn)(int, uint32_t, uint32_t);
         uintptr_t payload = node->payload;
         TickFn fn = (TickFn)Object_CallbackFromPsxSlot((const void *)payload);
-        if (fn != NULL) fn((int)payload, arg2, arg3);
+        if (fn != NULL)
+            fn((int)payload, arg2, arg3);
     }
 }
 

@@ -31,6 +31,12 @@ extern uint32_t _DAT_80065b08;
 extern uint32_t _DAT_80065b10;
 extern uint32_t _DAT_80065af8;
 
+static uint32_t rd32le_raw(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
 void Terrain_LoadTerrHead(void *payload, int payloadSize)
 {
     uint8_t *cursor = (uint8_t *)payload;
@@ -53,24 +59,19 @@ void Terrain_LoadTerrHead(void *payload, int payloadSize)
 
 /* HIGH-MED: hidden LOAD 0x80105318, direct 28-byte COLS color/light copy.
  * The source also derives a few small color deltas for renderer draw-env
- * records; those renderer-side writes are intentionally omitted here.
+ * records; those renderer-side writes are intentionally omitted here.  Keep
+ * the raw byte order: LOAD uses lw/sw, then later code reads the individual
+ * bytes back with lbu.
  */
 void Terrain_LoadCols(const uint8_t *payload)
 {
-    DAT_80065b58 = (uint32_t)payload[0] << 24 | (uint32_t)payload[1] << 16 |
-                   (uint32_t)payload[2] << 8 | payload[3];
-    _DAT_80065b00 = (uint32_t)payload[4] << 24 | (uint32_t)payload[5] << 16 |
-                    (uint32_t)payload[6] << 8 | payload[7];
-    DAT_80065b2c = (uint32_t)payload[8] << 24 | (uint32_t)payload[9] << 16 |
-                   (uint32_t)payload[10] << 8 | payload[11];
-    DAT_80065b54 = (uint32_t)payload[12] << 24 | (uint32_t)payload[13] << 16 |
-                   (uint32_t)payload[14] << 8 | payload[15];
-    _DAT_80065b08 = (uint32_t)payload[16] << 24 | (uint32_t)payload[17] << 16 |
-                    (uint32_t)payload[18] << 8 | payload[19];
-    _DAT_80065b10 = (uint32_t)payload[20] << 24 | (uint32_t)payload[21] << 16 |
-                    (uint32_t)payload[22] << 8 | payload[23];
-    _DAT_80065af8 = (uint32_t)payload[24] << 24 | (uint32_t)payload[25] << 16 |
-                    (uint32_t)payload[26] << 8 | payload[27];
+    DAT_80065b58 = rd32le_raw(payload + 0);
+    _DAT_80065b00 = rd32le_raw(payload + 4);
+    DAT_80065b2c = rd32le_raw(payload + 8);
+    DAT_80065b54 = rd32le_raw(payload + 12);
+    _DAT_80065b08 = rd32le_raw(payload + 16);
+    _DAT_80065b10 = rd32le_raw(payload + 20);
+    _DAT_80065af8 = rd32le_raw(payload + 24);
 }
 
 void Audio_LoadTrackTable(void *stream, int payloadSize)

@@ -52,7 +52,7 @@ extern void FUN_8001d4f0(uint32_t *parent, uint32_t *child);
 extern void FUN_800205f8(int obj);
 
 /* DAT_800737d8: world bank handle (int32 value used as bone bank pointer). */
-extern uint32_t DAT_800737d8;
+extern uintptr_t DAT_800737d8;
 
 /* ------------------------------------------------------------------ */
 
@@ -135,11 +135,10 @@ tick:
      * ---------------------------------------------------------------- */
 spawn:
     {
-        int bank = (int)(uintptr_t)(uint32_t)DAT_800737d8;
         int counter = 0;
 
         do {
-            int s0 = FUN_8001ac44((int *)(uintptr_t)(uint32_t)bank, 21u, 148, 8);
+            int s0 = FUN_8001ac44((int *)(uintptr_t)DAT_800737d8, 21u, 148, 8);
             uint8_t *p = (uint8_t *)(uintptr_t)(uint32_t)s0;
             counter = mips_addu_i32(counter, 1);
 

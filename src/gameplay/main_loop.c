@@ -48,6 +48,7 @@
  * but the control flow + state transitions are 1:1 with the original.
  */
 #include <stdint.h>
+#include <stdlib.h>
 
 /* PSX libgs */
 typedef struct { int16_t x, y, w, h; } RECT;
@@ -76,6 +77,7 @@ extern void     Audio_StreamReset(void);                /* FUN_80029dec */
 extern void     FUN_800227a4(uint32_t mask);
 extern void     Host_VehicleInit(void);
 extern void     Host_AIVehicleInit(void);
+extern int      Host_WeaponProbe(void);
 extern uint32_t Sound_LoadSND(const char *path);        /* FUN_80044360 */
 extern uint32_t Font_LoadFNT(const char *path);         /* FUN_80015f80 */
 extern void     Font_PrepareGlyphs(int idx);            /* FUN_800165cc */
@@ -136,7 +138,7 @@ extern int32_t  iRam0000000c;
 extern int32_t  iRam00000618, iRam00000624, iRam00000628;
 extern int32_t  iRam000005ac, iRam0000060c, iRamffffacb0;
 extern uintptr_t iRam00000608;
-extern uint8_t  uRam0000000c, uRam000006cc, uRam000006cf, uRam00000014;
+extern uint32_t uRam0000000c, uRam000006cc, uRam000006cf, uRam00000014;
 extern uint8_t  cRam00000600, uRam00000680, uRam0000062c, uRam00000630;
 extern uint32_t uRam000005f8;
 extern uint16_t uRam000006f0, uRam000007dc, uRam00000620;
@@ -145,6 +147,7 @@ extern uint8_t  DAT_80065674[];
 extern uint8_t  UNK_8006567a;
 extern void    *DAT_8006eed8, *DAT_8006eee0;
 extern uint32_t DAT_8006eef0, DAT_8006eff8, DAT_8006f100;
+extern int      g_v8_weapon_probe;
 
 void V8_MainLoop(void)
 {
@@ -233,6 +236,8 @@ void V8_MainLoop(void)
         Level_LoadByName(shellPath, (char *)banner, bannerKind);
         Host_VehicleInit();
         Host_AIVehicleInit();
+        if (g_v8_weapon_probe)
+            exit(Host_WeaponProbe());
 
         Shell_PostLoad();
         uRam0000000c = 0;
@@ -269,7 +274,7 @@ void V8_MainLoop(void)
                 uRam0000000c++;
                 uRam000006cc = (uint8_t)uRam0000000c;
                 Physics_Step(t == (uint32_t)ticks - 1 ? (uint32_t)ticks : 0);
-                Physics_PostStep((uint32_t)iRam0000000c);
+                Physics_PostStep(uRam0000000c);
                 Physics_FlushVoxels();
                 if ((DAT_80065c30 & 0x800000) != 0) p1View = 3 - p1View;
                 padOr  |= uRam0000062c;

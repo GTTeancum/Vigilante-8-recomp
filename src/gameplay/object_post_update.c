@@ -35,6 +35,7 @@ extern void Object_ApplyAngularVelocity(uint32_t *m, int pitchRate, int yawRate,
 extern int  Terrain_HeightAndProbe(intptr_t self, int *posXyz, void *normalOut, uintptr_t *materialOut);    /* FUN_8001d748 */
 extern void *FUN_8001f5a0(intptr_t self, intptr_t query);   /* SAT_SelectAxis */
 extern void  FUN_800176f8(intptr_t obj, int32_t *vec, int32_t *pos); /* Object_ApplyImpulseAtPoint */
+extern uintptr_t Collision_QueryHostWord(const void *query, uint32_t index);
 extern void  FUN_80012068(int idx, int a, int b, int c);    /* HudFlash_SetEntry */
 extern void  FUN_800205f8(int obj);                         /* Damage_Apply */
 
@@ -118,6 +119,14 @@ void ObjList_FastInsert(uintptr_t listSentinel, uintptr_t payload)
     sentinel->prev = node;
 }
 
+/* HIGH: PSX symbol alias for ObjList_FastInsert.  Several decompiled level
+ * callbacks still call the original address directly, so this must not be a
+ * platform stub. */
+void FUN_8001fe50(uintptr_t listSentinel, uintptr_t payload)
+{
+    ObjList_FastInsert(listSentinel, payload);
+}
+
 void Object_RegisterPostUpdate(uint32_t *obj)
 {
     obj[0] |= 0x80u;
@@ -162,7 +171,7 @@ uint32_t Projectile_GravityTick(uint8_t *obj, int mode, intptr_t arg)
     if (mode != 3) return 0;
 
     uint32_t *query = (uint32_t *)(uintptr_t)arg;
-    intptr_t hitObj = (intptr_t)query[0];
+    intptr_t hitObj = (intptr_t)Collision_QueryHostWord(query, 0);
     if (*(int8_t *)(uintptr_t)(hitObj + 4) != 2) {
         return 0;
     }
@@ -289,7 +298,10 @@ uint32_t FUN_8002036c(uint32_t *param_1)
             FUN_8003e730(param_1);
         }
         FUN_800202f4(param_1);
-        uVar2 = 0;  /* FUN_800202f4 is void; return propagates 0 via $v0 */
+        /* Source return is the non-zero node pointer left in v0 by the final
+         * FUN_8001fe50 insert.  Host list insertion is void, but callers such
+         * as LOAD.DLL case 2/3/4 only need the source truth value. */
+        uVar2 = 1;
     }
     return uVar2;
 }

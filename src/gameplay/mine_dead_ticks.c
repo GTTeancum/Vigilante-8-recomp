@@ -68,13 +68,14 @@ extern void FUN_8004483c(int voice, uint32_t bank, int pitch, const void *pos);
 extern int FUN_8003fd24(const int32_t *xyz, int kind);
 
 /* FUN_80020620 -- ColEvent_Dispatch. */
-extern void FUN_80020620(uint32_t obj, uint32_t event);
+extern void FUN_80020620(intptr_t obj, uint32_t event);
 
 /* FUN_800205f8 -- Object_RetireDeferred. */
-extern void FUN_800205f8(int obj);
+extern void FUN_800205f8(intptr_t obj);
 
 /* FUN_80031454 -- WeaponHit_Apply. */
-extern int FUN_80031454(int obj, int *collider, uint16_t radius, int strength);
+extern int FUN_80031454(intptr_t obj, intptr_t *collider, uint16_t radius, int strength);
+extern uintptr_t Collision_QueryHostWord(const void *query, uint32_t index);
 
 /* FUN_800439b8 -- RotMatrix_ApplyAngVel: update rotation matrix with angular vel. */
 extern void FUN_800439b8(int *matrix, int ax, int ay, int az);
@@ -190,9 +191,9 @@ static int32_t clamp256(int32_t v)
 /* LAB_800321C0 -- MineDead_Tick (normal mine variant)               */
 /* ================================================================== */
 
-int LAB_800321C0(int obj, int event, int param3)
+intptr_t LAB_800321C0(intptr_t obj, int event, intptr_t param3)
 {
-    uint8_t *s2 = (uint8_t *)(uintptr_t)(uint32_t)obj;
+    uint8_t *s2 = (uint8_t *)(uintptr_t)obj;
 
     /* ---- event dispatch ---- */
     if (event == 3) goto event3;
@@ -370,7 +371,7 @@ event3: {
     }
 
     /* Standard weapon hit. */
-    return FUN_80031454(obj, (int *)(uintptr_t)(uint32_t)param3, 26u, 55);
+    return FUN_80031454(obj, (intptr_t *)(uintptr_t)param3, 26u, 55);
 }
 
 event4: {
@@ -386,7 +387,7 @@ event4: {
 event9: {
     /* ----- Target unlock ----- */
     /* If obj[0x84] == param3, set obj[0x84] = obj[0x80]. */
-    if (*(int32_t *)(s2 + 0x84) == param3) {
+    if ((intptr_t)*(int32_t *)(s2 + 0x84) == param3) {
         *(int32_t *)(s2 + 0x84) = *(int32_t *)(s2 + 0x80);
     }
     /* fall through */
@@ -401,9 +402,9 @@ return0:
 /* LAB_8003277C -- MineDead_Tick (large mine / area-proxy variant)   */
 /* ================================================================== */
 
-int LAB_8003277C(int obj, int event, int param3)
+intptr_t LAB_8003277C(intptr_t obj, int event, intptr_t param3)
 {
-    uint8_t *s1 = (uint8_t *)(uintptr_t)(uint32_t)obj;
+    uint8_t *s1 = (uint8_t *)(uintptr_t)obj;
 
     /* ---- event dispatch ---- */
     if (event == 3) goto large_event3;
@@ -472,7 +473,7 @@ large_event0: {
         int32_t *spos = (int32_t *)(s1 + 0x48);  /* s0 reassigned in delay slot */
         FUN_8004483c(voice, DAT_800658FC, 55, spos);
         FUN_8003fd24(spos, 12);
-        FUN_80020620((uint32_t)obj, 1u);
+        FUN_80020620(obj, 1u);
         return -1;
     }
 
@@ -529,15 +530,14 @@ large_event0: {
 
 large_event3: {
     /* ----- Collision ----- */
-    uint8_t *collider = (uint8_t *)(uintptr_t)(uint32_t)
-                        (*(int32_t *)(uintptr_t)(uint32_t)param3);
+    uint8_t *collider = (uint8_t *)Collision_QueryHostWord((void *)(uintptr_t)param3, 0);
     uint8_t collider_type = collider[4];
 
     /* Type 7 (mine or proxy): ignore to prevent self-collision. */
     if (collider_type == 7u)
         goto large_return0;
 
-    return FUN_80031454(obj, (int *)(uintptr_t)(uint32_t)param3, 26u, 55);
+    return FUN_80031454(obj, (intptr_t *)(uintptr_t)param3, 26u, 55);
 }
 
 large_event4: {

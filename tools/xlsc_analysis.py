@@ -295,7 +295,7 @@ def parse_bin_mesh(data, bin_body, bin_size):
     if bin_size < 32:
         return triangles
 
-    # PSX object header guess:
+    # PSX object header unresolved field map:
     # offset 0: flags / id
     # offset 4: vertex count (u16)
     # offset 6: normal count (u16)  -- often same as vertex count

@@ -129,6 +129,7 @@ extern uint32_t uRam000005d4;
 /* uRam0000062c / uRam00000630: button-down / button-up edge masks. */
 extern uint32_t uRam0000062c;
 extern uint32_t uRam00000630;
+extern uint32_t Host_PadToPhysicsFlags(uint32_t pad, uint32_t prevPad);
 extern uint32_t Host_PadShimTick(void);
 
 /* FUN_80045088: Heap_Free (frees a buffer by handle). */
@@ -398,15 +399,7 @@ void FUN_800120d4(void)
     uRam00000630 = 0;
 
     static uint32_t prevHostPad = 0;
-    uint32_t pressedHostPad = hostPad & ~prevHostPad;
-    uint32_t physicsFlags = 0;
-    if (hostPad & 0x10000000u) physicsFlags |= 0x00000100u;
-    if (hostPad & 0x40000000u) physicsFlags |= 0x00000200u;
-    if (pressedHostPad & 0x10000000u) physicsFlags |= 0x01000000u;
-    if (pressedHostPad & 0x40000000u) physicsFlags |= 0x02000000u;
-    if (hostPad & 0x80000000u) physicsFlags |= 0x00001400u;
-    if (hostPad & 0x20000000u) physicsFlags |= 0x00000c00u;
-    if (hostPad & 0x08000000u) physicsFlags |= 0x00040000u;
+    uint32_t physicsFlags = Host_PadToPhysicsFlags(hostPad, prevHostPad);
     prevHostPad = hostPad;
 
     *(int16_t  *)(DAT_80065c28 + 0x00) = 2;

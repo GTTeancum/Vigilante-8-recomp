@@ -35,6 +35,8 @@
  * HIGH confidence: line-by-line MIPS port of both bodies.
  */
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 /* V8_RandNext (FUN_80017160) -- 16-bit LCG/xorshift. */
 extern uint32_t V8_RandNext(void);
@@ -42,6 +44,17 @@ extern uint32_t V8_RandNext(void);
 /* gp+0x16: difficulty byte / countdown (0, 1, or 2; used in lock rate). */
 extern int8_t cRam00000016;
 extern uintptr_t Object_CallbackFromPsxSlot(const void *obj);
+
+static int weapon_trace_enabled(void)
+{
+    static int checked = 0;
+    static int enabled = 0;
+    if (!checked) {
+        enabled = getenv("V8_TRACE_WEAPONS") != NULL;
+        checked = 1;
+    }
+    return enabled;
+}
 
 static inline int32_t mips_addu_i32(int32_t a, int32_t b)
 {
@@ -77,8 +90,16 @@ void FUN_8002ce68(uint32_t *self, int activate)
     if (!node)
         return;
 
-    typedef int (*TickFn)(uint32_t *, int, uint32_t *);
+    typedef int (*TickFn)(intptr_t, int, intptr_t);
     TickFn cb = (TickFn)Object_CallbackFromPsxSlot(node);
+    if (weapon_trace_enabled()) {
+        fprintf(stderr,
+                "v8: attached update vehicle=%p active=%d slot=%u node=%p hp=%d status=%d cb=%p flags=0x%x\n",
+                (void *)self, activate, (unsigned)db, (void *)node,
+                (int)*(int16_t *)((uint8_t *)node + 0x0c),
+                (int)*(int16_t *)((uint8_t *)node + 0x06),
+                (void *)cb, (unsigned)node[0]);
+    }
 
     /* Deactivate conditions: flag==0, OR node health (i16@+0xc)==0,
      * OR node status (i16@+0x06) already non-zero (already locked). */
@@ -86,16 +107,29 @@ void FUN_8002ce68(uint32_t *self, int activate)
         || *(int16_t *)((uint8_t *)node + 0x0c) == 0
         || *(int16_t *)((uint8_t *)node + 0x06) != 0) {
         /* Deactivate: dispatch mode 0 */
-        if (cb)
-            cb(node, 0, self);
+        if (cb) {
+            int ret = cb((intptr_t)node, 0, (intptr_t)self);
+            if (weapon_trace_enabled()) {
+                fprintf(stderr,
+                        "v8: attached callback ret vehicle=%p node=%p event=0 ret=%d status=%d\n",
+                        (void *)self, (void *)node, ret,
+                        (int)*(int16_t *)((uint8_t *)node + 0x06));
+            }
+        }
         return;
     }
 
     /* Activate: dispatch mode 0xB (lock-begin), store return in node->status */
-    if (cb)
-        *(int16_t *)((uint8_t *)node + 0x06) =
-            (int16_t)cb(node, 0xb, self);
-    else
+    if (cb) {
+        int ret = cb((intptr_t)node, 0xb, (intptr_t)self);
+        *(int16_t *)((uint8_t *)node + 0x06) = (int16_t)ret;
+        if (weapon_trace_enabled()) {
+            fprintf(stderr,
+                    "v8: attached callback ret vehicle=%p node=%p event=11 ret=%d status=%d\n",
+                    (void *)self, (void *)node, ret,
+                    (int)*(int16_t *)((uint8_t *)node + 0x06));
+        }
+    } else
         *(int16_t *)((uint8_t *)node + 0x06) = 0;
 
     /* Increment lock progress only while player is alive and node is ready */

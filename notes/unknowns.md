@@ -52,7 +52,8 @@ is the residual set, separated by what's *deliberately* out of scope
 It allocates `0x124` bytes through `FUN_8001ac44`, installs the chassis
 tick at object `+0x64`, creates four wheel children, and clears the
 vehicle child/weapon pointer block at `+0xec..+0x118`. Earlier notes
-that treated the vehicle size as unknown or guessed `0x200` are stale;
+that treated the vehicle size as unknown or used the old `0x200` placeholder
+are stale;
 `0x200` remains only the temporary host-shim allocation size.
 
 2026-05-24 audit note: the cleaned constructor previously zeroed the
@@ -226,7 +227,7 @@ reset) BOTH write:
    `*(u16*)(obj + 0xa4) = 0`        // angYPreBake = 0
    `*(u16*)(obj + 0xa6) = 0x3c`     // inputMul = 60
 
-This is the engine's ACTUAL value for `inputMul` (60), not a guess.
+This is the engine's ACTUAL value for `inputMul` (60), recovered from source initializers.
 
 **Artifact extracted:**
 

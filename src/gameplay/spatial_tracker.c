@@ -24,7 +24,8 @@ void FUN_8003e598(uint32_t *obj, void *slot)
     if (node == 0)
         return;
 
-    while (*node != 0) {
+    int guard = 0;
+    while (*node != 0 && guard++ < 256) {
         if (*node == 1) {
             int *box = (int *)((uint8_t *)node + 4);
 

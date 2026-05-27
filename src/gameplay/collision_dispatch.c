@@ -35,15 +35,17 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 extern void (*pcRam00000730)(uint32_t obj, int eventId, uint32_t param2);
 extern void  Damage_Apply(void *obj);        /* FUN_800205f8 */
 extern void  ObjList_ApplyDestroy(int **listSentinel); /* FUN_800206f0 */
 extern uint32_t FUN_8001edb4(intptr_t param_1, uint32_t *param_2); /* Object_TestCollision */
-extern uint32_t TerrainMesh_CollidePropObjects(intptr_t obj);
 
 extern int32_t   *piRam00000714;  /* active-object list head node */
 extern uintptr_t  uRam000006fc;   /* world collision kd-tree root */
+extern void      *puRam000007d0;  /* player vehicle object */
 
 typedef struct CollisionHostNode {
     struct CollisionHostNode *next;
@@ -60,6 +62,18 @@ static CollisionHostNode *host_list_first(void *listHead)
     return sentinel->next;
 }
 
+static int source_leaf_list(int *node)
+{
+    uintptr_t head;
+    uintptr_t tail;
+
+    if (node == NULL || node[0] != 0)
+        return 0;
+    head = (uintptr_t)(uint32_t)node[1];
+    tail = (uintptr_t)(uint32_t)node[3];
+    return (uintptr_t)(uint32_t)node[2] == 0 && head != 0 && tail != 0;
+}
+
 static inline int32_t mips_addu_i32(int32_t a, int32_t b)
 {
     return (int32_t)((uint32_t)a + (uint32_t)b);
@@ -68,6 +82,52 @@ static inline int32_t mips_addu_i32(int32_t a, int32_t b)
 static inline int32_t mips_subu_i32(int32_t a, int32_t b)
 {
     return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static int collision_trace_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *env = getenv("V8_TRACE_COLLISION");
+        cached = (env != NULL && env[0] != 0 && env[0] != '0');
+    }
+    return cached;
+}
+
+static int s_trace_frame;
+static int s_trace_active;
+static int s_trace_static_queries;
+static int s_trace_leaf_tests;
+static int s_trace_leaf_hits;
+static int s_trace_pair_tests;
+static int s_trace_pair_hits;
+static int s_trace_player_static_prints;
+
+static void trace_player_static_candidate(intptr_t self, uint32_t *obj)
+{
+    int32_t dx, dz, reach;
+
+    if (!collision_trace_enabled())
+        return;
+    if ((void *)self != puRam000007d0)
+        return;
+    if (obj == NULL || s_trace_player_static_prints >= 24)
+        return;
+
+    dx = mips_subu_i32(*(int32_t *)(uintptr_t)(self + 0x24), (int32_t)obj[9]);
+    dz = mips_subu_i32(*(int32_t *)(uintptr_t)(self + 0x2c), (int32_t)obj[0x0b]);
+    reach = mips_addu_i32(*(int32_t *)(uintptr_t)(self + 0x54), (int32_t)obj[0x15]);
+    fprintf(stderr,
+            "v8: collide player_static frame=%d obj=%p flags=0x%x kind=%u layer=%d player=(0x%x,0x%x,0x%x) obj=(0x%x,0x%x,0x%x) dx=%d dz=%d reach=0x%x shape=0x%x child=0x%x\n",
+            s_trace_frame, (void *)obj, (unsigned)obj[0],
+            (unsigned)*(uint8_t *)((uint8_t *)obj + 0x04),
+            (int)*(int16_t *)((uint8_t *)obj + 0x06),
+            (unsigned)*(uint32_t *)(uintptr_t)(self + 0x24),
+            (unsigned)*(uint32_t *)(uintptr_t)(self + 0x28),
+            (unsigned)*(uint32_t *)(uintptr_t)(self + 0x2c),
+            (unsigned)obj[9], (unsigned)obj[10], (unsigned)obj[0x0b],
+            dx, dz, (unsigned)reach, (unsigned)obj[0x17], (unsigned)obj[0x0e]);
+    s_trace_player_static_prints++;
 }
 
 /* ================================================================
@@ -174,28 +234,37 @@ uint32_t FUN_80020f14(int *param_1, intptr_t param_2)
         uVar3 = 2;
         if (iVar4 == 0) {
             /* Leaf: walk the object linked list */
-            CollisionHostNode *hnode = host_list_first(param_1 + 1);
-            if (hnode != NULL) {
-                for (; hnode != NULL; hnode = hnode->next) {
-                    uint32_t *obj = (uint32_t *)hnode->payload;
-                    if (obj == NULL)
-                        continue;
-                    if (((*obj & 0x20) == 0) &&
+            if (source_leaf_list(param_1)) {
+                piVar1 = (int *)(uintptr_t)(uint32_t)param_1[1];
+                for (; piVar1 != NULL && *piVar1 != 0;
+                     piVar1 = (int *)(uintptr_t)(uint32_t)*piVar1) {
+                    uint32_t *obj = (uint32_t *)(uintptr_t)(uint32_t)piVar1[2];
+                    trace_player_static_candidate(param_2, obj);
+                    if (collision_trace_enabled())
+                        s_trace_leaf_tests++;
+                    if (obj != NULL &&
+                        ((*obj & 0x20) == 0) &&
                         (iVar4 = (int)FUN_8001edb4(param_2, obj), iVar4 != 0)) {
+                        if (collision_trace_enabled())
+                            s_trace_leaf_hits++;
                         return 0;
                     }
                 }
             } else {
-                piVar1 = (int *)(uintptr_t)param_1[1];
-                for (piVar2 = (int *)(uintptr_t)*(int *)(uintptr_t)param_1[1];
-                     piVar2 != NULL;
-                     piVar2 = (int *)(uintptr_t)*piVar2) {
-                    if (((*(uint32_t *)(uintptr_t)piVar1[2] & 0x20) == 0) &&
-                        (iVar4 = (int)FUN_8001edb4(param_2, (uint32_t *)(uintptr_t)piVar1[2]),
-                         iVar4 != 0)) {
+                CollisionHostNode *hnode = host_list_first(param_1 + 1);
+                for (; hnode != NULL; hnode = hnode->next) {
+                    uint32_t *obj = (uint32_t *)hnode->payload;
+                    if (obj == NULL)
+                        continue;
+                    trace_player_static_candidate(param_2, obj);
+                    if (collision_trace_enabled())
+                        s_trace_leaf_tests++;
+                    if (((*obj & 0x20) == 0) &&
+                        (iVar4 = (int)FUN_8001edb4(param_2, obj), iVar4 != 0)) {
+                        if (collision_trace_enabled())
+                            s_trace_leaf_hits++;
                         return 0;
                     }
-                    piVar1 = piVar2;
                 }
             }
             uVar3 = 1;
@@ -235,6 +304,18 @@ void FUN_8002169c(void)
     int iVar5;
     uint8_t *listHead = (uint8_t *)piRam00000714;
     CollisionHostNode *outer;
+    int trace = collision_trace_enabled();
+
+    if (trace) {
+        s_trace_frame++;
+        s_trace_active = 0;
+        s_trace_static_queries = 0;
+        s_trace_leaf_tests = 0;
+        s_trace_leaf_hits = 0;
+        s_trace_pair_tests = 0;
+        s_trace_pair_hits = 0;
+        s_trace_player_static_prints = 0;
+    }
 
     if (listHead == NULL) {
         extern uint8_t DAT_80065a18[];
@@ -248,6 +329,8 @@ void FUN_8002169c(void)
             continue;
         if ((*puVar6 & 0x20) != 0)
             continue;
+        if (trace)
+            s_trace_active++;
 
         puVar6[0x1e] = 0;
         puVar6[0x1d] = 0;
@@ -258,15 +341,24 @@ void FUN_8002169c(void)
             if (((*other & 0x20) == 0) &&
                 ((*other & *puVar6 & 0x200) == 0) &&
                 (iVar5 = (int)FUN_8001edb4((intptr_t)puVar6, other), iVar5 != 0)) {
+                if (trace)
+                    s_trace_pair_hits++;
                 return;
             }
+            if (trace && (*other & 0x20) == 0)
+                s_trace_pair_tests++;
         }
         if (((*puVar6 & 0x100) == 0) && uRam000006fc != 0) {
+            if (trace)
+                s_trace_static_queries++;
             FUN_80020f14((int *)(uintptr_t)uRam000006fc, (intptr_t)puVar6);
         }
-        if ((*puVar6 & 0x100) == 0) {
-            TerrainMesh_CollidePropObjects((intptr_t)puVar6);
-        }
+    }
+    if (trace && (s_trace_frame <= 180 || (s_trace_frame % 300) == 0)) {
+        fprintf(stderr,
+                "v8: collide frame=%d active=%d pair_tests=%d pair_hits=%d static_queries=%d leaf_tests=%d leaf_hits=%d\n",
+                s_trace_frame, s_trace_active, s_trace_pair_tests, s_trace_pair_hits,
+                s_trace_static_queries, s_trace_leaf_tests, s_trace_leaf_hits);
     }
 }
 

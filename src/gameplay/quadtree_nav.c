@@ -61,6 +61,7 @@ extern uint32_t FUN_80015010(void);
 
 /* Heap_AllocOrRetry (FUN_800116f4) -- allocate or wait + retry. */
 extern int FUN_800116f4(int size);
+extern uint32_t Heap_Generation(void);
 
 /* SquareRoot0 -- integer square root, from libgte. */
 extern long SquareRoot0(long n);
@@ -68,8 +69,13 @@ extern long SquareRoot0(long n);
 static uint32_t *host_astar_node_pool(void)
 {
     static uint32_t *pool = NULL;
-    if (pool == NULL)
+    static uint32_t pool_generation = 0;
+    uint32_t heap_generation = Heap_Generation();
+
+    if (pool == NULL || pool_generation != heap_generation) {
         pool = (uint32_t *)(uintptr_t)FUN_800116f4(0x400 * 7 * 4);
+        pool_generation = heap_generation;
+    }
     return pool != NULL ? pool : DAT_800738a0;
 }
 
@@ -546,6 +552,7 @@ int FUN_80024d54(intptr_t param_1, intptr_t param_2, uint32_t param_3, int param
             if ((uVar1 & 0x4000) != 0) goto code_r0x80025060;
 
             /* New node: mark as open, compute heuristic, insert into open list. */
+    code_new_node:
             *(uint16_t *)(uPtr + 2) = uVar1 | 0x4000;
             iVar15 = FUN_80024cc0((int)(uintptr_t)puVar3,
                                    (int16_t)*(uint16_t *)((uint8_t *)puVar6 + 0xc - 4),
@@ -571,12 +578,22 @@ int FUN_80024d54(intptr_t param_1, intptr_t param_2, uint32_t param_3, int param
         if ((uVar1 & 0x2000) != 0) {
             puVar13 = puVar16;
         }
+        if (puVar13 == NULL) {
+            *(uint16_t *)(uPtr + 2) = uVar1 & 0x9fff;
+            uVar1 &= 0x9fff;
+            goto code_new_node;
+        }
         /* Find puVar3 in the appropriate list (open or closed). */
         if ((puVar3[2] != puVar13[2]) || (*((uint8_t *)puVar3 + 0x10) != *((uint8_t *)puVar13 + 0x10))) {
             do {
                 do {
                     puVar14  = puVar13;
                     puVar13  = (uint32_t *)(uintptr_t)*puVar14;
+                    if (puVar13 == NULL) {
+                        *(uint16_t *)(uPtr + 2) = uVar1 & 0x9fff;
+                        uVar1 &= 0x9fff;
+                        goto code_new_node;
+                    }
                 } while (puVar3[2] != puVar13[2]);
             } while (*((uint8_t *)puVar3 + 0x10) != *((uint8_t *)puVar13 + 0x10));
         }

@@ -12,7 +12,11 @@
  *   0x80000000 = Left    (steer left)
  *   0x20000000 = Right   (steer right)
  *   0x00000100 = Start
- *   0x08000000 = X / fire
+ *   0x08000000 = X / machine guns
+ *   0x04000000 = Circle / attached weapon fire
+ *   0x00100000 = L1 / previous weapon
+ *   0x00200000 = R1 / next weapon
+ *   0x00400000 = Triangle / next target
  *   0x00000040 = Select / advance-load-screen
  *
  * Replay format (--replay <path>):
@@ -48,9 +52,8 @@ extern int      Screenshot_Save(const char *path);
 uint32_t Host_PadShimTick(void);
 extern void FUN_800120d4(void);
 
-static void update_physics_input_lut(uint32_t pad)
+uint32_t Host_PadToPhysicsFlags(uint32_t pad, uint32_t prevPad)
 {
-    static uint32_t prevPad = 0;
     uint32_t pressed = pad & ~prevPad;
     uint32_t physicsFlags = 0;
 
@@ -60,7 +63,24 @@ static void update_physics_input_lut(uint32_t pad)
     if (pressed & 0x40000000u) physicsFlags |= 0x02000000u;
     if (pad & 0x80000000u) physicsFlags |= 0x00001400u;
     if (pad & 0x20000000u) physicsFlags |= 0x00000c00u;
-    if (pad & 0x08000000u) physicsFlags |= 0x00040000u;
+    if (pad & 0x08000000u) physicsFlags |= 0x00040002u;
+    if (pad & 0x04000000u) physicsFlags |= 0x00040004u;
+
+    /* Source vehicle_event.c consumes these as one-frame events:
+     * 0x80000/0x100000 cycle the active weapon slot, 0x200000 cycles
+     * the lock-on target.  The rewritten controls layer only maps keys
+     * to source event bits; the weapon/target behavior stays in gameplay. */
+    if (pressed & 0x00200000u) physicsFlags |= 0x00080000u;
+    if (pressed & 0x00100000u) physicsFlags |= 0x00100000u;
+    if (pressed & 0x00400000u) physicsFlags |= 0x00200000u;
+
+    return physicsFlags;
+}
+
+static void update_physics_input_lut(uint32_t pad)
+{
+    static uint32_t prevPad = 0;
+    uint32_t physicsFlags = Host_PadToPhysicsFlags(pad, prevPad);
     prevPad = pad;
 
     *(int16_t  *)(DAT_80065c28 + 0x00) = 2;
@@ -144,6 +164,11 @@ static uint32_t read_pad_input(void)
         if (k[SDL_SCANCODE_LEFT]  || k[SDL_SCANCODE_A]) pad |= 0x80000000;
         if (k[SDL_SCANCODE_RIGHT] || k[SDL_SCANCODE_D]) pad |= 0x20000000;
         if (k[SDL_SCANCODE_SPACE])  pad |= 0x08000000;
+        if (k[SDL_SCANCODE_LCTRL] || k[SDL_SCANCODE_RCTRL] ||
+            k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT]) pad |= 0x04000000;
+        if (k[SDL_SCANCODE_Q])      pad |= 0x00100000;
+        if (k[SDL_SCANCODE_E])      pad |= 0x00200000;
+        if (k[SDL_SCANCODE_TAB])    pad |= 0x00400000;
         if (k[SDL_SCANCODE_RETURN]) pad |= 0x00000100;
     }
 #endif
@@ -154,7 +179,7 @@ static uint32_t read_pad_input(void)
     }
     if (g_v8_auto_fire_period > 0 &&
         (g_v8_frame_count % g_v8_auto_fire_period) == 0) {
-        pad |= 0x08000000;
+        pad |= 0x08000000 | 0x04000000;
     }
     return pad;
 }

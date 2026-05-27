@@ -26,6 +26,8 @@
  */
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "structs.h"
 
 /* GTE matrix operations */
@@ -38,27 +40,86 @@ extern void   ApplyMatrixSV(MATRIX *m, SVECTOR *in, SVECTOR *out);
 extern void   FUN_800434d0(intptr_t obj, SVECTOR *in, int *out); /* GTE_ProjectVec */
 extern MATRIX *CompMatrixLV(MATRIX *a, MATRIX *b, MATRIX *out);
 extern uint32_t FUN_8001e120(intptr_t param_1, int eventId, intptr_t scratchOut);
+extern void    *FUN_8001178c(uint32_t size, uint32_t mode);
+extern void    *puRam000007d0;
+
+static int collision_narrow_trace_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *env = getenv("V8_TRACE_NARROW_COLLISION");
+        cached = (env != NULL && env[0] != 0 && env[0] != '0');
+    }
+    return cached;
+}
+
+static void trace_player_narrow(const char *stage, intptr_t self,
+                                const uint32_t *other, uintptr_t hit)
+{
+    if (!collision_narrow_trace_enabled() || (void *)self != puRam000007d0)
+        return;
+    fprintf(stderr,
+            "v8: narrow player stage=%s other=%p flags=0x%x kind=%u layer=%d pos=(0x%x,0x%x,0x%x) r=0x%x shape=0x%x child=0x%x hit=%p\n",
+            stage, (const void *)other,
+            other ? (unsigned)other[0] : 0,
+            other ? (unsigned)*(const uint8_t *)((const uint8_t *)other + 4) : 0,
+            other ? (int)*(const int16_t *)((const uint8_t *)other + 6) : 0,
+            other ? (unsigned)other[9] : 0,
+            other ? (unsigned)other[10] : 0,
+            other ? (unsigned)other[11] : 0,
+            other ? (unsigned)other[0x15] : 0,
+            other ? (unsigned)other[0x17] : 0,
+            other ? (unsigned)other[0x0e] : 0,
+            (void *)hit);
+}
 
 /* PSX scratchpad emulation (0x1f800000 region).
  * The query record keeps the original 32-bit field layout because SAT and
  * collision handlers index it by byte offsets.  The pointer to this host
  * buffer is passed through intptr_t so the buffer itself can live above 4GB. */
-static uint32_t s_colScratch[16];
+static uint32_t s_colScratchFallback[16];
+static uint32_t *s_colScratch;
+static uintptr_t s_colScratchHost[5];
 uint32_t _DAT_1f80000c; /* object ptr A -- also read by spillway_grab.c */
+
+static uint32_t *col_scratch(void)
+{
+    if (s_colScratch == NULL) {
+        s_colScratch = (uint32_t *)FUN_8001178c(sizeof(s_colScratchFallback), 1);
+        if (s_colScratch == NULL)
+            s_colScratch = s_colScratchFallback;
+    }
+    return s_colScratch;
+}
 
 /* Sentinel return value when a collision is found.
  * On PSX this would be 0x1f800000; on host we return the address of
  * the scratchpad buffer (cast to uintptr_t so callers can index it). */
-#define SCRATCH_BASE ((uintptr_t)(void*)s_colScratch)
+#define SCRATCH_BASE ((uintptr_t)(void*)col_scratch())
 
 #define SET_COL_SCRATCH(aShape, bShape, aObj, bObj) do { \
-    s_colScratch[0] = 0; \
-    s_colScratch[1] = (uint32_t)(uintptr_t)(aShape); \
-    s_colScratch[2] = (uint32_t)(uintptr_t)(bShape); \
-    s_colScratch[3] = (uint32_t)(uintptr_t)(aObj); \
-    s_colScratch[4] = (uint32_t)(uintptr_t)(bObj); \
+    uint32_t *scratch = col_scratch(); \
+    scratch[0] = 0; \
+    scratch[1] = (uint32_t)(uintptr_t)(aShape); \
+    scratch[2] = (uint32_t)(uintptr_t)(bShape); \
+    scratch[3] = (uint32_t)(uintptr_t)(aObj); \
+    scratch[4] = (uint32_t)(uintptr_t)(bObj); \
+    s_colScratchHost[0] = 0; \
+    s_colScratchHost[1] = (uintptr_t)(aShape); \
+    s_colScratchHost[2] = (uintptr_t)(bShape); \
+    s_colScratchHost[3] = (uintptr_t)(aObj); \
+    s_colScratchHost[4] = (uintptr_t)(bObj); \
     _DAT_1f80000c = (uint32_t)(uintptr_t)(aObj); \
 } while (0)
+
+uintptr_t Collision_QueryHostWord(const void *query, uint32_t index)
+{
+    if (index >= 5 || query == NULL)
+        return 0;
+    if ((const uint32_t *)query == col_scratch())
+        return s_colScratchHost[index];
+    return (uintptr_t)((const uint32_t *)query)[index];
+}
 
 static inline int32_t mips_addu_i32(int32_t a, int32_t b)
 {
@@ -177,7 +238,7 @@ uint32_t FUN_8001e408(int *param_1, intptr_t param_2, SVECTOR *param_3, MATRIX *
     uint32_t  uVar12, uVar13, uVar14;
     int       iVar15;
     SVECTOR   local_50;
-    int       local_48 = 0, local_44 = 0, local_40 = 0;
+    int       local_48[3] = {0, 0, 0};
     SVECTOR  *local_38;
     int       local_30;
 
@@ -228,16 +289,16 @@ uint32_t FUN_8001e408(int *param_1, intptr_t param_2, SVECTOR *param_3, MATRIX *
         uVar5 = 1;
     } else {
         /* Project the AABB half-extents along the sphere axis */
-        FUN_800434d0(local_30, local_38, &local_48);
-        local_48 = mips_mult_lo_i32(local_48, mips_subu_i32(param_1[3], *param_1));
-        local_44 = mips_mult_lo_i32(local_44, mips_subu_i32(param_1[4], param_1[1]));
-        local_40 = mips_mult_lo_i32(local_40, mips_subu_i32(param_1[5], param_1[2]));
-        local_48 = mips_abs_i32(local_48);
-        local_44 = mips_abs_i32(local_44);
-        local_40 = mips_abs_i32(local_40);
-        local_40 = mips_addu_i32(mips_addu_i32(local_48, local_44), local_40);
-        if (local_40 < 0) local_40 = mips_addu_i32(local_40, 0x1fff);
-        uVar5 = (uint32_t)mips_subu_i32(iVar15, local_40 >> 13) >> 31;
+        FUN_800434d0(local_30, local_38, local_48);
+        local_48[0] = mips_mult_lo_i32(local_48[0], mips_subu_i32(param_1[3], *param_1));
+        local_48[1] = mips_mult_lo_i32(local_48[1], mips_subu_i32(param_1[4], param_1[1]));
+        local_48[2] = mips_mult_lo_i32(local_48[2], mips_subu_i32(param_1[5], param_1[2]));
+        local_48[0] = mips_abs_i32(local_48[0]);
+        local_48[1] = mips_abs_i32(local_48[1]);
+        local_48[2] = mips_abs_i32(local_48[2]);
+        local_48[2] = mips_addu_i32(mips_addu_i32(local_48[0], local_48[1]), local_48[2]);
+        if (local_48[2] < 0) local_48[2] = mips_addu_i32(local_48[2], 0x1fff);
+        uVar5 = (uint32_t)mips_subu_i32(iVar15, local_48[2] >> 13) >> 31;
     }
     return uVar5;
 }
@@ -492,6 +553,7 @@ uint32_t FUN_8001edb4(intptr_t param_1, uint32_t *param_2)
 
         uVar3 = 0;
         if (bVar1) {
+            trace_player_narrow("broad-hit", param_1, param_2, 0);
             /* Register contact slot pointers if B has the 0x40 flag */
             if ((*param_2 & 0x40) != 0) {
                 if (*(int *)(uintptr_t)(param_1 + 0x74) == 0) {
@@ -509,24 +571,38 @@ uint32_t FUN_8001edb4(intptr_t param_1, uint32_t *param_2)
                                                    (uintptr_t)(param_1 + 0x10),
                                                    (uintptr_t)(param_2 + 4));
                 if (piVar4 == NULL) {
+                    trace_player_narrow("narrow-miss", param_1, param_2, 0);
                     return 0;
                 }
             }
+            trace_player_narrow("narrow-hit", param_1, param_2, (uintptr_t)piVar4);
 
             /* piVar4 points into scratchpad; rewrite obj A pointer */
             *piVar4 = (uint32_t)(uintptr_t)param_2;
+            if (piVar4 == col_scratch())
+                s_colScratchHost[0] = (uintptr_t)param_2;
 
             uVar5 = FUN_8001e120(param_1, 3, (intptr_t)piVar4);
             if ((uVar5 == 0) || (uVar3 = uVar5 >> 31, uVar5 == 0xffffffff)) {
                 /* Swap shape pointers so A is the contacting object */
                 uint32_t oldShapeB = piVar4[1];
                 uint32_t oldObjB = piVar4[3];
+                uintptr_t oldShapeBHost = Collision_QueryHostWord(piVar4, 1);
+                uintptr_t oldObjBHost = Collision_QueryHostWord(piVar4, 3);
                 uVar3 = uVar5 >> 31;
                 *piVar4     = (uint32_t)(uintptr_t)param_1;
                 piVar4[1]   = piVar4[2];
                 piVar4[2]   = oldShapeB;
                 piVar4[3]   = piVar4[4];
                 piVar4[4]   = oldObjB;
+                if (piVar4 == col_scratch()) {
+                    uintptr_t oldObjAHost = s_colScratchHost[4];
+                    s_colScratchHost[0] = (uintptr_t)param_1;
+                    s_colScratchHost[1] = s_colScratchHost[2];
+                    s_colScratchHost[2] = oldShapeBHost;
+                    s_colScratchHost[3] = oldObjAHost;
+                    s_colScratchHost[4] = oldObjBHost;
+                }
                 iVar2 = (int)FUN_8001e120((intptr_t)param_2, 3, (intptr_t)piVar4);
                 if (iVar2 < 0) {
                     uVar3 = uVar3 | 2;

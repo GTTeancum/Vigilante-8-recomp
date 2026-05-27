@@ -40,7 +40,6 @@ extern uint32_t uRam0000062c;             /* P1 pad bits */
  * integrator directly with host-side pad-to-vel mapping. */
 extern void Object_IntegrateAndOrient(uint8_t *obj);
 extern int32_t Vec3_Length(const int32_t *v);
-extern void Host_WeaponFire(uint8_t *vehicle, uint32_t pad_bits);
 extern uintptr_t Object_CallbackFromPsxSlot(const void *obj);
 extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 /* Host-side terrain fallback. Host_TerrainLoad expands ZONE chunks into
@@ -50,6 +49,7 @@ extern uintptr_t DAT_800911a0[32 * 32];
 extern uint8_t   g_terrain_tile_x_min, g_terrain_tile_x_max;
 extern uint8_t   g_terrain_tile_z_min, g_terrain_tile_z_max;
 extern int32_t   Terrain_HeightAt(uint32_t x, uint32_t z);
+extern uintptr_t DAT_800737a0[];
 
 /* ZONE-based height (6-chunk fallback for areas not covered by XOBF). */
 static int32_t Host_TerrainH8At(int32_t pos_x, int32_t pos_z)
@@ -200,11 +200,9 @@ static void vehicle_tick(uint8_t *self, int mode, int catchupFlag)
         }
     }
 
-    /* Phase 5: weapon firing.  Host_WeaponFire reads pad_bits for the
-     * fire button (0x08000000 = space / X), manages the projectile
-     * spawn log signal, and after a 5-tick travel time calls
-     * Damage_AccumulateOrFire (the real engine damage path). */
-    Host_WeaponFire(self, uRam0000062c);
+    /* Weapon/fire input is delivered to the source event LUT by pad_shim.c.
+     * Do not call the old host demo projectile path here; source weapons run
+     * through vehicle_event.c -> weapon slot callbacks. */
 }
 
 void Host_VehicleInit(void)
@@ -244,9 +242,19 @@ void Host_VehicleInit(void)
                     int32_t gy = Host_GroundAt(sx, sy, sz);
                     if (getenv("V8_TRACE_SPAWN_MATRIX") != NULL) {
                         fprintf(stderr,
-                                "v8: original vehicle ground delta pos=(0x%x,0x%x,0x%x) ground=0x%x delta=%d\n",
+                                "v8: original vehicle ground delta pos=(0x%x,0x%x,0x%x) ground=0x%x delta=%d "
+                                "inertia=(%d,%d,%d) vel=(%d,%d,%d) ang=(%d,%d,%d)\n",
                                 (unsigned)sx, (unsigned)sy, (unsigned)sz,
-                                (unsigned)gy, sy - gy);
+                                (unsigned)gy, sy - gy,
+                                (int)*(int16_t *)(g_vehicle + 0x9c),
+                                (int)*(int16_t *)(g_vehicle + 0x9e),
+                                (int)*(int16_t *)(g_vehicle + 0xa0),
+                                *(int32_t *)(g_vehicle + 0x80),
+                                *(int32_t *)(g_vehicle + 0x84),
+                                *(int32_t *)(g_vehicle + 0x88),
+                                *(int32_t *)(g_vehicle + 0x90),
+                                *(int32_t *)(g_vehicle + 0x94),
+                                *(int32_t *)(g_vehicle + 0x98));
                         for (int w = 0; w < 4; w++) {
                             uint8_t *wheel = (uint8_t *)(uintptr_t)*(uint32_t *)(g_vehicle + 0xfc + w * 4);
                             if (wheel) {

@@ -35,9 +35,9 @@ add_library(v8platform STATIC
     exe_data_tables.c
     font_decode_stub.c
     host_vehicle.c
-    host_weapon.c
     host_ai_vehicle.c
     host_vehicle_exp_probe.c
+    host_weapon_probe.c
     physics_shim.c
     host_terrain.c
     terrain_mesh.c

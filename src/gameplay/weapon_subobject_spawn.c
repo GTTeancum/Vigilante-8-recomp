@@ -22,13 +22,13 @@
 
 extern void    *FUN_8001d470(uint32_t size);
 extern void    *FUN_8001ac44(int *bank, uint16_t idx, uint32_t flags, uint32_t mode);
-extern intptr_t FUN_8001b038(int parent, uint32_t mask);          /* BoneAnim_LookupSlot */
-extern MATRIX  *FUN_8001d624(int obj);                            /* Matrix_ComposeParentChain */
-extern void     FUN_8001d68c(MATRIX *out, int parent, int joint); /* Matrix_ComposeRelativeToObject */
+extern intptr_t FUN_8001b038(intptr_t parent, uint32_t mask);     /* BoneAnim_LookupSlot */
+extern MATRIX  *FUN_8001d624(intptr_t obj);                       /* Matrix_ComposeParentChain */
+extern void     FUN_8001d68c(MATRIX *out, intptr_t parent, intptr_t joint); /* Matrix_ComposeRelativeToObject */
 extern void     FUN_8001b2fc(uint32_t *parent, const void *jointTpl, uint32_t *child);
 
-uint32_t *FUN_80031300(int param_1, int param_2, uint16_t param_3,
-                       uint32_t param_4, int param_5)
+uint32_t *FUN_80031300(intptr_t param_1, intptr_t param_2, uint16_t param_3,
+                       uint32_t param_4, intptr_t param_5)
 {
     uint16_t  uVar1;
     intptr_t  iVar2;
@@ -47,7 +47,7 @@ uint32_t *FUN_80031300(int param_1, int param_2, uint16_t param_3,
             param_3, param_4, 8);
     }
 
-    puVar3[0x20] = (uint32_t)param_1;
+    puVar3[0x20] = (uint32_t)(uintptr_t)param_1;
     *puVar3 = 0x800000u;
     uVar1 = *(uint16_t *)(uintptr_t)(param_1 + 6);
     *(uint8_t *)(puVar3 + 1) = 7;

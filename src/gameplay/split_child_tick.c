@@ -35,51 +35,367 @@
  * HIGH confidence: line-for-line MIPS port with direct disassembly.
  */
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* -- External helpers -- */
-extern void     FUN_8001d708(int obj);              /* Object_InitBoneMatrix */
-extern intptr_t FUN_8001b038(int obj, uint16_t kind);/* Bone_FindByKindOnObj */
-extern int      FUN_8001ac44(int bank, uint16_t slot, uint32_t size, uint32_t flags); /* BoneObj_BuildTree */
-extern void     FUN_800205f8(int obj);              /* Damage_Apply */
+extern void     FUN_8001d708(intptr_t obj);         /* Object_InitBoneMatrix */
+extern intptr_t FUN_8001b038(intptr_t obj, uint16_t kind);/* Bone_FindByKindOnObj */
+extern intptr_t FUN_8001ac44(intptr_t bank, uint16_t slot, uint32_t size, uint32_t flags); /* BoneObj_BuildTree */
+extern void     FUN_800205f8(intptr_t obj);         /* Damage_Apply */
 extern int      FUN_8003fea8(uint32_t pos, uint32_t colour); /* WeaponSpawn_SparkEffect */
-extern void     FUN_80020890(int obj, int timer);   /* Object_SchedulePostEvent */
-extern void     FUN_80020744(int obj);              /* Object_BindToWorld */
-extern int      FUN_8001ffd4(int param_1, int param_2); /* ObjList_FindPayloadBySpawnId */
-extern void     FUN_8002cbe8(int source, int child); /* WeaponSlot_Attach / Object_LinkToVehicle */
+extern void     FUN_80020890(intptr_t obj, int timer); /* Object_SchedulePostEvent */
+extern void     FUN_80020744(intptr_t obj);         /* Object_BindToWorld */
+extern intptr_t FUN_8001ffd4(intptr_t param_1, int param_2); /* ObjList_FindPayloadBySpawnId */
+extern void     FUN_8002cbe8(intptr_t source, intptr_t child); /* WeaponSlot_Attach / Object_LinkToVehicle */
 extern void     FUN_8003fd24(const int32_t *xyz, int arg); /* Debris_AttachTrack */
 extern void    *FUN_8003d1e8(uint8_t state_code);   /* Vehicle_StateToCallback (vehicle_init_joints.c) */
 extern uint32_t FUN_8003ce24(uint32_t param_1);     /* WeaponTarget_PickRandom */
+extern uintptr_t Collision_QueryHostWord(const void *query, uint32_t index);
 
 /* Audio stubs (engine out of scope) */
 extern int  FUN_8004410c(void);                    /* Audio_AllocVoice */
 extern int  FUN_8004483c(int voice, int bank, int sfx, int *pos); /* Audio_PlaySfx3D */
 
 /* Globals */
-extern uint32_t DAT_800737dc;   /* vehicle-sound bank handle */
-extern int32_t  DAT_80065BB8;   /* gp+2228: shared bank ptr (written on spawn) */
-extern uint8_t  uRam000005f8;   /* audio bank handle */
+extern uintptr_t DAT_800737dc;  /* vehicle-sound bank handle */
+extern uintptr_t DAT_80065BB8;  /* gp+2228: shared bank ptr (written on spawn) */
+extern uint32_t  uRam000005f8;  /* audio bank handle */
 extern int32_t  DAT_80065aac;   /* gp+1960: wtype-0 hit counter */
 extern int32_t  DAT_80065a10;   /* gp+1804: wtype-2..14 hit counter */
 extern int16_t  DAT_8005ec84[]; /* weapon slot → bone-bank index table */
 extern uint8_t  DAT_80065a50[]; /* 0x8006_5A50 re-spawn / obj-list table */
 extern void     Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
+extern uintptr_t Object_CallbackFromPsxSlot(const void *obj);
 
-/* Sub-tick callback pointers for newly spawned children (pass-3 stubs) */
-extern int LAB_80031fa0(int, int, int); /* wtype 2 child tick */
-extern int LAB_8003302c(int, int, int); /* wtype 4 child tick */
-extern int LAB_800336fc(int, int, int); /* wtype 6 child tick */
-extern int LAB_80034920(int, int, int); /* wtype 9 child tick */
-extern int LAB_8003565c(int, int, int); /* wtype 8 child tick */
+/* Sub-tick callbacks for newly spawned split-weapon children. */
+extern intptr_t LAB_80031fa0(intptr_t, int, intptr_t); /* wtype 2 child tick */
+extern intptr_t LAB_8003302c(intptr_t, int, intptr_t); /* wtype 4 child tick */
+extern intptr_t LAB_800336fc(intptr_t, intptr_t, int); /* wtype 6 child tick */
+extern intptr_t LAB_80034920(intptr_t, int, intptr_t); /* wtype 9 child tick */
+intptr_t LAB_8003565c(intptr_t, int, intptr_t); /* wtype 8 child tick */
 
 /* ------------------------------------------------------------------ */
 
-int LAB_8003565c(int obj, int event, int param3)
+extern int      FUN_8003c538(uint32_t *obj, intptr_t arg);
+extern void    *FUN_800354e0(intptr_t slot, intptr_t owner, int16_t kind,
+                             void *tickFn);
+extern intptr_t FUN_8001d5a0(intptr_t obj);
+extern int32_t  FUN_80016a20(const int32_t *v);
+extern uint32_t FUN_80017160(void);
+extern int      FUN_800244c4(int x, int z);
+extern void     FUN_800435c0(const void *mat, const int32_t *src, int32_t *dst);
+extern void     FUN_80016bd8(int16_t *out, int32_t *from, int32_t *to);
+extern int      FUN_8004ecd4(int y, int x);
+extern uint32_t FUN_80034b5c(int obj);
+extern uint32_t FUN_80020778(uint32_t *obj);
+extern void     FUN_8001fe50(uintptr_t listSentinel, uintptr_t payload);
+extern int      ObjList_Length(int **headPtr);
+extern int      FUN_8001fe8c(void *listSentinel, uint32_t *obj);
+extern void     FUN_800176f8(intptr_t obj, int32_t *vec, int32_t *pos);
+extern void     FUN_80012050(int idx, uint8_t type);
+extern void     FUN_80012068(int idx, uint8_t b5, uint8_t b6, uint8_t b7);
+extern void     FUN_8001d708(intptr_t obj);
+extern void     FUN_800205f8(intptr_t obj);
+extern void     FUN_80020620(intptr_t obj, uint32_t event);
+extern uint8_t DAT_80065a90[];
+extern int32_t DAT_80065798[3];
+extern void     FUN_8002cb7c(intptr_t slot);
+
+typedef struct SplitHostObjListNode {
+    struct SplitHostObjListNode *next;
+    struct SplitHostObjListNode *prev;
+    uintptr_t payload;
+    uint32_t deadline;
+} SplitHostObjListNode;
+
+static inline int32_t mips_addu_i32(int32_t a, int32_t b)
 {
-    (void)obj;
-    (void)event;
-    (void)param3;
+    return (int32_t)((uint32_t)a + (uint32_t)b);
+}
+
+static inline int32_t mips_subu_i32(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a - (uint32_t)b);
+}
+
+static inline int32_t rtz_shift(int32_t v, int shift)
+{
+    int32_t bias = (1 << shift) - 1;
+    if (v < 0)
+        v = mips_addu_i32(v, bias);
+    return v >> shift;
+}
+
+intptr_t LAB_80034cec(intptr_t obj, int event, intptr_t arg)
+{
+    uint8_t *self = (uint8_t *)(uintptr_t)obj;
+
+    if (event == 0) {
+        if (FUN_80034b5c((int)(uintptr_t)obj) == 0)
+            return 0;
+        *(int16_t *)(self + 6) = 0;
+        FUN_80020778((uint32_t *)self);
+        *(uint32_t *)self |= 0x300u;
+        FUN_8001fe50((uintptr_t)DAT_80065a90, (uintptr_t)obj);
+        if (ObjList_Length((int **)DAT_80065a90) >= 0x10) {
+            SplitHostObjListNode *sentinel = (SplitHostObjListNode *)DAT_80065a90;
+            uint8_t *head = NULL;
+            if (sentinel->next != NULL)
+                head = (uint8_t *)(uintptr_t)sentinel->next->payload;
+            if (head != NULL) {
+                uintptr_t cb = Object_CallbackFromPsxSlot(head);
+                if (cb != 0) {
+                    typedef intptr_t (*cb_t)(intptr_t, int, intptr_t);
+                    ((cb_t)cb)((intptr_t)head, 2, 0);
+                }
+            }
+        }
+        return 0;
+    }
+
+    if (event == 2)
+        goto retire;
+
+    if (event == 3) {
+        uint8_t *hit = arg ? (uint8_t *)(uintptr_t)*(uint32_t *)(uintptr_t)arg : NULL;
+        if (hit != NULL) {
+            if (hit[4] == 0)
+                return 1;
+            if (hit[4] == 2) {
+                FUN_800176f8((intptr_t)hit, DAT_80065798, (int32_t *)(self + 0x48));
+                if (*(int16_t *)(hit + 6) < 0)
+                    FUN_80012068(~(int)*(int16_t *)(hit + 6), 0xff, 4, 0x40);
+            }
+        }
+retire:
+        FUN_8001fe8c(DAT_80065a90, (uint32_t *)self);
+        FUN_8004483c(FUN_8004410c(), (int)(uintptr_t)uRam000005f8,
+                     0x38, (int *)(self + 0x48));
+        FUN_8003fd24((const int32_t *)(self + 0x48), 0);
+        FUN_80020620(obj, 0);
+        return -1;
+    }
+
     return 0;
+}
+
+intptr_t LAB_8003502c(intptr_t obj, int event, intptr_t arg)
+{
+    uint8_t *self = (uint8_t *)(uintptr_t)obj;
+
+    if (event == 0) {
+        if (FUN_80034b5c((int)(uintptr_t)obj) != 0) {
+            FUN_80020778((uint32_t *)self);
+            *(uint32_t *)self |= 0x100u;
+            FUN_80020890(obj, 0x78);
+        }
+        return 0;
+    }
+
+    if (event == 3) {
+        uint8_t *hit = arg ? (uint8_t *)(uintptr_t)*(uint32_t *)(uintptr_t)arg : NULL;
+        if (hit != NULL && hit[4] == 2) {
+            int32_t delta[3];
+            int16_t dir[4];
+            intptr_t bone;
+
+            bone = FUN_8001b038((intptr_t)hit,
+                                (uint16_t)((((int32_t)FUN_80017160() * 7) >> 15) - 0x7ff0));
+            delta[0] = mips_subu_i32(*(int32_t *)(self + 0x24), *(int32_t *)(hit + 0x24));
+            delta[1] = mips_subu_i32(*(int32_t *)(self + 0x28), *(int32_t *)(hit + 0x28));
+            delta[1] = mips_addu_i32(delta[1], -0x5000);
+            delta[2] = mips_subu_i32(*(int32_t *)(self + 0x2c), *(int32_t *)(hit + 0x2c));
+            extern int16_t *FUN_80016b08(int32_t *param_1, int16_t *param_2);
+            FUN_80016b08(delta, dir);
+            *(int32_t *)(hit + 0x80) = mips_addu_i32(*(int32_t *)(hit + 0x80),
+                                                     (int32_t)dir[0] << 3);
+            *(int32_t *)(hit + 0x84) = mips_addu_i32(*(int32_t *)(hit + 0x84),
+                                                     (int32_t)dir[1] << 3);
+            *(int32_t *)(hit + 0x88) = mips_addu_i32(*(int32_t *)(hit + 0x88),
+                                                     (int32_t)dir[2] << 3);
+            if (*(int16_t *)(hit + 6) < 0)
+                FUN_80012050(~(int)*(int16_t *)(hit + 6), 4);
+            if (bone != 0) {
+                uint8_t *spark = (uint8_t *)FUN_8001ac44((intptr_t)DAT_800737dc, 0x15, 0x94, 8);
+                if (spark != NULL) {
+                    *(uint32_t *)spark = 0x410u;
+                    *(uint16_t *)(spark + 6) = *(uint16_t *)(hit + 6);
+                    Object_SetCallbackPsxSlot(spark, (uintptr_t)&LAB_80034cec);
+                    FUN_8001d708((intptr_t)spark);
+                }
+            }
+        }
+        return 0;
+    }
+
+    if (event == 2 || event == 4) {
+        FUN_80020620(obj, 0);
+        return -1;
+    }
+
+    return 0;
+}
+
+intptr_t LAB_800352ac(intptr_t obj, int event, intptr_t arg)
+{
+    uint8_t *self = (uint8_t *)(uintptr_t)obj;
+
+    if (event == 0) {
+        *(int32_t *)(self + 0x24) =
+            mips_addu_i32(*(int32_t *)(self + 0x24), *(int32_t *)(self + 0x88));
+        *(int32_t *)(self + 0x28) =
+            mips_addu_i32(*(int32_t *)(self + 0x28), *(int32_t *)(self + 0x8c));
+        *(int32_t *)(self + 0x2c) =
+            mips_addu_i32(*(int32_t *)(self + 0x2c), *(int32_t *)(self + 0x90));
+        *(int32_t *)(self + 0x48) = *(int32_t *)(self + 0x24);
+        *(int32_t *)(self + 0x4c) = *(int32_t *)(self + 0x28);
+        *(int32_t *)(self + 0x50) = *(int32_t *)(self + 0x2c);
+        if ((int16_t)--*(uint16_t *)(self + 0x94) < 0)
+            goto expire;
+        if (FUN_800244c4(*(int32_t *)(self + 0x48), *(int32_t *)(self + 0x50)) <
+            *(int32_t *)(self + 0x4c))
+            goto expire;
+        return 0;
+    }
+
+    if (event == 3) {
+        uint8_t *hit = arg ? (uint8_t *)(uintptr_t)*(uint32_t *)(uintptr_t)arg : NULL;
+        if (hit != NULL && hit[4] == 3)
+            return -1;
+        goto expire_impact;
+    }
+
+    if (event == 5) {
+expire:
+        FUN_800205f8(obj);
+        return -1;
+    }
+
+    return 0;
+
+expire_impact:
+    FUN_8003fd24((const int32_t *)(self + 0x48), 0x10);
+    FUN_8004483c(FUN_8004410c(), (int)(uintptr_t)uRam000005f8,
+                 0x39, (int *)(self + 0x48));
+    FUN_80020620(obj, event == 0 ? 1u : 0u);
+    return -1;
+}
+
+intptr_t LAB_8003565c(intptr_t obj, int event, intptr_t param3)
+{
+    uint8_t *self = (uint8_t *)(uintptr_t)obj;
+
+    switch (event) {
+    case 0:
+        FUN_8003c538((uint32_t *)self, param3);
+        return 0;
+
+    case 2:
+        return 5;
+
+    case 3: {
+        intptr_t owner = param3;
+        void *shot = FUN_800354e0(obj, owner, 0x0f, (void *)&LAB_80034cec);
+        (void)shot;
+        *(uint16_t *)(self + 0x0c) = (uint16_t)(*(uint16_t *)(self + 0x0c) - 1u);
+        if (*(uint16_t *)(self + 0x0c) == 0)
+            FUN_8002cb7c(obj);
+        return 0x3c;
+    }
+
+    case 11: {
+        uint32_t fireCode = (uint32_t)param3 & 0xfffu;
+        uint16_t ammo = *(uint16_t *)(self + 0x0c);
+        void *shot;
+        uint8_t *sp;
+
+        if (fireCode == 0x132u) {
+            if (ammo < 2)
+                return -1;
+            shot = FUN_800354e0(obj, FUN_8001d5a0(obj), 0x1c,
+                                (void *)&LAB_8003502c);
+            sp = (uint8_t *)shot;
+            if (sp != NULL) {
+                *(uint32_t *)(sp + 0x54) =
+                    FUN_80016a20((const int32_t *)((uint8_t *)(uintptr_t)*(uint32_t *)(sp + 0x5c) + 0x10));
+                sp[4] = 3;
+                *(uint32_t *)sp |= 0x01000000u;
+            }
+            ammo = (uint16_t)(ammo - 2u);
+        } else if (fireCode == 0x134u) {
+            uint16_t count;
+            if (ammo < 2)
+                return -1;
+            shot = FUN_800354e0(obj, FUN_8001d5a0(obj), 0x18,
+                                (void *)&LAB_800352ac);
+            sp = (uint8_t *)shot;
+            count = ammo < 6 ? ammo : 6;
+            if (sp != NULL) {
+                *(uint32_t *)(sp + 0x54) =
+                    FUN_80016a20((const int32_t *)((uint8_t *)(uintptr_t)*(uint32_t *)(sp + 0x5c) + 0x10));
+                sp[4] = 3;
+                *(uint32_t *)sp |= 0x01000000u;
+                *(uint16_t *)(sp + 0x0c) = count;
+            }
+            ammo = (uint16_t)(ammo - count);
+        } else {
+            return 0;
+        }
+        *(uint16_t *)(self + 0x0c) = ammo;
+        if (ammo == 0)
+            FUN_8002cb7c(obj);
+        return 0x78;
+    }
+
+    case 13:
+        return 0x8015;
+
+    case 14: {
+        uint32_t rng = FUN_80017160();
+        uint8_t *target = (uint8_t *)(uintptr_t)param3;
+        uint8_t *owner;
+        int32_t local[3];
+        int16_t delta[4];
+        int32_t dot;
+        int32_t threshold;
+
+        if ((rng & 0x3ffu) == 0)
+            return 1;
+        if ((rng & 0xffu) == 0 &&
+            (FUN_800244c4(*(int32_t *)(target + 0x24),
+                          *(int32_t *)(target + 0x2c)) & 0xff) == 0x80)
+            return 1;
+        if ((rng & 0x0fu) != 0)
+            return 0;
+
+        owner = (uint8_t *)(uintptr_t)*(uint32_t *)(target + 0xe4);
+        if (owner == NULL)
+            return 0;
+        FUN_800435c0(target + 0x10, (int32_t *)(owner + 0x24), local);
+        if (local[2] >= 0 || local[2] <= (int32_t)0xfff6a000u)
+            return 0;
+        {
+            int32_t ang = (int32_t)(int16_t)FUN_8004ecd4(local[0], local[2]);
+            if (ang < 0)
+                ang = mips_subu_i32(0, ang);
+            if (ang < 0x6ab)
+                return 0;
+        }
+        FUN_80016bd8(delta, (int32_t *)(owner + 0x24), (int32_t *)(target + 0x24));
+        dot = mips_addu_i32((rtz_shift(*(int32_t *)(owner + 0x80), 7) * delta[0]),
+              mips_addu_i32((rtz_shift(*(int32_t *)(owner + 0x84), 7) * delta[1]),
+                             (rtz_shift(*(int32_t *)(owner + 0x88), 7) * delta[2])));
+        dot = rtz_shift(dot, 12);
+        threshold = (dot << 4) - dot;
+        threshold <<= 2;
+        return (mips_subu_i32(0, local[2]) < threshold) ? 1 : 0;
+    }
+
+    default:
+        return 0;
+    }
 }
 
 /*
@@ -94,17 +410,17 @@ int LAB_8003565c(int obj, int event, int param3)
  *
  * Returns -2 on success, 0 if s0<0 was the entry path (skip spawn).
  */
-static int common_spawn_child(int obj, int source, int bank,
-                              int16_t slot, int (*child_cb)(int,int,int),
+static int common_spawn_child(intptr_t obj, intptr_t source, intptr_t bank,
+                              int16_t slot, intptr_t (*child_cb)(intptr_t,int,intptr_t),
                               uint16_t kind)
 {
-    uint8_t *s2 = (uint8_t *)(uintptr_t)(uint32_t)obj;
-    uint8_t *s3 = (uint8_t *)(uintptr_t)(uint32_t)source;
+    uint8_t *s2 = (uint8_t *)(uintptr_t)obj;
+    uint8_t *s3 = (uint8_t *)(uintptr_t)source;
 
     /* Play impact SFX 37 */
     {
         int voice = FUN_8004410c();
-        FUN_8004483c(voice, (int)(uintptr_t)(uint32_t)uRam000005f8, 37, (int *)(s2 + 0x24));
+        FUN_8004483c(voice, (int)(uintptr_t)uRam000005f8, 37, (int *)(s2 + 0x24));
     }
 
     /* Spark effect if source[6] == -1 */
@@ -112,9 +428,9 @@ static int common_spawn_child(int obj, int source, int bank,
         FUN_8003fea8((uint32_t)(uintptr_t)(s3 + 0x24), 0x84044040u);
     }
 
-    /* Allocate child bone object from bank */
-    int child = FUN_8001ac44(bank, (uint16_t)(uint32_t)slot, 0x84, 8);
-    uint8_t *cp = (uint8_t *)(uintptr_t)(uint32_t)child;
+    /* Allocate the full source child record; installed callbacks use +0x88..+0x94. */
+    intptr_t child = FUN_8001ac44(bank, (uint16_t)(uint32_t)slot, 0x98, 8);
+    uint8_t *cp = (uint8_t *)(uintptr_t)child;
 
     /* Flags */
     *(uint32_t *)(cp + 0x00) = 0x00010000u;
@@ -123,6 +439,16 @@ static int common_spawn_child(int obj, int source, int bank,
     if (child_cb) {
         Object_SetCallbackPsxSlot(cp, (uintptr_t)child_cb);
         child_cb(child, 1, 0);
+    }
+    if (getenv("V8_TRACE_WEAPONS") != NULL) {
+        fprintf(stderr,
+                "v8: pickup child materialized pickup=%p source=%p child=%p wkind=%u cb=%p raw=0x%08x slot=%d key=0x%04x\n",
+                (void *)(uintptr_t)obj, (void *)(uintptr_t)source,
+                (void *)(uintptr_t)child,
+                (unsigned)*(uint16_t *)(s2 + 0x0a),
+                (void *)Object_CallbackFromPsxSlot(cp),
+                (unsigned)*(uint32_t *)(cp + 0x64),
+                (int)slot, (unsigned)kind);
     }
 
     /* maxHP = HP from newly spawned object */
@@ -166,7 +492,7 @@ static int common_spawn_child(int obj, int source, int bank,
 
     /* Re-spawn next gen from table */
     int16_t idx = *(int16_t *)(s2 + 0x06);
-    int next = FUN_8001ffd4((int)(uintptr_t)DAT_80065a50, (int)idx);
+    intptr_t next = FUN_8001ffd4((intptr_t)DAT_80065a50, (int)idx);
     if (next) {
         FUN_80020890(next, 600);
         DAT_80065a10 -= 1;
@@ -176,9 +502,9 @@ static int common_spawn_child(int obj, int source, int bank,
 
 /* ------------------------------------------------------------------ */
 
-int LAB_8003c61c(int obj, int event, int param3)
+intptr_t LAB_8003c61c(intptr_t obj, int event, intptr_t param3)
 {
-    uint8_t *s2 = (uint8_t *)(uintptr_t)(uint32_t)obj;
+    uint8_t *s2 = (uint8_t *)(uintptr_t)obj;
 
     switch (event) {
 
@@ -187,15 +513,16 @@ int LAB_8003c61c(int obj, int event, int param3)
         uint16_t sub = *(uint16_t *)(s2 + 0x42);
         sub = (uint16_t)(sub + 68u);
         *(uint16_t *)(s2 + 0x42) = sub;
-        if (param3 != 0)
+        if (param3 != 0) {
             FUN_8001d708(obj);          /* Object_InitBoneMatrix */
+        }
         return 0;
     }
 
     /* ---- Event 1: spawn init ---- */
     case 1: {
         /* Save bank handle globally for parent's next FUN_80021b80 call */
-        DAT_80065BB8 = *(int32_t *)(s2 + 0x58);
+        DAT_80065BB8 = (uintptr_t)*(uint32_t *)(s2 + 0x58);
 
         /* Update flags: set bits 7,8,9; clear bit 3 */
         uint32_t fl = *(uint32_t *)(s2 + 0x00);
@@ -234,9 +561,8 @@ int LAB_8003c61c(int obj, int event, int param3)
     /* ---- Event 3: collision ---- */
     case 3: {
         /* param3 is a descriptor; first word is the source object handle */
-        int *desc = (int *)(uintptr_t)(uint32_t)param3;
-        int source = desc[0];
-        uint8_t *s3 = (uint8_t *)(uintptr_t)(uint32_t)source;
+        intptr_t source = (intptr_t)Collision_QueryHostWord((void *)(uintptr_t)param3, 0);
+        uint8_t *s3 = (uint8_t *)(uintptr_t)source;
         uint8_t source_type = s3[0x04];
 
         /* Only handle source type 2 (projectile/weapon impact) */
@@ -259,7 +585,7 @@ int LAB_8003c61c(int obj, int event, int param3)
             return 0;
 
         /* DAT_800737dc: vehicle bank loaded at function entry (s1 in MIPS) */
-        int vehicle_bank = (int)(uintptr_t)(uint32_t)DAT_800737dc;
+        intptr_t vehicle_bank = (intptr_t)DAT_800737dc;
 
         switch (wtype) {
 
@@ -312,7 +638,7 @@ int LAB_8003c61c(int obj, int event, int param3)
             /* Play SFX 39 */
             {
                 int voice = FUN_8004410c();
-                FUN_8004483c(voice, (int)(uintptr_t)(uint32_t)uRam000005f8, 39, (int *)(s2 + 0x24));
+                FUN_8004483c(voice, (int)(uintptr_t)uRam000005f8, 39, (int *)(s2 + 0x24));
             }
             /* Spark effect if source[6] == -1 */
             if (*(int16_t *)(s3 + 0x06) == -1)
@@ -322,7 +648,7 @@ int LAB_8003c61c(int obj, int event, int param3)
             FUN_800205f8(obj);
             {
                 int16_t idx = *(int16_t *)(s2 + 0x06);
-                int next = FUN_8001ffd4((int)(uintptr_t)DAT_80065a50, (int)idx);
+                intptr_t next = FUN_8001ffd4((intptr_t)DAT_80065a50, (int)idx);
                 if (next) {
                     FUN_80020890(next, 600);
                     DAT_80065aac -= 1;
@@ -344,12 +670,12 @@ int LAB_8003c61c(int obj, int event, int param3)
             *(uint16_t *)(s3 + 0x11e) = 900;
         sfx38_tail: {
             int voice = FUN_8004410c();
-            FUN_8004483c(voice, (int)(uintptr_t)(uint32_t)uRam000005f8, 38, (int *)(s2 + 0x24));
+            FUN_8004483c(voice, (int)(uintptr_t)uRam000005f8, 38, (int *)(s2 + 0x24));
             if (*(int16_t *)(s3 + 0x06) == -1)
                 FUN_8003fea8((uint32_t)(uintptr_t)(s3 + 0x24), 0x84044040u);
             FUN_800205f8(obj);
             int16_t idx = *(int16_t *)(s2 + 0x06);
-            int next = FUN_8001ffd4((int)(uintptr_t)DAT_80065a50, (int)idx);
+            intptr_t next = FUN_8001ffd4((intptr_t)DAT_80065a50, (int)idx);
             if (next) {
                 FUN_80020890(next, 600);
                 DAT_80065aac -= 1;
@@ -360,27 +686,27 @@ int LAB_8003c61c(int obj, int event, int param3)
         /* wtype 2: LAB_80031fa0 child, slot 0, kind 0x8011 */
         case 2:
             return common_spawn_child(obj, source, vehicle_bank, 0,
-                                      LAB_80031fa0, 0x8011);
+                                      (intptr_t (*)(intptr_t,int,intptr_t))LAB_80031fa0, 0x8011);
         /* wtype 4: LAB_8003302c child, slot 17, kind 0x8012 */
         case 4:
             return common_spawn_child(obj, source, vehicle_bank, 17,
-                                      LAB_8003302c, 0x8012);
+                                      (intptr_t (*)(intptr_t,int,intptr_t))LAB_8003302c, 0x8012);
         /* wtype 6: LAB_800336fc child, slot 7, kind 0x8013 */
         case 6:
             return common_spawn_child(obj, source, vehicle_bank, 7,
-                                      LAB_800336fc, 0x8013);
+                                      (intptr_t (*)(intptr_t,int,intptr_t))LAB_800336fc, 0x8013);
         /* wtype 9: LAB_80034920 child, slot 10, kind 0x8014 */
         case 9:
             return common_spawn_child(obj, source, vehicle_bank, 10,
-                                      LAB_80034920, 0x8014);
+                                      (intptr_t (*)(intptr_t,int,intptr_t))LAB_80034920, 0x8014);
         /* wtype 8: LAB_8003565c child, slot 13, kind 0x8015 */
         case 8:
             return common_spawn_child(obj, source, vehicle_bank, 13,
-                                      LAB_8003565c, 0x8015);
+                                      (intptr_t (*)(intptr_t,int,intptr_t))LAB_8003565c, 0x8015);
 
         /* wtype 14: look up callback and slot from bone kind 0x801f */
         case 14: {
-            int src_bank = *(int32_t *)(s3 + 0x58);
+            intptr_t src_bank = (intptr_t)(uintptr_t)*(uint32_t *)(s3 + 0x58);
             uint8_t src_d0 = s3[0xd0];
             intptr_t bone = FUN_8001b038(source, 0x801fu);
             void *cb_ptr = FUN_8003d1e8(src_d0);
@@ -391,7 +717,7 @@ int LAB_8003c61c(int obj, int event, int param3)
                 /* No bone found: just apply damage + respawn */
                 FUN_800205f8(obj);
                 int16_t idx = *(int16_t *)(s2 + 0x06);
-                int next = FUN_8001ffd4((int)(uintptr_t)DAT_80065a50, (int)idx);
+                intptr_t next = FUN_8001ffd4((intptr_t)DAT_80065a50, (int)idx);
                 if (next) {
                     FUN_80020890(next, 600);
                     DAT_80065a10 -= 1;
@@ -399,7 +725,7 @@ int LAB_8003c61c(int obj, int event, int param3)
                 return -2;
             }
             /* Install the looked-up callback and spawn */
-            typedef int (*cb_t)(int,int,int);
+            typedef intptr_t (*cb_t)(intptr_t,int,intptr_t);
             return common_spawn_child(obj, source, src_bank, slot14,
                                       (cb_t)cb_ptr, 0x801fu);
         }

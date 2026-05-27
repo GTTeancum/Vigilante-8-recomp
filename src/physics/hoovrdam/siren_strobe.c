@@ -60,7 +60,7 @@ extern void Heap_Free(uint32_t p);                                   /* FUN_8004
 extern uint8_t  DAT_8008f660, DAT_80100098;
 extern uint32_t DAT_80101b88;
 extern uint32_t _DAT_800659fc, _DAT_800737e8, _DAT_80065a10;
-extern uint32_t FUN_801006cc;
+extern uint32_t FUN_801006cc(uint32_t *obj, int mode, int impulse);
 extern int FUN_8003e80c(int obj, int event, int param3);
 
 uint32_t HD_SirenStrobe(uint32_t *self, uint32_t mode, uint32_t *arg)

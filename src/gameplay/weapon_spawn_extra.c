@@ -7,8 +7,9 @@
  * Each constructs a new object from the world bone-bank
  * (DAT_800737d8) and registers it into the active scene.
  *
- * HIGH confidence (direct Ghidra port).  The LAB_ tick callbacks
- * are out-of-scope pass-3 stubs; the spawn logic itself is in-scope.
+ * HIGH confidence (direct Ghidra port).  The LAB_ tick callbacks are
+ * implemented in the gameplay/effect modules and installed through the
+ * source callback-slot bridge.
  */
 #include <stdint.h>
 
@@ -18,10 +19,9 @@ extern void     FUN_8002036c(int obj);                         /* Object_PostUpd
 extern void     FUN_800202f4(uint32_t *obj);                   /* Object_RegisterInScene */
 extern int      FUN_8001db54(int *pos, int radius);            /* GTE frustum visibility check */
 
-extern uint32_t DAT_800737d8;
+extern uintptr_t DAT_800737d8;
 extern int32_t  iRam00000010;
 
-/* Tick callback labels (panic stubs pending pass-3 decomp). */
 extern int  LAB_8003e7b4(int obj, int event, int param3); /* effect_death_ticks.c */
 extern void LAB_8003efc8(void);
 extern void LAB_8003ee88(void);

@@ -34,7 +34,7 @@ extern uint8_t Pool_AllocSFX(void);
 extern void Pool_BindFXOnObject(uint32_t h, uint32_t bin, int slot, uint32_t *xyz);
 extern int  Rand255(void);
 extern int *_DAT_80065a18;
-extern uint32_t FUN_801005e8;
+extern uint32_t FUN_801005e8(uint32_t *obj, uint32_t mode, uint32_t *arg);
 
 uint32_t VF_SiloRotate(int self, int mode, int param3)
 {

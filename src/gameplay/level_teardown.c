@@ -38,9 +38,13 @@ extern void Tree_FreeTerrain(void *root);                /* FUN_80020968 */
 extern void FUN_80020540(uint32_t *param_1);              /* Object_Free */
 
 extern uintptr_t uRam000007d8;
+extern uint32_t  uRam000005f8;
 extern uintptr_t iRam000006f8;
 extern uintptr_t iRam000006ec;
+extern uintptr_t uRam000006ec;
+extern void     *_DAT_800659f0;
 extern uintptr_t iRam000006fc;
+extern uintptr_t uRam000006fc;
 extern uintptr_t iRam000007bc;
 extern void     *puRam000007c4;
 extern void     *puRam000007a4;
@@ -53,7 +57,9 @@ extern uint8_t   DAT_80065ac0[];
 /* FUN_80022a1c -- Level_Free (renamed from Level_Teardown to match main_loop.c callers) */
 void Level_Free(void)
 {
-    Audio_StopAllSfx((void *)uRam000007d8);
+    if (uRam000007d8 != 0 && uRam000005f8 != 0) {
+        Audio_StopAllSfx((void *)uRam000007d8);
+    }
 
     if (iRam000006f8 != 0) {
         /* Unregister from scene lists then free; FUN_800203fc returns param_1. */
@@ -61,12 +67,16 @@ void Level_Free(void)
     }
     if (iRam000006ec != 0) {
         Heap_Free((void *)iRam000006ec);
+        iRam000006ec = 0;
+        uRam000006ec = 0;
+        _DAT_800659f0 = NULL;
     }
 
     Tree_Free(DAT_80065a50);
     Tree_Free(DAT_80065a18);
-    Tree_FreeTerrain((void *)iRam000006fc);
+    Tree_FreeTerrain((void *)uRam000006fc);
     iRam000006fc = 0;
+    uRam000006fc = 0;
 
     while (puRam000007c4 != NULL &&
            puRam000007c4 != DAT_80065ac0 &&

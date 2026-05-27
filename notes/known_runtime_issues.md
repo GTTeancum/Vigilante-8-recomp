@@ -1,0 +1,2 @@
+
+[2026-05-26T14:31:39.9699007-04:00] Prop collision remains incomplete: user reports many visible objects are still pass-through, while other low/drive-over objects collide as hard blockers. Treat this as unresolved source/asset semantics, likely tied to destructible prop callbacks, damage handling, and per-object collision class/shape metadata. Do not replace with empirical AABB fixes; continue resolving through weapon/powerup/destructible-object RE.

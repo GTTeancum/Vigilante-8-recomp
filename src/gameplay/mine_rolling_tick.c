@@ -55,11 +55,11 @@ extern int FUN_8001add0(int param_1, int *param_2, uint16_t param_3, uint32_t pa
 
 /* FUN_80031454 -- WeaponHit_Apply: apply impulse + damage to collider.
  *   Returns -1 (event consumed) or 0 (pass-through). */
-extern int FUN_80031454(int param_1, int *param_2, uint16_t param_3, int param_4);
+extern int FUN_80031454(intptr_t param_1, intptr_t *param_2, uint16_t param_3, int param_4);
 
 /* Post-die tick callbacks installed after explosion. */
-extern int LAB_800321C0(int obj, int event, int param3); /* normal variant */
-extern int LAB_8003277C(int obj, int event, int param3); /* large variant  */
+extern intptr_t LAB_800321C0(intptr_t obj, int event, intptr_t param3); /* normal variant */
+extern intptr_t LAB_8003277C(intptr_t obj, int event, intptr_t param3); /* large variant  */
 extern void Object_SetCallbackPsxSlot(void *obj, uintptr_t callback);
 
 /* ------------------------------------------------------------------ */
@@ -74,13 +74,13 @@ static int32_t mips_mult_lo_i32(int32_t a, int32_t b)
     return (int32_t)((uint32_t)((int64_t)a * (int64_t)b));
 }
 
-int LAB_80032aa4(int obj, int event, int param3)
+intptr_t LAB_80032aa4(intptr_t obj, int event, intptr_t param3)
 {
-    uint8_t *s0 = (uint8_t *)(uintptr_t)(uint32_t)obj;
+    uint8_t *s0 = (uint8_t *)(uintptr_t)obj;
 
     if (event == 3) {
         /* Collision: detonate — apply proximity damage to collider. */
-        return FUN_80031454(obj, (int *)(uintptr_t)(uint32_t)param3, 26u, 55);
+        return FUN_80031454(obj, (intptr_t *)(uintptr_t)param3, 26u, 55);
     }
 
     if (event >= 4) {

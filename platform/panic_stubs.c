@@ -267,7 +267,7 @@ uint8_t bRam000006cf = 0;
  * Written by LAB_8003c61c event-1 (spawn) with obj[0x58] (bank handle).
  * Read by LAB_8003cb64 to pass as bank arg to FUN_80021b80.
  * Zero until a split-projectile object has been initialised. */
-int32_t DAT_80065BB8 = 0;
+uintptr_t DAT_80065BB8 = 0;
 
 /* FUN_8001555c: Iso_ReadSector16 -- read ISO9660 PVD (sector 16) into dst.
  * Stub returns dst unchanged (zero-filled buffer = never matches). */
@@ -672,6 +672,10 @@ int16_t DAT_8005ec84[12] = {0};
 
 /* DAT_80065864: anchor point for SpawnOrbitObject (int[3] = xyz). */
 int32_t DAT_80065864[3] = {0};
+uint8_t DAT_80065870[0x20] = {0};
+uint8_t DAT_80065878[0x20] = {0};
+uint8_t DAT_8006587c[0x20] = {0};
+uint8_t DAT_80065888[0x20] = {0};
 
 /* PTR_s_6789__8005ed14: SFX pointer table indexed by (*opcode >> 6 & 0x3c).
  * Each element is a pointer to a per-category SFX-id byte table.
@@ -679,9 +683,14 @@ int32_t DAT_80065864[3] = {0};
  * Zero-filled stub (all pointers NULL → safe no-op in weapon_script.c). */
 uintptr_t PTR_s_6789__8005ed14[16] = {0};   /* 0x3c/4 + 1 = 16 entries */
 
-/* DAT_8005ece4: SFX opcode → sfxId map for opcodes 0x8400..0x8409 (10 entries).
- * uint16 each, accessed as (opcode - 0x8400) * 2 byte offset. */
-uint16_t DAT_8005ece4[10] = {0};
+/* DAT_8005ece4: SFX opcode map for 0x8400..0x840a.
+ * Source treats 0x840a as the first halfword at DAT_8005ecf8, so the
+ * host table keeps that overlapping entry explicit instead of relying on
+ * split globals being adjacent in native memory. */
+uint16_t DAT_8005ece4[11] = {0};
+
+/* DAT_8005eca8: three child effect kind ids used by LAB_80038d18. */
+uint16_t DAT_8005eca8[4] = {0x30, 0x2e, 0x2f, 0};
 
 /* DAT_8005ecf8: effect-type map for opcodes 0x8800..0x8807 (8 entries × 4 bytes). */
 uint32_t DAT_8005ecf8[8] = {0};
@@ -695,6 +704,15 @@ int32_t DAT_80065788[4] = {0};
 
 /* DAT_800657a4: impulse vector for FUN_800354e0 (generic weapon shot). */
 int32_t DAT_800657a4[4] = {0};
+
+/* DAT_80065798: impulse vector used by LAB_80034cec impact handling. */
+int32_t DAT_80065798[3] = {0};
+
+/* DAT_800657b0: matrix-space recoil vector used by state2 projectile fire. */
+int32_t DAT_800657b0[3] = {0};
+
+/* DAT_800657cc: recoil vector used by state5 projectile fire. */
+int32_t DAT_800657cc[3] = {0};
 
 /* DAT_8006576c: impulse vector for FUN_80031dfc (bullet spawn). */
 int32_t DAT_8006576c[4] = {0};
@@ -731,9 +749,25 @@ int  FUN_80011adc(const char *path) { (void)path; v8_panic_warn("FUN_80011adc");
 void *Overlay_LoadAndRelocate_Named(const char *p)
     { return (void *)(uintptr_t)FUN_80011adc(p); }
 
-/* ObjList_FastClear (FUN_8001fe50): clears the back-buffer pending-object list. */
-void FUN_8001fe50(void *list) { (void)list; }
-void ObjList_FastClear(void *list) { FUN_8001fe50(list); }
+/* ObjList_FastClear: host-only level-load clear helper.
+ * FUN_8001fe50 itself is ObjList_FastInsert and is implemented in
+ * src/gameplay/object_post_update.c; keep this helper separate so direct
+ * PSX-name insert callers do not bind to a clear/no-op stub. */
+void ObjList_FastClear(void *list) {
+    typedef struct HostObjListNode {
+        struct HostObjListNode *next;
+        struct HostObjListNode *prev;
+        uintptr_t payload;
+        uint32_t deadline;
+    } HostObjListNode;
+    HostObjListNode *sentinel = (HostObjListNode *)list;
+    if (sentinel != NULL) {
+        sentinel->next = NULL;
+        sentinel->prev = sentinel;
+        sentinel->payload = 0;
+        sentinel->deadline = 0;
+    }
+}
 
 /* FUN_8001af48 -- implemented in src/gameplay/object_freetree_quiet.c
  * (Object_HeapFreeRecursiveQuiet, aliased as Audio_StopAllSfx). */
@@ -763,6 +797,7 @@ int32_t  *piRam0000079c = NULL;
 uint8_t   DAT_80065a18[32] = {0};
 uint8_t   DAT_80065a50[32] = {0};
 uint8_t   DAT_80065a80[32] = {0};   /* physics-active scene list head */
+uint8_t   DAT_80065a90[32] = {0};   /* weapon projectile scratch/list head */
 uint8_t   DAT_80065aa0[32] = {0};
 uint8_t   DAT_80065ac0[32] = {0};
 uint32_t  _DAT_80065b3c = 0;        /* low-Z/fall boundary; zero until level data wires it */
