@@ -1,0 +1,14 @@
+{
+  "SHELL": { "file": "Shell\\Shell.dll", "confidence": "source-string" },
+  "LOAD": { "file": "Shell\\Load.dll", "confidence": "source-string" },
+  "AIRGRAVE": { "file": "Terrain\\AIRGRAVE.DLL", "confidence": "layout-assumption" },
+  "CANYNLND": { "file": "Terrain\\CANYNLND.DLL", "confidence": "layout-assumption" },
+  "CASNOCTY": { "file": "Terrain\\CASNOCTY.DLL", "confidence": "layout-assumption" },
+  "HOOVRDAM": { "file": "Terrain\\HOOVRDAM.DLL", "confidence": "layout-assumption" },
+  "OILFIELD": { "file": "Terrain\\OILFIELD.DLL", "confidence": "layout-assumption" },
+  "SANDFACT": { "file": "Terrain\\SANDFACT.DLL", "confidence": "layout-assumption" },
+  "SCRTBASE": { "file": "Terrain\\SCRTBASE.DLL", "confidence": "layout-assumption" },
+  "SKIRESRT": { "file": "Terrain\\SKIRESRT.DLL", "confidence": "layout-assumption" },
+  "VALLYFRM": { "file": "Terrain\\VALLYFRM.DLL", "confidence": "layout-assumption" },
+  "WILDWEST": { "file": "Terrain\\WILDWEST.DLL", "confidence": "layout-assumption" }
+}

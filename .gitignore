@@ -26,6 +26,9 @@ ghidra/
 /*.cue
 /PS1 game/
 /input/
+/reference/assets/
+/reference/generated/
+/reference/traces/
 # Note: analysis/ contains Ghidra decomp output (derived work, used as
 # audit ground truth for cleaned src/ files) and IS tracked.
 

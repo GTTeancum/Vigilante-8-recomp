@@ -63,6 +63,14 @@ Important project documents:
 
 Generated build directories, transient logs, emulator traces, and local extracted game data are intentionally not part of the parked `main` branch.
 
+## RecompOne Reference Lane
+
+The `codex/recompone-reference-staging` branch includes a self-contained,
+vendored RecompOne reference lane. It is intended to execute and trace original
+gameplay, physics, HUD, and menu behavior while this repository remains the
+shipping native C implementation. See `reference/README.md`; no game assets are
+included.
+
 ## Restart Guidance
 
 When this project is picked up again, start from `main`, not from the parked WIP branch. Treat the WIP branch as a research archive only.
