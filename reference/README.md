@@ -54,6 +54,28 @@ That launcher sets Vigilante 8's own Music and Sound Effects controls to 0 for
 the working handoff without changing Windows volume or the host mixer. Direct
 test launches remain audible unless `RECOMPONE_V8_GAME_VOLUME=0` is set.
 
+### High-resolution presentation
+
+The host Display settings now provide 1280x720, 1920x1080, 2560x1440, and
+3840x2160 output presets plus Off/FXAA anti-aliasing. Fullscreen uses the
+desktop resolution. The game image remains at its original 4:3 aspect inside
+the selected output, and both settings persist in `interface.ini`.
+
+This is deliberately a final presentation pass. Vigilante 8 still produces its
+original 320x240 gameplay and 640x480 shell framebuffer with the same VRAM,
+fixed-point simulation, primitive submission, UI coordinates, and timing.
+The host first scales that completed framebuffer to the visible output pixels;
+optional FXAA then filters only edges in that scaled image. It is not MSAA and
+does not claim higher-resolution PS1 geometry.
+
+Automation may override the saved choices with
+`RECOMPONE_OUTPUT_RESOLUTION=1920x1080` and `RECOMPONE_ANTI_ALIASING=FXAA`.
+`RECOMPONE_PRESENTATION_CAPTURE=1` adds post-presentation PPMs beside the
+unchanged native-framebuffer captures. The test-only
+`RECOMPONE_PRESENTATION_RESOLUTION` and
+`RECOMPONE_PRESENTATION_CAPTURE_FRAME` overrides exercise an exact offscreen
+surface independently of the current monitor size.
+
 Host audio uses the bundled SDL2 runtime to queue the reference SPU, XA, and
 Red Book CD-audio mix as 44.1 kHz stereo signed-16 output, so the handoff does
 not require a separate OpenAL installation. The CUE reader preserves the full

@@ -87,16 +87,20 @@ game-over/results through a reproducible input fixture and every gate in
 `VERTICAL_SLICE.md` has current runtime evidence. Process responsiveness or a
 single gameplay screenshot is not sufficient.
 
-## First post-goal presentation phase
+## First post-goal presentation phase — complete
 
-After the vertical slice is genuinely complete and deployed, extend only the
-reference presentation lane in this order:
+The reference host now offers 720p, 1080p, 1440p, and 4K output canvases,
+desktop-resolution fullscreen, and optional FXAA. Both operations consume only
+the completed original framebuffer; the PS1 viewport, 4:3 aspect, UI
+coordinates, VRAM, fixed-point gameplay state, and timing remain unchanged.
 
-1. Add higher output resolutions while preserving the original game viewport,
-   aspect, UI coordinates, and gameplay state.
-2. Add anti-aliasing on top of the higher-resolution path and verify that it is
-   presentation-only.
+Validation covered an unskipped boot movie at an exact 2880x2160 4:3 surface,
+the title and menu route, active Oil Fields physics/gameplay, the complete pause
+and confirmation flow, full destruction, the presented result screen, result
+acceptance, teardown, and replay loading. Stable native-framebuffer captures
+matched between AA-off and FXAA runs while independent presentation captures
+proved that the post-process produced the requested larger images.
 
-Neither item relaxes the current boot-to-results, audio, graphics, stability,
-or state-evidence gates, and neither changes the separate native 32-bit x86
-Xbox architecture.
+This work does not relax the boot-to-results, audio, graphics, stability, or
+state-evidence gates and does not change the separate native 32-bit x86 Xbox
+architecture.

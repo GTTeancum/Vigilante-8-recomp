@@ -116,8 +116,17 @@ identifies the target screen, and changing nonblack framebuffer hashes continue
 through gameplay, destruction, result dismissal, teardown, and replay loading.
 
 This completes the original-resolution Graphics gate for the vertical slice.
-Higher output resolutions and anti-aliasing are deliberately queued as the first
-post-goal presentation work so they cannot hide or perturb the fidelity baseline.
+Higher output resolutions and anti-aliasing were deliberately completed only
+after this baseline so they could not hide or perturb its fidelity evidence.
+
+The post-goal host presentation pass supports 720p through 4K output and
+optional FXAA. An exact 2880x2160 game surface presented a decoded boot-movie
+frame, while 1080p FXAA captures covered shell menus, active Oil Fields vehicle
+physics, pause/confirmation, full destruction, and the visible `YOU LOSE!`
+result. The result input was accepted through the original poll-320 path and
+normal teardown reached a fresh Oil Fields load. The native framebuffer is
+captured before the new pass and retained matching stage hashes between
+AA-disabled and FXAA runs, proving that the extension is presentation-only.
 
 ## Current physics status
 
