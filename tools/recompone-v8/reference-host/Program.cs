@@ -3,11 +3,14 @@ using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Memory;
 using Recompiled;
 
+string launchDirectory = Environment.CurrentDirectory;
 Environment.CurrentDirectory = AppContext.BaseDirectory;
 if (Environment.GetEnvironmentVariable("RECOMPONE_V8_GAME_VOLUME") == null)
     Environment.SetEnvironmentVariable("RECOMPONE_V8_GAME_VOLUME", "0");
 
-string? explicitCue = null;
+string? explicitSource = null;
+string? explicitLoose = null;
+bool disableLoose = false;
 bool probeSource = false;
 string? probeFile = null;
 for (int i = 0; i < args.Length; i++)
@@ -25,52 +28,65 @@ for (int i = 0; i < args.Length; i++)
     }
     if (args[i].Equals("--loose", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
     {
-        Environment.SetEnvironmentVariable(
-            "RECOMPONE_LOOSE_DIR", Path.GetFullPath(args[++i]));
+        explicitLoose = ResolveLaunchPath(args[++i]);
         continue;
     }
     if (args[i].Equals("--no-loose", StringComparison.OrdinalIgnoreCase))
     {
-        Environment.SetEnvironmentVariable("RECOMPONE_LOOSE_DIR", "0");
+        disableLoose = true;
         continue;
     }
-    if (explicitCue != null)
+    if (explicitSource != null)
     {
-        Console.Error.WriteLine(
-            "usage: Vigilante8PC [disc.cue] [--loose <directory>] [--no-loose] " +
-            "[--probe-source] [--probe-file <disc-path>]");
+        PrintUsage();
         return 1;
     }
-    explicitCue = Path.GetFullPath(args[i]);
+    explicitSource = ResolveLaunchPath(args[i]);
+}
+
+if (explicitLoose != null && disableLoose)
+{
+    PrintUsage();
+    return 1;
 }
 
 ConfigManager.Load();
-string? cuePath = ResolveCue(explicitCue, ConfigManager.Game.CdPath);
-if (cuePath != null)
+(string? cuePath, string? loosePath) = ResolveSource(
+    explicitSource, explicitLoose, disableLoose);
+if (loosePath != null)
 {
+    Environment.SetEnvironmentVariable("RECOMPONE_LOOSE_DIR", loosePath);
+    ConfigManager.Game.CdPath = "";
+    Console.WriteLine($"[Host] standalone-loose={loosePath}");
+}
+else if (cuePath != null)
+{
+    Environment.SetEnvironmentVariable("RECOMPONE_LOOSE_DIR", "0");
     ConfigManager.Game.CdPath = cuePath;
     ConfigManager.SaveGame();
     Console.WriteLine($"[Host] disc={cuePath}");
 }
 else
 {
-    ConfigManager.Game.CdPath = "";
-    Console.WriteLine("[Host] no neighboring CUE found; opening the disc picker");
+    throw new FileNotFoundException(
+        "No game source found. Put Vigilante8PC.exe beside the extracted loose " +
+        "SYSTEM.CNF tree, or beside/pass a retail CUE file.");
 }
 
 if (probeSource)
 {
-    if (cuePath == null) return 2;
-    string? loosePath = RecompOne.Runtime.Runtime.ResolveLoosePath(cuePath);
-    using var source = CueFs.Open(cuePath, loosePath);
+    using var source = loosePath != null
+        ? CueFs.OpenLoose(loosePath)
+        : CueFs.Open(cuePath!);
     byte[] system = source.ReadFile("SYSTEM.CNF");
     Console.WriteLine(
-        $"[SourceProbe] cue={cuePath} loose={loosePath ?? "disabled"} " +
-        $"overrides={source.LooseOverrideCount} systemCnfBytes={system.Length}");
+        $"[SourceProbe] mode={(source.IsStandaloneLoose ? "standalone-loose" : "cue")} " +
+        $"root={loosePath ?? cuePath} files={source.LooseOverrideCount} " +
+        $"systemCnfBytes={system.Length}");
     if (!string.IsNullOrWhiteSpace(probeFile))
     {
         if (!source.Locate(probeFile, out int lba, out uint size))
-            throw new FileNotFoundException($"Disc file not found: {probeFile}");
+            throw new FileNotFoundException($"Game file not found: {probeFile}");
         byte[] file = source.ReadFile(probeFile);
         byte[] cooked = source.ReadSectorData(lba, 2048);
         byte[] raw = source.ReadSectorData(lba, 2352);
@@ -85,8 +101,14 @@ if (probeSource)
 }
 
 PreloadBundledNative("SDL2.dll");
-Entry.Run(new PSMemory(), cuePath);
+Entry.Run(new PSMemory(), cuePath, loosePath);
 return 0;
+
+string ResolveLaunchPath(string path) => Path.GetFullPath(path, launchDirectory);
+
+static void PrintUsage() => Console.Error.WriteLine(
+    "usage: Vigilante8PC [disc.cue|loose-directory] [--loose <directory>] " +
+    "[--no-loose] [--probe-source] [--probe-file <game-path>]");
 
 static void PreloadBundledNative(string fileName)
 {
@@ -105,24 +127,43 @@ static void PreloadBundledNative(string fileName)
     }
 }
 
-static string? ResolveCue(string? explicitCue, string? savedCue)
+static (string? CuePath, string? LoosePath) ResolveSource(
+    string? explicitSource,
+    string? explicitLoose,
+    bool disableLoose)
 {
-    if (!string.IsNullOrWhiteSpace(explicitCue))
+    if (explicitLoose != null)
+        return (null, RequireLooseRoot(explicitLoose));
+
+    if (explicitSource != null)
     {
-        if (File.Exists(explicitCue)) return Path.GetFullPath(explicitCue);
-        if (Directory.Exists(explicitCue)) return FindCue(explicitCue);
-        throw new FileNotFoundException($"Disc CUE not found: {explicitCue}");
+        if (Directory.Exists(explicitSource))
+        {
+            if (!disableLoose && File.Exists(Path.Combine(explicitSource, "SYSTEM.CNF")))
+                return (null, RequireLooseRoot(explicitSource));
+            string? cue = FindCue(explicitSource);
+            if (cue != null) return (cue, null);
+            throw new FileNotFoundException($"No loose SYSTEM.CNF or CUE found: {explicitSource}");
+        }
+        if (!File.Exists(explicitSource))
+            throw new FileNotFoundException($"Game source not found: {explicitSource}");
+        if (!Path.GetExtension(explicitSource).Equals(".cue", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"Expected a CUE file or loose directory: {explicitSource}");
+        return (Path.GetFullPath(explicitSource), null);
     }
 
-    string? adjacent = FindCue(AppContext.BaseDirectory);
-    if (adjacent != null) return adjacent;
-    string siblingBinCue = Path.GetFullPath(
-        Path.Combine(AppContext.BaseDirectory, "..", "BINCUE"));
-    string? sibling = Directory.Exists(siblingBinCue) ? FindCue(siblingBinCue) : null;
-    if (sibling != null) return sibling;
-    return !string.IsNullOrWhiteSpace(savedCue) && File.Exists(savedCue)
-        ? Path.GetFullPath(savedCue)
-        : null;
+    if (!disableLoose && File.Exists(Path.Combine(AppContext.BaseDirectory, "SYSTEM.CNF")))
+        return (null, RequireLooseRoot(AppContext.BaseDirectory));
+    return (FindCue(AppContext.BaseDirectory), null);
+}
+
+static string RequireLooseRoot(string directory)
+{
+    string root = Path.GetFullPath(directory);
+    if (!Directory.Exists(root) || !File.Exists(Path.Combine(root, "SYSTEM.CNF")))
+        throw new DirectoryNotFoundException(
+            $"Standalone loose root must contain SYSTEM.CNF: {root}");
+    return root;
 }
 
 static string? FindCue(string directory)

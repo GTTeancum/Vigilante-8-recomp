@@ -18,12 +18,18 @@ public static class EntryWriter
         entry.AppendLine();
         entry.AppendLine("public static class Entry");
         entry.AppendLine("{");
-        entry.AppendLine("    public static void Run(IMemory m, string? cuePath = null)");
+        entry.AppendLine("    public static void Run(IMemory m, string? cuePath = null, string? loosePath = null)");
         entry.AppendLine("    {");
         entry.AppendLine($"        RecompOne.Runtime.Runtime.Initialize({ToStringLiteral(windowTitle)});");
-        entry.AppendLine("        RecompOne.Runtime.Runtime.WaitForValidDisc();");
-        entry.AppendLine("        string discPath = cuePath ?? RecompOne.Runtime.Runtime.CdPath;");
-        entry.AppendLine("        using var fs = CueFs.Open(discPath, RecompOne.Runtime.Runtime.ResolveLoosePath(discPath));");
+        entry.AppendLine("        loosePath ??= RecompOne.Runtime.Runtime.ResolveLoosePath();");
+        entry.AppendLine("        if (loosePath == null && cuePath == null)");
+        entry.AppendLine("        {");
+        entry.AppendLine("            RecompOne.Runtime.Runtime.WaitForValidDisc();");
+        entry.AppendLine("            cuePath = RecompOne.Runtime.Runtime.CdPath;");
+        entry.AppendLine("        }");
+        entry.AppendLine("        using var fs = loosePath != null");
+        entry.AppendLine("            ? CueFs.OpenLoose(loosePath)");
+        entry.AppendLine("            : CueFs.Open(cuePath!);");
         entry.AppendLine("        var cd = new CdController(fs, m);");
         entry.AppendLine("        m.SetCd(cd);");
         foreach (var name in overlays)

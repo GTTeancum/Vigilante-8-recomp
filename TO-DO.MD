@@ -1,6 +1,6 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 11:45 EDT
+Last updated: 2026-07-22 12:05 EDT
 Status: ACTIVE
 
 ## Goal
@@ -18,8 +18,9 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
       failing arena is fixed or documented with reproducible evidence.
 - [x] Cooperative and Versus split-screen each reach active gameplay in clean,
       independent runs and remain stable under simultaneous two-pad input.
-- [ ] Direct BIN/CUE and loose-file deployments remain byte-identical and pass
-      focused regressions after any runtime changes.
+- [ ] Direct BIN/CUE and standalone loose-file deployments use the same
+      executable and pass focused regressions after any runtime changes; the
+      loose deployment must work with the entire `BINCUE` tree unavailable.
 - [ ] Temporary test processes and handoff logs are cleaned; cards and settings
       are preserved; coherent changes are committed.
 
@@ -46,9 +47,12 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 
 ### Other autonomous coverage
 
-- [x] Exercise loose-file content mutation, size changes, deletion/fallback,
-      ambiguous basename handling, and raw-sector disc fallback in an isolated
-      temporary tree.
+- [ ] Replace the CUE-backed override layer with a standalone loose filesystem
+      that boots, streams STR/XA, plays loose music, and reaches gameplay with
+      no BIN/CUE files available.
+- [ ] Exercise exact-path content mutation, size changes, missing-file errors,
+      ambiguous basename rejection, and cooked/raw stream reads in an isolated
+      standalone tree suitable for future mods.
 - [x] Add non-invasive live-controller diagnostics and validate SDL/XInput
       discovery against the attached XInput-compatible device.
 - [x] Exercise hot-plug state handling and rumble calls where automation permits.
@@ -70,8 +74,8 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 
 - The reference executable remains Windows x64; the shipping Xbox game is a
   separate 32-bit x86 implementation.
-- Loose mode still requires the CUE for stable LBAs, XA/STR raw sectors, CDDA,
-  and fallback files.
+- Standalone loose mode must never discover, open, or fall back to BIN/CUE data.
+  Its path-stable asset tree is also the supported foundation for future mods.
 - Renderer, raw controls, and host audio output are rewrite seams; gameplay
   state and timing remain the fidelity target.
 
@@ -111,10 +115,10 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
   at its arena-specific callback boundary and passed the corrected 120-second
   gate. Liveness now uses continuous framebuffer probes while wheel-body ticks
   remain diagnostic telemetry.
-- 2026-07-22: The reusable isolated loose-file suite passed edited content,
-  changed lengths, deletion-to-disc fallback, unique and ambiguous basename
-  handling, cooked-sector overrides, and raw 2352-byte disc fallback without
-  modifying either handoff data tree.
+- 2026-07-22: The first isolated loose-file suite proved override mechanics,
+  but its deletion/raw-sector cases depended on disc fallback. The clarified
+  standalone/modding requirement invalidated that acceptance result; the item
+  is reopened until the same executable passes with `BINCUE` wholly absent.
 - 2026-07-22: The attached Xbox controller survived an automated SDL
   close/reopen rescan with the same Player 1 assignment. Suppressed motor tests
   routed independent start/stop requests to both controller slots; physical

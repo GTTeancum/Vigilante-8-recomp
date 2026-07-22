@@ -96,6 +96,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--exe", type=Path, default=DEFAULT_EXE)
     parser.add_argument("--cue", type=Path, default=DEFAULT_CUE)
     parser.add_argument(
+        "--loose-root",
+        type=Path,
+        help="Use a standalone extracted asset tree; no CUE/BIN is opened.",
+    )
+    parser.add_argument(
         "--maps",
         default="all",
         help=(
@@ -352,7 +357,7 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
 
 def run_one(
     exe: Path,
-    cue: Path,
+    source_args: list[str],
     output: Path,
     arena: Arena,
     mode: str,
@@ -404,7 +409,7 @@ def run_one(
 
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
         process = subprocess.Popen(
-            [str(exe), str(cue)],
+            [str(exe), *source_args],
             cwd=str(exe.parent),
             env=env,
             stdout=stdout,
@@ -534,7 +539,10 @@ def run_one(
         and text.count(f"loaded relocated overlay: {arena.overlay}") >= 2
         and bool(re.search(r"\[Soak\] gameplay tick=\d+", post_result_text))
     )
-    overrides_match = re.search(r"loose-file overrides=(\d+)", text)
+    overrides_match = re.search(
+        r"(?:standalone loose files|CUE overrides|loose-file overrides)=(\d+)",
+        text,
+    )
     source_overrides = int(overrides_match.group(1)) if overrides_match else 0
 
     if passed and not overlay_seen:
@@ -612,9 +620,18 @@ def main() -> int:
     exe = args.exe.resolve()
     if not exe.is_file():
         raise SystemExit(f"Vigilante8PC executable not found: {exe}")
-    cue = args.cue.resolve()
-    if not cue.is_file():
-        raise SystemExit(f"Vigilante 8 CUE not found: {cue}")
+    if args.loose_root:
+        loose_root = args.loose_root.resolve()
+        if not (loose_root / "SYSTEM.CNF").is_file():
+            raise SystemExit(
+                f"Standalone loose root does not contain SYSTEM.CNF: {loose_root}"
+            )
+        source_args = ["--loose", str(loose_root)]
+    else:
+        cue = args.cue.resolve()
+        if not cue.is_file():
+            raise SystemExit(f"Vigilante 8 CUE not found: {cue}")
+        source_args = [str(cue)]
     if args.seconds <= 0 or args.entry_timeout <= 0 or args.heartbeat_timeout <= 0:
         raise SystemExit("durations and timeouts must be positive")
     if args.cycles <= 0:
@@ -638,7 +655,7 @@ def main() -> int:
             )
             result = run_one(
                 exe,
-                cue,
+                source_args,
                 output,
                 arena,
                 args.mode,
