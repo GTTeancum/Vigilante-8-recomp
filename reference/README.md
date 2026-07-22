@@ -278,9 +278,8 @@ Credits selection played all 1,251 queued frames through its authored reset and
 normal loop restart. The pause fixture completed CD-track selection, resume,
 confirmation cancel, a second resume, and confirmed quit with no runtime-fault
 marker. Separate clean fixtures also exercised Cooperative, Versus, and both
-two-player selector layouts. See
-`VERTICAL_SLICE.md` for the evidence and the remaining cross-runtime
-state-comparison work.
+two-player selector layouts. See `VERTICAL_SLICE.md` for the retained evidence;
+the reference's state trace is the oracle for later native-port comparison.
 
 The original CD-audio path now sees the retail 1-13 TOC rather than a synthetic
 single data track. Focused audible runs started menu track 2 and gameplay track

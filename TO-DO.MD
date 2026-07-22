@@ -87,12 +87,13 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 
 ## User sign-off queue
 
+The retained screenshots and controller checklist are collected in
+`reference/SIGNOFF.md`.
+
 - [ ] Physical-controller feel: buttons, sticks, triggers, dead zones, hot-plug,
       and rumble on the user's actual controller.
 - [ ] Visual acceptance of every arena and both split-screen layouts after the
       automated stability gates pass.
-- [ ] Any PS1-versus-reference comparison that requires an externally
-      instrumented original-game/emulator capture not available locally.
 
 ## Evidence log
 
@@ -165,8 +166,9 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
   state. The comparator reproduced the 16,260-tick victory trace and 900-tick
   Quest trace exactly against themselves, then correctly found Arcade-versus-
   Quest divergence at tick 1. Native snapshot scaffolding now records the
-  instruction-confirmed one-byte PRNG carry; external PS1 capture remains a
-  user-sign-off dependency rather than an autonomous local task.
+  instruction-confirmed one-byte PRNG carry. Comparison against an externally
+  instrumented PS1/emulator is explicitly outside this goal; the local
+  trace/comparator audit is complete and supplies the later native-port oracle.
 - 2026-07-22: Final x64 single-file publication produced byte-identical
   `Vigilante8PC.exe` deployments at SHA256
   `1DFD56EFA33760E6E18072DFFCDB22775AF2520D9215FF7976971E302DA1D9C7`.

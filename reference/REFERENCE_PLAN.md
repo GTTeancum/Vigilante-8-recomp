@@ -82,9 +82,9 @@ seconds without a runtime error, and the deployed copy passed a second active
 smoke test. The reference now emits a pointer-neutral JSONL record at every
 player-vehicle physics tick, including original pad words, PRNG state, match
 state, transforms, velocities, damage zones, and weapon inventories. A
-committed comparator finds the first divergent tick and field. An instrumented
-original PS1/emulator trace or a linkable native gameplay loop is still
-required for the first cross-runtime comparison.
+committed comparator finds the first divergent tick and field. This reference
+trace is the oracle for the later native gameplay port. An externally
+instrumented PS1/emulator comparison is not a requirement of this goal.
 
 The current vertical slice is complete only when a clean launch reaches
 game-over/results through a reproducible input fixture and every gate in

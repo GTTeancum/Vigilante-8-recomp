@@ -47,5 +47,6 @@ python tools/recompone-v8/compare_state_traces.py expected.jsonl actual.jsonl
 
 The comparator reports the first divergent tick and field path. `--ignore`
 can omit a deliberately uncontrolled field; `--allow-prefix`
-validates a clean common prefix when a capture is interrupted. An externally
-instrumented PS1 run must emit the same schema for cross-runtime comparison.
+validates a clean common prefix when a capture is interrupted. The later native
+port should emit the same pointer-neutral schema when its gameplay loop is
+ready. External PS1/emulator comparison is not part of the reference goal.

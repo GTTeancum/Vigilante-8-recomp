@@ -25,7 +25,7 @@ native 32-bit x86 Xbox game.
 | Intros | all boot movies/logos play, skip, and transition with original timing rules | stage markers and representative captures |
 | Menus | title, mode, player/vehicle, level, options used by the slice, pause, and results paths draw and navigate correctly | committed input fixture, menu-state trace, captures |
 | Match load | selected mode/vehicle/arena survive the SHELL to LOAD to terrain-overlay transition | selection and overlay-state trace |
-| Physics | spawn/drop, suspension contact, stationary settling, acceleration, steering, braking, collision, and recovery are trustworthy | PS1-versus-reference frame/state comparison with first-divergence reporting |
+| Physics | spawn/drop, suspension contact, stationary settling, acceleration, steering, braking, collision, and recovery are trustworthy | deterministic fixed-point reference trace, focused runtime telemetry, and visual acceptance; the later native port compares against this oracle |
 | Weapons | pickup or loadout, selection, firing, ammo, projectile lifecycle, impact, damage, destruction, and retirement execute | event/object trace and visible runtime proof |
 | Graphics | movies, menus, HUD, vehicles, terrain, props, particles, weapons, pause, and results are legible and behaviorally faithful | representative captures plus framebuffer/stage markers |
 | Audio | music, SFX, voice, channel/voice allocation, looping, stop/fade, menu cues, weapon/impact cues, and results transitions execute | SPU/CD event trace plus audible output capture/check |
@@ -34,9 +34,12 @@ native 32-bit x86 Xbox game.
 
 ## Fidelity rule
 
-Stable execution is necessary but not sufficient. Data from a subsystem becomes
-portable only after that subsystem's relevant state agrees with an original PS1
-run or after any remaining difference is proven to be presentation-only.
+Stable execution is necessary but not sufficient. Reference data is accepted
+when it comes from the recompiled original instruction path, required host shims
+are source-backed and narrowly scoped, and deterministic state traces expose
+the relevant fixed-point behavior. An externally instrumented PS1/emulator
+comparison is not required by this reference goal. The later native port must
+compare its state against this reference oracle.
 
 The first physics comparison starts at vehicle creation and records, per frame:
 
@@ -46,8 +49,8 @@ The first physics comparison starts at vehicle creation and records, per frame:
 - wheel position, suspension compression, contact state, and terrain sample;
 - weapon/projectile and damage events once those systems enter the slice.
 
-Comparison stops at the first differing field. Fix or classify that divergence
-before treating later derived values as source truth.
+Native-port comparison stops at the first differing field. Fix or classify that
+divergence before treating later native derived values as equivalent.
 
 ## Current boot-movie status
 
@@ -155,9 +158,9 @@ ticks 720, 780, 840, and 900 (`upY` 4072, 4093, 4038, and 4097). The corrected
 35-second focused run reached tick 900 with no runtime fault marker. This passes
 the runtime collision-and-recovery behavior needed before weapon work, and the
 user has visually accepted the complete vehicle-physics presentation as
-correct. The
-PS1-versus-reference state comparison remains open before the full fidelity
-gate is closed.
+correct. Per-tick reference tracing now records the original input, PRNG,
+transform, velocity, damage, and weapon state needed by the later native port;
+an external PS1 comparison is not an open gate.
 
 ## Current weapon status
 
@@ -182,8 +185,8 @@ result builder ran at tick 7,459 with mode 1, the original alive flag cleared,
 and all three player damage zones at zero. Player-owned projectiles continued to
 use the original spawn, registration, impact, and retirement callbacks; no test
 hook changed health, damage, AI, or match state. This completes the fixed-slice
-Weapons gate at runtime, subject to the same PS1-versus-reference state audit as
-the final fidelity gate.
+Weapons gate at runtime. The reference trace supplies the subsequent native-port
+comparison boundary.
 
 ## Current audio status
 

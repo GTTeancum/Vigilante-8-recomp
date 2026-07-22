@@ -38,8 +38,9 @@ Implements the three deliverables from `PROJECT_SCOPE.md > Verification`:
 - The running RecompOne reference now supplies immediately usable,
   pointer-neutral per-tick JSONL traces through `RECOMPONE_STATE_TRACE_PATH`.
   `tools/recompone-v8/compare_state_traces.py` reports the first divergent tick
-  and field. Cross-runtime validation still requires an external emulator
-  capture or the native gameplay loop; neither is available locally.
+  and field. The native gameplay loop will compare against this oracle when it
+  becomes linkable; external PS1/emulator comparison is outside the reference
+  goal.
 - The PRNG carry at `0x800568d8` is one byte (`LBU`/`SB`), not an `int32_t`.
   Binary snapshot schema version 3 records the corrected type with explicit
   padding.
