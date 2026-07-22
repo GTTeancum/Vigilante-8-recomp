@@ -39,13 +39,17 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [ ] Reproduce and correct the Canyonlands gameplay crash in which
       `FUN_80024998` reads corrupt address `0x380C110F` after roughly 4,500
       gameplay ticks.
-- [ ] Determine whether the Ski Resort post-defeat presentation stall is a
-      game/runtime defect or a result-screen automation false positive, then
-      pass defeat dismissal and arena relaunch.
+- [x] Classify the Ski Resort post-defeat presentation stall as a
+      result-screen automation false positive. With result/title transitions
+      excluded from the gameplay framebuffer gate, two fresh matches reached
+      3,960 and 6,480 ticks and returned cleanly to the title screen.
 - [x] Diagnose Casino City's fragmented emulated-heap exhaustion: allocation
       failure is recoverable pressure, not a fatal condition; a subsequent
       Canyonlands run logged it and continued normally through 9,900 ticks and
       result/title teardown.
+- [ ] Reproduce and isolate Casino City's distinct late Object_PreTick
+      animation stall, first captured at tick 3,060 with a live managed stack;
+      the next targeted repetitions have object/cursor/callback tracing armed.
 - [x] Regenerate and regression-test the newly recovered main-executable
       entrypoint `0x8003DFFC`, reached from Hoover Dam gameplay at tick 720.
 - [x] Fix Hoover Dam callback `0x80100A18` clearing its animation cursor on
