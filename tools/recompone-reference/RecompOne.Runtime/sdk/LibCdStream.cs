@@ -203,17 +203,24 @@ public static class LibCdStream
             byte[] sec;
             try { lock (LibCd.DiscLock) sec = cd.ReadSectorData(_streamLba, 2336); }
             catch { Thread.Sleep(2); continue; }
+            int payload = StrPayloadOffset(sec);
 
             if (!_loggedScan)
             {
                 _loggedScan = true;
-                Console.WriteLine($"[CdStream] scanning LBA={_streamLba} submode=0x{sec[2]:X2} magic=0x{Read16(sec, 8):X4} chunk={Read16(sec, 12)} count={Read16(sec, 14)}");
+                int header = payload >= 0 ? payload : 8;
+                Console.WriteLine($"[CdStream] scanning LBA={_streamLba} submode=0x{sec[2]:X2} magic=0x{Read16(sec, header):X4} chunk={Read16(sec, header + 4)} count={Read16(sec, header + 6)} payload={payload}");
             }
 
-            if ((sec[2] & 0x04) != 0) { XaAudio.DecodeSector(sec, 8, sec[3]); _streamLba++; continue; }
-            if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
+            if (payload < 0)
+            {
+                if ((sec[2] & 0x04) != 0) XaAudio.DecodeSector(sec, 8, sec[3]);
+                _streamLba++;
+                continue;
+            }
+            if (Read16(sec, payload + 4) != 0) { _streamLba++; continue; }
 
-            int n = Read16(sec, 14);
+            int n = Read16(sec, payload + 6);
             if (n <= 0 || n > _slots) { _streamLba++; continue; }
 
             double delivered = _clock.Elapsed.TotalSeconds * LibCd.SectorsPerSecond;
@@ -230,9 +237,9 @@ public static class LibCdStream
             }
 
             int frameLba = _streamLba;
-            int frameNumber = (int)Read32(sec, 16);
-            int width = Read16(sec, 24);
-            int height = Read16(sec, 26);
+            int frameNumber = (int)Read32(sec, payload + 8);
+            int width = Read16(sec, payload + 16);
+            int height = Read16(sec, payload + 18);
             if (!CollectFrame(cd, m, start, n)) continue;
 
             int queued = ++_framesQueued;
@@ -265,18 +272,29 @@ public static class LibCdStream
             catch { return false; }
             lba++;
 
-            if ((sec[2] & 0x04) != 0) { XaAudio.DecodeSector(sec, 8, sec[3]); continue; }
-            if (Read16(sec, 8) != VideoMagic) continue;
+            int payload = StrPayloadOffset(sec);
+            if (payload < 0)
+            {
+                if ((sec[2] & 0x04) != 0) XaAudio.DecodeSector(sec, 8, sec[3]);
+                continue;
+            }
 
             uint hdr = _statusBase + (uint)((start + collected) * HeaderSize);
             uint dat = _dataBase + (uint)((start + collected) * SlotData);
-            for (int j = 0; j < HeaderSize; j++) m.WriteU8(hdr + (uint)j, sec[8 + j]);
-            for (int j = 0; j < SlotData; j++) m.WriteU8(dat + (uint)j, sec[8 + HeaderSize + j]);
+            for (int j = 0; j < HeaderSize; j++) m.WriteU8(hdr + (uint)j, sec[payload + j]);
+            for (int j = 0; j < SlotData; j++) m.WriteU8(dat + (uint)j, sec[payload + HeaderSize + j]);
             collected++;
         }
         _streamLba = lba;
         Thread.MemoryBarrier();
         return true;
+    }
+
+    static int StrPayloadOffset(byte[] sector)
+    {
+        if (sector.Length >= 8 + HeaderSize + SlotData && Read16(sector, 8) == VideoMagic) return 8;
+        if (sector.Length >= HeaderSize + SlotData && Read16(sector, 0) == VideoMagic) return 0;
+        return -1;
     }
 
     // Caller holds _lock.

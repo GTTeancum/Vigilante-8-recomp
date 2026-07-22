@@ -63,8 +63,15 @@ public sealed class Dma
     void TransferMdecOut(uint madr, uint bcr)
     {
         uint words = WordCount(bcr);
+        uint wordOr = 0;
+        bool trace = Log.DmaOn;
         for (uint i = 0; i < words; i++)
-            _mem.WriteU32(madr + i * 4u, _mdec.ReadData());
+        {
+            uint word = _mdec.ReadData();
+            if (trace) wordOr |= word;
+            _mem.WriteU32(madr + i * 4u, word);
+        }
+        if (trace) Log.Dma($"MDEC out words={words} or=0x{wordOr:X8}");
     }
 
     void TransferGpu(uint madr, uint bcr, uint chcr)
@@ -87,8 +94,15 @@ public sealed class Dma
         else if ((chcr & 1u) != 0)
         {
             uint words = WordCount(bcr);
+            uint wordOr = 0;
+            bool trace = Log.DmaOn;
             for (uint i = 0; i < words; i++)
-                _gpu.WriteGp0(_mem.ReadU32(madr + i * 4u));
+            {
+                uint word = _mem.ReadU32(madr + i * 4u);
+                if (trace) wordOr |= word;
+                _gpu.WriteGp0(word);
+            }
+            if (trace) Log.Dma($"GPU in words={words} or=0x{wordOr:X8}");
         }
         else
         {

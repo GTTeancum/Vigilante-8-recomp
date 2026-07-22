@@ -57,9 +57,24 @@ no-live-input run reached the authored frame-number reset for all three boot
 streams: `ACTLOGO.STR` at queued frame 227, `LUXOFLUX.STR` at 91, and
 `INTRO.STR` at 1,267. The run then reached the original `PRESS START` text.
 
-This proves movie transport and transition timing, but does not yet close the
-Intros or Graphics gates: the current presented movie surface is flat gray.
-MDEC decode/upload fidelity remains the next boot-path defect.
+The flat movie-surface defect is resolved. SHELL's MDEC quantization and scale
+tables live inside its relocated overlay; the generated code retained their
+linked addresses when handing them to DMA, so the hardware model read zeroes.
+The narrow SHELL MDEC-input bridge now materializes the active overlay delta
+only for DMA sources inside that overlay. On the restored original disc, the
+runtime loads the retail quantization and cosine tables, decodes 300
+macroblocks per 320x240 frame, transfers non-constant output through MDEC-out
+and GPU DMA, uploads all 20 strips, and flips the original double-buffered VRAM
+pages. A timed capture shows the decoded Activision movie frame rather than the
+earlier untouched black page.
+
+Representative original-disc captures show all three authored sequences: the
+Activision shatter logo, the rendered Luxoflux logo and slogan, and the
+letterboxed opening road shot from `INTRO.STR`. A clean uninterrupted repeat
+then played all 227, 91, and 1,267 queued frames, retained changing nonblack
+framebuffer hashes, and reached the retail `PRESS START` renderer with no
+runtime error marker. The Intros gate is complete for the fixed slice. The
+broader Graphics gate still includes menus, gameplay, pause, and results.
 
 ## Commit discipline
 

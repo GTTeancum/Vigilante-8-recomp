@@ -33,6 +33,10 @@ internal static class HostWindow
     static int _ramFrame;
     static int _displayProbeFrame;
     static uint _lastDisplayHash;
+    static readonly int _displayProbeInterval =
+        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_DISPLAY_PROBE_INTERVAL"), out int interval)
+            ? Math.Max(1, interval)
+            : 120;
 
     static bool _layoutPending = true;
     static bool _closed;
@@ -327,7 +331,7 @@ internal static class HostWindow
 
     static void ProbeDisplay(Gpu gpu, int w, int h)
     {
-        if (++_displayProbeFrame % 120 != 1) return;
+        if (++_displayProbeFrame % _displayProbeInterval != 1) return;
 
         int pixels = w * h;
         int nonzero = 0;

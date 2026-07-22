@@ -75,6 +75,13 @@ neutralizes attached keyboards/gamepads before applying a scripted fixture, so
 real controller state cannot skip boot movies or perturb the replay. It is a
 test-only switch; normal launches retain the original movie-skip controls.
 
+Focused movie diagnostics are available without changing normal output:
+`RECOMPONE_TRACE_MDEC=1` records table loads and decoded-frame hashes,
+`RECOMPONE_TRACE_DMA=1` records MDEC/GPU transfer summaries, and
+`RECOMPONE_TRACE_GPU=1` records image uploads and display-page flips. Automated
+capture runs can lower `RECOMPONE_DISPLAY_PROBE_INTERVAL` from its default 120
+presentations without changing movie timing.
+
 ## Prepare the reference configuration
 
 From the repository root:
@@ -115,6 +122,11 @@ smoke test. The stage-aware fixture also completed two generated-build runs and
 one deployed-build run, each remaining active in Oilfield past 55 seconds with
 no fatal runtime marker. The latest visual proof is
 `reference/traces/recompone_gameplay_deployed.png`.
+
+The original-disc boot path also completes all three unskipped movie streams
+with visible decoded output and reaches the retail `PRESS START` renderer. The
+handoff launcher retains normal movie-skip input while setting only Vigilante
+8's in-game Music and Sound Effects controls to zero.
 
 See `REFERENCE_PLAN.md` for the architecture and `VERTICAL_SLICE.md` for the
 active acceptance gates.

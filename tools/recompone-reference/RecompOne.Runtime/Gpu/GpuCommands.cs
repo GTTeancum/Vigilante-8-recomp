@@ -125,6 +125,7 @@ public sealed partial class Gpu
         _loadH = (int)((_fifo[2] >> 16) & 0xFFFF); if (_loadH == 0) _loadH = 0x200; else _loadH &= 0x1FF; if (_loadH == 0) _loadH = 0x200;
         _loadPx = 0;
         _loadImage = true;
+        Log.Gpu($"image load begin xy={_loadX},{_loadY} size={_loadW}x{_loadH}");
         HleLoadBegin();
         _fifo.Clear();
     }
@@ -142,7 +143,23 @@ public sealed partial class Gpu
                 Vram[idx] = stored;
         }
         HleLoadPut(stored);
-        if (++_loadPx >= _loadW * _loadH) { _loadImage = false; HleLoadFlush(); }
+        if (++_loadPx >= _loadW * _loadH)
+        {
+            _loadImage = false;
+            if (Log.GpuOn)
+            {
+                uint wordOr = 0;
+                if (!HleOn)
+                {
+                    for (int row = 0; row < _loadH; row++)
+                        for (int col = 0; col < _loadW; col++)
+                            wordOr |= Vram[((_loadY + row) & (VramHeight - 1)) * VramWidth +
+                                          ((_loadX + col) & (VramWidth - 1))];
+                }
+                Log.Gpu($"image load end xy={_loadX},{_loadY} size={_loadW}x{_loadH} or=0x{wordOr:X4}");
+            }
+            HleLoadFlush();
+        }
     }
 
     void BeginImageRead()

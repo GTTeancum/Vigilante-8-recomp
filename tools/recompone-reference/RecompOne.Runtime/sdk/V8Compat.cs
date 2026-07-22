@@ -506,6 +506,17 @@ public static class V8Compat
         }
     }
 
+    public static void TranslateOverlayDmaSource(CpuContext c, IMemory m)
+    {
+        if (m is not RelocatedMemory relocated) return;
+        if (c.A0 < relocated.LinkedBase || c.A0 - relocated.LinkedBase >= relocated.Size) return;
+
+        // The retail loader relocates pointers embedded in an overlay before
+        // they cross into DMA hardware. Generated code retains linked virtual
+        // addresses, so materialize that relocation in the source register.
+        c.A0 += relocated.Delta;
+    }
+
     static string ReadAscii(IMemory m, uint address, int maxLength)
     {
         if (!IsRetailRamRange(address, 1u)) return string.Empty;

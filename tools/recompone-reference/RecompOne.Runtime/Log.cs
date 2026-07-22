@@ -4,11 +4,11 @@ public static class Log
 {
     public static bool BiosOn = false;
     public static bool SpuOn = false;
-    public static bool GpuOn = false;
-    public static bool DmaOn = false;
+    public static bool GpuOn = Environment.GetEnvironmentVariable("RECOMPONE_TRACE_GPU") == "1";
+    public static bool DmaOn = Environment.GetEnvironmentVariable("RECOMPONE_TRACE_DMA") == "1";
     public static bool CdOn = false;
     public static bool SdkOn = false;
-    public static bool MdecOn = false;
+    public static bool MdecOn = Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MDEC") == "1";
 
     public static void Mdec(string m)
     {

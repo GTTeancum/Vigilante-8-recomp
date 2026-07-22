@@ -154,12 +154,14 @@ public sealed class Mdec
         for (int i = 0; i < 64; i++) _quantLuma[i] = _tableBytes[i];
         if (_quantColor)
             for (int i = 0; i < 64; i++) _quantChroma[i] = _tableBytes[64 + i];
+        Log.Mdec($"quant color={_quantColor} luma={Convert.ToHexString(_quantLuma.AsSpan(0, 8))} chroma={Convert.ToHexString(_quantChroma.AsSpan(0, 8))}");
     }
 
     void LoadScale()
     {
         for (int i = 0; i < 64; i++)
             _scale[i] = (short)(_tableBytes[i * 2] | (_tableBytes[i * 2 + 1] << 8));
+        Log.Mdec($"scale={string.Join(',', _scale.Take(8))}");
     }
 
     void DecodeAll()
@@ -194,7 +196,17 @@ public sealed class Mdec
                 mbCount++;
             }
         }
-        Log.Mdec($"decode depth={_depth} signed={_signed} bit15={_bit15} inHW={_inHalfwords.Count} consumedHW={_readPos} mbs={mbCount} wordsOut={_out.Count - mbStart} outTotal={_out.Count}");
+        if (Log.MdecOn)
+        {
+            uint hash = 2166136261u;
+            uint wordOr = 0;
+            foreach (uint word in _out)
+            {
+                hash = (hash ^ word) * 16777619u;
+                wordOr |= word;
+            }
+            Log.Mdec($"decode depth={_depth} signed={_signed} bit15={_bit15} inHW={_inHalfwords.Count} consumedHW={_readPos} mbs={mbCount} wordsOut={_out.Count - mbStart} outTotal={_out.Count} or=0x{wordOr:X8} hash=0x{hash:X8}");
+        }
     }
 
     ushort NextHalfword() => _readPos < _inHalfwords.Count ? _inHalfwords[_readPos++] : (ushort)0xFE00;

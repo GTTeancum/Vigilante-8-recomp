@@ -679,6 +679,12 @@ def main() -> int:
             },
             {
                 "overlay": "SHELL",
+                "address": "8010E500",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TranslateOverlayDmaSource",
+                "mode": "pre",
+            },
+            {
+                "overlay": "SHELL",
                 "address": "8010DD70",
                 "target": "RecompOne.Runtime.Sdk.LibCdStream.StFreeRing",
                 "mode": "replace",

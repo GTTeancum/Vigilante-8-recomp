@@ -159,7 +159,11 @@ public sealed partial class Gpu
     {
         switch (op)
         {
-            case 0x05: _dispVramX = (int)(p & 0x3FF); _dispVramY = (int)((p >> 10) & 0x1FF); break;
+            case 0x05:
+                _dispVramX = (int)(p & 0x3FF);
+                _dispVramY = (int)((p >> 10) & 0x1FF);
+                Log.Gpu($"display start={_dispVramX},{_dispVramY}");
+                break;
             case 0x06: _hRange1 = (int)(p & 0xFFF); _hRange2 = (int)((p >> 12) & 0xFFF); break;
             case 0x07: _vRange1 = (int)(p & 0x3FF); _vRange2 = (int)((p >> 10) & 0x3FF); break;
             case 0x08:
