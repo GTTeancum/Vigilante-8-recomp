@@ -23,6 +23,8 @@ public static class V8Compat
         Environment.GetEnvironmentVariable("RECOMPONE_V8_GAME_VOLUME") == "0";
     static readonly bool _traceVehicle =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VEHICLE") == "1";
+    static readonly bool _traceWeapons =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_WEAPONS") == "1";
     static int _vehiclePhysicsTick;
     static uint _integratingVehicle;
     static int _integratingVehicleTick;
@@ -31,12 +33,24 @@ public static class V8Compat
     static int _playerCollisionCount;
     static byte _collidingOtherKind;
     static bool _capturedVehicleCollision;
+    static string? _lastWeaponState;
+    static int _weaponStateChangeCount;
+    static bool _pendingPlayerChildSpawn;
+    static uint _pendingPlayerSpawnWeapon;
+    static uint _pendingPlayerSpawnKind;
+    static uint _pendingPlayerSpawnCaller;
+    static uint _pendingPlayerHitProjectile;
+    static uint _pendingPlayerHitTarget;
+    static ushort _pendingPlayerHitHealth;
+    static bool _capturedPlayerProjectile;
+    static bool _capturedPlayerWeaponHit;
     static bool _gameplayStage;
     static bool _zeroGameVolumeLogged;
     static string _lastHeapOperation = "heap initialization";
     static string? _lastMenuStage;
     static readonly Dictionary<uint, HeapAllocation> _liveHeapAllocations = new();
     static readonly Dictionary<uint, List<string>> _objectHistory = new();
+    static readonly HashSet<uint> _playerProjectiles = new();
     static readonly HashSet<string> _seenMenuText = new(StringComparer.Ordinal);
 
     public static void Alloc(CpuContext c, IMemory m)
@@ -163,8 +177,32 @@ public static class V8Compat
 
     public static void TraceObjectRetire(CpuContext c, IMemory m)
     {
+        m = Dispatcher.UnwrapMemory(m);
         RecordObjectEvent(c.A0,
             $"retire flags=0x{m.ReadU32(c.A0):X8} cb=0x{m.ReadU32(c.A0 + 0x64u):X8} caller=0x{c.RA:X8}");
+        if (_traceWeapons && _playerProjectiles.Remove(c.A0))
+        {
+            Console.Error.WriteLine(
+                $"[V8Weapon] tick={_vehiclePhysicsTick} event=retire projectile=0x{c.A0:X8} " +
+                $"flags=0x{m.ReadU32(c.A0):X8} kind={m.ReadU8(c.A0 + 8u)} " +
+                $"callback=0x{m.ReadU32(c.A0 + 0x64u):X8} pos={ReadVec3(m, c.A0 + 0x24u)}");
+        }
+    }
+
+    public static void TracePlayerProjectileRegister(CpuContext c, IMemory m)
+    {
+        if (!_traceWeapons || !_playerProjectiles.Contains(c.A0)) return;
+        m = Dispatcher.UnwrapMemory(m);
+        Console.Error.WriteLine(
+            $"[V8Weapon] tick={_vehiclePhysicsTick} event=register projectile=0x{c.A0:X8} " +
+            $"flags=0x{m.ReadU32(c.A0):X8} kind={m.ReadU8(c.A0 + 8u)} " +
+            $"callback=0x{m.ReadU32(c.A0 + 0x64u):X8} life={m.ReadU16(c.A0 + 0x94u)} " +
+            $"pos={ReadVec3(m, c.A0 + 0x24u)} vel={ReadVec3(m, c.A0 + 0x88u)}");
+        if (!_capturedPlayerProjectile)
+        {
+            _capturedPlayerProjectile = true;
+            HostWindow.RequestDisplayCapture("weapon_projectile_first");
+        }
     }
 
     public static void TrackObjectOwner(CpuContext c, IMemory m) =>
@@ -480,6 +518,7 @@ public static class V8Compat
             _lastMenuStage = null;
             InputManager.SignalScriptStage("gameplay");
         }
+        TracePlayerWeaponState(m, player, tick);
         if (!_traceVehicle || tick > 900) return;
         if (tick is 1 or 15 or 30 or 60 or 120 or 180 or 300 or 420 or 510 or 600 or 720 or 780 or 840 or 900)
             HostWindow.RequestDisplayCapture($"physics_{tick:000}");
@@ -558,6 +597,92 @@ public static class V8Compat
             _capturedVehicleCollision = true;
             HostWindow.RequestDisplayCapture("collision_vehicle_first");
         }
+    }
+
+    static void TracePlayerWeaponState(IMemory m, uint player, int tick)
+    {
+        if (!_traceWeapons) return;
+        string state =
+            $"selected={m.ReadU8(player + 0xB3u)} " +
+            $"primary={ReadWeaponSlot(m, m.ReadU32(player + 0x10Cu))} " +
+            $"slot0={ReadWeaponSlot(m, m.ReadU32(player + 0x110u))} " +
+            $"slot1={ReadWeaponSlot(m, m.ReadU32(player + 0x114u))} " +
+            $"slot2={ReadWeaponSlot(m, m.ReadU32(player + 0x118u))}";
+        if (state == _lastWeaponState) return;
+        _lastWeaponState = state;
+        if (++_weaponStateChangeCount <= 256)
+            Console.Error.WriteLine($"[V8Weapon] tick={tick} event=state {state}");
+    }
+
+    public static void TracePlayerChildSpawnPre(CpuContext c, IMemory m)
+    {
+        if (!_traceWeapons) return;
+        m = Dispatcher.UnwrapMemory(m);
+        uint player = m.ReadU32(c.GP + 0x7D0u);
+        if (player == 0u || c.A0 != player) return;
+
+        _pendingPlayerChildSpawn = true;
+        _pendingPlayerSpawnWeapon = c.A1;
+        _pendingPlayerSpawnKind = c.A2;
+        _pendingPlayerSpawnCaller = c.RA;
+        Console.Error.WriteLine(
+            $"[V8Weapon] tick={_vehiclePhysicsTick} event=spawn-pre owner=0x{player:X8} " +
+            $"weapon={ReadWeaponSlot(m, c.A1)} kind={c.A2} caller=0x{c.RA:X8}");
+    }
+
+    public static void TracePlayerChildSpawnPost(CpuContext c, IMemory m)
+    {
+        if (!_traceWeapons || !_pendingPlayerChildSpawn) return;
+        m = Dispatcher.UnwrapMemory(m);
+        _pendingPlayerChildSpawn = false;
+        uint projectile = c.V0;
+        if (projectile == 0u) return;
+        _playerProjectiles.Add(projectile);
+        Console.Error.WriteLine(
+            $"[V8Weapon] tick={_vehiclePhysicsTick} event=spawn-post projectile=0x{projectile:X8} " +
+            $"weapon=0x{_pendingPlayerSpawnWeapon:X8} kind={_pendingPlayerSpawnKind} " +
+            $"caller=0x{_pendingPlayerSpawnCaller:X8} pos={ReadVec3(m, projectile + 0x24u)}");
+    }
+
+    public static void TracePlayerWeaponHitPre(CpuContext c, IMemory m)
+    {
+        if (!_traceWeapons || !_playerProjectiles.Contains(c.A0) || c.A1 == 0u) return;
+        m = Dispatcher.UnwrapMemory(m);
+        uint target = m.ReadU32(c.A1);
+        _pendingPlayerHitProjectile = c.A0;
+        _pendingPlayerHitTarget = target;
+        _pendingPlayerHitHealth = IsRetailRamRange(target, 0x12u) ? m.ReadU16(target + 0x0Cu) : (ushort)0;
+        Console.Error.WriteLine(
+            $"[V8Weapon] tick={_vehiclePhysicsTick} event=hit-pre projectile=0x{c.A0:X8} " +
+            $"target=0x{target:X8} kind={(IsRetailRamRange(target, 5u) ? m.ReadU8(target + 4u) : 0)} " +
+            $"health={_pendingPlayerHitHealth} effect={c.A2} sfx={unchecked((int)c.A3)}");
+    }
+
+    public static void TracePlayerWeaponHitPost(CpuContext c, IMemory m)
+    {
+        if (!_traceWeapons || _pendingPlayerHitProjectile == 0u) return;
+        m = Dispatcher.UnwrapMemory(m);
+        ushort health = IsRetailRamRange(_pendingPlayerHitTarget, 0x12u)
+            ? m.ReadU16(_pendingPlayerHitTarget + 0x0Cu)
+            : (ushort)0;
+        Console.Error.WriteLine(
+            $"[V8Weapon] tick={_vehiclePhysicsTick} event=hit-post projectile=0x{_pendingPlayerHitProjectile:X8} " +
+            $"target=0x{_pendingPlayerHitTarget:X8} health={_pendingPlayerHitHealth}->{health} " +
+            $"result={unchecked((int)c.V0)}");
+        if (!_capturedPlayerWeaponHit)
+        {
+            _capturedPlayerWeaponHit = true;
+            HostWindow.RequestDisplayCapture("weapon_hit_first");
+        }
+        _pendingPlayerHitProjectile = 0u;
+        _pendingPlayerHitTarget = 0u;
+    }
+
+    static string ReadWeaponSlot(IMemory m, uint address)
+    {
+        if (!IsRetailRamRange(address, 0x68u)) return $"0x{address:X8}";
+        return $"0x{address:X8}/kind={m.ReadU8(address + 8u)}/status={unchecked((short)m.ReadU16(address + 6u))}/" +
+               $"ammo={m.ReadU16(address + 0x0Cu)}/cb=0x{m.ReadU32(address + 0x64u):X8}";
     }
 
     static string ReadVec3(IMemory m, uint address) =>

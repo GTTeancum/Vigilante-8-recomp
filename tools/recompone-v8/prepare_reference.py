@@ -634,6 +634,30 @@ def main() -> int:
             },
             {
                 "overlay": "main",
+                "address": "80031300",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TracePlayerChildSpawnPre",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80031300",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TracePlayerChildSpawnPost",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
+                "address": "80031454",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TracePlayerWeaponHitPre",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80031454",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TracePlayerWeaponHitPost",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
                 "address": "80044080",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.ApplyUserGameVolume",
                 "mode": "pre",
@@ -672,6 +696,12 @@ def main() -> int:
                 "overlay": "main",
                 "address": "800202F4",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TrackObjectOwner",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800202F4",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TracePlayerProjectileRegister",
                 "mode": "pre",
             },
             {

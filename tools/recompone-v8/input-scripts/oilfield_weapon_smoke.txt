@@ -1,0 +1,53 @@
+# Stage-synchronized one-player Oil Fields weapon lifecycle exercise.
+# The absolute START pulse skips the already-validated boot movies. Gameplay
+# timing begins on the first original player-vehicle physics tick.
+
+10+2=START
+
+[press_start]
+1+2=START
+
+[main_menu]
+1+2=DOWN
+10+2=CROSS
+
+[player_count]
+5+2=CROSS
+
+[choose_player]
+5+2=CROSS
+
+[select_location]
+5+2=RIGHT
+15+2=RIGHT
+25+2=RIGHT
+35+2=RIGHT
+45+2=RIGHT
+55+2=RIGHT
+65+2=RIGHT
+75+2=RIGHT
+85+2=RIGHT
+95+2=RIGHT
+
+[location_oilfield]
+1+2=CROSS
+
+[choose_enemies]
+5+2=CROSS
+
+[gameplay]
+# Establish motion, fire the primary weapon while approaching the arena, then
+# exercise both original gameplay fire paths around steering and braking.
+# The retail digital-pad decode table maps R2 to held command bit 1 (the
+# built-in gun), L2 to held command bit 2 (the selected weapon), and R1/L1 to
+# the forward/reverse weapon-cycle edge bits.
+180+120=CROSS
+220+80=R2
+300+120=CROSS,RIGHT
+340+12=L2
+380+2=R1
+420+90=SQUARE
+520+120=R2
+660+20=L2
+700+2=L1
+720+20=L2

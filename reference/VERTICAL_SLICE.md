@@ -101,9 +101,29 @@ changed player velocity from `(-7463,73,-13293)` to
 contacts, the vehicle stayed upright and returned to near-level matrices at
 ticks 720, 780, 840, and 900 (`upY` 4072, 4093, 4038, and 4097). The corrected
 35-second focused run reached tick 900 with no runtime fault marker. This passes
-the runtime collision-and-recovery behavior needed before weapon work; the
+the runtime collision-and-recovery behavior needed before weapon work, and the
+user has visually accepted the complete vehicle-physics presentation as
+correct. The
 PS1-versus-reference state comparison remains open before the full fidelity
 gate is closed.
+
+## Current weapon status
+
+The retail digital-pad mapping was recovered directly from `SLUS_005.10` at
+`0x80056784`. The game byte-swaps the two button bytes before applying mapping
+words `A8563412 B9C81007`; in the resulting abstract command word, R2 holds the
+built-in-gun bit, L2 holds the selected-weapon bit, and R1/L1 produce the two
+weapon-cycle edges. The committed `oilfield_weapon_smoke.txt` fixture uses those
+original mappings instead of host-button guesses.
+
+A focused 35-second run collected a weapon pickup, built-in-gun firing, selected
+weapon firing, ammo change, projectile registration, impact, and retirement.
+The trace recorded 34 player projectile spawns, 34 registrations, 34 retirements,
+and three impacts. The selected missile slot changed from 12 rounds to 11 after
+firing. The process remained responsive through the full run with no unmapped
+call, exception, fatal, heap, or terrain marker. Damage-state transitions and a
+vehicle destruction remain open, so this is a lifecycle milestone rather than
+the complete Weapons gate.
 
 ## Commit discipline
 

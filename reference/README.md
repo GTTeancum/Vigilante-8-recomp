@@ -101,6 +101,15 @@ velocity, angular velocity, and rotation matrix. It saves one focused capture
 at the first vehicle-to-vehicle contact without flooding the trace directory
 during persistent contact.
 
+The focused weapon regression is
+`tools/recompone-v8/input-scripts/oilfield_weapon_smoke.txt`. It uses the
+digital-pad mapping recovered from the retail executable: R2 fires the built-in
+gun, L2 fires the selected weapon, and R1/L1 cycle weapon slots. Set
+`RECOMPONE_TRACE_WEAPONS=1` to record player loadout changes, child-projectile
+creation, final registration, impacts, and retirement. The trace is deliberately
+scoped to player-owned projectiles so sustained firing does not bury failures in
+unrelated arena-object logging.
+
 ## Prepare the reference configuration
 
 From the repository root:
@@ -154,7 +163,9 @@ result, matching the instruction's simultaneous source reads. The deterministic
 Oil Fields exercise retains an upright, near-orthonormal vehicle matrix through
 settling, acceleration, steering, and braking, and completed a 55-second active
 gameplay run without a runtime error marker. The user visually accepted those
-motions as correct; collision and recovery remain separate Physics-gate work.
+motions as correct. Focused collision tracing then captured the original impulse
+response and upright recovery through tick 900 without a runtime error marker;
+the user visually accepted the complete vehicle-physics presentation.
 
 See `REFERENCE_PLAN.md` for the architecture and `VERTICAL_SLICE.md` for the
 active acceptance gates.
