@@ -49,4 +49,16 @@ public class ViewConfig
         get => GetBool("NativeResolution");
         set => SetBool("NativeResolution", value);
     }
+
+    public string OutputResolution
+    {
+        get => GetString("OutputResolution", "1280x720");
+        set => SetString("OutputResolution", value);
+    }
+
+    public string AntiAliasing
+    {
+        get => GetString("AntiAliasing", "Off");
+        set => SetString("AntiAliasing", value);
+    }
 }

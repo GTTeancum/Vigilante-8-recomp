@@ -11,6 +11,8 @@ internal sealed class OutputPanel : IPanel
     static uint _texId;
     static int _texW, _texH;
     static float _aspect = 4f / 3f;
+    static Vector2 _available;
+    static Vector2 _framebufferScale = Vector2.One;
     static bool _loggedSet;
     static bool _loggedDraw;
 
@@ -20,6 +22,21 @@ internal sealed class OutputPanel : IPanel
         if (_loggedSet) return;
         _loggedSet = true;
         Console.WriteLine($"[Host] output texture id={id} size={w}x{h} aspect={_aspect:F3}");
+    }
+
+    public static (int w, int h) GetPresentationSize(float aspect, int fallbackW, int fallbackH)
+    {
+        Vector2 available = _available;
+        Vector2 scale = _framebufferScale;
+        if (available.X <= 0f || available.Y <= 0f)
+        {
+            available = new Vector2(fallbackW, fallbackH);
+            scale = Vector2.One;
+        }
+
+        var fitted = FitAspect(new Vector2(aspect > 0f ? aspect : 4f / 3f, 1f), available);
+        return (Math.Max(1, (int)MathF.Round(fitted.X * scale.X)),
+                Math.Max(1, (int)MathF.Round(fitted.Y * scale.Y)));
     }
 
     public void Draw()
@@ -37,6 +54,8 @@ internal sealed class OutputPanel : IPanel
         if (_texId != 0 && _texW > 0 && _texH > 0)
         {
             var avail = ImGui.GetContentRegionAvail();
+            _available = avail;
+            _framebufferScale = ImGui.GetIO().DisplayFramebufferScale;
             var imageSize = FitAspect(new Vector2(_aspect, 1f), avail);
             var offset = (avail - imageSize) * 0.5f;
             if (!_loggedDraw)

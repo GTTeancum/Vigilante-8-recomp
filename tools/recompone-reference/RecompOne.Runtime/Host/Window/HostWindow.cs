@@ -23,6 +23,7 @@ internal static class HostWindow
     static uint _vramTex;
     static uint _ramTex;
     static Hle.GlBackend? _glBackend;
+    static PresentationRenderer? _presentationRenderer;
 
     static byte[] _rgbDisplay = [];
     static byte[] _rgbVram = [];
@@ -34,6 +35,20 @@ internal static class HostWindow
     static int _displayProbeFrame;
     static uint _lastDisplayHash;
     static string? _requestedDisplayCapture;
+    static string? _pendingPresentationCapture;
+    static readonly string? _outputResolutionOverride =
+        Environment.GetEnvironmentVariable("RECOMPONE_OUTPUT_RESOLUTION");
+    static readonly string? _antiAliasingOverride =
+        Environment.GetEnvironmentVariable("RECOMPONE_ANTI_ALIASING");
+    static readonly string? _presentationResolutionOverride =
+        Environment.GetEnvironmentVariable("RECOMPONE_PRESENTATION_RESOLUTION");
+    static readonly int _presentationCaptureFrame =
+        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_PRESENTATION_CAPTURE_FRAME"), out int captureFrame)
+            ? Math.Max(1, captureFrame)
+            : 0;
+    static int _presentationFrame;
+    static readonly bool _capturePresentation =
+        Environment.GetEnvironmentVariable("RECOMPONE_PRESENTATION_CAPTURE") == "1";
     static readonly int _displayProbeInterval =
         int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_DISPLAY_PROBE_INTERVAL"), out int interval)
             ? Math.Max(1, interval)
@@ -46,12 +61,13 @@ internal static class HostWindow
     public static void Initialize(string title)
     {
         ConfigManager.Load();
+        var outputSize = ParseOutputResolution(_outputResolutionOverride ?? ConfigManager.View.OutputResolution);
 
         try
         {
             var options = WindowOptions.Default with
             {
-                Size = new Vector2D<int>(1280, 720),
+                Size = new Vector2D<int>(outputSize.width, outputSize.height),
                 Title = title,
                 VSync = false,
                 UpdatesPerSecond = 0,
@@ -115,6 +131,29 @@ internal static class HostWindow
     {
         if (_window == null) return;
         _window.WindowState = on ? WindowState.Fullscreen : WindowState.Normal;
+        if (!on)
+        {
+            var size = ParseOutputResolution(ConfigManager.View.OutputResolution);
+            _window.Size = new Vector2D<int>(size.width, size.height);
+        }
+    }
+
+    public static void SetOutputResolution(string resolution)
+    {
+        if (_window == null || ConfigManager.View.Fullscreen) return;
+        var size = ParseOutputResolution(resolution);
+        _window.Size = new Vector2D<int>(size.width, size.height);
+    }
+
+    static (int width, int height) ParseOutputResolution(string resolution)
+    {
+        string[] parts = resolution.Split('x', 'X');
+        if (parts.Length == 2 &&
+            int.TryParse(parts[0], out int width) &&
+            int.TryParse(parts[1], out int height) &&
+            width is >= 640 and <= 7680 && height is >= 480 and <= 4320)
+            return (width, height);
+        return (1280, 720);
     }
 
     public static bool IsKeyDown(Key k) => InputManager.IsKeyDown(k);
@@ -156,6 +195,8 @@ internal static class HostWindow
         _displayTex = CreateTexture(_gl);
         _vramTex= CreateTexture(_gl);
         _ramTex = CreateTexture(_gl);
+        _presentationRenderer = new PresentationRenderer(_gl);
+        _presentationRenderer.Initialize();
 
         Hle.GlVram.Scale = ConfigManager.View.NativeResolution ? 1 : 4;
         _glBackend = new Hle.GlBackend(_gl);
@@ -232,7 +273,7 @@ internal static class HostWindow
                     gpu.DisplayWidth, gpu.DisplayHeight,
                     gpu.Display24Bit,
                     outW: wf.X, outH: wf.Y);
-                if (tex != 0) OutputPanel.SetTexture(tex, tw, th, aspect);
+                if (tex != 0) PresentTexture(gl, tex, tw, th, aspect);
                 gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                 gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
             }
@@ -305,6 +346,7 @@ internal static class HostWindow
         ConfigManager.SaveGame();
         PanelManager.Shutdown();
         _glBackend?.Dispose();
+        _presentationRenderer?.Dispose();
         _imgui?.Dispose();
         _gl?.DeleteTexture(_displayTex);
         _gl?.DeleteTexture(_vramTex);
@@ -333,7 +375,33 @@ internal static class HostWindow
         gl.BindTexture(TextureTarget.Texture2D, _displayTex);
         gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgb, (uint)w, (uint)h, 0,
             PixelFormat.Rgb, PixelType.UnsignedByte, _rgbDisplay.AsSpan(0, needed));
-        OutputPanel.SetTexture(_displayTex, w, h);
+        PresentTexture(gl, _displayTex, w, h, 4f / 3f);
+    }
+
+    static void PresentTexture(GL gl, uint sourceTexture, int sourceWidth, int sourceHeight, float aspect)
+    {
+        var framebuffer = _window!.FramebufferSize;
+        var output = OutputPanel.GetPresentationSize(aspect, framebuffer.X, framebuffer.Y);
+        if (!string.IsNullOrWhiteSpace(_presentationResolutionOverride))
+        {
+            var forced = ParseOutputResolution(_presentationResolutionOverride);
+            output = (forced.width, forced.height);
+        }
+        bool fxaa = (_antiAliasingOverride ?? ConfigManager.View.AntiAliasing)
+            .Equals("FXAA", StringComparison.OrdinalIgnoreCase);
+        uint texture = sourceTexture;
+        if (_presentationRenderer is { Ready: true })
+        {
+            string? capture = _pendingPresentationCapture;
+            _pendingPresentationCapture = null;
+            if (_capturePresentation && ++_presentationFrame == _presentationCaptureFrame)
+                capture = $"frame_{_presentationFrame:000000}";
+            texture = _presentationRenderer.Render(sourceTexture, sourceWidth, sourceHeight,
+                output.w, output.h, fxaa, capture);
+        }
+        OutputPanel.SetTexture(texture, output.w, output.h, aspect);
+        gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        gl.Viewport(0, 0, (uint)framebuffer.X, (uint)framebuffer.Y);
     }
 
     static void ProbeDisplay(Gpu gpu, int w, int h)
@@ -366,6 +434,8 @@ internal static class HostWindow
             string path = $"recompone_capture_{captureLabel}.ppm";
             WriteDisplayPpm(path, w, h, pixels);
             Console.WriteLine($"[GPU] captured stage '{captureLabel}' to {path}");
+            if (_capturePresentation)
+                _pendingPresentationCapture = captureLabel;
         }
     }
 
