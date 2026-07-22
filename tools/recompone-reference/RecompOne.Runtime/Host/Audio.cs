@@ -1,66 +1,73 @@
-using Silk.NET.OpenAL;
-using ALDevice = Silk.NET.OpenAL.Device;
-using ALCtx = Silk.NET.OpenAL.Context;
+using System.Runtime.InteropServices;
+using Silk.NET.SDL;
+using Thread = System.Threading.Thread;
 
 namespace RecompOne.Runtime.Host;
 
 internal static unsafe class Audio
 {
-    static ALContext? _alc;
-    static AL? _al;
-    static ALDevice* _device;
-    static ALCtx* _context;
-
-
+    const int SampleRate = 44100;
+    const int Channels = 2;
     const int NumBuffers = 8;
     const int FramesPerBuffer = 256;
+    const uint BytesPerBuffer = FramesPerBuffer * Channels * sizeof(short);
+    const uint TargetQueuedBytes = NumBuffers * BytesPerBuffer;
 
-    static uint _source;
-    static uint[] _buffers = new uint[NumBuffers];
-    static short[] _sampleBuf = new short[FramesPerBuffer * 2];
+    static Sdl? _sdl;
+    static uint _device;
+    static readonly short[] _sampleBuf = new short[FramesPerBuffer * Channels];
 
     static Thread? _mixerThread;
     static Spu? _spu;
     static volatile bool _running;
     static float _masterVolume = 1.0f;
+    static long _mixedFrames;
+    static bool _firstAudibleBufferReported;
 
     public static void Initialize()
     {
         try
         {
-            _alc = ALContext.GetApi(true);
-            _al = AL.GetApi(true);
-            _device = _alc.OpenDevice("");
-            if (_device == null)
+            _sdl = Sdl.GetApi();
+            if (_sdl.InitSubSystem(Sdl.InitAudio) != 0)
+                throw new InvalidOperationException($"SDL audio init failed: {GetError()}");
+
+            AudioSpec wanted = new()
             {
-                Console.Error.WriteLine("[Host] no audio device, audio disabled");
-                return;
-            }
-            _context = _alc.CreateContext(_device, null);
-            _alc.MakeContextCurrent(_context);
+                Freq = SampleRate,
+                Format = (ushort)Sdl.AudioS16Sys,
+                Channels = Channels,
+                Samples = FramesPerBuffer,
+                Callback = default,
+                Userdata = null,
+            };
+            AudioSpec obtained = default;
+            _device = _sdl.OpenAudioDevice((byte*)null, 0, &wanted, &obtained, 0);
+            if (_device == 0)
+                throw new InvalidOperationException($"SDL audio device open failed: {GetError()}");
 
-            _source = _al.GenSource();
-            _al.SetSourceProperty(_source, SourceFloat.Gain, _masterVolume);
-            fixed (uint* ptr = _buffers)
-                _al.GenBuffers(NumBuffers, ptr);
-
-            //initial empty rihgt
-            for (int i = 0; i < _buffers.Length; i++)
+            if (obtained.Freq != SampleRate || obtained.Format != (ushort)Sdl.AudioS16Sys ||
+                obtained.Channels != Channels)
             {
-                _al.BufferData(_buffers[i], BufferFormat.Stereo16, _sampleBuf, 44100);
-                uint b = _buffers[i];
-                _al.SourceQueueBuffers(_source, 1, &b);
+                throw new InvalidOperationException(
+                    $"SDL returned unsupported audio format {obtained.Freq} Hz/0x{obtained.Format:X4}/{obtained.Channels}ch");
             }
 
-            _al.SourcePlay(_source);
+            Array.Clear(_sampleBuf);
+            for (int i = 0; i < NumBuffers; i++)
+                QueueCurrentBuffer();
 
             _running = true;
             _mixerThread = new Thread(MixerLoop) { IsBackground = true, Name = "spu-mixer" };
             _mixerThread.Start();
+            _sdl.PauseAudioDevice(_device, 0);
+            Console.Error.WriteLine(
+                $"[Host] SDL audio ready: device={_device} {obtained.Freq} Hz stereo S16 queue={TargetQueuedBytes} bytes");
         }
         catch (Exception e)
         {
             Console.Error.WriteLine($"[Host] audio init failed: {e.Message}");
+            Shutdown();
         }
     }
 
@@ -72,52 +79,96 @@ internal static unsafe class Audio
     public static void SetMasterVolume(float volume)
     {
         _masterVolume = Math.Clamp(volume, 0f, 1f);
-        if (_al != null && _source != 0)
-            _al.SetSourceProperty(_source, SourceFloat.Gain, _masterVolume);
     }
 
     static void MixerLoop()
     {
         while (_running)
         {
+            var sdl = _sdl;
             var spu = _spu;
-            if (spu != null) FillBuffers(spu);
+            if (sdl == null || _device == 0 || spu == null)
+            {
+                Thread.Sleep(3);
+                continue;
+            }
+
+            while (_running && sdl.GetQueuedAudioSize(_device) < TargetQueuedBytes)
+            {
+                spu.Mix(_sampleBuf, FramesPerBuffer);
+                ApplyMasterVolume();
+                ReportFirstAudibleBuffer();
+                QueueCurrentBuffer();
+                _mixedFrames += FramesPerBuffer;
+            }
+
             Thread.Sleep(3);
         }
     }
 
-    static void FillBuffers(Spu spu)
+    static void ApplyMasterVolume()
     {
-        _al!.GetSourceProperty(_source, GetSourceInteger.BuffersProcessed, out int processed);
-        while (processed > 0)
+        float volume = _masterVolume;
+        if (volume >= 0.999f) return;
+        if (volume <= 0.001f)
         {
-            uint buf = 0;
-            _al.SourceUnqueueBuffers(_source, 1, &buf);
-
-            spu.Mix(_sampleBuf, FramesPerBuffer);
-
-            _al.BufferData(buf, BufferFormat.Stereo16, _sampleBuf, 44100);
-            _al.SourceQueueBuffers(_source, 1, &buf);
-            processed--;
+            Array.Clear(_sampleBuf);
+            return;
         }
 
-        _al.GetSourceProperty(_source, GetSourceInteger.SourceState, out int state);
-        if (state != (int)SourceState.Playing)
-            _al.SourcePlay(_source);
+        for (int i = 0; i < _sampleBuf.Length; i++)
+            _sampleBuf[i] = (short)Math.Clamp((int)MathF.Round(_sampleBuf[i] * volume), short.MinValue, short.MaxValue);
+    }
+
+    static void ReportFirstAudibleBuffer()
+    {
+        if (_firstAudibleBufferReported) return;
+        int peak = 0;
+        foreach (short sample in _sampleBuf)
+            peak = Math.Max(peak, Math.Abs((int)sample));
+        if (peak == 0) return;
+
+        _firstAudibleBufferReported = true;
+        Console.Error.WriteLine($"[Host] first nonzero SPU output at mixed frame {_mixedFrames}: peak={peak}");
+    }
+
+    static void QueueCurrentBuffer()
+    {
+        var sdl = _sdl ?? throw new InvalidOperationException("SDL audio is not initialized");
+        fixed (short* samples = _sampleBuf)
+        {
+            if (sdl.QueueAudio(_device, samples, BytesPerBuffer) != 0)
+                throw new InvalidOperationException($"SDL audio queue failed: {GetError()}");
+        }
+    }
+
+    static string GetError()
+    {
+        if (_sdl == null) return "SDL unavailable";
+        return Marshal.PtrToStringUTF8((nint)_sdl.GetError()) ?? "unknown SDL error";
     }
 
     public static void Shutdown()
     {
-        if (_alc == null) return;
         _running = false;
         _mixerThread?.Join();
-        if (_al != null)
+        _mixerThread = null;
+        _spu = null;
+        _mixedFrames = 0;
+        _firstAudibleBufferReported = false;
+
+        if (_sdl != null)
         {
-            _al.SourceStop(_source);
-            _al.DeleteSource(_source);
-            _al.DeleteBuffers(_buffers);
+            if (_device != 0)
+            {
+                _sdl.PauseAudioDevice(_device, 1);
+                _sdl.ClearQueuedAudio(_device);
+                _sdl.CloseAudioDevice(_device);
+                _device = 0;
+            }
+            _sdl.QuitSubSystem(Sdl.InitAudio);
+            _sdl.Dispose();
+            _sdl = null;
         }
-        if (_context != null) _alc.DestroyContext(_context);
-        if (_device != null) _alc.CloseDevice(_device);
     }
 }

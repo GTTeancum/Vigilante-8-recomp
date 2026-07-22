@@ -50,6 +50,10 @@ dotnet build reference/generated/recompiled/Vigilante8Reference.csproj -c Releas
 The verified handoff is also copied to `PS1 game/RecompOneReference/`. Launch
 it with `PS1 game/Run RecompOne Reference.cmd`.
 
+Host audio uses the bundled SDL2 runtime to queue the reference SPU/XA mix as
+44.1 kHz stereo signed-16 output, so the handoff does not require a separate
+OpenAL installation.
+
 ## Prepare the reference configuration
 
 From the repository root:
