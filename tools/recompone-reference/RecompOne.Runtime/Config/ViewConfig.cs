@@ -44,21 +44,21 @@ public class ViewConfig
         set => SetBool("Fullscreen", value);
     }
 
-    public bool NativeResolution
+    public bool HighResolution3D
     {
-        get => GetBool("NativeResolution");
-        set => SetBool("NativeResolution", value);
+        get => GetBool("HighResolution3D", true);
+        set => SetBool("HighResolution3D", value);
     }
 
     public string OutputResolution
     {
-        get => GetString("OutputResolution", "1280x720");
+        get => GetString("OutputResolution", "1920x1080");
         set => SetString("OutputResolution", value);
     }
 
     public string AntiAliasing
     {
-        get => GetString("AntiAliasing", "Off");
+        get => GetString("AntiAliasing", "FXAA");
         set => SetString("AntiAliasing", value);
     }
 }

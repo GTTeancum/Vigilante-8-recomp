@@ -90,16 +90,17 @@ single gameplay screenshot is not sufficient.
 ## First post-goal presentation phase — complete
 
 The reference host now offers 720p, 1080p, 1440p, and 4K output canvases,
-desktop-resolution fullscreen, and optional FXAA. Both operations consume only
-the completed original framebuffer; the PS1 viewport, 4:3 aspect, UI
-coordinates, VRAM, fixed-point gameplay state, and timing remain unchanged.
+desktop-resolution fullscreen, 4x internal 3D rasterization, and optional FXAA.
+The PS1 primitive stream is rasterized at four times the native dimensions
+before FXAA and final 4:3 presentation. UI coordinates, VRAM data, fixed-point
+gameplay state, and timing remain unchanged.
 
-Validation covered an unskipped boot movie at an exact 2880x2160 4:3 surface,
-the title and menu route, active Oil Fields physics/gameplay, the complete pause
-and confirmation flow, full destruction, the presented result screen, result
-acceptance, teardown, and replay loading. Stable native-framebuffer captures
-matched between AA-off and FXAA runs while independent presentation captures
-proved that the post-process produced the requested larger images.
+The original-framebuffer presentation pass covered the complete boot-to-result
+route. The corrected 4x 3D path separately completed the title/menu route,
+active Oil Fields physics and weapon rendering, and the complete pause and
+confirmation flow. Its exact 1080p captures show that vehicle silhouettes and
+other polygon edges are generated at higher resolution before FXAA, rather than
+merely filtering enlarged native-resolution stair steps.
 
 This work does not relax the boot-to-results, audio, graphics, stability, or
 state-evidence gates and does not change the separate native 32-bit x86 Xbox

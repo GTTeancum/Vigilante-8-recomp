@@ -120,6 +120,9 @@ MAIN_NATIVE_CALLBACK_STARTS = (
     # callback slot; its body ends at the next callback, 0x8003959C.
     0x80039458,
     0x8003959C,
+    # Object event callback stored at +0x64 by the gameplay path. Its prologue
+    # starts at 0x80039D14 and dispatches through the switch at 0x80039D58.
+    0x80039D14,
     0x8003A084,
     # Deferred object callback between the known 0x8003A084 and 0x8003A9DC
     # callbacks, reached during the longer Oil Fields physics exercise.

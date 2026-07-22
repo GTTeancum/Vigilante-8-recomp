@@ -61,15 +61,15 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ConfigManager.SaveView(PanelManager.Panels);
         }
 
-        ImGui.SeparatorText("Experimental renderer");
-        bool native = ConfigManager.View.NativeResolution;
-        if (ImGui.Checkbox("Native resolution", ref native))
+        ImGui.SeparatorText("3D rendering");
+        bool highResolution3D = ConfigManager.View.HighResolution3D;
+        if (ImGui.Checkbox("High-resolution 3D (4x)", ref highResolution3D))
         {
-            ConfigManager.View.NativeResolution = native;
-            Hle.GpuHle.NativeResolution = native;
+            ConfigManager.View.HighResolution3D = highResolution3D;
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        if (ConfigManager.View.NativeResolution != (Hle.GlVram.Scale == 1))
+        ImGui.TextDisabled("Rasterizes PS1 polygons at 4x internal resolution.");
+        if (ConfigManager.View.HighResolution3D != Hle.GpuHle.Active)
             ImGui.TextDisabled("A restart is required.");
     }
 }

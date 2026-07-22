@@ -57,19 +57,23 @@ test launches remain audible unless `RECOMPONE_V8_GAME_VOLUME=0` is set.
 ### High-resolution presentation
 
 The host Display settings now provide 1280x720, 1920x1080, 2560x1440, and
-3840x2160 output presets plus Off/FXAA anti-aliasing. Fullscreen uses the
-desktop resolution. The game image remains at its original 4:3 aspect inside
-the selected output, and both settings persist in `interface.ini`.
+3840x2160 output presets, a **High-resolution 3D (4x)** switch, and Off/FXAA
+anti-aliasing. Fullscreen uses the desktop resolution. The game image remains
+at its original 4:3 aspect inside the selected output, and the settings persist
+in `interface.ini`. New or reset configurations default to 1080p, 4x 3D, and
+FXAA.
 
-This is deliberately a final presentation pass. Vigilante 8 still produces its
-original 320x240 gameplay and 640x480 shell framebuffer with the same VRAM,
-fixed-point simulation, primitive submission, UI coordinates, and timing.
-The host first scales that completed framebuffer to the visible output pixels;
-optional FXAA then filters only edges in that scaled image. It is not MSAA and
-does not claim higher-resolution PS1 geometry.
+High-resolution 3D sends the original PS1 primitive stream through the host GPU
+rasterizer at four times the native dimensions: 320x240 gameplay is rasterized
+at 1280x960 before presentation. FXAA then operates on those genuinely
+higher-resolution polygon edges. Fixed-point simulation, primitive submission,
+VRAM data, UI coordinates, and timing remain unchanged; source textures and 2D
+shell artwork naturally retain their original detail. This is not MSAA or a
+high-resolution texture replacement.
 
-Automation may override the saved choices with
-`RECOMPONE_OUTPUT_RESOLUTION=1920x1080` and `RECOMPONE_ANTI_ALIASING=FXAA`.
+Automation may override the saved choices with `RECOMPONE_GPU_HLE=1`,
+`RECOMPONE_OUTPUT_RESOLUTION=1920x1080`, and
+`RECOMPONE_ANTI_ALIASING=FXAA`.
 `RECOMPONE_PRESENTATION_CAPTURE=1` adds post-presentation PPMs beside the
 unchanged native-framebuffer captures. The test-only
 `RECOMPONE_PRESENTATION_RESOLUTION` and

@@ -160,8 +160,11 @@ internal static class HostWindow
 
     internal static void RequestDisplayCapture(string label)
     {
-        _requestedDisplayCapture = new string(
+        string sanitized = new string(
             label.Where(ch => char.IsAsciiLetterOrDigit(ch) || ch == '_').ToArray());
+        _requestedDisplayCapture = sanitized;
+        if (_capturePresentation && Hle.GpuHle.Active)
+            _pendingPresentationCapture = sanitized;
     }
 
     public static void RequestDiscPath() => _discPicker?.Show();
@@ -198,12 +201,14 @@ internal static class HostWindow
         _presentationRenderer = new PresentationRenderer(_gl);
         _presentationRenderer.Initialize();
 
-        Hle.GlVram.Scale = ConfigManager.View.NativeResolution ? 1 : 4;
+        bool highResolution3D = ConfigManager.View.HighResolution3D ||
+            Environment.GetEnvironmentVariable("RECOMPONE_GPU_HLE") == "1";
+        Hle.GlVram.Scale = highResolution3D ? 4 : 1;
         _glBackend = new Hle.GlBackend(_gl);
         _glBackend.InitGl();
-        Hle.GpuHle.Active = false;
+        Hle.GpuHle.Active = highResolution3D;
         Hle.GpuHle.Backend = _glBackend;
-        Hle.GpuHle.NativeResolution = ConfigManager.View.NativeResolution;
+        Hle.GpuHle.NativeResolution = false;
 
         _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
 

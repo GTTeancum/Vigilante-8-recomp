@@ -119,14 +119,14 @@ This completes the original-resolution Graphics gate for the vertical slice.
 Higher output resolutions and anti-aliasing were deliberately completed only
 after this baseline so they could not hide or perturb its fidelity evidence.
 
-The post-goal host presentation pass supports 720p through 4K output and
-optional FXAA. An exact 2880x2160 game surface presented a decoded boot-movie
-frame, while 1080p FXAA captures covered shell menus, active Oil Fields vehicle
-physics, pause/confirmation, full destruction, and the visible `YOU LOSE!`
-result. The result input was accepted through the original poll-320 path and
-normal teardown reached a fresh Oil Fields load. The native framebuffer is
-captured before the new pass and retained matching stage hashes between
-AA-disabled and FXAA runs, proving that the extension is presentation-only.
+The post-goal host presentation pass supports 720p through 4K output, 4x
+internal 3D rasterization, and optional FXAA. The complete original-framebuffer
+route still covers full destruction, the visible `YOU LOSE!` result, result
+acceptance, teardown, and replay loading. A corrected 1080p 4x/FXAA capture run
+separately covers shell menus, active Oil Fields vehicle physics and weapon
+rendering, plus pause/confirmation. Gameplay primitives are drawn at 1280x960
+before the 1440x1080 4:3 presentation surface is pillarboxed into 1920x1080;
+the simulation and PS1 data path remain unchanged.
 
 ## Current physics status
 
