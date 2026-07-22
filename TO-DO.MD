@@ -1,7 +1,7 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 15:22 EDT
-Status: ACTIVE - USER-FOUND DEFECT REMEDIATION
+Last updated: 2026-07-22 15:42 EDT
+Status: BLOCKED ON USER RETEST
 
 ## Goal
 
@@ -204,3 +204,10 @@ The retained screenshots and controller checklist are collected in
   software rasterizers. Enhanced mode reports dithering Off by default;
   enabling the Display setting restores the original ordered-dither path,
   and both configurations passed independent Oil Fields gameplay runs.
+- 2026-07-22: The corrected x64 single-file build is deployed byte-identically
+  to both layouts at SHA256
+  `6DF36FCEA232032F0CEE6AE9AA22BBDE4637CD44844E1B3B6D03946C0292AEEB`.
+  The direct copy selected its CUE; the standalone copy selected exactly 69
+  loose assets and did not open disc media. Both reached Oil Fields, reported
+  dithering Off, completed 360 gameplay ticks, and exited through the original
+  pause confirmation. Cards and settings retained their prior hashes.
