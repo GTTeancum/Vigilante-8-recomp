@@ -13,6 +13,9 @@ public static class XaAudio
     static readonly int[] _ring = new int[Capacity];
     static int _writeIdx, _readIdx, _count;
     static readonly object _gate = new();
+    static readonly bool _trace =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_AUDIO") == "1";
+    static long _sectorsDecoded;
 
     static int _oldL, _olderL, _oldR, _olderR;
     static int _srcRate = 37800;
@@ -32,6 +35,7 @@ public static class XaAudio
             _pos = 0;
             _s0L = _s0R = _s1L = _s1R = 0;
             _underrun = 0;
+            _sectorsDecoded = 0;
         }
     }
 
@@ -55,7 +59,13 @@ public static class XaAudio
         }
     }
 
-    public static void DecodeSector(byte[] sec, int off, byte coding)
+    public static void DecodeSector(
+        byte[] sec,
+        int off,
+        byte coding,
+        int lba = -1,
+        byte file = 0,
+        byte channel = 0)
     {
         bool stereo = (coding & 0x01) != 0;
         int rate = (coding & 0x04) != 0 ? 18900 : 37800;
@@ -88,14 +98,25 @@ public static class XaAudio
         lock (_gate)
         {
             _srcRate = rate;
+            int peak = 0;
             for (int i = 0; i < n; i++)
             {
-                _ring[_writeIdx] = frames[i];
+                int packed = frames[i];
+                peak = Math.Max(peak, Math.Abs((int)(short)(packed & 0xFFFF)));
+                peak = Math.Max(peak, Math.Abs((int)(short)(packed >> 16)));
+                _ring[_writeIdx] = packed;
                 _writeIdx = (_writeIdx + 1) & Mask;
                 if (_count < Capacity) _count++;
                 else _readIdx = (_readIdx + 1) & Mask;
             }
             if (!_playing && _count >= PrimeFrames) _playing = true;
+            long decoded = ++_sectorsDecoded;
+            if (_trace && (decoded == 1 || decoded % 19 == 0))
+            {
+                Console.Error.WriteLine(
+                    $"[XA] file={file} channel={channel} lba={lba} sectors={decoded} " +
+                    $"rate={rate} frames={n} buffered={_count} peak={peak}");
+            }
         }
     }
 

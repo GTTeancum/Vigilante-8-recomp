@@ -127,6 +127,10 @@ MAIN_NATIVE_CALLBACK_STARTS = (
     0x8003A9DC,
     0x8003B138,
     0x8003B1E0,
+    # Object event callback stored at +0x64 by the gameplay path. Its native
+    # prologue begins at 0x8003B3C8 and its epilogue ends immediately before
+    # the already mapped callback at 0x8003B8D4.
+    0x8003B3C8,
     0x8003B8D4,
     0x8003BDE0,
     # Deferred object callback reached after the deterministic braking phase;
@@ -745,6 +749,12 @@ def main() -> int:
                 "overlay": "main",
                 "address": "800205F8",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TraceObjectRetire",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8001F9CC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceAnimationObject",
                 "mode": "pre",
             },
             {

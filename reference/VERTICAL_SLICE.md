@@ -73,8 +73,7 @@ Activision shatter logo, the rendered Luxoflux logo and slogan, and the
 letterboxed opening road shot from `INTRO.STR`. A clean uninterrupted repeat
 then played all 227, 91, and 1,267 queued frames, retained changing nonblack
 framebuffer hashes, and reached the retail `PRESS START` renderer with no
-runtime error marker. The Intros gate is complete for the fixed slice. The
-broader Graphics gate still includes menus, gameplay, pause, and results.
+runtime error marker. The Intros gate is complete for the fixed slice.
 
 ## Current menu status
 
@@ -104,6 +103,21 @@ and Cooperative, enters Oil Fields, and reaches each mode's visibly distinct
 two-player selector layout. Normal launches still use live controller discovery.
 Together with Options and pause, this completes the Menus gate for the reference
 vertical-slice phase.
+
+## Current graphics status
+
+All Graphics evidence comes from the running original-disc reference, not from
+mockups. Representative captures cover decoded movies; 640x480 title, selection,
+Options, Quest, Cooperative, and Versus layouts; 320x240 Oil Fields terrain,
+vehicles, props, HUD, radar, particles, projectiles, impacts, and destruction;
+the pause/confirmation overlays; and the presented `YOU LOSE!` result screen.
+Stage-bound captures are requested only after the retail text or gameplay state
+identifies the target screen, and changing nonblack framebuffer hashes continue
+through gameplay, destruction, result dismissal, teardown, and replay loading.
+
+This completes the original-resolution Graphics gate for the vertical slice.
+Higher output resolutions and anti-aliasing are deliberately queued as the first
+post-goal presentation work so they cannot hide or perturb the fidelity baseline.
 
 ## Current physics status
 
@@ -176,11 +190,24 @@ An audible Oil Fields run presented the 1-13 TOC, started menu track 2 at its
 authored pregap, retained playback through later data seeks, and started a
 gameplay-selected track without an unmapped-sector stop. The pause regression
 then changed track 2 to track 3 and back through the original CD Track row.
-Focused sector traces recorded nonzero source peaks up to 17,724, proving that
-the runtime is consuming PCM from the audio BIN files rather than mixing a
-silent placeholder. XA stream pacing, SPU voice allocation/loop/stop evidence,
-and an audible mixed-output capture/check remain open before the Audio gate can
-pass.
+Focused sector traces recorded nonzero source peaks, proving that the runtime is
+consuming PCM from the audio BIN files rather than mixing a silent placeholder.
+The host now also applies the retail CD input matrix, mute/demute state, and the
+original SPU CD-volume registers to both CDDA and XA input.
+
+The clean boot-to-results audio regression played menu track 2 and gameplay
+track 5, while the original SPU path allocated menu, weapon, impact, and vehicle
+voices. Its bounded lifecycle trace recorded 576 key-ons, 24 key-offs, 417
+sample ends, and one loop before the trace limit. The paced result transition
+selected `DEFEAT.XA` file 1/channel 0, decoded nonzero sectors with peaks above
+30,000, and delivered absolute-sector ready reports through the retail
+`0x80043D94` callback. Mixed-output summaries independently showed active CDDA
+and active XA buffers.
+
+The standard-library capture checker validated 201.363 seconds of 44.1 kHz
+stereo signed-16 output: peak 32,766, RMS -8.55 dBFS, and zero clipped samples.
+This completes the Audio gate, including music, SFX/voice allocation, looping,
+stop/end behavior, weapon/impact cues, and the result transition.
 
 ## Current match-end status
 
@@ -193,6 +220,18 @@ edge at result poll 320, and reaches normal teardown, arena cleanup, and disc
 reload. The complete run had no unmapped call, unhandled exception, fatal,
 terrain, or heap-exhaustion marker. The Match end gate is complete for the
 fixed slice.
+
+## Current stability status
+
+The final clean regression launched from boot, navigated the deterministic
+retail route, ran the complete AI-controlled match, reached the result builder,
+accepted the stage-relative replay input after the original minimum interval,
+completed teardown, reloaded LOAD and Oil Fields, and continued presenting the
+new match. It ran for 201 seconds with no unmapped call, unhandled exception,
+invalid-animation-pointer diagnostic, heap corruption/exhaustion, terrain fault,
+deadlock, or stale-log ambiguity. The newly recovered original callback at
+`0x8003B3C8-0x8003B8D4` covers the deferred object event reached during replay
+construction. This completes the fixed-slice Stability gate.
 
 ## Commit discipline
 

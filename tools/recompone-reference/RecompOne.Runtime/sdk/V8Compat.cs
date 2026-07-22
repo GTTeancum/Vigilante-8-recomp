@@ -27,6 +27,8 @@ public static class V8Compat
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_WEAPONS") == "1";
     static readonly bool _traceOptions =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OPTIONS") == "1";
+    static readonly bool _traceAnimation =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_ANIMATION") == "1";
     static int _vehiclePhysicsTick;
     static uint _integratingVehicle;
     static int _integratingVehicleTick;
@@ -71,6 +73,27 @@ public static class V8Compat
     static readonly Dictionary<uint, List<string>> _objectHistory = new();
     static readonly HashSet<uint> _playerProjectiles = new();
     static readonly HashSet<string> _seenMenuText = new(StringComparer.Ordinal);
+    static readonly Dictionary<uint, uint> _lastAnimationPointers = new();
+
+    public static void TraceAnimationObject(CpuContext c, IMemory m)
+    {
+        if (!_traceAnimation) return;
+        uint obj = c.A0;
+        uint pointer = m.ReadU32(obj + 0x60u);
+        _lastAnimationPointers.TryGetValue(obj, out uint previous);
+        _lastAnimationPointers[obj] = pointer;
+        if (pointer == 0u || pointer >= 0x80000000u) return;
+
+        string history = _objectHistory.TryGetValue(obj, out var events)
+            ? string.Join(" | ", events.TakeLast(8))
+            : "none";
+        Console.Error.WriteLine(
+            $"[V8Animation] object=0x{obj:X8} pointer=0x{pointer:X8} previous=0x{previous:X8} " +
+            $"flags=0x{m.ReadU32(obj):X8} id={m.ReadU16(obj + 0x0Au)} " +
+            $"parent=0x{m.ReadU32(obj + 0x3Cu):X8} child=0x{m.ReadU32(obj + 0x38u):X8} " +
+            $"next=0x{m.ReadU32(obj + 0x34u):X8} callback=0x{m.ReadU32(obj + 0x64u):X8} " +
+            $"history={history}");
+    }
 
     public static void Alloc(CpuContext c, IMemory m)
     {

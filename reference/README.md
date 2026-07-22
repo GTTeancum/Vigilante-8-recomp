@@ -180,8 +180,8 @@ by the vendored RecompOne projects. RecompOne is
 an immature upstream tool, so bring-up fixes belong in the vendored reference
 lane unless they reveal a defect in the native V8 implementation.
 
-The preparation script currently emits 2,408 main-executable functions and 506
-overlay functions; runtime discovery brings the generated total to 2,992. The
+The preparation script currently emits 2,409 main-executable functions and 506
+overlay functions; runtime discovery brings the generated total to 2,993. The
 Release build has been validated with .NET 10.0.302. Scripted navigation,
 steering, acceleration, and weapon inputs sustained active Oilfield gameplay
 for 272.7 seconds without a runtime error, followed by a separate deployed-copy
@@ -219,15 +219,26 @@ normal loop restart. The pause fixture completed CD-track selection, resume,
 confirmation cancel, a second resume, and confirmed quit with no runtime-fault
 marker. Separate clean fixtures also presented and navigated the Quest route,
 Cooperative, Versus, and both two-player selector layouts. See
-`VERTICAL_SLICE.md` for the remaining audio, graphics, and final
-state-comparison gates.
+`VERTICAL_SLICE.md` for the evidence and the remaining cross-runtime
+state-comparison work.
 
 The original CD-audio path now sees the retail 1-13 TOC rather than a synthetic
 single data track. Focused audible runs started menu track 2 and gameplay track
 8, continued menu music across unrelated asset seeks, and used the pause CD
-Track row to move from track 2 to track 3 and back. Sector traces show nonzero
-PCM peaks from the actual BIN audio files. XA pacing, SPU voice lifecycle, and
-an output capture/check remain open in the Audio gate.
+Track row to move from track 2 to track 3 and back. The completed boot-to-results
+audio regression then played menu track 2, gameplay track 5, the original SPU
+menu/weapon/impact voices, and the `DEFEAT.XA` result stream. Its bounded SPU
+trace recorded 576 key-ons, 24 key-offs, 417 sample ends, and a looping voice
+before reaching its diagnostic limit. XA reports advanced through the retail
+ready callback while CDDA and XA both appeared in mixed-output summaries.
+
+`tools/recompone-v8/check_reference_audio.py` validated the final 201.363-second
+44.1 kHz stereo signed-16 capture at -8.55 dBFS RMS, peak 32,766, with zero
+clipped samples. The same clean launch reached results, accepted the replay
+input, completed teardown, reloaded Oil Fields, and remained active without an
+unmapped call, unhandled exception, invalid-animation-pointer diagnostic, heap
+failure, or terrain fault. This completes the vertical-slice Audio and
+Stability gates.
 
 See `REFERENCE_PLAN.md` for the architecture and `VERTICAL_SLICE.md` for the
 active acceptance gates.

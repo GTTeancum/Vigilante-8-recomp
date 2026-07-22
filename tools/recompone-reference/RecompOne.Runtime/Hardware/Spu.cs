@@ -14,6 +14,8 @@ public sealed class Spu
 
     static readonly int[] AdsrStepDown = { -8, -7, -6, -5 };
     static readonly int[] AdsrStepUp = { 7, 6, 5, 4 };
+    static readonly bool TraceAudio =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_AUDIO") == "1";
 
 
     static readonly short[] Gauss = {
@@ -118,6 +120,8 @@ public sealed class Spu
         public bool EndX;
         public bool IgnoreLoop;
         public bool HasBlock;
+        public bool EndLogged;
+        public bool LoopLogged;
 
         public int Old, Older;
 
@@ -149,6 +153,7 @@ public sealed class Spu
 
     int _noiseLevel = 1;
     int _noiseTimer;
+    int _traceEvents;
 
     public Spu()
     {
@@ -260,8 +265,8 @@ public sealed class Spu
             case 0x1A6: _transferAddr = val; break;
             case 0x1AA: _spucnt = val; break;
             case 0x1AC: _transferCtrl = val; break;
-            case 0x1B0: _cdVolL = val; break;
-            case 0x1B2: _cdVolR = val; break;
+            case 0x1B0: _cdVolL = val; TraceEvent($"cd-volume left=0x{_cdVolL:X4} right=0x{_cdVolR:X4}"); break;
+            case 0x1B2: _cdVolR = val; TraceEvent($"cd-volume left=0x{_cdVolL:X4} right=0x{_cdVolR:X4}"); break;
             case 0x1B4: _extVolL = val; break;
             case 0x1B6: _extVolR = val; break;
         }
@@ -283,7 +288,13 @@ public sealed class Spu
             v.Old = v.Older = 0;
             v.HasBlock = false;
             v.EndX = false;
+            v.EndLogged = false;
+            v.LoopLogged = false;
             _endx &= ~(1u << (b + i));
+            TraceEvent(
+                $"key-on voice={b + i} start=0x{v.StartAddr:X4} repeat=0x{v.RepeatAddr:X4} " +
+                $"pitch=0x{v.Pitch:X4} vol=0x{v.VolL:X4},0x{v.VolR:X4} " +
+                $"adsr=0x{v.AdsrLo:X4},0x{v.AdsrHi:X4}");
         }
     }
 
@@ -295,7 +306,10 @@ public sealed class Spu
             if ((mask & (1 << i)) == 0) continue;
             var v = _v[b + i];
             if (v.Phase != AdsrPhase.Off)
+            {
+                TraceEvent($"key-off voice={b + i} phase={v.Phase} adsr=0x{(ushort)v.AdsrVol:X4}");
                 v.Phase = AdsrPhase.Release;
+            }
         }
     }
 
@@ -368,13 +382,15 @@ public sealed class Spu
                 int mixL = l, mixR = r;
                 if (XaAudio.Next(out short xl, out short xr))
                 {
-                    mixL += xl * (short)_cdVolL >> 15;
-                    mixR += xr * (short)_cdVolR >> 15;
+                    Sdk.LibCd.MixCdInput(xl, xr, out int xml, out int xmr);
+                    mixL += xml * (short)_cdVolL >> 15;
+                    mixR += xmr * (short)_cdVolR >> 15;
                 }
                 if (CddaAudio.Next(out short cl, out short cr))
                 {
-                    mixL += cl * (short)_cdVolL >> 15;
-                    mixR += cr * (short)_cdVolR >> 15;
+                    Sdk.LibCd.MixCdInput(cl, cr, out int cml, out int cmr);
+                    mixL += cml * (short)_cdVolL >> 15;
+                    mixR += cmr * (short)_cdVolR >> 15;
                 }
                 mixL = Math.Clamp(mixL, -32768, 32767) * _mainCurL >> 15;
                 mixR = Math.Clamp(mixR, -32768, 32767) * _mainCurR >> 15;
@@ -522,8 +538,21 @@ public sealed class Spu
             _endx  |= 1u << index;
             v.CurAddr = (uint)v.RepeatAddr << 3;
 
-            if ((flags & 2) == 0)
+            if ((flags & 2) != 0)
             {
+                if (!v.LoopLogged)
+                {
+                    TraceEvent($"loop voice={index} repeat=0x{v.RepeatAddr:X4}");
+                    v.LoopLogged = true;
+                }
+            }
+            else
+            {
+                if (!v.EndLogged)
+                {
+                    TraceEvent($"sample-end voice={index} repeat=0x{v.RepeatAddr:X4}");
+                    v.EndLogged = true;
+                }
                 v.AdsrVol = 0;
                 v.Phase = AdsrPhase.Release;
             }
@@ -601,5 +630,14 @@ public sealed class Spu
             _noiseTimer += 0x20000 >> shift;
             if (_noiseTimer < 0) _noiseTimer += 0x20000 >> shift;
         }
+    }
+
+    void TraceEvent(string message)
+    {
+        if (!TraceAudio || _traceEvents >= 1024) return;
+        _traceEvents++;
+        Console.Error.WriteLine($"[SPU] {message}");
+        if (_traceEvents == 1024)
+            Console.Error.WriteLine("[SPU] trace limit reached");
     }
 }

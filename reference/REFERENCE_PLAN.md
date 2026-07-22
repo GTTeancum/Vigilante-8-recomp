@@ -86,3 +86,17 @@ The current vertical slice is complete only when a clean launch reaches
 game-over/results through a reproducible input fixture and every gate in
 `VERTICAL_SLICE.md` has current runtime evidence. Process responsiveness or a
 single gameplay screenshot is not sufficient.
+
+## First post-goal presentation phase
+
+After the vertical slice is genuinely complete and deployed, extend only the
+reference presentation lane in this order:
+
+1. Add higher output resolutions while preserving the original game viewport,
+   aspect, UI coordinates, and gameplay state.
+2. Add anti-aliasing on top of the higher-resolution path and verify that it is
+   presentation-only.
+
+Neither item relaxes the current boot-to-results, audio, graphics, stability,
+or state-evidence gates, and neither changes the separate native 32-bit x86
+Xbox architecture.

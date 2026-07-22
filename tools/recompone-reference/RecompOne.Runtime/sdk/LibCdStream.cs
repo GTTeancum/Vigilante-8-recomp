@@ -214,7 +214,15 @@ public static class LibCdStream
 
             if (payload < 0)
             {
-                if ((sec[2] & 0x04) != 0) XaAudio.DecodeSector(sec, 8, sec[3]);
+                double audioDelivered = _clock.Elapsed.TotalSeconds * LibCd.SectorsPerSecond;
+                if ((_streamLba - _streamStartLba) + 1 > audioDelivered)
+                {
+                    Thread.Sleep(1);
+                    continue;
+                }
+                if ((sec[2] & 0x04) != 0 && LibCd.AcceptXaSector(sec[0], sec[1]))
+                    XaAudio.DecodeSector(sec, 8, sec[3], _streamLba, sec[0], sec[1]);
+                LibCd.ReportXaSector(_streamLba);
                 _streamLba++;
                 continue;
             }
@@ -275,7 +283,9 @@ public static class LibCdStream
             int payload = StrPayloadOffset(sec);
             if (payload < 0)
             {
-                if ((sec[2] & 0x04) != 0) XaAudio.DecodeSector(sec, 8, sec[3]);
+                if ((sec[2] & 0x04) != 0 && LibCd.AcceptXaSector(sec[0], sec[1]))
+                    XaAudio.DecodeSector(sec, 8, sec[3], lba - 1, sec[0], sec[1]);
+                LibCd.ReportXaSector(lba - 1);
                 continue;
             }
 

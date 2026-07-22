@@ -45,6 +45,9 @@ public static class LibCd
 
     static bool _readActive;
     static bool _xaActive;
+    static int _xaReportLba = -1;
+    static int _xaPendingReportLba = -1;
+    static int _xaLastTraceSecond = -1;
     static volatile bool _cddaActive;
     static int _cddaLba;
     static int _cddaPendingReportLba = -1;
@@ -52,7 +55,14 @@ public static class LibCd
     static int _cddaLastReportSecond = -1;
     static byte _filterFile;
     static byte _filterChannel;
+    static byte _cdMixLl = 0x80;
+    static byte _cdMixLr;
+    static byte _cdMixRr = 0x80;
+    static byte _cdMixRl;
+    static bool _cdMuted;
     static int _v8FileStartLba = -1;
+    static readonly bool TraceAudio =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_AUDIO") == "1";
 
     internal static readonly object DiscLock = new();
     static readonly object _posGate = new();
@@ -124,6 +134,23 @@ public static class LibCd
     internal static int CurrentLba { get { lock (_posGate) return PosToInt(_pos); } }
     internal static double SectorsPerSecond => (_mode & 0x80) != 0 ? 150.0 : 75.0; //cd pacer
 
+    internal static bool AcceptXaSector(byte file, byte channel) =>
+        (_mode & 0x08) == 0 || (file == _filterFile && channel == _filterChannel);
+
+    internal static void ReportXaSector(int lba) =>
+        Interlocked.Exchange(ref _xaPendingReportLba, lba);
+
+    internal static void MixCdInput(short left, short right, out int mixedLeft, out int mixedRight)
+    {
+        if (_cdMuted)
+        {
+            mixedLeft = mixedRight = 0;
+            return;
+        }
+        mixedLeft = Math.Clamp((left * _cdMixLl + right * _cdMixRl) >> 7, short.MinValue, short.MaxValue);
+        mixedRight = Math.Clamp((left * _cdMixLr + right * _cdMixRr) >> 7, short.MinValue, short.MaxValue);
+    }
+
     internal static bool TryDescribeLocatedFile(int lba, out string name, out int endLba)
     {
         lock (_locatedFileGate)
@@ -147,6 +174,7 @@ public static class LibCd
 
     internal static void Tick()
     {
+        DispatchXaReport();
         DispatchCddaReport();
         bool xaMode = (_mode & 0x40) != 0;
 
@@ -252,6 +280,29 @@ public static class LibCd
         c.Restore(snap);
     }
 
+    static void DispatchXaReport()
+    {
+        int lba = Interlocked.Exchange(ref _xaPendingReportLba, -1);
+        if (lba < 0 || !_xaActive || _cbReady == 0 || Runtime.Cpu == null || Runtime.Mem == null)
+            return;
+
+        _xaReportLba = lba;
+        int traceSecond = lba / 75;
+        if (TraceAudio && traceSecond != _xaLastTraceSecond)
+        {
+            _xaLastTraceSecond = traceSecond;
+            Console.Error.WriteLine($"[XA-REPORT] lba={lba} ready=0x{_cbReady:X8}");
+        }
+        var c = Runtime.Cpu;
+        var m = Runtime.Mem;
+        var snap = c.Snapshot();
+        _lastIntr = DataReady;
+        c.A0 = DataReady;
+        c.A1 = 0;
+        Dispatcher.Call(c, m, _cbReady);
+        c.Restore(snap);
+    }
+
     static void PumpXa()
     {
         if (Runtime.Cd == null) return;
@@ -290,6 +341,18 @@ public static class LibCd
     {
         uint madr = c.A0;
         int words = (int)c.A1;
+        // The retail XA-ready callback asks for exactly one word and treats it
+        // as the current absolute MSF. Preserve normal sector payload reads.
+        if (_xaActive && words == 1 && _xaReportLba >= 0)
+        {
+            IntToPos(_xaReportLba, out byte mm, out byte ss, out byte ff);
+            m.WriteU8(madr, mm);
+            m.WriteU8(madr + 1, ss);
+            m.WriteU8(madr + 2, ff);
+            m.WriteU8(madr + 3, 0);
+            c.V0 = 1;
+            return;
+        }
         int lba = CurrentLba;
         byte[] data;
         lock (DiscLock) data = Runtime.Cd!.ReadSectorData(lba);
@@ -342,7 +405,20 @@ public static class LibCd
     public static void CdStatus(CpuContext c, IMemory m) => c.V0 = _status;
     public static void CdMode(CpuContext c, IMemory m) => c.V0 = _mode;
     public static void CdLastCom(CpuContext c, IMemory m) => c.V0 = _com;
-    public static void CdMix(CpuContext c, IMemory m) => c.V0 = 1;
+    public static void CdMix(CpuContext c, IMemory m)
+    {
+        if (c.A0 != 0)
+        {
+            _cdMixLl = m.ReadU8(c.A0);
+            _cdMixLr = m.ReadU8(c.A0 + 1);
+            _cdMixRr = m.ReadU8(c.A0 + 2);
+            _cdMixRl = m.ReadU8(c.A0 + 3);
+            if (TraceAudio)
+                Console.Error.WriteLine(
+                    $"[CDMIX] ll={_cdMixLl} lr={_cdMixLr} rr={_cdMixRr} rl={_cdMixRl}");
+        }
+        c.V0 = 1;
+    }
 
     static void CdResetState()
     {
@@ -354,13 +430,20 @@ public static class LibCd
         _cbSync = _cbReady = _cbData = 0;
         _readActive = false;
         _xaActive = false;
+        _xaReportLba = -1;
+        _xaPendingReportLba = -1;
+        _xaLastTraceSecond = -1;
         _cddaActive = false;
         _cddaLba = 0;
         _cddaPendingReportLba = -1;
         _cddaTrackNumber = 0;
         _cddaLastReportSecond = -1;
         CddaAudio.Reset();
+        XaAudio.Reset();
         _filterFile = _filterChannel = 0;
+        _cdMixLl = _cdMixRr = 0x80;
+        _cdMixLr = _cdMixRl = 0;
+        _cdMuted = false;
         Array.Clear(_pos);
         Array.Clear(_lastResult);
         Dispatcher.ClearPending();
@@ -402,6 +485,11 @@ public static class LibCd
             case ReadN:
                 _cddaActive = false;
                 CddaAudio.Reset();
+                XaAudio.Reset();
+                _xaActive = false;
+                _xaReportLba = -1;
+                _xaPendingReportLba = -1;
+                _xaLastTraceSecond = -1;
                 _readActive = true;
                 Dispatcher.LoadByLba(CurrentLba);
                 Console.Error.WriteLine($"[LibCd] ReadN start LBA={CurrentLba} ready=0x{_cbReady:X8} data=0x{_cbData:X8}");
@@ -411,7 +499,11 @@ public static class LibCd
             case ReadS:
                 _cddaActive = false;
                 CddaAudio.Reset();
+                XaAudio.Reset();
                 _xaActive = true;
+                _xaReportLba = CurrentLba;
+                _xaPendingReportLba = -1;
+                _xaLastTraceSecond = -1;
                 _readActive = false;
                 LibCdStream.OnReadStream(CurrentLba);
                 break;
@@ -458,13 +550,20 @@ public static class LibCd
                 LibCdStream.OnStopStream();
                 _readActive = false;
                 _xaActive = false;
+                _xaReportLba = -1;
+                _xaPendingReportLba = -1;
+                _xaLastTraceSecond = -1;
                 _cddaActive = false;
                 CddaAudio.Reset();
+                XaAudio.Reset();
                 Dispatcher.ClearPending();
                 break;
             case Play:
                 _readActive = false;
                 _xaActive = false;
+                _xaReportLba = -1;
+                _xaPendingReportLba = -1;
+                _xaLastTraceSecond = -1;
                 _cddaLba = CurrentLba;
                 _cddaActive = true;
                 _cddaPendingReportLba = -1;
@@ -474,8 +573,15 @@ public static class LibCd
                 EnsureXaThread();
                 Console.Error.WriteLine($"[CDDA] play LBA={_cddaLba} mode=0x{_mode:X2}");
                 break;
-            case Nop: case Mute:
-            case Demute: case SeekL: case SeekP:
+            case Mute:
+                _cdMuted = true;
+                if (TraceAudio) Console.Error.WriteLine("[CDMIX] muted");
+                break;
+            case Demute:
+                _cdMuted = false;
+                if (TraceAudio) Console.Error.WriteLine("[CDMIX] demuted");
+                break;
+            case Nop: case SeekL: case SeekP:
                 break;
             default:
                 break;
