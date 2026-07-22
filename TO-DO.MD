@@ -1,7 +1,7 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 14:50 EDT
-Status: ACTIVE
+Last updated: 2026-07-22 14:59 EDT
+Status: READY FOR USER SIGN-OFF
 
 ## Goal
 
@@ -21,7 +21,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [x] Direct BIN/CUE and standalone loose-file deployments use the same
       executable and pass focused regressions after any runtime changes; the
       loose deployment must work with the entire `BINCUE` tree unavailable.
-- [ ] Temporary test processes and handoff logs are cleaned; cards and settings
+- [x] Temporary test processes and handoff logs are cleaned; cards and settings
       are preserved; coherent changes are committed.
 
 ## Work queue
@@ -167,3 +167,11 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
   Quest divergence at tick 1. Native snapshot scaffolding now records the
   instruction-confirmed one-byte PRNG carry; external PS1 capture remains a
   user-sign-off dependency rather than an autonomous local task.
+- 2026-07-22: Final x64 single-file publication produced byte-identical
+  `Vigilante8PC.exe` deployments at SHA256
+  `1DFD56EFA33760E6E18072DFFCDB22775AF2520D9215FF7976971E302DA1D9C7`.
+  The `BINCUE` copy selected direct CUE mode and the `PS1 game` copy selected
+  standalone loose mode with 69 exact-path assets. Each independently completed
+  Oil Fields gameplay, two pause/resume cycles, confirmation cancel, and normal
+  confirmed quit with zero fatal markers. Cards and settings retained their
+  pre-test hashes; all 34 temporary deployment captures were removed.
