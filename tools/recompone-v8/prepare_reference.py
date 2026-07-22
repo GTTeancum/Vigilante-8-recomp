@@ -182,6 +182,10 @@ MAIN_INTERNAL_ENTRYPOINTS = (
     0x8003DC10,
     0x8003DFB0,
     0x8003DFD8,
+    # Collision/event code calls the second routine embedded in Ghidra's
+    # overlapping 0x8003DFD8 extent. Its independent prologue begins at this
+    # direct JAL target and runs through FUN_8003E254.
+    0x8003DFFC,
     0x8003F4F0,
     0x8003F600,
     0x8003F684,

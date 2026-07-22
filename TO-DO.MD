@@ -1,7 +1,7 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 15:42 EDT
-Status: BLOCKED ON USER RETEST
+Last updated: 2026-07-22 16:22 EDT
+Status: ACTIVE - THREE-HOUR CRASH SOAK
 
 ## Goal
 
@@ -36,6 +36,17 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
       the host input UI.
 - [x] Apply the enhanced-mode dithering default to both accelerated and
       software PS1 raster paths, retaining a live fidelity toggle.
+- [ ] Reproduce and correct the Canyonlands gameplay crash in which
+      `FUN_80024998` reads corrupt address `0x380C110F` after roughly 4,500
+      gameplay ticks.
+- [ ] Determine whether the Ski Resort post-defeat presentation stall is a
+      game/runtime defect or a result-screen automation false positive, then
+      pass defeat dismissal and arena relaunch.
+- [ ] Diagnose Casino City's fragmented emulated-heap exhaustion: a 4,592-byte
+      allocation failed at tick 5,580 despite 94,216 aggregate free bytes and
+      a largest free block of only 2,896 bytes.
+- [ ] Regenerate and regression-test the newly recovered main-executable
+      entrypoint `0x8003DFFC`, reached from Hoover Dam gameplay at tick 720.
 
 ### Multi-map soak
 

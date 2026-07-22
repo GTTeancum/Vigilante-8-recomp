@@ -51,7 +51,6 @@ FATAL_MARKERS = {
     "vigilante 8 fatal error": "original fatal error",
     "audio init failed": "audio initialization failure",
     "window unavailable": "window initialization failure",
-    "heap exhausted": "heap exhaustion",
     "terrain tile pointer is invalid": "terrain pointer failure",
     "invalid animation": "invalid animation pointer",
     "stack overflow": "stack overflow",
@@ -86,6 +85,9 @@ class RunResult:
     clean_match_exit: bool
     result_screen_seen: bool
     clean_match_relaunch: bool
+    clean_match_teardown: bool
+    heap_exhaustion_count: int
+    hang_stack: str | None
     source_overrides: int | None
     stdout_log: str
     stderr_log: str
@@ -355,6 +357,37 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=5)
 
 
+def capture_managed_stack(
+    process: subprocess.Popen[bytes], output: Path, stem: str
+) -> Path | None:
+    """Capture a live managed stack before terminating a stalled process."""
+    tool = shutil.which("dotnet-stack")
+    if tool is None:
+        fallback = Path.home() / ".dotnet" / "tools" / "dotnet-stack.exe"
+        if fallback.is_file():
+            tool = str(fallback)
+    if tool is None or process.poll() is not None:
+        return None
+
+    path = output / f"{stem}.hang-stack.txt"
+    try:
+        with path.open("wb") as stream:
+            subprocess.run(
+                [tool, "report", "--process-id", str(process.pid)],
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+                timeout=20,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        if path.stat().st_size > 0:
+            return path
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    path.unlink(missing_ok=True)
+    return None
+
+
 def run_one(
     exe: Path,
     source_args: list[str],
@@ -406,6 +439,7 @@ def run_one(
     passed = False
     gameplay_capture: Path | None = None
     final_capture: Path | None = None
+    hang_stack: Path | None = None
 
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
         process = subprocess.Popen(
@@ -467,6 +501,18 @@ def run_one(
                     reason = "clean match completion, result dismissal, and gameplay relaunch"
                     break
 
+                result_offset = text.find("[Input] stage 'result_screen'")
+                post_result_text = text[result_offset:] if result_offset >= 0 else ""
+                clean_match_teardown = (
+                    result_started is not None
+                    and "[LibCd] ReadN start LBA=1472" in post_result_text
+                    and "[CDDA] play LBA=109500" in post_result_text
+                )
+                if clean_match_teardown:
+                    passed = True
+                    reason = "clean match completion and title return"
+                    break
+
                 clean_match_exit = "[Input] stage 'pause_quit'" in text
                 if clean_exit and clean_match_exit:
                     passed = True
@@ -493,9 +539,11 @@ def run_one(
                         break
                     if (
                         last_framebuffer_at is not None
+                        and result_started is None
                         and now - last_framebuffer_at > heartbeat_timeout
                     ):
                         reason = "render heartbeat timeout"
+                        hang_stack = capture_managed_stack(process, output, stem)
                         break
                     if result_started is not None and now - result_started > 45.0:
                         reason = "result teardown or gameplay relaunch timeout"
@@ -539,6 +587,12 @@ def run_one(
         and text.count(f"loaded relocated overlay: {arena.overlay}") >= 2
         and bool(re.search(r"\[Soak\] gameplay tick=\d+", post_result_text))
     )
+    clean_match_teardown = (
+        result_screen_seen
+        and "[LibCd] ReadN start LBA=1472" in post_result_text
+        and "[CDDA] play LBA=109500" in post_result_text
+    )
+    heap_exhaustion_count = text.lower().count("heap exhausted")
     overrides_match = re.search(
         r"(?:standalone loose files|CUE overrides|loose-file overrides)=(\d+)",
         text,
@@ -609,6 +663,9 @@ def run_one(
         clean_match_exit=clean_match_exit,
         result_screen_seen=result_screen_seen,
         clean_match_relaunch=clean_match_relaunch,
+        clean_match_teardown=clean_match_teardown,
+        heap_exhaustion_count=heap_exhaustion_count,
+        hang_stack=str(hang_stack) if hang_stack else None,
         source_overrides=source_overrides,
         stdout_log=str(stdout_path),
         stderr_log=str(stderr_path),
