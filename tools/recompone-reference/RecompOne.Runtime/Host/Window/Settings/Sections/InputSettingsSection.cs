@@ -15,7 +15,7 @@ internal sealed class InputSettingsSection : ISettingsSection
     [
         ("Cross", b => b.Cross, (b,v) => b.Cross = v, p => p.Cross, (p,v) => p.Cross = v),
         ("Circle", b => b.Circle, (b,v) => b.Circle = v, p => p.Circle, (p,v) => p.Circle = v),
-        ("Square", b => b.Square, (b,v) => b.Square = v, p => p.Square, (p,v) => p.Square = v),
+        ("Square (handbrake)", b => b.Square, (b,v) => b.Square = v, p => p.Square, (p,v) => p.Square = v),
         ("Triangle", b => b.Triangle, (b,v) => b.Triangle = v, p => p.Triangle, (p,v) => p.Triangle = v),
         ("L1", b => b.L1, (b,v) => b.L1 = v, p => p.L1, (p,v) => p.L1 = v),
         ("R1", b => b.R1, (b,v) => b.R1 = v, p => p.R1, (p,v) => p.R1 = v),
@@ -25,8 +25,8 @@ internal sealed class InputSettingsSection : ISettingsSection
         ("R3", b => b.R3, (b,v) => b.R3 = v, p => p.R3, (p,v) => p.R3 = v),
         ("Start", b => b.Start, (b,v) => b.Start = v, p => p.Start, (p,v) => p.Start = v),
         ("Select", b => b.Select, (b,v) => b.Select = v, p => p.Select, (p,v) => p.Select = v),
-        ("Up", b => b.Up, (b,v) => b.Up = v, p => p.Up, (p,v) => p.Up = v),
-        ("Down", b => b.Down, (b,v) => b.Down = v, p => p.Down, (p,v) => p.Down = v),
+        ("Up (accelerate)", b => b.Up, (b,v) => b.Up = v, p => p.Up, (p,v) => p.Up = v),
+        ("Down (brake/reverse)", b => b.Down, (b,v) => b.Down = v, p => p.Down, (p,v) => p.Down = v),
         ("Left", b => b.Left, (b,v) => b.Left = v, p => p.Left, (p,v) => p.Left = v),
         ("Right", b => b.Right, (b,v) => b.Right = v, p => p.Right, (p,v) => p.Right = v),
     ];
@@ -117,7 +117,7 @@ internal sealed class InputSettingsSection : ISettingsSection
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
             return;
 
-        ImGui.TableSetupColumn("Button", ImGuiTableColumnFlags.WidthFixed, 90);
+        ImGui.TableSetupColumn("Button", ImGuiTableColumnFlags.WidthFixed, 160);
         ImGui.TableSetupColumn(_gamepadMode ? "Gamepad" : "Keyboard", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableHeadersRow();
 

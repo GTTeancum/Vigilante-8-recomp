@@ -71,5 +71,13 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         ImGui.TextDisabled("Rasterizes PS1 polygons at 4x internal resolution.");
         if (ConfigManager.View.HighResolution3D != Hle.GpuHle.Active)
             ImGui.TextDisabled("A restart is required.");
+
+        bool ps1Dithering = ConfigManager.View.Ps1Dithering;
+        if (ImGui.Checkbox("PS1 color dithering (fidelity)", ref ps1Dithering))
+        {
+            ConfigManager.View.Ps1Dithering = ps1Dithering;
+            ConfigManager.SaveView(PanelManager.Panels);
+        }
+        ImGui.TextDisabled("Off by default; changes take effect immediately.");
     }
 }

@@ -213,6 +213,8 @@ internal static class HostWindow
         Hle.GpuHle.Active = highResolution3D;
         Hle.GpuHle.Backend = _glBackend;
         Hle.GpuHle.NativeResolution = false;
+        Console.WriteLine(
+            $"[Host] PS1 color dithering={(ConfigManager.View.Ps1Dithering ? "On (fidelity)" : "Off (enhanced default)")}");
 
         _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
 

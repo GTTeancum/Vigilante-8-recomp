@@ -82,7 +82,7 @@ public sealed partial class Gpu
         int bias0 = IsTopLeft(b, c) ? 0 : -1;
         int bias1 = IsTopLeft(c, a) ? 0 : -1;
         int bias2 = IsTopLeft(a, b) ? 0 : -1;
-        bool ditherTex = _dither && !raw;
+        bool ditherTex = DitherEnabled && !raw;
 
         int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
         int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
@@ -119,7 +119,7 @@ public sealed partial class Gpu
                     if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
                     Plot(x, y, tr, tg, tb, semi && stp, ditherTex, stp);
                 }
-                else Plot(x, y, r, g, bl, semi, _dither && gouraud);
+                else Plot(x, y, r, g, bl, semi, DitherEnabled && gouraud);
             }
         }
     }
@@ -223,7 +223,7 @@ public sealed partial class Gpu
         if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
         int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
         int steps = Math.Max(dx, dy);
-        if (steps == 0) { Plot(x0, y0, r0, g0, b0, semi, _dither); return; }
+        if (steps == 0) { Plot(x0, y0, r0, g0, b0, semi, DitherEnabled); return; }
         for (int i = 0; i <= steps; i++)
         {
             double t = (double)i / steps;
@@ -233,7 +233,7 @@ public sealed partial class Gpu
             int g = (int)(g0 + (g1 - g0) * t);
             int b = (int)(b0 + (b1 - b0) * t);
             if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
-            Plot(x, y, r, g, b, semi, _dither);
+            Plot(x, y, r, g, b, semi, DitherEnabled);
         }
     }
 

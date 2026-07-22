@@ -1,0 +1,51 @@
+# Stage-synchronized reverse-control regression.
+# The player vehicle settles with no input, then holds the retail reverse
+# command long enough to establish sustained backward motion. State tracing
+# records the active-low pad word and vehicle velocity.
+
+10+2=START
+
+[press_start]
+1+2=START
+
+[main_menu]
+1+2=DOWN
+10+2=CROSS
+
+[player_count]
+5+2=CROSS
+
+[choose_player]
+5+2=CROSS
+
+[select_location]
+5+2=RIGHT
+15+2=RIGHT
+25+2=RIGHT
+35+2=RIGHT
+45+2=RIGHT
+55+2=RIGHT
+65+2=RIGHT
+75+2=RIGHT
+85+2=RIGHT
+95+2=RIGHT
+
+[location_oilfield]
+1+2=CROSS
+
+[choose_enemies]
+5+2=CROSS
+
+[gameplay]
+180+720=DOWN
+
+[soak_teardown]
+1+2=START
+
+[pause_1]
+20+2=RIGHT
+40+2=CROSS
+
+[pause_confirm_1]
+10+2=LEFT
+30+2=CROSS

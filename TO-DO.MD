@@ -26,6 +26,17 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 
 ## Work queue
 
+### User-found defect remediation
+
+- [x] Recover the Aircraft Graveyard crash, translate the omitted native
+      callback, and pass a sustained arena regression under movement and
+      weapon load.
+- [x] Verify reverse from original pad input through vehicle motion and make
+      the retail Down=brake/reverse and Square=handbrake mapping explicit in
+      the host input UI.
+- [x] Apply the enhanced-mode dithering default to both accelerated and
+      software PS1 raster paths, retaining a live fidelity toggle.
+
 ### Multi-map soak
 
 - [x] Recover and document the retail arena-selection order and stable menu
@@ -69,7 +80,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [ ] Add widescreen gameplay support by expanding the horizontal 3D view;
       preserve the original aspect ratio and placement of HUD/UI elements, and
       pillarbox intros and menus rather than stretching them.
-- [ ] Add a PS1 color-dithering toggle and default the enhanced presentation
+- [x] Add a PS1 color-dithering toggle and default the enhanced presentation
       mode to undithered output so flat textures and gradients remain clean;
       retain authentic ordered dithering in the fidelity/reference mode.
 - [ ] Add optional perspective-correct texture mapping to eliminate the
@@ -180,3 +191,16 @@ The retained screenshots and controller checklist are collected in
   Oil Fields gameplay, two pause/resume cycles, confirmation cancel, and normal
   confirmed quit with zero fatal markers. Cards and settings retained their
   pre-test hashes; all 34 temporary deployment captures were removed.
+- 2026-07-22: Windows crash evidence identified Aircraft Graveyard event 17
+  dispatching omitted main-executable wrapper `0x80021830`. Raw retail MIPS
+  established its exact body, regenerated output now registers it, and the
+  corrected arena passed 3,600 gameplay ticks under movement and weapons.
+- 2026-07-22: A sustained input trace confirmed Square/X is the retail
+  handbrake, while Down (D-pad or left stick) is brake/reverse. Down changed
+  the active-low pad word to `0xFFBF` and established strong backward vehicle
+  motion; the host input labels now expose both functions without changing
+  original gameplay controls.
+- 2026-07-22: PS1 color dithering is now gated in both accelerated and
+  software rasterizers. Enhanced mode reports dithering Off by default;
+  enabling the Display setting restores the original ordered-dither path,
+  and both configurations passed independent Oil Fields gameplay runs.

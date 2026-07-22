@@ -1,10 +1,12 @@
 using RecompOne.Runtime.Hle;
+using RecompOne.Runtime.Config;
 
 namespace RecompOne.Runtime;
 
 public sealed partial class Gpu
 {
     static bool HleOn => GpuHle.Active && GpuHle.Backend is { Ready: true };
+    bool DitherEnabled => _dither && ConfigManager.View.Ps1Dithering;
 
     int CurTPage() => ((_texPageX / 64) & 0xf) | (((_texPageY / 256) & 1) << 4)
                     | ((_blendMode & 3) << 5) | ((_texDepth & 3) << 7);
@@ -13,7 +15,7 @@ public sealed partial class Gpu
     {
         ClipX0 = _drawAreaLeft, ClipY0 = _drawAreaTop, ClipX1 = _drawAreaRight, ClipY1 = _drawAreaBottom,
         TwMaskX = _texWinMaskX, TwMaskY = _texWinMaskY, TwOffX = _texWinOffX, TwOffY = _texWinOffY,
-        SetMask = _setMask, CheckMask = _checkMask, Dither = _dither,
+        SetMask = _setMask, CheckMask = _checkMask, Dither = DitherEnabled,
     };
 
     static HleVertex HV(in Vert v) => new()

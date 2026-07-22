@@ -50,6 +50,12 @@ public class ViewConfig
         set => SetBool("HighResolution3D", value);
     }
 
+    public bool Ps1Dithering
+    {
+        get => GetBool("Ps1Dithering", false);
+        set => SetBool("Ps1Dithering", value);
+    }
+
     public string OutputResolution
     {
         get => GetString("OutputResolution", "1920x1080");
