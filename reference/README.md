@@ -43,16 +43,21 @@ From the repository root:
 ```powershell
 python tools/recompone-v8/prepare_reference.py --cue "BINCUE/Vigilante 8 (USA).cue"
 dotnet run --project tools/recompone-reference/RecompOne.Recompiler/RecompOne.Recompiler.csproj -c Release --no-build -- reference/generated/v8.recompone.json
-dotnet build reference/generated/recompiled/Vigilante8Reference.csproj -c Release --no-restore
-& "reference/generated/recompiled/bin/Release/net10.0/Vigilante8Reference.exe" "BINCUE/Vigilante 8 (USA).cue"
+dotnet build reference/generated/recompiled/Vigilante8PC.csproj -c Release --no-restore
+& "reference/generated/recompiled/bin/Release/net10.0/Vigilante8PC.exe" "BINCUE/Vigilante 8 (USA).cue"
 ```
 
-The verified handoff is also copied to `PS1 game/RecompOneReference/`. Launch
-it with `PS1 game/Run RecompOne Reference.cmd`.
+The same self-contained executable is deployed to two locations:
 
-That launcher sets Vigilante 8's own Music and Sound Effects controls to 0 for
-the working handoff without changing Windows volume or the host mixer. Direct
-test launches remain audible unless `RECOMPONE_V8_GAME_VOLUME=0` is set.
+- `BINCUE/Vigilante8PC.exe` tests the direct BIN/CUE setup.
+- `PS1 game/Vigilante8PC.exe` tests the extracted files in `PS1 game`
+  as live overrides, with the sibling CUE supplying untouched files and raw
+  audiovisual sectors.
+
+Both copies discover the CUE automatically and have the same binary hash. The
+executable defaults Vigilante 8's own Music and Sound Effects controls to 0
+without changing Windows volume or the host mixer. `LOOSE_FILES.md` documents
+the override boundary and optional command-line controls.
 
 ### High-resolution presentation
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 from pathlib import Path
 
 
@@ -575,7 +576,8 @@ def main() -> int:
     config = {
         "game": {
             "id": "SLUS-00510",
-            "name": "Vigilante8Reference",
+            "name": "Vigilante8PC",
+            "title": "Vigilante 8 PC",
             "output": "recompiled",
         },
         "cue": relative_posix(cue, config_dir),
@@ -842,6 +844,12 @@ def main() -> int:
     }
     config_path = output / "v8.recompone.json"
     write_json(config_path, config)
+    host_template = Path(__file__).with_name("reference-host")
+    host_output = output / "recompiled"
+    host_output.mkdir(parents=True, exist_ok=True)
+    (host_output / "Vigilante8Reference.csproj").unlink(missing_ok=True)
+    for name in ("Program.cs", "Vigilante8PC.csproj"):
+        shutil.copyfile(host_template / name, host_output / name)
 
     print(f"Wrote {config_path}")
     print(f"Main functions: {counts['main']}")

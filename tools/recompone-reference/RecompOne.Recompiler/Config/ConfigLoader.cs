@@ -33,6 +33,7 @@ public sealed class GameConfig
 {
     [JsonPropertyName("id")] public string Id { get; set; } = "";
     [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("title")] public string? Title { get; set; }
     [JsonPropertyName("output")] public string Output { get; set; } = "./Recompiled";
 }
 

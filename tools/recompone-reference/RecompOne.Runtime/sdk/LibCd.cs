@@ -646,6 +646,17 @@ public static class LibCd
         uint destination = c.A0;
         uint length = c.A1;
         uint offset = m.ReadU32(c.GP + 0x6ACu);
+
+        if (Runtime.Cd.Fs.TryReadLooseFileRange(
+                _v8FileStartLba, offset, checked((int)length), out byte[] looseData))
+        {
+            for (int i = 0; i < looseData.Length; i++)
+                m.WriteU8(destination + (uint)i, looseData[i]);
+            m.WriteU32(c.GP + 0x6ACu, offset + length);
+            c.V0 = 1u;
+            return;
+        }
+
         uint copied = 0u;
         while (copied < length)
         {

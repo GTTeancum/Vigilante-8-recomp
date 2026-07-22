@@ -5,7 +5,7 @@ namespace RecompOne.Recompiler.CodeGen;
 
 public static class EntryWriter
 {
-    public static void Write(PsxExe exe, string bootExe, string className, string? mainCall, List<string> overlays, string outDir)
+    public static void Write(PsxExe exe, string bootExe, string className, string windowTitle, string? mainCall, List<string> overlays, string outDir)
     {
         var entry = new StringBuilder();
         entry.AppendLine("using RecompOne.Runtime.Cdrom;");
@@ -20,9 +20,10 @@ public static class EntryWriter
         entry.AppendLine("{");
         entry.AppendLine("    public static void Run(IMemory m, string? cuePath = null)");
         entry.AppendLine("    {");
-        entry.AppendLine($"        RecompOne.Runtime.Runtime.Initialize(\"{className}\");");
+        entry.AppendLine($"        RecompOne.Runtime.Runtime.Initialize({ToStringLiteral(windowTitle)});");
         entry.AppendLine("        RecompOne.Runtime.Runtime.WaitForValidDisc();");
-        entry.AppendLine("        using var fs = CueFs.Open(cuePath ?? RecompOne.Runtime.Runtime.CdPath);");
+        entry.AppendLine("        string discPath = cuePath ?? RecompOne.Runtime.Runtime.CdPath;");
+        entry.AppendLine("        using var fs = CueFs.Open(discPath, RecompOne.Runtime.Runtime.ResolveLoosePath(discPath));");
         entry.AppendLine("        var cd = new CdController(fs, m);");
         entry.AppendLine("        m.SetCd(cd);");
         foreach (var name in overlays)
@@ -60,4 +61,7 @@ public static class EntryWriter
     }
 
     static string DispatchTableName(string name) => $"{char.ToUpperInvariant(name[0])}{name[1..]}DispatchTable";
+
+    static string ToStringLiteral(string value) =>
+        System.Text.Json.JsonSerializer.Serialize(value);
 }

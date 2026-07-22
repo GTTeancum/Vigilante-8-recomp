@@ -238,7 +238,7 @@ public static class OverlayWriter
 
         Console.WriteLine("[Recompiler] Emitting Entry.cs");
         var overlayNames = overlayResults.Select(o => o.Name).ToList();
-        EntryWriter.Write(mainExe, sysCfg.BootExe, className, mainCall, overlayNames, outDir);
+        EntryWriter.Write(mainExe, sysCfg.BootExe, className, config.Game.Title ?? config.Game.Name, mainCall, overlayNames, outDir);
 
         Console.WriteLine("[Recompiler] finished "); //maybe add time it took
     }

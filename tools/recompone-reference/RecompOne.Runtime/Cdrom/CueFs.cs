@@ -3,21 +3,37 @@ namespace RecompOne.Runtime.Cdrom;
 public sealed class CueFs : IDisposable
 {
     private record Entry(int Lba, uint Size, bool IsDir, string Name);
+    private record LooseEntry(int Lba, uint DiscSize, string DiscPath, string HostPath, long HostSize);
 
     private readonly CueBin _bin;
+    private readonly Dictionary<string, string> _looseFiles =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<int, LooseEntry> _looseByStartLba = [];
+    private readonly LooseEntry[] _looseByLba;
 
-    private CueFs(CueBin bin) => _bin = bin;
+    private CueFs(CueBin bin, string? looseRoot)
+    {
+        _bin = bin;
+        IndexLooseFiles(looseRoot);
+        _looseByLba = IndexLooseDiscEntries();
+        if (_looseByLba.Length > 0)
+            Console.WriteLine(
+                $"[CD] loose-file overrides={_looseByLba.Length} root={Path.GetFullPath(looseRoot!)}");
+    }
 
-    public static CueFs Open(string cuePath) => new(CueBin.Open(cuePath));
+    public static CueFs Open(string cuePath) => new(CueBin.Open(cuePath), null);
+
+    public static CueFs Open(string cuePath, string? looseRoot) =>
+        new(CueBin.Open(cuePath), looseRoot);
+
+    public int LooseOverrideCount => _looseByLba.Length;
 
     public byte[] ReadFile(string path)
     {
-        path = path.TrimStart('/', '\\');
-        var parts = path.Split('/', '\\');
-        var dir = Root();
-        for (int i = 0; i < parts.Length - 1; i++)
-            dir = Find(dir, StripVersion(parts[i]), true);
-        var file = Find(dir, StripVersion(parts[^1]), false);
+        var (file, discPath) = LocateEntryWithPath(path) ??
+            throw new FileNotFoundException($"File not found: {path}");
+        if (TryGetLoose(file.Lba, out var loose))
+            return File.ReadAllBytes(loose.HostPath);
         return ReadExtent(file.Lba, (int)file.Size);
     }
 
@@ -39,10 +55,12 @@ public sealed class CueFs : IDisposable
     {
         lba = 0;
         size = 0;
-        var entry = LocateEntry(name);
-        if (entry == null) return false;
-        lba = entry.Lba;
-        size = entry.Size;
+        var located = LocateEntryWithPath(name);
+        if (located == null) return false;
+        lba = located.Value.Entry.Lba;
+        size = TryGetLoose(lba, out var loose)
+            ? checked((uint)loose.HostSize)
+            : located.Value.Entry.Size;
         return true;
     }
 
@@ -52,7 +70,8 @@ public sealed class CueFs : IDisposable
         if (found != null)
         {
             path = found.Value.Path;
-            endLba = found.Value.EndLba;
+            endLba = found.Value.Entry.Lba +
+                (int)((found.Value.Entry.Size + 2047u) >> 11);
             return true;
         }
 
@@ -61,7 +80,7 @@ public sealed class CueFs : IDisposable
         return false;
     }
 
-    private (string Path, int EndLba)? FindByLba(Entry dir, string basePath, int lba)
+    private (Entry Entry, string Path)? FindByLba(Entry dir, string basePath, int lba)
     {
         foreach (var e in Entries(dir))
         {
@@ -75,47 +94,66 @@ public sealed class CueFs : IDisposable
 
             int endLba = e.Lba + (int)((e.Size + 2047u) >> 11);
             if (lba >= e.Lba && lba < endLba)
-                return (path, endLba);
+                return (e, path);
         }
         return null;
     }
 
-    private Entry? LocateEntry(string name)
+    private (Entry Entry, string Path)? LocateEntryWithPath(string name)
     {
-        name = name.TrimStart('/', '\\');
+        name = NormalizeDiscPath(name);
         try
         {
-            var parts = name.Split('/', '\\');
+            var parts = name.Split('/');
             var dir = Root();
+            string basePath = "";
             for (int i = 0; i < parts.Length - 1; i++)
-                dir = Find(dir, StripVersion(parts[i]), true);
-            return Find(dir, StripVersion(parts[^1]), false);
+            {
+                dir = Find(dir, parts[i], true);
+                basePath = basePath.Length == 0 ? dir.Name : $"{basePath}/{dir.Name}";
+            }
+            var file = Find(dir, parts[^1], false);
+            return (file, basePath.Length == 0 ? file.Name : $"{basePath}/{file.Name}");
         }
         catch (FileNotFoundException) { }
 
-        int slash = name.LastIndexOfAny(['/', '\\']);
+        int slash = name.LastIndexOf('/');
         var basename = slash >= 0 ? name[(slash + 1)..] : name;
-        return SearchEntry(Root(), StripVersion(basename).ToUpperInvariant());
+        return SearchEntry(Root(), "", basename);
     }
 
-    private Entry? SearchEntry(Entry dir, string name)
+    private (Entry Entry, string Path)? SearchEntry(Entry dir, string basePath, string name)
     {
         foreach (var e in Entries(dir))
         {
+            string path = basePath.Length == 0 ? e.Name : $"{basePath}/{e.Name}";
             if (e.IsDir)
             {
-                var found = SearchEntry(e, name);
+                var found = SearchEntry(e, path, name);
                 if (found != null) return found;
             }
             else if (e.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-                return e;
+                return (e, path);
         }
         return null;
     }
 
-    public byte[] ReadSector(int lba) => _bin.ReadSector(lba);
+    public byte[] ReadSector(int lba) => ReadSectorData(lba, 2048);
 
-    public byte[] ReadSectorData(int lba, int size) => _bin.ReadSectorData(lba, size);
+    public byte[] ReadSectorData(int lba, int size)
+    {
+        if (size == 2048 && TryReadLooseSector(lba, out var loose))
+            return loose;
+        return _bin.ReadSectorData(lba, size);
+    }
+
+    public bool TryReadLooseFileRange(int startLba, uint offset, int count, out byte[] data)
+    {
+        data = [];
+        if (!TryGetLoose(startLba, out var loose)) return false;
+        data = ReadLooseRange(loose, offset, count);
+        return true;
+    }
 
     public int FirstTrackNumber => _bin.FirstTrackNumber;
     public int LastTrackNumber => _bin.LastTrackNumber;
@@ -204,4 +242,102 @@ public sealed class CueFs : IDisposable
     }
 
     public void Dispose() => _bin.Dispose();
+
+    private void IndexLooseFiles(string? looseRoot)
+    {
+        if (string.IsNullOrWhiteSpace(looseRoot) || !Directory.Exists(looseRoot)) return;
+        string root = Path.GetFullPath(looseRoot);
+        foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            string relative = NormalizeDiscPath(Path.GetRelativePath(root, file));
+            if (relative.Length > 0) _looseFiles[relative] = Path.GetFullPath(file);
+        }
+    }
+
+    private LooseEntry[] IndexLooseDiscEntries()
+    {
+        if (_looseFiles.Count == 0) return [];
+        var found = new List<LooseEntry>();
+        IndexLooseDiscEntries(Root(), "", found);
+        foreach (var entry in found) _looseByStartLba[entry.Lba] = entry;
+        return found.OrderBy(entry => entry.Lba).ToArray();
+    }
+
+    private void IndexLooseDiscEntries(Entry dir, string basePath, List<LooseEntry> found)
+    {
+        foreach (var entry in Entries(dir))
+        {
+            string path = basePath.Length == 0 ? entry.Name : $"{basePath}/{entry.Name}";
+            if (entry.IsDir)
+            {
+                IndexLooseDiscEntries(entry, path, found);
+                continue;
+            }
+            if (!TryResolveLoose(path, out string hostPath)) continue;
+            found.Add(new LooseEntry(
+                entry.Lba, entry.Size, path, hostPath, new FileInfo(hostPath).Length));
+        }
+    }
+
+    private bool TryResolveLoose(string discPath, out string hostPath)
+    {
+        discPath = NormalizeDiscPath(discPath);
+        if (_looseFiles.TryGetValue(discPath, out hostPath!)) return true;
+
+        string basename = discPath[(discPath.LastIndexOf('/') + 1)..];
+        string? match = null;
+        foreach (var (candidate, path) in _looseFiles)
+        {
+            if (!candidate.EndsWith($"/{basename}", StringComparison.OrdinalIgnoreCase) &&
+                !candidate.Equals(basename, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (match != null) { hostPath = ""; return false; }
+            match = path;
+        }
+        hostPath = match ?? "";
+        return match != null;
+    }
+
+    private bool TryGetLoose(int startLba, out LooseEntry entry) =>
+        _looseByStartLba.TryGetValue(startLba, out entry!);
+
+    private bool TryReadLooseSector(int lba, out byte[] data)
+    {
+        foreach (var entry in _looseByLba)
+        {
+            int sectors = (int)((entry.DiscSize + 2047u) >> 11);
+            if (lba < entry.Lba || lba >= entry.Lba + sectors) continue;
+            data = ReadLooseRange(entry, (uint)((lba - entry.Lba) * 2048), 2048);
+            return true;
+        }
+        data = [];
+        return false;
+    }
+
+    private static byte[] ReadLooseRange(LooseEntry entry, uint offset, int count)
+    {
+        var data = new byte[count];
+        using var stream = File.OpenRead(entry.HostPath);
+        if (offset >= stream.Length) return data;
+        stream.Position = offset;
+        int done = 0;
+        while (done < count)
+        {
+            int read = stream.Read(data, done, count - done);
+            if (read == 0) break;
+            done += read;
+        }
+        return data;
+    }
+
+    private static string NormalizeDiscPath(string path)
+    {
+        var parts = path.Trim().TrimStart('/', '\\')
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(StripVersion)
+            .ToArray();
+        if (parts.Any(part => part is "." or ".."))
+            throw new InvalidDataException($"Invalid loose-file path: {path}");
+        return string.Join('/', parts);
+    }
 }
