@@ -80,6 +80,9 @@ MAIN_NATIVE_CALLBACK_STARTS = (
     0x8003565C,
     0x800359C0,
     0x800363E0,
+    # Deferred object callback stored at object +0x64. The next independently
+    # installed native callback begins at 0x80036AD8.
+    0x80036910,
     0x80036AD8,
     0x800372B0,
     0x800378D0,

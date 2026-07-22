@@ -167,6 +167,7 @@ internal static unsafe class InputManager
 
         _scriptStage = stage;
         _stagePoll = 0;
+        HostWindow.RequestDisplayCapture(stage);
         Console.Error.WriteLine($"[Input] stage '{stage}' at absolute poll {_inputPoll}");
     }
 

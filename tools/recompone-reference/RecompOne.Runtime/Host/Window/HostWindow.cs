@@ -33,6 +33,7 @@ internal static class HostWindow
     static int _ramFrame;
     static int _displayProbeFrame;
     static uint _lastDisplayHash;
+    static string? _requestedDisplayCapture;
     static readonly int _displayProbeInterval =
         int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_DISPLAY_PROBE_INTERVAL"), out int interval)
             ? Math.Max(1, interval)
@@ -117,6 +118,12 @@ internal static class HostWindow
     }
 
     public static bool IsKeyDown(Key k) => InputManager.IsKeyDown(k);
+
+    internal static void RequestDisplayCapture(string label)
+    {
+        _requestedDisplayCapture = new string(
+            label.Where(ch => char.IsAsciiLetterOrDigit(ch) || ch == '_').ToArray());
+    }
 
     public static void RequestDiscPath() => _discPicker?.Show();
 
@@ -331,7 +338,10 @@ internal static class HostWindow
 
     static void ProbeDisplay(Gpu gpu, int w, int h)
     {
-        if (++_displayProbeFrame % _displayProbeInterval != 1) return;
+        string? captureLabel = _requestedDisplayCapture;
+        _requestedDisplayCapture = null;
+        bool periodicProbe = ++_displayProbeFrame % _displayProbeInterval == 1;
+        if (!periodicProbe && string.IsNullOrEmpty(captureLabel)) return;
 
         int pixels = w * h;
         int nonzero = 0;
@@ -344,11 +354,24 @@ internal static class HostWindow
             hash = (hash ^ rgb) * 16777619u;
         }
 
-        if (hash == _lastDisplayHash) return;
-        _lastDisplayHash = hash;
-        Console.WriteLine($"[GPU] framebuffer {w}x{h} nonzero={nonzero} hash=0x{hash:X8}");
+        if (hash != _lastDisplayHash)
+        {
+            _lastDisplayHash = hash;
+            Console.WriteLine($"[GPU] framebuffer {w}x{h} nonzero={nonzero} hash=0x{hash:X8}");
+            WriteDisplayPpm("recompone_vram_latest.ppm", w, h, pixels);
+        }
 
-        using var dump = File.Create("recompone_vram_latest.ppm");
+        if (!string.IsNullOrEmpty(captureLabel))
+        {
+            string path = $"recompone_capture_{captureLabel}.ppm";
+            WriteDisplayPpm(path, w, h, pixels);
+            Console.WriteLine($"[GPU] captured stage '{captureLabel}' to {path}");
+        }
+    }
+
+    static void WriteDisplayPpm(string path, int w, int h, int pixels)
+    {
+        using var dump = File.Create(path);
         byte[] header = System.Text.Encoding.ASCII.GetBytes($"P6\n{w} {h}\n255\n");
         dump.Write(header);
         dump.Write(_rgbDisplay, 0, pixels * 3);

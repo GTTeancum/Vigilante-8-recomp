@@ -82,6 +82,10 @@ Focused movie diagnostics are available without changing normal output:
 capture runs can lower `RECOMPONE_DISPLAY_PROBE_INTERVAL` from its default 120
 presentations without changing movie timing.
 
+Stage-synchronized fixtures also save `recompone_capture_<stage>.ppm` at each
+recognized menu input boundary, so menu evidence comes from the exact retail
+screen that accepted the scripted action.
+
 ## Prepare the reference configuration
 
 From the repository root:
