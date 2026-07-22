@@ -886,10 +886,14 @@ public static class V8Compat
         {
             "PRESS START" => "press_start",
             "ARCADE" => "main_menu",
+            "COOPERATIVE" => "two_player_mode",
             "1 PLAYER" => "player_count",
             "SELECT LOCATION" => "select_location",
             "Oil Fields" => "location_oilfield",
+            "QUEST ROUTE" => "quest_route",
             "CHOOSE PLAYER" => "choose_player",
+            "CHOOSE PLAYERS" => "choose_players",
+            "PLAYERS" => "choose_players",
             "CHOOSE ENEMIES" => "choose_enemies",
             _ => null,
         };
@@ -912,7 +916,8 @@ public static class V8Compat
             {
                 "memory_card" => 20,
                 "difficulty_setting" or "controller_1" or "controller_2" or
-                "audio_settings" or "screen_adjustment" => 12,
+                "audio_settings" or "screen_adjustment" or "quest_route" or
+                "choose_players" or "two_player_mode" => 12,
                 _ => 0,
             };
             InputManager.SignalScriptStage(_lastMenuStage, captureDelay);

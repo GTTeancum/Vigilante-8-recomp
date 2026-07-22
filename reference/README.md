@@ -139,6 +139,13 @@ The reference advances host input only inside the retail confirmation loop,
 whose asynchronous PS1 pad polling otherwise has no scheduling point in a
 statically recompiled host process.
 
+The remaining front-end branches use `quest_menu_smoke.txt`,
+`two_player_coop_menu_smoke.txt`, and `two_player_versus_menu_smoke.txt`. They
+cover the Quest vehicle and route screens plus both two-player mode layouts and
+the shared player selector. Two-player automation sets
+`RECOMPONE_FORCE_PAD2_CONNECTED=1`; this test-only switch reports a neutral
+second controller without changing normal live controller discovery.
+
 ## Prepare the reference configuration
 
 From the repository root:
@@ -207,9 +214,10 @@ Screen Adjustment editor restores `(0,0)` after moving both axes, and the
 Credits selection played all 1,251 queued frames through its authored reset and
 normal loop restart. The pause fixture completed CD-track selection, resume,
 confirmation cancel, a second resume, and confirmed quit with no runtime-fault
-marker. Alternate Quest and two-player front-end branches remain to close the
-full Menus gate. See `VERTICAL_SLICE.md` for those routes plus the remaining
-audio, graphics, and final state-comparison gates.
+marker. Separate clean fixtures also presented and navigated the Quest route,
+Cooperative, Versus, and both two-player selector layouts. See
+`VERTICAL_SLICE.md` for the remaining audio, graphics, and final
+state-comparison gates.
 
 See `REFERENCE_PLAN.md` for the architecture and `VERTICAL_SLICE.md` for the
 active acceptance gates.

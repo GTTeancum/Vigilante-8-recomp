@@ -96,9 +96,14 @@ VSync, so the host advances one presentation/input frame only at that original
 poll site. This preserves the retail decision logic while supplying the
 asynchronous input edge the statically recompiled process otherwise cannot see.
 
-The fixed one-player slice's menu and pause path is complete. Quest-route and
-two-player Cooperative/Versus branches remain before the broader full Menus
-gate is closed.
+The remaining front-end branches are also covered by clean fixtures. Quest
+selects a player and reaches the route map, including route movement and the
+original completion-state text. Two-player automation supplies a neutral,
+test-only controller-2 connection, then separately anchors and accepts Versus
+and Cooperative, enters Oil Fields, and reaches each mode's visibly distinct
+two-player selector layout. Normal launches still use live controller discovery.
+Together with Options and pause, this completes the Menus gate for the reference
+vertical-slice phase.
 
 ## Current physics status
 

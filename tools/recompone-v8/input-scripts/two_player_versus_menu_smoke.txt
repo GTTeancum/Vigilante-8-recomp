@@ -1,0 +1,20 @@
+# Deterministic two-controller traversal of Versus through location selection
+# and into the shared two-player vehicle selector.
+
+10+2=START
+
+[press_start]
+1+2=START
+
+[player_count]
+5+2=DOWN
+15+2=CROSS
+
+[two_player_mode]
+10+2=UP
+20+2=CROSS
+
+[location_oilfield]
+5+2=CROSS
+
+[choose_players]

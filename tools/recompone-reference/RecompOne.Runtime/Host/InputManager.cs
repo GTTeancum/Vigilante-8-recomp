@@ -35,6 +35,7 @@ internal static unsafe class InputManager
     static int _stageCapturePoll = -1;
     static string? _stageCaptureLabel;
     static bool _disableLiveInput;
+    static bool _forcePad2Connected;
 
     
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
@@ -43,9 +44,13 @@ internal static unsafe class InputManager
     public static void Initialize(IInputContext input)
     {
         _disableLiveInput = Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_LIVE_INPUT") == "1";
+        _forcePad2Connected =
+            Environment.GetEnvironmentVariable("RECOMPONE_FORCE_PAD2_CONNECTED") == "1";
         ParseScriptedInput();
         if (_disableLiveInput)
             Console.Error.WriteLine("[Input] live keyboard/gamepad input disabled for deterministic replay");
+        if (_forcePad2Connected)
+            Console.Error.WriteLine("[Input] controller 2 connection forced for deterministic replay");
         if (input.Keyboards.Count > 0)
         {
             _keyboard = input.Keyboards[0];
@@ -84,7 +89,8 @@ internal static unsafe class InputManager
             PollGamepads();
         }
         ApplyScriptedInput();
-        Controller.Connected2 = !_disableLiveInput && (_pad1 != null || HasAnyKey(ConfigManager.Game.Keys2));
+        Controller.Connected2 = _forcePad2Connected ||
+            (!_disableLiveInput && (_pad1 != null || HasAnyKey(ConfigManager.Game.Keys2)));
     }
 
     static void ParseScriptedInput()

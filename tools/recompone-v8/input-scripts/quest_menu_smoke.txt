@@ -1,0 +1,21 @@
+# Stage-synchronized traversal of the one-player Quest branch through its route
+# screen and into the retail single-player vehicle selector.
+
+10+2=START
+
+[press_start]
+1+2=START
+
+[player_count]
+5+2=CROSS
+
+[main_menu]
+10+2=CROSS
+
+[quest_route]
+20+2=RIGHT
+40+2=LEFT
+60+2=CROSS
+
+[choose_player]
+20+2=CROSS
