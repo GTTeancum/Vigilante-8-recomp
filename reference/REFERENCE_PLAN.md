@@ -12,6 +12,23 @@
 RecompOne output is not treated as readable reconstructed source and is not
 linked into the shipping C executable. It is an oracle used to prove behavior.
 
+## Current phase: boot-to-game-over vertical slice
+
+The reference lane now has an explicit end-to-end fidelity target. It must run
+the original boot and intro sequence, expose the complete one-player menu path,
+load one deterministic match, exercise vehicle physics and weapons, and reach
+the original game-over/results flow. Graphics, music, sound effects, voices,
+and their transition rules are part of this reference target.
+
+This is a reference-lane expansion, not a change to the shipping architecture.
+The native Xbox game remains a separate 32-bit x86 implementation. Its renderer,
+controls, and playback engine may be rewritten, but the reference is used to
+recover the original state rules, asset interpretation, event timing, and
+observable behavior for those systems.
+
+Detailed gates and evidence requirements are tracked in
+`VERTICAL_SLICE.md`.
+
 ## Bring-up sequence
 
 1. Generate function maps from the existing main-EXE and 12-overlay Ghidra
@@ -64,3 +81,8 @@ Oilfield ran under scripted steering, acceleration, and weapon input for 272.7
 seconds without a runtime error, and the deployed copy passed a second active
 smoke test. Shared state-trace capture and first-divergence comparison remain
 the next reference-lane work rather than prerequisites for running the game.
+
+The current vertical slice is complete only when a clean launch reaches
+game-over/results through a reproducible input fixture and every gate in
+`VERTICAL_SLICE.md` has current runtime evidence. Process responsiveness or a
+single gameplay screenshot is not sufficient.

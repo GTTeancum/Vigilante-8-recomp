@@ -15,6 +15,12 @@ asset loaders, or the shipping runtime.
 - Rewrite renderer, controls, audio presentation, HUD, and menus cleanly while
   keeping their state rules and timing source-backed.
 
+The active reference milestone is broader than the original decompilation
+charter's shipping seams: it is a complete boot-to-game-over vertical slice,
+including intros, full menu flow, physics, weapons, graphics, music, sound
+effects, voices, pause, and results. This gives the separate native Xbox game a
+trustworthy oracle even where its eventual renderer and audio engine differ.
+
 RecompOne is vendored at `tools/recompone-reference/` using `git subtree`, so
 this checkout remains one ordinary repository with no submodule setup.
 
@@ -83,4 +89,5 @@ for 272.7 seconds without a runtime error, followed by a separate deployed-copy
 smoke test. The latest visual proof is
 `reference/traces/recompone_gameplay_deployed.png`.
 
-See `REFERENCE_PLAN.md` for the order of work when the project is unparked.
+See `REFERENCE_PLAN.md` for the architecture and `VERTICAL_SLICE.md` for the
+active acceptance gates.

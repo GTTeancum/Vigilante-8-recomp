@@ -22,6 +22,7 @@ ghidra/
 # Original PSX disc contents and extracted assets stay LOCAL ONLY.
 /bin-cue/*.bin
 /bin-cue/*.cue
+/BINCUE/
 /*.bin
 /*.cue
 /PS1 game/
