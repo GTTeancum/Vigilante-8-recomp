@@ -14,8 +14,8 @@ public static class LibPad
 
     static uint _buf1;
     static uint _buf2;
-    static int _smallMotorIdx = 0;
-    static int _largeMotorIdx = 1;
+    static readonly int[] _smallMotorIdx = [0, 0];
+    static readonly int[] _largeMotorIdx = [1, 1];
 
     public static void PadInitDirect(CpuContext c, IMemory m)
     {
@@ -48,28 +48,30 @@ public static class LibPad
 
     public static void PadSetActAlign(CpuContext c, IMemory m)
     {
-        if (!IsPort1(c.A0)) { c.V0 = 1; return; }
+        int port = PortIndex(c.A0);
         uint ptr = c.A1;
         uint len = c.A2;
         if (ptr == 0 || len < 2) { c.V0 = 0; return; }
         for (int i = 0; i < (int)len && i < 6; i++)
         {
             byte v = m.ReadU8(ptr + (uint)i);
-            if (v == 0x00) _smallMotorIdx = i;
-            else if (v == 0x01) _largeMotorIdx = i;
+            if (v == 0x00) _smallMotorIdx[port] = i;
+            else if (v == 0x01) _largeMotorIdx[port] = i;
         }
         c.V0 = 1;
     }
 
     public static void PadSetAct(CpuContext c, IMemory m)
     {
-        if (!IsPort1(c.A0)) { c.V0 = 1; return; }
+        int port = PortIndex(c.A0);
         uint ptr = c.A1;
         uint len = c.A2;
         if (ptr == 0 || len == 0) { c.V0 = 0; return; }
-        byte small = _smallMotorIdx < (int)len ? m.ReadU8(ptr + (uint)_smallMotorIdx) : (byte)0;
-        byte large = _largeMotorIdx < (int)len ? m.ReadU8(ptr + (uint)_largeMotorIdx) : (byte)0;
-        InputManager.SetRumble(large, small);
+        byte small = _smallMotorIdx[port] < (int)len
+            ? m.ReadU8(ptr + (uint)_smallMotorIdx[port]) : (byte)0;
+        byte large = _largeMotorIdx[port] < (int)len
+            ? m.ReadU8(ptr + (uint)_largeMotorIdx[port]) : (byte)0;
+        InputManager.SetRumble(port, large, small);
         c.V0 = 1;
     }
 
@@ -82,6 +84,7 @@ public static class LibPad
     }
 
     static bool IsPort1(uint port) => (port & 0x10u) == 0;
+    static int PortIndex(uint port) => IsPort1(port) ? 0 : 1;
 
     static void WritePad(IMemory m, uint buf, ushort buttons, bool present, byte rx, byte ry, byte lx, byte ly)
     {

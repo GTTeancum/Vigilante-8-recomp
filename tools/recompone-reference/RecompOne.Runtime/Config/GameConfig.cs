@@ -55,16 +55,23 @@ public class GamepadBindings
         L3 = [], R3 = [], Start = [], Select = [],
         Up = [], Down = [], Left = [], Right = []
     };
+
+    public bool HasAnyBinding() =>
+        Cross.Length > 0 || Circle.Length > 0 || Square.Length > 0 || Triangle.Length > 0 ||
+        L1.Length > 0 || R1.Length > 0 || L2.Length > 0 || R2.Length > 0 ||
+        L3.Length > 0 || R3.Length > 0 || Start.Length > 0 || Select.Length > 0 ||
+        Up.Length > 0 || Down.Length > 0 || Left.Length > 0 || Right.Length > 0;
 }
 
 public class GameConfig
 {
+    public int InputBindingsVersion { get; set; }
     public string CdPath { get; set; } = "";
     public float MasterVolume { get; set; } = 1.0f;
     public bool Muted { get; set; } = false;
     public KeyBindings Keys { get; set; } = new();
     public KeyBindings Keys2 { get; set; } = KeyBindings.Empty();
     public GamepadBindings Pad { get; set; } = new();
-    public GamepadBindings Pad2 { get; set; } = GamepadBindings.Empty();
+    public GamepadBindings Pad2 { get; set; } = new();
     public List<string> ActiveMods { get; set; } = [];
 }

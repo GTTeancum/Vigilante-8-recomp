@@ -29,15 +29,28 @@ public static class ConfigManager
 
     public static void Load()
     {
+        bool saveGame = false;
         if (File.Exists(GameConfigPath))
         {
             try { Game = JsonSerializer.Deserialize<GameConfig>(File.ReadAllText(GameConfigPath), _opts) ?? new(); }
-            catch { Game = new(); }
+            catch { Game = new(); saveGame = true; }
         }
         else
         {
-            SaveGame();
+            Game = new();
+            saveGame = true;
         }
+
+        if (Game.InputBindingsVersion < 1)
+        {
+            // Pad2 was historically serialized as an all-empty legacy default.
+            // Migrate only that legacy shape; any customized non-empty mapping
+            // is retained byte-for-byte by the serializer.
+            if (!Game.Pad2.HasAnyBinding()) Game.Pad2 = new GamepadBindings();
+            Game.InputBindingsVersion = 1;
+            saveGame = true;
+        }
+        if (saveGame) SaveGame();
 
         if (File.Exists(InterfaceFile))
         {

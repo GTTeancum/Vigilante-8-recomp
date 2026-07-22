@@ -1,5 +1,6 @@
 using Silk.NET.Input;
 using Silk.NET.SDL;
+using System.Runtime.InteropServices;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Hardware;
 
@@ -314,6 +315,16 @@ internal static unsafe class InputManager
             if (_pad0 == null) _pad0 = ctrl;
             else { _pad1 = ctrl; break; }
         }
+        Console.WriteLine(
+            $"[Input] SDL controllers: joysticks={n} " +
+            $"p1={ControllerName(_pad0)} p2={ControllerName(_pad1)}");
+    }
+
+    static string ControllerName(GameController* controller)
+    {
+        if (_sdl == null || controller == null) return "none";
+        string name = Marshal.PtrToStringUTF8((nint)_sdl.GameControllerName(controller)) ?? "unknown";
+        return $"'{name}'";
     }
 
     static void PollKeyboard()
@@ -442,13 +453,14 @@ internal static unsafe class InputManager
         return (byte)Math.Clamp((int)MathF.Round((f + 1.0f) * 127.5f), 0, 255);
     }
 
-    public static void SetRumble(byte large, byte small)
+    public static void SetRumble(int pad, byte large, byte small)
     {
-        if (_sdl == null || _pad0 == null) return;
+        GameController* controller = pad == 0 ? _pad0 : _pad1;
+        if (_sdl == null || controller == null) return;
         ushort lo = (ushort)(large * 257);
         ushort hi = small != 0 ? (ushort)65535 : (ushort)0;
         uint duration = large == 0 && small == 0 ? 0u : 500u;
-        _sdl.GameControllerRumble(_pad0, lo, hi, duration);
+        _sdl.GameControllerRumble(controller, lo, hi, duration);
     }
 
     static void OnKeyDown(IKeyboard kb, Key key, int _)

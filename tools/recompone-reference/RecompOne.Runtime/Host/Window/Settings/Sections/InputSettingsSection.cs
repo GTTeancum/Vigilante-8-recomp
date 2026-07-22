@@ -64,7 +64,7 @@ internal sealed class InputSettingsSection : ISettingsSection
             else
             {
                 if (_padIndex == 0) ConfigManager.Game.Pad = new GamepadBindings();
-                else ConfigManager.Game.Pad2 = GamepadBindings.Empty();
+                else ConfigManager.Game.Pad2 = new GamepadBindings();
             }
             _remapRow = -1;
             ConfigManager.SaveGame();

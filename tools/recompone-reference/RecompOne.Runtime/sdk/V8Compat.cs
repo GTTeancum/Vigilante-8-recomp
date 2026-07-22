@@ -36,6 +36,19 @@ public static class V8Compat
             : 0;
     static readonly string? _automationTargetLocation =
         Environment.GetEnvironmentVariable("RECOMPONE_TARGET_LOCATION");
+    static readonly string? _automationTargetTwoPlayerMode =
+        Environment.GetEnvironmentVariable("RECOMPONE_TARGET_TWO_PLAYER_MODE");
+    static readonly int _automationGameplayCaptureDelay =
+        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_GAMEPLAY_CAPTURE_DELAY_POLLS"),
+            out int gameplayCaptureDelay)
+            ? Math.Max(0, gameplayCaptureDelay)
+            : 0;
+    static readonly int _soakTeardownTick =
+        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_SOAK_TEARDOWN_TICKS"),
+            out int soakTeardownTick)
+            ? Math.Max(0, soakTeardownTick)
+            : 0;
+    static bool _soakTeardownSignaled;
     static int _vehiclePhysicsTick;
     static uint _integratingVehicle;
     static int _integratingVehicleTick;
@@ -601,11 +614,16 @@ public static class V8Compat
         if (player == 0u || c.A0 != player) return;
 
         int tick = ++_vehiclePhysicsTick;
+        if (!_soakTeardownSignaled && _soakTeardownTick > 0 && tick >= _soakTeardownTick)
+        {
+            _soakTeardownSignaled = true;
+            InputManager.SignalScriptStage("soak_teardown");
+        }
         if (tick == 1)
         {
             _gameplayStage = true;
             _lastMenuStage = null;
-            InputManager.SignalScriptStage("gameplay");
+            InputManager.SignalScriptStage("gameplay", _automationGameplayCaptureDelay);
         }
         else if (_pauseResumePending)
         {
@@ -616,9 +634,16 @@ public static class V8Compat
         if (_soakHeartbeatTicks > 0 &&
             (tick == 1 || tick % _soakHeartbeatTicks == 0))
         {
+            uint player2 = m.ReadU32(c.GP + 0x7D4u);
+            string player2State = player2 == 0u
+                ? " player2=0x00000000"
+                : $" player2=0x{player2:X8} pos2={ReadVec3(m, player2 + 0x24u)} " +
+                  $"vel2={ReadVec3(m, player2 + 0x80u)}";
             Console.Error.WriteLine(
-                $"[Soak] gameplay tick={tick} player=0x{player:X8} " +
-                $"pos={ReadVec3(m, player + 0x24u)} vel={ReadVec3(m, player + 0x80u)}");
+                $"[Soak] gameplay tick={tick} match_mode={m.ReadU8(c.GP + 0x15u)} " +
+                $"player=0x{player:X8} " +
+                $"pos={ReadVec3(m, player + 0x24u)} vel={ReadVec3(m, player + 0x80u)}" +
+                player2State);
         }
         TracePlayerWeaponState(m, player, tick);
         if (!_traceVehicle || tick > 900) return;
@@ -963,7 +988,11 @@ public static class V8Compat
         {
             "PRESS START" => "press_start",
             "ARCADE" => "main_menu",
-            "COOPERATIVE" => "two_player_mode",
+            "VERSUS" or "COOPERATIVE" =>
+                _automationTargetTwoPlayerMode == null ||
+                text.Equals(_automationTargetTwoPlayerMode, StringComparison.OrdinalIgnoreCase)
+                    ? "two_player_mode"
+                    : null,
             "1 PLAYER" => "player_count",
             "SELECT LOCATION" => "select_location",
             "QUEST ROUTE" => "quest_route",

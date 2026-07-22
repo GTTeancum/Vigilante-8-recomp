@@ -1,6 +1,6 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 10:34 EDT  
+Last updated: 2026-07-22 10:54 EDT
 Status: ACTIVE
 
 ## Goal
@@ -16,7 +16,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
       missing gameplay entry, unmapped calls, heap/terrain faults, or stale logs.
 - [ ] At least one substantial soak pass covers every selectable arena; any
       failing arena is fixed or documented with reproducible evidence.
-- [ ] Cooperative and Versus split-screen each reach active gameplay in clean,
+- [x] Cooperative and Versus split-screen each reach active gameplay in clean,
       independent runs and remain stable under simultaneous two-pad input.
 - [ ] Direct BIN/CUE and loose-file deployments remain byte-identical and pass
       focused regressions after any runtime changes.
@@ -37,11 +37,11 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 
 ### Split-screen
 
-- [ ] Make Player 2 gamepad defaults usable without manual remapping while
+- [x] Make Player 2 gamepad defaults usable without manual remapping while
       preserving explicit user bindings.
-- [ ] Create separate Cooperative and Versus gameplay fixtures.
-- [ ] Validate simultaneous Player 1/Player 2 movement and weapon inputs.
-- [ ] Validate split-screen rendering, match progression, teardown, and clean
+- [x] Create separate Cooperative and Versus gameplay fixtures.
+- [x] Validate simultaneous Player 1/Player 2 movement and weapon inputs.
+- [x] Validate split-screen rendering, match progression, teardown, and clean
       relaunch independently from single-player soak results.
 
 ### Other autonomous coverage
@@ -49,7 +49,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [ ] Exercise loose-file content mutation, size changes, deletion/fallback,
       ambiguous basename handling, and raw-sector disc fallback in an isolated
       temporary tree.
-- [ ] Add non-invasive live-controller diagnostics and validate SDL/XInput
+- [x] Add non-invasive live-controller diagnostics and validate SDL/XInput
       discovery against the attached XInput-compatible device.
 - [ ] Exercise hot-plug state handling and rumble calls where automation permits.
 - [ ] Test the victory/result path without directly writing gameplay state.
@@ -92,3 +92,8 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
   `reference/generated/soak/all-arenas-reachability-fixed/summary.json` records
   8/8 passes with correct overlays, SDL audio, gameplay heartbeats, and changing
   HLE framebuffer hashes.
+- 2026-07-22: Separate clean processes proved Cooperative as internal match
+  mode 4 and Versus as mode 3. Each run rendered two distinct live viewports,
+  changed both player positions under simultaneous pad scripts, initialized
+  audio, remained responsive, and quit through the original pause confirmation.
+  The host also discovered the attached `Xbox One Controller` through SDL.
