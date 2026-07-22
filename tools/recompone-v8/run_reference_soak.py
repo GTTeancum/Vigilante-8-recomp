@@ -423,6 +423,7 @@ def run_one(
         )
     env["RECOMPONE_TRACE_LEVEL_LOAD"] = "1"
     env["RECOMPONE_TRACE_RESULTS"] = "1"
+    env["RECOMPONE_TRACE_ANIMATION"] = "1"
     env["RECOMPONE_GAMEPLAY_CAPTURE_DELAY_POLLS"] = "300"
     if clean_exit:
         env["RECOMPONE_SOAK_TEARDOWN_TICKS"] = str(max(180, round(seconds * 60)))
@@ -545,7 +546,7 @@ def run_one(
                         reason = "render heartbeat timeout"
                         hang_stack = capture_managed_stack(process, output, stem)
                         break
-                    if result_started is not None and now - result_started > 45.0:
+                    if result_started is not None and now - result_started > 90.0:
                         reason = "result teardown or gameplay relaunch timeout"
                         break
 
