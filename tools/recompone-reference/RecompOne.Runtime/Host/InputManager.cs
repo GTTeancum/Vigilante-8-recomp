@@ -70,10 +70,26 @@ internal static unsafe class InputManager
 
     static void ParseScriptedInput()
     {
+        _scriptedInput.Clear();
+        _inputPoll = 0;
+
         string? script = Environment.GetEnvironmentVariable("RECOMPONE_INPUT_SCRIPT");
+        string? scriptFile = Environment.GetEnvironmentVariable("RECOMPONE_INPUT_FILE");
+        if (!string.IsNullOrWhiteSpace(script) && !string.IsNullOrWhiteSpace(scriptFile))
+            throw new InvalidOperationException("Set only one of RECOMPONE_INPUT_SCRIPT or RECOMPONE_INPUT_FILE");
+
+        if (!string.IsNullOrWhiteSpace(scriptFile))
+        {
+            string fullPath = Path.GetFullPath(scriptFile);
+            if (!File.Exists(fullPath))
+                throw new FileNotFoundException("Scripted input fixture was not found", fullPath);
+
+            script = string.Join('\n', File.ReadLines(fullPath).Select(line => line.Split('#', 2)[0]));
+            Console.Error.WriteLine($"[Input] fixture: {fullPath}");
+        }
         if (string.IsNullOrWhiteSpace(script)) return;
 
-        foreach (string raw in script.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (string raw in script.Split([';', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             string[] sides = raw.Split('=', 2, StringSplitOptions.TrimEntries);
             string[] range = sides[0].Split('+', 2, StringSplitOptions.TrimEntries);

@@ -54,6 +54,11 @@ Host audio uses the bundled SDL2 runtime to queue the reference SPU/XA mix as
 44.1 kHz stereo signed-16 output, so the handoff does not require a separate
 OpenAL installation.
 
+For deterministic automation, set `RECOMPONE_INPUT_FILE` to a committed
+poll-indexed fixture. The current reachability baseline is
+`tools/recompone-v8/input-scripts/oilfield_gameplay_smoke.txt`; it proves the
+path into gameplay but does not yet carry a PS1-fidelity claim.
+
 ## Prepare the reference configuration
 
 From the repository root:

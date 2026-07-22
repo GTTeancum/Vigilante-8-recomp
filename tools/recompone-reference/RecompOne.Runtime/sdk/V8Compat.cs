@@ -426,9 +426,18 @@ public static class V8Compat
             (xBlock, zNextBlock), (xNextBlock, zNextBlock) })
         {
             if (bx >= 32u || bz >= 32u)
+            {
+                string detail = c.RA == 0x800324F8u
+                    ? $" mine=0x{c.S2:X8} flags=0x{m.ReadU32(c.S2):X8} " +
+                      $"callback=0x{m.ReadU32(c.S2 + 0x64u):X8} " +
+                      $"pos={ReadVec3(m, c.S2 + 0x48u)} vel={ReadVec3(m, c.S2 + 0x88u)} " +
+                      $"owner=0x{m.ReadU32(c.S2 + 0x80u):X8} target=0x{m.ReadU32(c.S2 + 0x84u):X8} " +
+                      $"life={m.ReadU16(c.S2 + 0x94u)}"
+                    : string.Empty;
                 throw new InvalidOperationException(
                     $"Vigilante 8 terrain query outside the 32x32 tile map: " +
-                    $"x=0x{c.A0:X8} z=0x{c.A1:X8} block={bx},{bz} caller=0x{c.RA:X8}");
+                    $"x=0x{c.A0:X8} z=0x{c.A1:X8} block={bx},{bz} caller=0x{c.RA:X8}{detail}");
+            }
 
             uint tileSlot = 0x800911A0u + bx * 0x80u + bz * 4u;
             uint tile = m.ReadU32(tileSlot);
@@ -438,6 +447,10 @@ public static class V8Compat
                     $"block={bx},{bz} slot=0x{tileSlot:X8} tile=0x{tile:X8} caller=0x{c.RA:X8}");
         }
     }
+
+    static string ReadVec3(IMemory m, uint address) =>
+        $"({unchecked((int)m.ReadU32(address))},{unchecked((int)m.ReadU32(address + 4u))}," +
+        $"{unchecked((int)m.ReadU32(address + 8u))})";
 
     public static void TraceBinParse(CpuContext c, IMemory m)
     {

@@ -1,0 +1,17 @@
+# Poll-indexed candidate path from boot to active one-player Oilfield play.
+# This is a reachability fixture, not yet a deterministic or PS1 fidelity fixture.
+# Syntax: start_poll+duration=BUTTON[,BUTTON...]
+
+540+2=START
+620+2=CROSS
+680+2=DOWN
+780+2=CROSS
+1050+2=CROSS
+1400+2=CROSS
+1700+2=CROSS
+
+# Exercise steering, acceleration, and both observed gameplay button paths.
+2000+600=CROSS,RIGHT
+2300+2=CIRCLE
+2500+180=R1
+2700+2=CIRCLE
