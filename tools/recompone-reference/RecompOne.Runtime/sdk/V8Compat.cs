@@ -25,6 +25,8 @@ public static class V8Compat
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VEHICLE") == "1";
     static readonly bool _traceWeapons =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_WEAPONS") == "1";
+    static readonly bool _traceResults =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_RESULTS") == "1";
     static readonly bool _traceOptions =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OPTIONS") == "1";
     static readonly bool _traceAnimation =
@@ -94,10 +96,23 @@ public static class V8Compat
     static readonly HashSet<uint> _playerProjectiles = new();
     static readonly HashSet<string> _seenMenuText = new(StringComparer.Ordinal);
     static readonly Dictionary<uint, uint> _lastAnimationPointers = new();
+    static Timer? _animationWatchdog;
+    static CpuContext? _animationWatchContext;
+    static IMemory? _animationWatchMemory;
+    static uint _casinoScatterObject;
+    static uint _casinoScatterMode;
+    static bool _casinoScatterEndFixLogged;
 
     public static void TraceAnimationObject(CpuContext c, IMemory m)
     {
         if (!_traceAnimation) return;
+        m = Dispatcher.UnwrapMemory(m);
+        _animationWatchContext = c;
+        _animationWatchMemory = m;
+        _animationWatchdog ??= new Timer(
+            _ => TraceAnimationStall(), null, Timeout.Infinite, Timeout.Infinite);
+        _animationWatchdog.Change(5000, Timeout.Infinite);
+
         uint obj = c.A0;
         uint pointer = m.ReadU32(obj + 0x60u);
         _lastAnimationPointers.TryGetValue(obj, out uint previous);
@@ -113,6 +128,61 @@ public static class V8Compat
             $"parent=0x{m.ReadU32(obj + 0x3Cu):X8} child=0x{m.ReadU32(obj + 0x38u):X8} " +
             $"next=0x{m.ReadU32(obj + 0x34u):X8} callback=0x{m.ReadU32(obj + 0x64u):X8} " +
             $"history={history}");
+    }
+
+    public static void TraceAnimationObjectPost(CpuContext c, IMemory m)
+    {
+        if (!_traceAnimation) return;
+        _animationWatchdog?.Change(Timeout.Infinite, Timeout.Infinite);
+        _animationWatchContext = null;
+        _animationWatchMemory = null;
+    }
+
+    static void TraceAnimationStall()
+    {
+        CpuContext? c = _animationWatchContext;
+        IMemory? m = _animationWatchMemory;
+        if (c == null || m == null) return;
+        uint obj = c.S2;
+        uint cursor = c.S1;
+        uint pointer = m.ReadU32(obj + 0x60u);
+        string history = _objectHistory.TryGetValue(obj, out var events)
+            ? string.Join(" | ", events.TakeLast(8))
+            : "none";
+        Console.Error.WriteLine(
+            $"[V8AnimationStall] object=0x{obj:X8} target={c.S6 & 0xFFFFu} " +
+            $"frame={m.ReadU16(obj + 0x46u)} pointer=0x{pointer:X8} cursor=0x{cursor:X8} " +
+            $"flags=0x{c.S3:X8} s0=0x{c.S0:X8} v0=0x{c.V0:X8} v1=0x{c.V1:X8} " +
+            $"entry=({m.ReadU16(pointer)},{m.ReadU16(pointer + 2u)}) " +
+            $"cursorWords=({m.ReadU16(cursor)},{m.ReadU16(cursor + 2u)}) " +
+            $"objectFlags=0x{m.ReadU32(obj):X8} id={m.ReadU16(obj + 0x0Au)} " +
+            $"callback=0x{m.ReadU32(obj + 0x64u):X8} history={history}");
+    }
+
+    public static void TraceCasinoScatterPre(CpuContext c, IMemory m)
+    {
+        _casinoScatterObject = c.A0;
+        _casinoScatterMode = c.A1;
+    }
+
+    public static void FixCasinoScatterAnimationEnd(CpuContext c, IMemory m)
+    {
+        if (_casinoScatterMode != 5u || _casinoScatterObject == 0u) return;
+        m = Dispatcher.UnwrapMemory(m);
+        if (m.ReadU32(_casinoScatterObject + 0x60u) != 0u) return;
+
+        // The Casino City scatter object clears its animation cursor on event
+        // 5 but returns zero. Object_PreTick then follows address zero as if it
+        // were another keyframe. Return the animation walker's documented
+        // negative abort value when this exact end-of-sequence state occurs.
+        c.V0 = 0xFFFFFFFFu;
+        if (!_casinoScatterEndFixLogged)
+        {
+            _casinoScatterEndFixLogged = true;
+            Console.Error.WriteLine(
+                $"[V8Compat] Casino City scatter animation ended cleanly " +
+                $"object=0x{_casinoScatterObject:X8}");
+        }
     }
 
     public static void Alloc(CpuContext c, IMemory m)
@@ -862,7 +932,7 @@ public static class V8Compat
 
     public static void TraceResultScreen(CpuContext c, IMemory m)
     {
-        if (!_traceWeapons || _resultScreenReached) return;
+        if ((!_traceWeapons && !_traceResults) || _resultScreenReached) return;
         m = Dispatcher.UnwrapMemory(m);
         _resultScreenReached = true;
         uint player = m.ReadU32(c.GP + 0x7D0u);

@@ -815,6 +815,24 @@ def main() -> int:
             },
             {
                 "overlay": "main",
+                "address": "8001F9CC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceAnimationObjectPost",
+                "mode": "post",
+            },
+            {
+                "overlay": "CASNOCTY",
+                "address": "80101A90",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceCasinoScatterPre",
+                "mode": "pre",
+            },
+            {
+                "overlay": "CASNOCTY",
+                "address": "80101A90",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.FixCasinoScatterAnimationEnd",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
                 "address": "800202F4",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TrackObjectOwner",
                 "mode": "pre",

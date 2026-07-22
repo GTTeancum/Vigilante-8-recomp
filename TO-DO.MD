@@ -1,6 +1,6 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 10:54 EDT
+Last updated: 2026-07-22 11:36 EDT
 Status: ACTIVE
 
 ## Goal
@@ -14,7 +14,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [x] A committed soak runner can select multiple named maps, run them for a
       bounded duration, retain per-map evidence, and fail on crashes, hangs,
       missing gameplay entry, unmapped calls, heap/terrain faults, or stale logs.
-- [ ] At least one substantial soak pass covers every selectable arena; any
+- [x] At least one substantial soak pass covers every selectable arena; any
       failing arena is fixed or documented with reproducible evidence.
 - [x] Cooperative and Versus split-screen each reach active gameplay in clean,
       independent runs and remain stable under simultaneous two-pad input.
@@ -33,7 +33,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [x] Implement a bounded soak runner with timeout, responsiveness, stage,
       framebuffer-change, audio-init, and fatal-marker checks.
 - [x] Run an initial all-map reachability matrix.
-- [ ] Run extended multi-map soak coverage and triage/fix failures.
+- [x] Run extended multi-map soak coverage and triage/fix failures.
 
 ### Split-screen
 
@@ -59,6 +59,12 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [ ] Refresh stale reference documentation and deployed-path instructions.
 - [ ] Audit available state-trace/comparison scaffolding and advance the
       PS1-versus-reference fidelity work as far as local inputs permit.
+
+### Future QOL and presentation
+
+- [ ] Add optional perspective-correct texture mapping to eliminate the
+      PlayStation's affine texture warping/projection distortion, while
+      retaining a fidelity mode for exact reference comparisons.
 
 ## Deliberate boundaries
 
@@ -97,3 +103,11 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
   changed both player positions under simultaneous pad scripts, initialized
   audio, remained responsive, and quit through the original pause confirmation.
   The host also discovered the attached `Xbox One Controller` through SDL.
+- 2026-07-22: Extended coverage now spans all eight selectable arenas. Ski
+  Resort, Valley Farms, Hoover Dam, Ghost Town, and Aircraft Graveyard ran the
+  full 120-second gameplay window; Canyonlands, Casino City, and Oil Fields
+  completed matches, dismissed results normally, reloaded their arenas, and
+  resumed physics. Casino City's reproducible scatter-animation spin was fixed
+  at its arena-specific callback boundary and passed the corrected 120-second
+  gate. Liveness now uses continuous framebuffer probes while wheel-body ticks
+  remain diagnostic telemetry.

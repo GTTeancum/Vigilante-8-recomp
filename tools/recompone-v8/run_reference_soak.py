@@ -56,6 +56,7 @@ FATAL_MARKERS = {
     "invalid animation": "invalid animation pointer",
     "stack overflow": "stack overflow",
     "outofmemoryexception": "out of memory",
+    "[v8animationstall]": "animation state-machine stall",
 }
 
 
@@ -73,14 +74,18 @@ class RunResult:
     match_mode: int | None
     overlay_seen: bool
     audio_ready: bool
+    framebuffer_probes: int
     framebuffer_changes: int
     player2_seen: bool
     player2_position_changes: int
     gameplay_capture: str | None
+    final_capture: str | None
     split_left_nonzero: int
     split_right_nonzero: int
     split_halves_distinct: bool
     clean_match_exit: bool
+    result_screen_seen: bool
+    clean_match_relaunch: bool
     source_overrides: int | None
     stdout_log: str
     stderr_log: str
@@ -182,6 +187,14 @@ def gameplay_script(mode: str, seconds: float, clean_exit: bool) -> list[str]:
                 "",
             ]
         )
+    elif mode == "arcade":
+        lines.extend(
+            [
+                "[result_screen]",
+                "320+2=P1:CIRCLE",
+                "",
+            ]
+        )
     return lines
 
 
@@ -280,6 +293,20 @@ def preserve_gameplay_capture(
     return target
 
 
+def preserve_final_capture(
+    directory: Path, output: Path, stem: str, started_at: float
+) -> Path | None:
+    source = directory / "recompone_vram_latest.ppm"
+    try:
+        if source.stat().st_mtime < started_at - 1.0:
+            return None
+    except FileNotFoundError:
+        return None
+    target = output / f"{stem}.final.ppm"
+    shutil.copy2(source, target)
+    return target
+
+
 def analyze_split_capture(path: Path | None) -> tuple[int, int, bool]:
     if path is None:
         return (0, 0, False)
@@ -357,6 +384,7 @@ def run_one(
             "COOPERATIVE" if mode == "coop" else "VERSUS"
         )
     env["RECOMPONE_TRACE_LEVEL_LOAD"] = "1"
+    env["RECOMPONE_TRACE_RESULTS"] = "1"
     env["RECOMPONE_GAMEPLAY_CAPTURE_DELAY_POLLS"] = "300"
     if clean_exit:
         env["RECOMPONE_SOAK_TEARDOWN_TICKS"] = str(max(180, round(seconds * 60)))
@@ -364,11 +392,15 @@ def run_one(
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     started = time.time()
     gameplay_started: float | None = None
-    last_heartbeat_at: float | None = None
+    last_framebuffer_at: float | None = None
     heartbeat_count = 0
+    framebuffer_count = 0
+    result_heartbeat_count: int | None = None
+    result_started: float | None = None
     reason = ""
     passed = False
     gameplay_capture: Path | None = None
+    final_capture: Path | None = None
 
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
         process = subprocess.Popen(
@@ -394,7 +426,7 @@ def run_one(
 
                 if gameplay_started is None and "[Input] stage 'gameplay'" in text:
                     gameplay_started = now
-                    last_heartbeat_at = now
+                    last_framebuffer_at = now
                     print(f"[{stem}] gameplay reached", flush=True)
 
                 heartbeat_matches = list(
@@ -402,7 +434,33 @@ def run_one(
                 )
                 if len(heartbeat_matches) > heartbeat_count:
                     heartbeat_count = len(heartbeat_matches)
-                    last_heartbeat_at = now
+
+                framebuffer_matches = re.findall(r"\[GPU\] framebuffer ", text)
+                if len(framebuffer_matches) > framebuffer_count:
+                    framebuffer_count = len(framebuffer_matches)
+                    last_framebuffer_at = now
+
+                if (
+                    result_started is None
+                    and "[Input] stage 'result_screen'" in text
+                ):
+                    result_started = now
+                    result_heartbeat_count = heartbeat_count
+                    print(f"[{stem}] result screen reached", flush=True)
+
+                overlay_load_count = text.count(
+                    f"loaded relocated overlay: {arena.overlay}"
+                )
+                clean_match_relaunch = (
+                    result_started is not None
+                    and overlay_load_count >= 2
+                    and result_heartbeat_count is not None
+                    and heartbeat_count > result_heartbeat_count
+                )
+                if clean_match_relaunch:
+                    passed = True
+                    reason = "clean match completion, result dismissal, and gameplay relaunch"
+                    break
 
                 clean_match_exit = "[Input] stage 'pause_quit'" in text
                 if clean_exit and clean_match_exit:
@@ -429,10 +487,13 @@ def run_one(
                         reason = "in-game exit timeout"
                         break
                     if (
-                        last_heartbeat_at is not None
-                        and now - last_heartbeat_at > heartbeat_timeout
+                        last_framebuffer_at is not None
+                        and now - last_framebuffer_at > heartbeat_timeout
                     ):
-                        reason = "gameplay heartbeat timeout"
+                        reason = "render heartbeat timeout"
+                        break
+                    if result_started is not None and now - result_started > 45.0:
+                        reason = "result teardown or gameplay relaunch timeout"
                         break
 
                 time.sleep(0.5)
@@ -441,6 +502,7 @@ def run_one(
             gameplay_capture = preserve_gameplay_capture(
                 exe.parent, output, stem, started
             )
+            final_capture = preserve_final_capture(exe.parent, output, stem, started)
             cleanup_runtime_artifacts(exe.parent, started)
 
     text = combined_text(stdout_path, stderr_path)
@@ -464,6 +526,14 @@ def run_one(
         analyze_split_capture(gameplay_capture)
     )
     clean_match_exit = "[Input] stage 'pause_quit'" in text
+    result_screen_seen = "[Input] stage 'result_screen'" in text
+    result_offset = text.find("[Input] stage 'result_screen'")
+    post_result_text = text[result_offset:] if result_offset >= 0 else ""
+    clean_match_relaunch = (
+        result_screen_seen
+        and text.count(f"loaded relocated overlay: {arena.overlay}") >= 2
+        and bool(re.search(r"\[Soak\] gameplay tick=\d+", post_result_text))
+    )
     overrides_match = re.search(r"loose-file overrides=(\d+)", text)
     source_overrides = int(overrides_match.group(1)) if overrides_match else 0
 
@@ -519,14 +589,18 @@ def run_one(
         match_mode=match_modes[-1] if match_modes else None,
         overlay_seen=overlay_seen,
         audio_ready=audio_ready,
+        framebuffer_probes=framebuffer_count,
         framebuffer_changes=len(framebuffer_hashes),
         player2_seen=player2_seen,
         player2_position_changes=len(player2_positions),
         gameplay_capture=str(gameplay_capture) if gameplay_capture else None,
+        final_capture=str(final_capture) if final_capture else None,
         split_left_nonzero=split_left_nonzero,
         split_right_nonzero=split_right_nonzero,
         split_halves_distinct=split_halves_distinct,
         clean_match_exit=clean_match_exit,
+        result_screen_seen=result_screen_seen,
+        clean_match_relaunch=clean_match_relaunch,
         source_overrides=source_overrides,
         stdout_log=str(stdout_path),
         stderr_log=str(stderr_path),
