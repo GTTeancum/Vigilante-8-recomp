@@ -36,9 +36,12 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
       the host input UI.
 - [x] Apply the enhanced-mode dithering default to both accelerated and
       software PS1 raster paths, retaining a live fidelity toggle.
-- [ ] Reproduce and correct the Canyonlands gameplay crash in which
-      `FUN_80024998` reads corrupt address `0x380C110F` after roughly 4,500
-      gameplay ticks.
+- [x] Reproduce and correct the Canyonlands `FUN_80024998` crash at
+      `0x380C110F`. Register capture proved the diagonal-neighbor lookup
+      returned null at original return address `0x80024C70`, unlike the four
+      axial cases which check null; the compatibility boundary now represents
+      that exact missing neighbor with a read-only empty pool cell. Ten fresh
+      Canyonlands matches passed through 70,200 aggregate gameplay ticks.
 - [x] Classify the Ski Resort post-defeat presentation stall as a
       result-screen automation false positive. With result/title transitions
       excluded from the gameplay framebuffer gate, two fresh matches reached
@@ -47,9 +50,11 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
       failure is recoverable pressure, not a fatal condition; a subsequent
       Canyonlands run logged it and continued normally through 9,900 ticks and
       result/title teardown.
-- [ ] Reproduce and isolate Casino City's distinct late Object_PreTick
-      animation stall, first captured at tick 3,060 with a live managed stack;
-      the next targeted repetitions have object/cursor/callback tracing armed.
+- [x] Isolate the intermittent cross-arena Object_PreTick stall. A Ghost Town
+      live stack exposed main callback `0x800378D0` event 5 dispatching through
+      `0x80037ADC`, clearing the child cursor, and returning continue; the exact
+      cleared-child state now aborts the outer animation walk. Casino City,
+      Hoover Dam, and Ghost Town subsequently completed long result/title runs.
 - [x] Regenerate and regression-test the newly recovered main-executable
       entrypoint `0x8003DFFC`, reached from Hoover Dam gameplay at tick 720.
 - [x] Fix Hoover Dam callback `0x80100A18` clearing its animation cursor on

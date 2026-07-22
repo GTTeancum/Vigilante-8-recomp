@@ -116,6 +116,7 @@ public static class V8Compat
     static CpuContext? _collisionNeighborContext;
     static uint _collisionNeighborSubject;
     static bool _collisionFaultTraceActive;
+    static bool _missingDiagonalNeighborFixLogged;
     static StreamWriter? _stateTraceWriter;
     static bool _stateTraceUnavailable;
 
@@ -263,6 +264,42 @@ public static class V8Compat
         {
             _collisionFaultTraceActive = false;
         }
+    }
+
+    public static void FixMissingDiagonalCollisionNeighbor(CpuContext c, IMemory m)
+    {
+        if (c.RA != 0x80024C70u || c.V0 != 0u) return;
+        m = Dispatcher.UnwrapMemory(m);
+
+        // FUN_80024998's diagonal-neighbor case omits the null check used by
+        // its four axial cases. Supply any live pool cell whose terrain flag
+        // is zero, which makes the original caller take its existing
+        // "no neighbor to link" branch without mutating the cell.
+        const uint poolBase = 0x800738A0u;
+        const uint poolStride = 0x1Cu;
+        for (uint i = 0; i < 0x400u; i++)
+        {
+            uint node = poolBase + i * poolStride;
+            uint data = m.ReadU32(node + 0x08u);
+            uint phys = data & 0x1FFFFFFFu;
+            if (data == 0u || phys >= 0x00200000u) continue;
+            uint slot = m.ReadU8(node + 0x10u);
+            if (m.ReadU16(data + slot * 2u + 2u) != 0u) continue;
+
+            c.V0 = node;
+            if (!_missingDiagonalNeighborFixLogged)
+            {
+                _missingDiagonalNeighborFixLogged = true;
+                Console.Error.WriteLine(
+                    $"[V8Compat] missing diagonal collision neighbor treated as empty " +
+                    $"subject=0x{c.S1:X8} sentinel=0x{node:X8}");
+            }
+            return;
+        }
+
+        Console.Error.WriteLine(
+            $"[V8CollisionFault] no empty pool cell for missing diagonal neighbor " +
+            $"subject=0x{c.S1:X8}");
     }
 
     public static void Alloc(CpuContext c, IMemory m)
