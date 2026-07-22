@@ -1,6 +1,6 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 11:36 EDT
+Last updated: 2026-07-22 11:40 EDT
 Status: ACTIVE
 
 ## Goal
@@ -46,7 +46,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 
 ### Other autonomous coverage
 
-- [ ] Exercise loose-file content mutation, size changes, deletion/fallback,
+- [x] Exercise loose-file content mutation, size changes, deletion/fallback,
       ambiguous basename handling, and raw-sector disc fallback in an isolated
       temporary tree.
 - [x] Add non-invasive live-controller diagnostics and validate SDL/XInput
@@ -111,3 +111,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
   at its arena-specific callback boundary and passed the corrected 120-second
   gate. Liveness now uses continuous framebuffer probes while wheel-body ticks
   remain diagnostic telemetry.
+- 2026-07-22: The reusable isolated loose-file suite passed edited content,
+  changed lengths, deletion-to-disc fallback, unique and ambiguous basename
+  handling, cooked-sector overrides, and raw 2352-byte disc fallback without
+  modifying either handoff data tree.

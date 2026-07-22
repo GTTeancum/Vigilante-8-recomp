@@ -9,11 +9,18 @@ if (Environment.GetEnvironmentVariable("RECOMPONE_V8_GAME_VOLUME") == null)
 
 string? explicitCue = null;
 bool probeSource = false;
+string? probeFile = null;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i].Equals("--probe-source", StringComparison.OrdinalIgnoreCase))
     {
         probeSource = true;
+        continue;
+    }
+    if (args[i].Equals("--probe-file", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+    {
+        probeSource = true;
+        probeFile = args[++i];
         continue;
     }
     if (args[i].Equals("--loose", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
@@ -30,7 +37,8 @@ for (int i = 0; i < args.Length; i++)
     if (explicitCue != null)
     {
         Console.Error.WriteLine(
-            "usage: Vigilante8PC [disc.cue] [--loose <directory>] [--no-loose] [--probe-source]");
+            "usage: Vigilante8PC [disc.cue] [--loose <directory>] [--no-loose] " +
+            "[--probe-source] [--probe-file <disc-path>]");
         return 1;
     }
     explicitCue = Path.GetFullPath(args[i]);
@@ -59,6 +67,20 @@ if (probeSource)
     Console.WriteLine(
         $"[SourceProbe] cue={cuePath} loose={loosePath ?? "disabled"} " +
         $"overrides={source.LooseOverrideCount} systemCnfBytes={system.Length}");
+    if (!string.IsNullOrWhiteSpace(probeFile))
+    {
+        if (!source.Locate(probeFile, out int lba, out uint size))
+            throw new FileNotFoundException($"Disc file not found: {probeFile}");
+        byte[] file = source.ReadFile(probeFile);
+        byte[] cooked = source.ReadSectorData(lba, 2048);
+        byte[] raw = source.ReadSectorData(lba, 2352);
+        static string Sha256(byte[] data) => Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(data));
+        Console.WriteLine(
+            $"[SourceProbeFile] path={probeFile} lba={lba} size={size} " +
+            $"bytes={file.Length} sha256={Sha256(file)} " +
+            $"sector2048={Sha256(cooked)} sector2352={Sha256(raw)}");
+    }
     return 0;
 }
 
