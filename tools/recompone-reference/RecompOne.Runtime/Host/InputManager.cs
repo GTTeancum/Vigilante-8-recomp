@@ -38,6 +38,10 @@ internal static unsafe class InputManager
     static string? _stageCaptureLabel;
     static bool _disableLiveInput;
     static bool _forcePad2Connected;
+    static bool _traceInput;
+    static bool _suppressRumble;
+    static readonly (byte Large, byte Small)[] _lastRumble =
+        [(byte.MaxValue, byte.MaxValue), (byte.MaxValue, byte.MaxValue)];
 
     
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
@@ -48,6 +52,9 @@ internal static unsafe class InputManager
         _disableLiveInput = Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_LIVE_INPUT") == "1";
         _forcePad2Connected =
             Environment.GetEnvironmentVariable("RECOMPONE_FORCE_PAD2_CONNECTED") == "1";
+        _traceInput = Environment.GetEnvironmentVariable("RECOMPONE_TRACE_INPUT") == "1";
+        _suppressRumble =
+            Environment.GetEnvironmentVariable("RECOMPONE_SUPPRESS_RUMBLE") == "1";
         ParseScriptedInput();
         if (_disableLiveInput)
             Console.Error.WriteLine("[Input] live keyboard/gamepad input disabled for deterministic replay");
@@ -66,6 +73,21 @@ internal static unsafe class InputManager
             _sdl.SetHint("SDL_JOYSTICK_RAWINPUT", "0");
             _sdl.InitSubSystem(Sdl.InitGamecontroller);
             Rescan();
+            if (Environment.GetEnvironmentVariable("RECOMPONE_TEST_CONTROLLER_RESCAN") == "1")
+            {
+                string before = $"p1={ControllerName(_pad0)} p2={ControllerName(_pad1)}";
+                Rescan();
+                string after = $"p1={ControllerName(_pad0)} p2={ControllerName(_pad1)}";
+                Console.WriteLine(
+                    $"[Input] controller rescan self-test before=({before}) after=({after})");
+            }
+            if (Environment.GetEnvironmentVariable("RECOMPONE_TEST_RUMBLE") == "1")
+            {
+                SetRumble(0, 128, 1);
+                SetRumble(1, 96, 1);
+                SetRumble(0, 0, 0);
+                SetRumble(1, 0, 0);
+            }
         }
         catch { _sdl = null; }
     }
@@ -456,7 +478,19 @@ internal static unsafe class InputManager
     public static void SetRumble(int pad, byte large, byte small)
     {
         GameController* controller = pad == 0 ? _pad0 : _pad1;
+        if ((uint)pad < (uint)_lastRumble.Length &&
+            _lastRumble[pad] != (large, small))
+        {
+            _lastRumble[pad] = (large, small);
+            if (_traceInput)
+            {
+                Console.WriteLine(
+                    $"[Input] rumble pad={pad + 1} large={large} small={small} " +
+                    $"controller={ControllerName(controller)} suppressed={_suppressRumble}");
+            }
+        }
         if (_sdl == null || controller == null) return;
+        if (_suppressRumble) return;
         ushort lo = (ushort)(large * 257);
         ushort hi = small != 0 ? (ushort)65535 : (ushort)0;
         uint duration = large == 0 && small == 0 ? 0u : 500u;

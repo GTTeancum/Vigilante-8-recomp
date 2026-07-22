@@ -1,6 +1,6 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 11:40 EDT
+Last updated: 2026-07-22 11:45 EDT
 Status: ACTIVE
 
 ## Goal
@@ -51,7 +51,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
       temporary tree.
 - [x] Add non-invasive live-controller diagnostics and validate SDL/XInput
       discovery against the attached XInput-compatible device.
-- [ ] Exercise hot-plug state handling and rumble calls where automation permits.
+- [x] Exercise hot-plug state handling and rumble calls where automation permits.
 - [ ] Test the victory/result path without directly writing gameplay state.
 - [ ] Extend gameplay coverage into Quest where deterministic automation permits.
 - [ ] Audit and either fix or explicitly disable the unsupported single-file
@@ -115,3 +115,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
   changed lengths, deletion-to-disc fallback, unique and ambiguous basename
   handling, cooked-sector overrides, and raw 2352-byte disc fallback without
   modifying either handoff data tree.
+- 2026-07-22: The attached Xbox controller survived an automated SDL
+  close/reopen rescan with the same Player 1 assignment. Suppressed motor tests
+  routed independent start/stop requests to both controller slots; physical
+  vibration strength and real unplug/replug feel remain user sign-off items.
