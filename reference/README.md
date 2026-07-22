@@ -70,6 +70,11 @@ variation cannot move button pulses onto a different menu. It accepts the arena
 only after the original shell renders `Oil Fields` rather than relying on the
 current cursor or a fixed delay.
 
+Set `RECOMPONE_DISABLE_LIVE_INPUT=1` for deterministic validation runs. This
+neutralizes attached keyboards/gamepads before applying a scripted fixture, so
+real controller state cannot skip boot movies or perturb the replay. It is a
+test-only switch; normal launches retain the original movie-skip controls.
+
 ## Prepare the reference configuration
 
 From the repository root:

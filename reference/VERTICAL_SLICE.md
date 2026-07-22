@@ -49,6 +49,18 @@ The first physics comparison starts at vehicle creation and records, per frame:
 Comparison stops at the first differing field. Fix or classify that divergence
 before treating later derived values as source truth.
 
+## Current boot-movie status
+
+The host CD stream now preserves disc pacing while blocking the recompiled
+version of the original polling loop until a frame arrives. A deterministic
+no-live-input run reached the authored frame-number reset for all three boot
+streams: `ACTLOGO.STR` at queued frame 227, `LUXOFLUX.STR` at 91, and
+`INTRO.STR` at 1,267. The run then reached the original `PRESS START` text.
+
+This proves movie transport and transition timing, but does not yet close the
+Intros or Graphics gates: the current presented movie surface is flat gray.
+MDEC decode/upload fidelity remains the next boot-path defect.
+
 ## Commit discipline
 
 Commit after each coherent gate or fix with its focused validation evidence in

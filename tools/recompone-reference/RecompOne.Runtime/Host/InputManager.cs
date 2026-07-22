@@ -32,6 +32,7 @@ internal static unsafe class InputManager
     static int _inputPoll;
     static string? _scriptStage;
     static int _stagePoll;
+    static bool _disableLiveInput;
 
     
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
@@ -39,7 +40,10 @@ internal static unsafe class InputManager
 
     public static void Initialize(IInputContext input)
     {
+        _disableLiveInput = Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_LIVE_INPUT") == "1";
         ParseScriptedInput();
+        if (_disableLiveInput)
+            Console.Error.WriteLine("[Input] live keyboard/gamepad input disabled for deterministic replay");
         if (input.Keyboards.Count > 0)
         {
             _keyboard = input.Keyboards[0];
@@ -65,11 +69,20 @@ internal static unsafe class InputManager
 
     public static void Poll()
     {
-        PollGamepadEvents();
-        PollKeyboard();
-        PollGamepads();
+        if (_disableLiveInput)
+        {
+            Controller.State = Controller.State2 = 0xFFFF;
+            Controller.LeftX = Controller.LeftY = Controller.RightX = Controller.RightY = 0x80;
+            Controller.LeftX2 = Controller.LeftY2 = Controller.RightX2 = Controller.RightY2 = 0x80;
+        }
+        else
+        {
+            PollGamepadEvents();
+            PollKeyboard();
+            PollGamepads();
+        }
         ApplyScriptedInput();
-        Controller.Connected2 = _pad1 != null || HasAnyKey(ConfigManager.Game.Keys2);
+        Controller.Connected2 = !_disableLiveInput && (_pad1 != null || HasAnyKey(ConfigManager.Game.Keys2));
     }
 
     static void ParseScriptedInput()

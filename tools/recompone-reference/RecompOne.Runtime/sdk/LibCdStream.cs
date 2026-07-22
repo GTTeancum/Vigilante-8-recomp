@@ -20,6 +20,11 @@ public static class LibCdStream
     static int _pendingLba = -1;
     static int _streamLba = -1;
     static int _streamStartLba;
+    static int _streamEndLba = int.MaxValue;
+    static string _streamName = "unknown";
+    static int _framesQueued;
+    static int _lastFrameNumber = -1;
+    static bool _streamSummaryPending;
     static readonly Stopwatch _clock = new();
 
     static int _writeIdx;
@@ -56,8 +61,13 @@ public static class LibCdStream
 
     public static void StUnSetRing(CpuContext c, IMemory m)
     {
-        _active = false;
-        _reading = false;
+        lock (_lock)
+        {
+            _active = false;
+            _reading = false;
+            LogStreamSummary("ring-unset");
+            Monitor.PulseAll(_lock);
+        }
         Log.Sdk("StUnSetRing");
     }
 
@@ -88,6 +98,10 @@ public static class LibCdStream
                 _prevStart = -1;
             }
 
+            // The original R3000 loop polls while real CD interrupts advance in
+            // parallel. Yield briefly so a host-paced frame can arrive before
+            // that statically recompiled polling loop exhausts its iteration cap.
+            while (_ready.Count == 0 && _reading) Monitor.Wait(_lock, 4);
             if (_ready.Count == 0) { c.V0 = 1; return; }
 
             var (start, n) = _ready.Dequeue();
@@ -108,15 +122,33 @@ public static class LibCdStream
     internal static void OnReadStream(int lba)
     {
         if (!InUse) return;
-        _pendingLba = lba;
-        _reading = true;
-        Console.WriteLine($"[CdStream] read start LBA={lba}");
+        LibCd.TryDescribeLocatedFile(lba, out string name, out int endLba);
+        lock (_lock)
+        {
+            _pendingLba = lba;
+            _streamLba = -1;
+            _streamStartLba = lba;
+            _streamEndLba = endLba;
+            _streamName = name;
+            _framesQueued = 0;
+            _lastFrameNumber = -1;
+            _streamSummaryPending = true;
+            _loggedScan = false;
+            _reading = true;
+            Monitor.PulseAll(_lock);
+        }
+        Console.WriteLine($"[CdStream] start '{name}' LBA={lba} end={endLba}");
         EnsureThread();
     }
 
     internal static void OnStopStream()
     {
-        _reading = false;
+        lock (_lock)
+        {
+            _reading = false;
+            LogStreamSummary("stop-command");
+            Monitor.PulseAll(_lock);
+        }
     }
 
     static void ResetRing(IMemory m)
@@ -157,6 +189,17 @@ public static class LibCdStream
                 _clock.Restart();
             }
 
+            if (_streamLba >= _streamEndLba)
+            {
+                lock (_lock)
+                {
+                    _reading = false;
+                    LogStreamSummary("file-end");
+                    Monitor.PulseAll(_lock);
+                }
+                continue;
+            }
+
             byte[] sec;
             try { lock (LibCd.DiscLock) sec = cd.ReadSectorData(_streamLba, 2336); }
             catch { Thread.Sleep(2); continue; }
@@ -186,15 +229,27 @@ public static class LibCdStream
                 if (!free) { Thread.Sleep(1); continue; }
             }
 
+            int frameLba = _streamLba;
+            int frameNumber = (int)Read32(sec, 16);
+            int width = Read16(sec, 24);
+            int height = Read16(sec, 26);
             if (!CollectFrame(cd, m, start, n)) continue;
 
-            Console.WriteLine($"[CdStream] frame LBA={_streamLba} chunks={n}");
+            int queued = ++_framesQueued;
+            bool reset = _lastFrameNumber >= 0 && frameNumber <= _lastFrameNumber;
+            if (queued == 1 || reset || frameNumber % 120 == 0)
+            {
+                string marker = reset ? " frame-reset" : "";
+                Console.WriteLine($"[CdStream] '{_streamName}' frame={frameNumber} queued={queued} LBA={frameLba} chunks={n} {width}x{height}{marker}");
+            }
+            _lastFrameNumber = frameNumber;
 
             lock (_lock)
             {
                 for (int i = 0; i < n; i++) _busy[start + i] = true;
                 _ready.Enqueue((start, n));
                 _writeIdx = start + n;
+                Monitor.PulseAll(_lock);
             }
         }
     }
@@ -224,5 +279,14 @@ public static class LibCdStream
         return true;
     }
 
+    // Caller holds _lock.
+    static void LogStreamSummary(string reason)
+    {
+        if (!_streamSummaryPending) return;
+        _streamSummaryPending = false;
+        Console.WriteLine($"[CdStream] end '{_streamName}' reason={reason} frames={_framesQueued} last={_lastFrameNumber} elapsed={_clock.Elapsed.TotalSeconds:F2}s");
+    }
+
     static ushort Read16(byte[] b, int o) => (ushort)(b[o] | (b[o + 1] << 8));
+    static uint Read32(byte[] b, int o) => (uint)(b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24));
 }

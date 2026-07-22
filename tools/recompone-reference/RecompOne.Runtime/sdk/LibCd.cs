@@ -33,6 +33,8 @@ public static class LibCd
     static byte _com;
     static readonly byte[] _pos = new byte[4];
     static readonly byte[] _lastResult = new byte[8];
+    static readonly object _locatedFileGate = new();
+    static readonly Dictionary<int, (int EndLba, string Name)> _locatedFiles = new();
     static int _lastIntr = Complete;
 
     static uint _cbSync;
@@ -114,6 +116,27 @@ public static class LibCd
 
     internal static int CurrentLba { get { lock (_posGate) return PosToInt(_pos); } }
     internal static double SectorsPerSecond => (_mode & 0x80) != 0 ? 150.0 : 75.0; //cd pacer
+
+    internal static bool TryDescribeLocatedFile(int lba, out string name, out int endLba)
+    {
+        lock (_locatedFileGate)
+        {
+            foreach (var (start, file) in _locatedFiles)
+            {
+                if (lba < start || lba >= file.EndLba) continue;
+                name = file.Name;
+                endLba = file.EndLba;
+                return true;
+            }
+        }
+
+        if (Runtime.Cd?.Fs.TryDescribeLba(lba, out name, out endLba) == true)
+            return true;
+
+        name = $"LBA {lba}";
+        endLba = int.MaxValue;
+        return false;
+    }
 
     internal static void Tick()
     {
@@ -217,6 +240,8 @@ public static class LibCd
             return;
         }
         Log.Sdk($"CdSearchFile '{name}' lba={lba} size={size}");
+        lock (_locatedFileGate)
+            _locatedFiles[lba] = (lba + (int)((size + 2047u) >> 11), name);
 
         IntToPos(lba, out byte mm, out byte ss, out byte ff);
         m.WriteU8(fp + 0, mm);

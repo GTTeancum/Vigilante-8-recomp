@@ -46,6 +46,40 @@ public sealed class CueFs : IDisposable
         return true;
     }
 
+    public bool TryDescribeLba(int lba, out string path, out int endLba)
+    {
+        var found = FindByLba(Root(), "", lba);
+        if (found != null)
+        {
+            path = found.Value.Path;
+            endLba = found.Value.EndLba;
+            return true;
+        }
+
+        path = $"LBA {lba}";
+        endLba = int.MaxValue;
+        return false;
+    }
+
+    private (string Path, int EndLba)? FindByLba(Entry dir, string basePath, int lba)
+    {
+        foreach (var e in Entries(dir))
+        {
+            string path = basePath.Length > 0 ? basePath + "/" + e.Name : e.Name;
+            if (e.IsDir)
+            {
+                var found = FindByLba(e, path, lba);
+                if (found != null) return found;
+                continue;
+            }
+
+            int endLba = e.Lba + (int)((e.Size + 2047u) >> 11);
+            if (lba >= e.Lba && lba < endLba)
+                return (path, endLba);
+        }
+        return null;
+    }
+
     private Entry? LocateEntry(string name)
     {
         name = name.TrimStart('/', '\\');
