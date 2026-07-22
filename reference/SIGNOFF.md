@@ -77,7 +77,7 @@ Only tactile feel and real unplug/replug behavior remain subjective.
 `BINCUE/Vigilante8PC.exe` and `PS1 game/Vigilante8PC.exe` are byte-identical:
 
 ```text
-SHA256  1DFD56EFA33760E6E18072DFFCDB22775AF2520D9215FF7976971E302DA1D9C7
+SHA256  FCA1987F77D0C3151FAC54C6B8386F1D1F9A8EE7863DC0B7E327BC0C8604174A
 ```
 
 The first selects the neighboring CUE. The second selects the 69-file

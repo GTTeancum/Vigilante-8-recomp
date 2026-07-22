@@ -1,7 +1,7 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 16:22 EDT
-Status: ACTIVE - THREE-HOUR CRASH SOAK
+Last updated: 2026-07-22 19:20 EDT
+Status: BLOCKED - USER SIGN-OFF
 
 ## Goal
 
@@ -245,3 +245,24 @@ The retained screenshots and controller checklist are collected in
   before terminating a stalled process. Natural result/title return is accepted
   without requiring an immediate same-arena relaunch, and heap-allocation
   pressure is recorded rather than treated as fatal by itself.
+- 2026-07-22: The three-hour loose-file crash hunt ran from 16:12 through the
+  19:12 cutoff and retained 64 bounded cases across nine campaigns, totaling
+  376,380 gameplay ticks. The early matrix deliberately remains in the evidence
+  set: its failures separate genuine unmapped-call, collision, and animation
+  defects from corrected result-transition false positives and recoverable heap
+  pressure.
+- 2026-07-22: A live Ghost Town stack isolated the common nested-animation
+  stall at callback `0x800378D0`; the source-backed cleared-child termination
+  fix subsequently completed long Casino City, Hoover Dam, and Ghost Town
+  matches with normal result/title teardown.
+- 2026-07-22: Fault-time registers reduced Canyonlands address `0x380C110F` to
+  the diagonal-only null return at `0x80024C70`. After the non-mutating empty-
+  neighbor compatibility fix, ten consecutive Canyonlands matches passed for
+  70,200 aggregate gameplay ticks. The closing post-cutoff bounded runs also
+  passed Ghost Town at 6,120 ticks and Hoover Dam at 7,380 ticks.
+- 2026-07-22: The final self-contained build is deployed byte-identically to
+  `BINCUE/Vigilante8PC.exe` and `PS1 game/Vigilante8PC.exe` at SHA256
+  `FCA1987F77D0C3151FAC54C6B8386F1D1F9A8EE7863DC0B7E327BC0C8604174A`.
+  No stale handoff logs were present, and both memory cards plus all settings
+  retained their pre-deployment hashes. Autonomous work is exhausted; only the
+  two subjective checks in the user sign-off queue remain.
