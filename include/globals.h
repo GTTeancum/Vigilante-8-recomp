@@ -56,9 +56,8 @@ extern uint32_t  g_matchConfigFlags;   /* LOW @ 0x80065c30 */
 extern int32_t   g_optionFlag_c28;     /* LOW */
 extern int32_t   g_optionFlag_c40;     /* LOW */
 
-/* RNG seed -- the function FUN_8001714c(seed) sets a single global seed.
- * Address inside the function (LW from a fixed VA) reveals the seed location.
- * Pass 2 must confirm. Provisional name: */
-extern int32_t   g_rngSeed;            /* LOW */
+/* RNG state confirmed from FUN_8001714c/FUN_80017160 fixed-address accesses. */
+extern int32_t   g_rngSeed;            /* HIGH @ 0x800568d4 */
+extern uint8_t   g_rngCounter;         /* HIGH @ 0x800568d8: one-byte carry */
 
 #endif /* V8_GLOBALS_H */

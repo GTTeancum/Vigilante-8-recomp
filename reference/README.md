@@ -126,6 +126,10 @@ presentations without changing movie timing.
 Stage-synchronized fixtures also save `recompone_capture_<stage>.ppm` at each
 recognized menu input boundary, so menu evidence comes from the exact retail
 screen that accepted the scripted action.
+`RECOMPONE_CAPTURE_SCRIPTED_STAGE=<stage>` additionally captures every pulse
+within one selected stage with its local poll number; this is useful for
+decoding multi-control screens such as the enemy and passcode editors without
+changing game state.
 
 The focused vehicle regression is
 `tools/recompone-v8/input-scripts/oilfield_physics_smoke.txt`. Its `gameplay`
@@ -162,6 +166,16 @@ is stage-relative: after the original 300-tick minimum it sends Circle at poll
 soft/full vehicle destruction, and the result state. No fixture input writes
 gameplay state directly.
 
+The complementary input-only win regression is
+`tools/recompone-v8/input-scripts/dual_cheat_victory_smoke.txt`. It enters
+`I_WILL_NOT_DIE` and `DEADLY_MISSILE` through the original Game Status passcode
+editor, selects one opponent, and runs with
+`RECOMPONE_V8_VICTORY_AUTOPILOT=1`. That switch only contributes normal digital
+pad masks for steering, braking, and weapons; it observes damage callbacks to
+choose a target and never writes game state. The validated run destroyed the
+opponent through the retail damage path, rendered `YOU WIN!`, and dismissed the
+result normally.
+
 The front-end Options regressions are
 `tools/recompone-v8/input-scripts/options_audio_smoke.txt` and
 `tools/recompone-v8/input-scripts/options_full_smoke.txt`. The first enters the
@@ -182,8 +196,9 @@ statically recompiled host process.
 
 The remaining front-end branches use `quest_menu_smoke.txt`,
 `two_player_coop_menu_smoke.txt`, and `two_player_versus_menu_smoke.txt`. They
-cover the Quest vehicle and route screens plus both two-player mode layouts and
-the shared player selector. Two-player automation sets
+cover the Quest vehicle and route screens, active Quest gameplay and pause/quit
+flow, plus both two-player mode layouts and the shared player selector.
+Two-player automation sets
 `RECOMPONE_FORCE_PAD2_CONNECTED=1`; this test-only switch reports a neutral
 second controller without changing normal live controller discovery.
 
@@ -249,14 +264,21 @@ boot through damage, enemy and player destruction, the visibly rendered retail
 `YOU LOSE!` result overlay, its accepted Circle input, and normal teardown. The
 run logged no unmapped call or runtime-fault marker.
 
+The complementary win fixture completed the same path without state writes:
+two passcodes were entered through the original UI, ordinary pad input defeated
+the sole opponent, and the retail result screen rendered `YOU WIN!` with one
+player and zero enemies before accepting Circle. A separate Quest run selected
+its route, loaded Ski Resort, sustained 900 active gameplay ticks with movement
+and weapons, and quit through the original pause confirmation.
+
 The original Options hub now completes all eight pages with visible captures.
 The Audio editor restores its initial values after bidirectional changes, the
 Screen Adjustment editor restores `(0,0)` after moving both axes, and the
 Credits selection played all 1,251 queued frames through its authored reset and
 normal loop restart. The pause fixture completed CD-track selection, resume,
 confirmation cancel, a second resume, and confirmed quit with no runtime-fault
-marker. Separate clean fixtures also presented and navigated the Quest route,
-Cooperative, Versus, and both two-player selector layouts. See
+marker. Separate clean fixtures also exercised Cooperative, Versus, and both
+two-player selector layouts. See
 `VERTICAL_SLICE.md` for the evidence and the remaining cross-runtime
 state-comparison work.
 

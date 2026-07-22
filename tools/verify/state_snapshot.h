@@ -13,6 +13,8 @@
 #include <stdint.h>
 #include "structs.h"
 
+#define V8_SS_MAGIC        0x53533856u  /* 'V8SS' little-endian */
+#define V8_SS_VERSION      3u
 #define V8_MAX_VEHICLES     8       /* observed: g_playerSlotIdx[8] */
 #define V8_MAX_PROJECTILES  64      /* placeholder; confirm in pass 2 */
 
@@ -21,7 +23,8 @@ typedef struct V8StateSnapshot {
     uint32_t  version;          /* schema rev (bump on layout change) */
     uint32_t  frameCounter;     /* g_vsyncCounter */
     int32_t   rngSeed;          /* g_rngSeed */
-    int32_t   rngCounter;       /* g_rngCounter */
+    uint8_t   rngCounter;       /* g_rngCounter: one-byte PRNG carry */
+    uint8_t   rngReserved[3];   /* explicit stable padding */
     uint8_t   matchMode;        /* g_matchMode */
     uint8_t   splitScreenMode;  /* g_splitScreenMode (0=1P, 1/2=2P) */
     uint8_t   drawBufIndex;     /* g_drawBufIndex */

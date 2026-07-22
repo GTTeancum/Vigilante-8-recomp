@@ -1,5 +1,5 @@
 # Stage-synchronized traversal of the one-player Quest branch through its route
-# screen and into the retail single-player vehicle selector.
+# screen, player selection, active gameplay, and the original pause/quit path.
 
 10+2=START
 
@@ -16,6 +16,25 @@
 20+2=RIGHT
 40+2=LEFT
 60+2=CROSS
+# The Quest arena load lands in the original post-load "continue" wait before
+# gameplay stage detection begins. Confirm it through the same active route stage.
+140+600=CROSS
 
 [choose_player]
 20+2=CROSS
+
+[gameplay]
+180+600=CROSS,RIGHT
+260+2=CIRCLE
+420+2=R1
+900+2=START
+
+[pause_1]
+20+2=RIGHT
+40+2=CROSS
+
+[pause_confirm_1]
+10+2=LEFT
+30+2=CROSS
+
+[pause_quit]

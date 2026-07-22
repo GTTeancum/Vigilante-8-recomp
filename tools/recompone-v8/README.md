@@ -29,3 +29,23 @@ The resulting `PS1 game` deployment does not need or search for BIN/CUE files.
 That exact-path tree is also the supported asset-mod surface. C# runtime hooks
 are confined to framework-dependent development builds until their detour
 dependency supports the deployed single-file layout.
+
+## State tracing
+
+Set `RECOMPONE_STATE_TRACE_PATH` to write one JSON Lines state record at the
+entry to every player-vehicle physics tick. Schema `v8-reference-state-v1`
+contains the deterministic physics tick, original active-low pad words, exact
+PRNG seed and one-byte carry, match mode, split-screen mode, and pointer-neutral
+vehicle transforms, velocities, damage zones, and weapon inventories. It does
+not write to emulated game state.
+
+Compare two captures with:
+
+```powershell
+python tools/recompone-v8/compare_state_traces.py expected.jsonl actual.jsonl
+```
+
+The comparator reports the first divergent tick and field path. `--ignore`
+can omit a deliberately uncontrolled field; `--allow-prefix`
+validates a clean common prefix when a capture is interrupted. An externally
+instrumented PS1 run must emit the same schema for cross-runtime comparison.

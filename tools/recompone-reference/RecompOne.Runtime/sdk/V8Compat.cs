@@ -1,5 +1,6 @@
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Dispatch;
+using RecompOne.Runtime.Hardware;
 using RecompOne.Runtime.Host;
 using RecompOne.Runtime.Memory;
 
@@ -31,6 +32,10 @@ public static class V8Compat
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OPTIONS") == "1";
     static readonly bool _traceAnimation =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_ANIMATION") == "1";
+    static readonly bool _victoryAutopilot =
+        Environment.GetEnvironmentVariable("RECOMPONE_V8_VICTORY_AUTOPILOT") == "1";
+    static readonly string? _stateTracePath =
+        Environment.GetEnvironmentVariable("RECOMPONE_STATE_TRACE_PATH");
     static readonly int _soakHeartbeatTicks =
         int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_SOAK_HEARTBEAT_TICKS"),
             out int heartbeatTicks)
@@ -73,12 +78,16 @@ public static class V8Compat
     static int _pendingVehicleDamageImpulse;
     static string? _pendingVehicleDamageState;
     static int _vehicleDamageChangeCount;
+    static uint _victoryAutopilotTarget;
+    static ushort _victoryAutopilotInput;
     static bool _capturedPlayerProjectile;
     static bool _capturedPlayerWeaponHit;
     static bool _capturedVehicleDestruction;
     static bool _resultScreenReached;
     static bool _gameplayStage;
     static bool _optionsMenuActive;
+    static bool _passcodeEditorVisited;
+    static int _passcodeEntryCount;
     static bool _pauseResumePending;
     static int _pauseScreenCount;
     static int _pauseConfirmCount;
@@ -102,6 +111,8 @@ public static class V8Compat
     static uint _casinoScatterObject;
     static uint _casinoScatterMode;
     static bool _casinoScatterEndFixLogged;
+    static StreamWriter? _stateTraceWriter;
+    static bool _stateTraceUnavailable;
 
     public static void TraceAnimationObject(CpuContext c, IMemory m)
     {
@@ -684,6 +695,8 @@ public static class V8Compat
         if (player == 0u || c.A0 != player) return;
 
         int tick = ++_vehiclePhysicsTick;
+        UpdateVictoryAutopilot(m, player, tick);
+        WriteStateTrace(m, c.GP, player, tick);
         if (!_soakTeardownSignaled && _soakTeardownTick > 0 && tick >= _soakTeardownTick)
         {
             _soakTeardownSignaled = true;
@@ -724,6 +737,150 @@ public static class V8Compat
             $"flags=0x{m.ReadU32(player):X8} upY={unchecked((short)m.ReadU16(player + 0x18u))} " +
             $"pos={ReadVec3(m, player + 0x24u)} vel={ReadVec3(m, player + 0x80u)} " +
             $"ang={ReadVec3(m, player + 0x90u)} matrix={ReadMatrix(m, player + 0x10u)}");
+    }
+
+    public static ushort GetAutomationInputMask() =>
+        _victoryAutopilot ? _victoryAutopilotInput : (ushort)0;
+
+    static void WriteStateTrace(IMemory m, uint gp, uint player, int tick)
+    {
+        if (string.IsNullOrWhiteSpace(_stateTracePath) || _stateTraceUnavailable)
+            return;
+
+        try
+        {
+            if (_stateTraceWriter == null)
+            {
+                string path = Path.GetFullPath(_stateTracePath);
+                string? directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+                _stateTraceWriter = new StreamWriter(path, false);
+                _stateTraceWriter.WriteLine(
+                    "{\"record\":\"schema\",\"schema\":\"v8-reference-state-v1\"," +
+                    "\"source\":\"SLUS_005.10\",\"tickHook\":\"FUN_8002f9bc:pre\"," +
+                    "\"inputEncoding\":\"PS1 active-low pad bits\"}");
+                AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+                {
+                    _stateTraceWriter?.Flush();
+                    _stateTraceWriter?.Dispose();
+                };
+                Console.Error.WriteLine($"[V8StateTrace] writing {path}");
+            }
+
+            uint player2 = m.ReadU32(gp + 0x7D4u);
+            _stateTraceWriter.WriteLine(
+                $"{{\"record\":\"state\",\"tick\":{tick}," +
+                $"\"rngSeed\":{unchecked((int)m.ReadU32(0x800568D4u))}," +
+                $"\"rngCarry\":{m.ReadU8(0x800568D8u)}," +
+                $"\"matchMode\":{m.ReadU8(gp + 0x15u)}," +
+                $"\"splitScreen\":{m.ReadU32(gp + 0x10u)}," +
+                $"\"pad1\":{Controller.State},\"pad2\":{Controller.State2}," +
+                $"\"p1\":{ReadStateTraceVehicle(m, player)}," +
+                $"\"p2\":{ReadStateTraceVehicle(m, player2)}}}");
+            if (tick % 60 == 0)
+                _stateTraceWriter.Flush();
+        }
+        catch (Exception ex)
+        {
+            _stateTraceUnavailable = true;
+            _stateTraceWriter?.Dispose();
+            _stateTraceWriter = null;
+            Console.Error.WriteLine($"[V8StateTrace] disabled after write failure: {ex.Message}");
+        }
+    }
+
+    static string ReadStateTraceVehicle(IMemory m, uint address)
+    {
+        if (!IsRetailRamRange(address, 0x11Cu) || m.ReadU8(address + 4u) != 2u)
+            return "null";
+
+        uint slot0 = m.ReadU32(address + 0x110u);
+        uint slot1 = m.ReadU32(address + 0x114u);
+        uint slot2 = m.ReadU32(address + 0x118u);
+        return
+            $"{{\"flags\":{m.ReadU32(address)},\"kind\":{m.ReadU8(address + 4u)}," +
+            $"\"health\":{m.ReadU16(address + 0x0Cu)}," +
+            $"\"maxHealth\":{m.ReadU16(address + 0x0Eu)}," +
+            $"\"matrix\":{ReadStateTraceMatrix(m, address + 0x10u)}," +
+            $"\"position\":{ReadStateTraceVec3(m, address + 0x24u)}," +
+            $"\"velocity\":{ReadStateTraceVec3(m, address + 0x80u)}," +
+            $"\"angularVelocity\":{ReadStateTraceVec3(m, address + 0x90u)}," +
+            $"\"damageZones\":[{ReadNodeHealthValue(m, m.ReadU32(address + 0xECu))}," +
+            $"{ReadNodeHealthValue(m, m.ReadU32(address + 0xF0u))}," +
+            $"{ReadNodeHealthValue(m, m.ReadU32(address + 0xF4u))}]," +
+            $"\"selectedWeapon\":{m.ReadU8(address + 0xB3u)}," +
+            $"\"weaponSlots\":[{ReadStateTraceWeapon(m, slot0)}," +
+            $"{ReadStateTraceWeapon(m, slot1)},{ReadStateTraceWeapon(m, slot2)}]}}";
+    }
+
+    static string ReadStateTraceVec3(IMemory m, uint address) =>
+        $"[{unchecked((int)m.ReadU32(address))}," +
+        $"{unchecked((int)m.ReadU32(address + 4u))}," +
+        $"{unchecked((int)m.ReadU32(address + 8u))}]";
+
+    static string ReadStateTraceMatrix(IMemory m, uint address) =>
+        $"[{unchecked((short)m.ReadU16(address))}," +
+        $"{unchecked((short)m.ReadU16(address + 2u))}," +
+        $"{unchecked((short)m.ReadU16(address + 4u))}," +
+        $"{unchecked((short)m.ReadU16(address + 6u))}," +
+        $"{unchecked((short)m.ReadU16(address + 8u))}," +
+        $"{unchecked((short)m.ReadU16(address + 10u))}," +
+        $"{unchecked((short)m.ReadU16(address + 12u))}," +
+        $"{unchecked((short)m.ReadU16(address + 14u))}," +
+        $"{unchecked((short)m.ReadU16(address + 16u))}]";
+
+    static string ReadStateTraceWeapon(IMemory m, uint address) =>
+        IsRetailRamRange(address, 0x0Eu)
+            ? $"{{\"kind\":{m.ReadU8(address + 8u)},\"ammo\":{m.ReadU16(address + 0x0Cu)}}}"
+            : "null";
+
+    static void UpdateVictoryAutopilot(IMemory m, uint player, int tick)
+    {
+        if (!_victoryAutopilot) return;
+
+        ushort fire = (ushort)(Controller.R2 | Controller.L2);
+        uint target = _victoryAutopilotTarget;
+        if (!IsRetailRamRange(target, 0xF8u) || m.ReadU8(target + 4u) != 2u)
+        {
+            _victoryAutopilotInput = fire;
+            return;
+        }
+
+        long dx = unchecked((int)m.ReadU32(target + 0x24u)) -
+                  (long)unchecked((int)m.ReadU32(player + 0x24u));
+        long dz = unchecked((int)m.ReadU32(target + 0x2Cu)) -
+                  (long)unchecked((int)m.ReadU32(player + 0x2Cu));
+        int forwardX = unchecked((short)m.ReadU16(player + 0x14u));
+        int forwardZ = unchecked((short)m.ReadU16(player + 0x20u));
+        long cross = (long)forwardX * dz - (long)forwardZ * dx;
+        long dot = (long)forwardX * dx + (long)forwardZ * dz;
+        long absoluteCross = Math.Abs(cross);
+        long absoluteDot = Math.Abs(dot);
+        ulong distanceSquared = (ulong)(dx * dx + dz * dz);
+        ushort steer = 0;
+        if (absoluteCross > absoluteDot / 8)
+            steer = cross < 0 ? Controller.Right : Controller.Left;
+        else if (dot < 0)
+            steer = Controller.Right;
+
+        // Brake inside a short engagement radius instead of continually
+        // overshooting the target. All movement remains ordinary pad input;
+        // the automation never changes gameplay state directly.
+        ushort movement = distanceSquared > 20_000_000_000UL
+            ? Controller.Cross
+            : Controller.Square;
+        _victoryAutopilotInput = (ushort)(fire | movement | steer);
+
+        if (tick % 600 == 0)
+        {
+            Console.Error.WriteLine(
+                $"[V8Autopilot] tick={tick} target=0x{target:X8} " +
+                $"distance2={distanceSquared} " +
+                $"movement={(movement == Controller.Cross ? "throttle" : "brake")} " +
+                $"steer={(steer == Controller.Right ? "right" : steer == Controller.Left ? "left" : "center")} " +
+                $"state={ReadVehicleDamageState(m, target)}");
+        }
     }
 
     public static void TraceVehicleIntegratePre(CpuContext c, IMemory m)
@@ -877,7 +1034,7 @@ public static class V8Compat
 
     public static void TraceVehicleDamagePre(CpuContext c, IMemory m)
     {
-        if (!_traceWeapons || unchecked((int)c.A1) >= 0) return;
+        if ((!_traceWeapons && !_victoryAutopilot) || unchecked((int)c.A1) >= 0) return;
         m = Dispatcher.UnwrapMemory(m);
         if (!IsRetailRamRange(c.A0, 0xF8u) || m.ReadU8(c.A0 + 4u) != 2u) return;
 
@@ -889,14 +1046,17 @@ public static class V8Compat
 
     public static void TraceVehicleDamagePost(CpuContext c, IMemory m)
     {
-        if (!_traceWeapons || _pendingVehicleDamageTarget == 0u) return;
+        if ((!_traceWeapons && !_victoryAutopilot) || _pendingVehicleDamageTarget == 0u) return;
         m = Dispatcher.UnwrapMemory(m);
         uint target = _pendingVehicleDamageTarget;
+        uint player = m.ReadU32(c.GP + 0x7D0u);
+        if (_victoryAutopilot && target != player)
+            _victoryAutopilotTarget = target;
         string before = _pendingVehicleDamageState ?? "unavailable";
         string after = ReadVehicleDamageState(m, target);
-        if ((before != after || c.V0 != 0u) && ++_vehicleDamageChangeCount <= 128)
+        if (_traceWeapons && (before != after || c.V0 != 0u) &&
+            ++_vehicleDamageChangeCount <= 128)
         {
-            uint player = m.ReadU32(c.GP + 0x7D0u);
             Console.Error.WriteLine(
                 $"[V8Damage] tick={_vehiclePhysicsTick} target=0x{target:X8} " +
                 $"role={(target == player ? "player" : "other")} impulse={_pendingVehicleDamageImpulse} " +
@@ -978,6 +1138,9 @@ public static class V8Compat
     static string ReadNodeHealth(IMemory m, uint address) =>
         IsRetailRamRange(address, 0x0Eu) ? m.ReadU16(address + 0x0Cu).ToString() : "-";
 
+    static int ReadNodeHealthValue(IMemory m, uint address) =>
+        IsRetailRamRange(address, 0x0Eu) ? m.ReadU16(address + 0x0Cu) : -1;
+
     static string ReadVec3(IMemory m, uint address) =>
         $"({unchecked((int)m.ReadU32(address))},{unchecked((int)m.ReadU32(address + 4u))}," +
         $"{unchecked((int)m.ReadU32(address + 8u))})";
@@ -1012,7 +1175,23 @@ public static class V8Compat
         else if (text == "GAME STATUS")
         {
             _optionsMenuActive = true;
-            stage = "game_status";
+            stage = _passcodeEditorVisited
+                ? _passcodeEntryCount == 1
+                    ? "game_status_return"
+                    : $"game_status_return_{_passcodeEntryCount}"
+                : "game_status";
+            _passcodeEditorVisited = false;
+        }
+        else if (text.StartsWith("passcode", StringComparison.OrdinalIgnoreCase) ||
+                 (_optionsMenuActive && text.Length == 1 &&
+                  (text[0] == '_' || text[0] is >= 'A' and <= 'Z')))
+        {
+            if (!_passcodeEditorVisited)
+                _passcodeEntryCount++;
+            _passcodeEditorVisited = true;
+            stage = _passcodeEntryCount == 1
+                ? "passcode"
+                : $"passcode_{_passcodeEntryCount}";
         }
         else if (text == "MEMORY CARD SLOT 1" && _optionsMenuActive)
         {
@@ -1115,6 +1294,8 @@ public static class V8Compat
             int captureDelay = _lastMenuStage switch
             {
                 "memory_card" => 20,
+                "passcode" or "passcode_2" => 40,
+                "choose_enemies" => 100,
                 "difficulty_setting" or "controller_1" or "controller_2" or
                 "audio_settings" or "screen_adjustment" or "quest_route" or
                 "choose_players" or "two_player_mode" => 12,

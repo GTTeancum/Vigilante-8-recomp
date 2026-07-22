@@ -79,8 +79,12 @@ reference tool; the existing C project remains authoritative for the port.
 The executable-gameplay portion of this rule was reached on 2026-07-21:
 Oilfield ran under scripted steering, acceleration, and weapon input for 272.7
 seconds without a runtime error, and the deployed copy passed a second active
-smoke test. Shared state-trace capture and first-divergence comparison remain
-the next reference-lane work rather than prerequisites for running the game.
+smoke test. The reference now emits a pointer-neutral JSONL record at every
+player-vehicle physics tick, including original pad words, PRNG state, match
+state, transforms, velocities, damage zones, and weapon inventories. A
+committed comparator finds the first divergent tick and field. An instrumented
+original PS1/emulator trace or a linkable native gameplay loop is still
+required for the first cross-runtime comparison.
 
 The current vertical slice is complete only when a clean launch reaches
 game-over/results through a reproducible input fixture and every gate in

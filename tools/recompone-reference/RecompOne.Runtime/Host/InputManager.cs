@@ -3,6 +3,7 @@ using Silk.NET.SDL;
 using System.Runtime.InteropServices;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Hardware;
+using RecompOne.Runtime.Sdk;
 
 namespace RecompOne.Runtime.Host;
 
@@ -39,6 +40,7 @@ internal static unsafe class InputManager
     static bool _disableLiveInput;
     static bool _forcePad2Connected;
     static bool _traceInput;
+    static string? _captureScriptedStage;
     static bool _suppressRumble;
     static readonly (byte Large, byte Small)[] _lastRumble =
         [(byte.MaxValue, byte.MaxValue), (byte.MaxValue, byte.MaxValue)];
@@ -53,6 +55,11 @@ internal static unsafe class InputManager
         _forcePad2Connected =
             Environment.GetEnvironmentVariable("RECOMPONE_FORCE_PAD2_CONNECTED") == "1";
         _traceInput = Environment.GetEnvironmentVariable("RECOMPONE_TRACE_INPUT") == "1";
+        string? captureScriptedStage =
+            Environment.GetEnvironmentVariable("RECOMPONE_CAPTURE_SCRIPTED_STAGE");
+        _captureScriptedStage = string.IsNullOrWhiteSpace(captureScriptedStage)
+            ? null
+            : NormalizeStage(captureScriptedStage);
         _suppressRumble =
             Environment.GetEnvironmentVariable("RECOMPONE_SUPPRESS_RUMBLE") == "1";
         ParseScriptedInput();
@@ -113,6 +120,7 @@ internal static unsafe class InputManager
             PollGamepads();
         }
         ApplyScriptedInput();
+        Controller.State &= (ushort)~V8Compat.GetAutomationInputMask();
         Controller.Connected2 = _forcePad2Connected ||
             (!_disableLiveInput && (_pad1 != null || HasAnyKey(ConfigManager.Game.Keys2)));
     }
@@ -263,6 +271,8 @@ internal static unsafe class InputManager
                 Console.Error.WriteLine(
                     $"[Input] scripted pulse at {location}: " +
                     $"p1=0x{pulse.Pad1Mask:X4} p2=0x{pulse.Pad2Mask:X4}");
+                if (_captureScriptedStage == pulse.Stage)
+                    HostWindow.RequestDisplayCapture($"{pulse.Stage}_{stagePoll:0000}");
             }
             Controller.State &= (ushort)~pulse.Pad1Mask;
             Controller.State2 &= (ushort)~pulse.Pad2Mask;

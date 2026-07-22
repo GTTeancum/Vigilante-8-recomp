@@ -11,6 +11,9 @@ LDFLAGS ?=
 OBJS = state_snapshot.o input_recorder.o
 TARGET = run_compare
 
+# state_capture.o is intentionally not linked into the host comparator. The
+# native gameplay target links it once the recovered game loop is available.
+
 all: $(TARGET)
 
 $(TARGET): run_compare.o $(OBJS)

@@ -1,6 +1,6 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 12:56 EDT
+Last updated: 2026-07-22 14:50 EDT
 Status: ACTIVE
 
 ## Goal
@@ -56,19 +56,25 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [x] Add non-invasive live-controller diagnostics and validate SDL/XInput
       discovery against the attached XInput-compatible device.
 - [x] Exercise hot-plug state handling and rumble calls where automation permits.
-- [ ] Test the victory/result path without directly writing gameplay state.
-- [ ] Extend gameplay coverage into Quest where deterministic automation permits.
+- [x] Test the victory/result path without directly writing gameplay state.
+- [x] Extend gameplay coverage into Quest where deterministic automation permits.
 - [x] Audit and either fix or explicitly disable the unsupported single-file
       C# mod/runtime-detour path.
 - [x] Refresh stale reference documentation and deployed-path instructions.
-- [ ] Audit available state-trace/comparison scaffolding and advance the
+- [x] Audit available state-trace/comparison scaffolding and advance the
       PS1-versus-reference fidelity work as far as local inputs permit.
 
 ### Future QOL and presentation
 
+- [ ] Add a PS1 color-dithering toggle and default the enhanced presentation
+      mode to undithered output so flat textures and gradients remain clean;
+      retain authentic ordered dithering in the fidelity/reference mode.
 - [ ] Add optional perspective-correct texture mapping to eliminate the
       PlayStation's affine texture warping/projection distortion, while
       retaining a fidelity mode for exact reference comparisons.
+- [ ] Add a geometry-edge anti-aliasing option (prefer MSAA or an equivalent
+      edge-only pass) that preserves crisp source textures and PS1 dithering;
+      retain full-frame FXAA and Off as separately selectable modes.
 
 ## Deliberate boundaries
 
@@ -145,3 +151,19 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
   `main/start` pre-hook. MonoMod declares single-file applications unsupported,
   so the deployed layout now rejects C# source mods with an explicit diagnostic
   instead of reporting inactive hooks as loaded; loose asset mods remain active.
+- 2026-07-22: The input-only victory fixture entered `I_WILL_NOT_DIE` and
+  `DEADLY_MISSILE` through the original passcode editor, launched a one-enemy
+  Oil Fields match, and supplied only ordinary controller input afterward. The
+  enemy reached real soft/full destruction at gameplay ticks 11,710/12,010;
+  the retail result logic reported the player alive at tick 12,521, rendered
+  `YOU WIN!` with `PLAYER 1 vs ENEMIES 0`, and accepted its Circle dismissal.
+- 2026-07-22: Quest automation selected its vehicle and route, confirmed the
+  original post-load continue wait, loaded Ski Resort, and sustained 900 active
+  gameplay ticks with moving position/velocity, acceleration, weapon fire, and
+  weapon cycling before quitting through the original pause confirmation.
+- 2026-07-22: The reference now emits pointer-neutral per-physics-tick JSONL
+  state. The comparator reproduced the 16,260-tick victory trace and 900-tick
+  Quest trace exactly against themselves, then correctly found Arcade-versus-
+  Quest divergence at tick 1. Native snapshot scaffolding now records the
+  instruction-confirmed one-byte PRNG carry; external PS1 capture remains a
+  user-sign-off dependency rather than an autonomous local task.
