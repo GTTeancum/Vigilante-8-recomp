@@ -111,6 +111,8 @@ public static class V8Compat
     static uint _cursorClearingAnimationObject;
     static uint _cursorClearingAnimationMode;
     static bool _cursorClearingAnimationFixLogged;
+    static uint _childCursorClearingAnimationObject;
+    static bool _childCursorClearingAnimationFixLogged;
     static StreamWriter? _stateTraceWriter;
     static bool _stateTraceUnavailable;
 
@@ -194,6 +196,34 @@ public static class V8Compat
                 $"[V8Compat] cursor-clearing animation ended cleanly " +
                 $"object=0x{_cursorClearingAnimationObject:X8} " +
                 $"callback=0x{m.ReadU32(_cursorClearingAnimationObject + 0x64u):X8}");
+        }
+    }
+
+    public static void TraceChildCursorClearingAnimationPre(CpuContext c, IMemory m)
+    {
+        _childCursorClearingAnimationObject = 0u;
+        if (c.A1 != 5u || c.A0 == 0u) return;
+        m = Dispatcher.UnwrapMemory(m);
+        _childCursorClearingAnimationObject = m.ReadU32(c.A0 + 0x38u);
+    }
+
+    public static void FixChildCursorClearingAnimationEnd(CpuContext c, IMemory m)
+    {
+        uint obj = _childCursorClearingAnimationObject;
+        if (obj == 0u) return;
+        m = Dispatcher.UnwrapMemory(m);
+        if (m.ReadU32(obj + 0x60u) != 0u) return;
+
+        // Main callback 0x800378D0 event 5 dispatches through 0x80037ADC,
+        // which clears the child object's animation cursor and returns zero.
+        // Abort the outer animation walk for that exact cleared-child state.
+        c.V0 = 0xFFFFFFFFu;
+        if (!_childCursorClearingAnimationFixLogged)
+        {
+            _childCursorClearingAnimationFixLogged = true;
+            Console.Error.WriteLine(
+                $"[V8Compat] child cursor-clearing animation ended cleanly " +
+                $"object=0x{obj:X8} callback=0x800378D0");
         }
     }
 

@@ -828,6 +828,18 @@ def main() -> int:
                 "mode": "post",
             },
             {
+                "overlay": "main",
+                "address": "800378D0",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceChildCursorClearingAnimationPre",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800378D0",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.FixChildCursorClearingAnimationEnd",
+                "mode": "post",
+            },
+            {
                 "overlay": "CASNOCTY",
                 "address": "80101A90",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TraceCursorClearingAnimationPre",
