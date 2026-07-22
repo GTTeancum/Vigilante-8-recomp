@@ -89,13 +89,15 @@ if (probeSource)
             throw new FileNotFoundException($"Game file not found: {probeFile}");
         byte[] file = source.ReadFile(probeFile);
         byte[] cooked = source.ReadSectorData(lba, 2048);
+        byte[] stream = source.ReadSectorData(lba, 2336);
         byte[] raw = source.ReadSectorData(lba, 2352);
         static string Sha256(byte[] data) => Convert.ToHexString(
             System.Security.Cryptography.SHA256.HashData(data));
         Console.WriteLine(
             $"[SourceProbeFile] path={probeFile} lba={lba} size={size} " +
             $"bytes={file.Length} sha256={Sha256(file)} " +
-            $"sector2048={Sha256(cooked)} sector2352={Sha256(raw)}");
+            $"sector2048={Sha256(cooked)} sector2336={Sha256(stream)} " +
+            $"sector2352={Sha256(raw)}");
     }
     return 0;
 }

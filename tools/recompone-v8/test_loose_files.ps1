@@ -1,16 +1,18 @@
 param(
     [string]$Exe = "reference/generated/recompiled/bin/Release/net10.0/Vigilante8PC.exe",
-    [string]$Cue = "BINCUE/Vigilante 8 (USA).cue",
+    [string]$LooseRoot = "PS1 game",
     [string]$OutputRoot = "reference/generated/loose-tests"
 )
 
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $exePath = (Resolve-Path (Join-Path $repo $Exe)).Path
-$cuePath = (Resolve-Path (Join-Path $repo $Cue)).Path
+$sourceRoot = (Resolve-Path (Join-Path $repo $LooseRoot)).Path
 $outputBase = Join-Path $repo $OutputRoot
-$runRoot = Join-Path $outputBase (Get-Date -Format "yyyyMMdd-HHmmss")
-New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+$runRoot = Join-Path $outputBase (Get-Date -Format "yyyyMMdd-HHmmssfff")
+$fixtureRoot = Join-Path $runRoot "standalone"
+New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
+Copy-Item -Path (Join-Path $sourceRoot "*") -Destination $fixtureRoot -Recurse -Force
 
 function Get-Sha256([byte[]]$Data) {
     $sha = [Security.Cryptography.SHA256]::Create()
@@ -28,14 +30,8 @@ function Assert-Equal($Actual, $Expected, [string]$Label) {
     }
 }
 
-function Invoke-Probe([string]$Label, [string]$DiscPath, [string]$LooseRoot = "") {
-    $arguments = @($cuePath)
-    if ($LooseRoot.Length -eq 0) {
-        $arguments += "--no-loose"
-    } else {
-        $arguments += @("--loose", $LooseRoot)
-    }
-    $arguments += @("--probe-file", $DiscPath)
+function Invoke-Probe([string]$Label, [string]$GamePath) {
+    $arguments = @("--loose", $fixtureRoot, "--probe-file", $GamePath)
     $output = (& $exePath @arguments 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 0) {
         throw "$Label probe failed with exit code $LASTEXITCODE`n$output"
@@ -54,90 +50,140 @@ function Invoke-Probe([string]$Label, [string]$DiscPath, [string]$LooseRoot = ""
     foreach ($match in [regex]::Matches($fileLine, "(?<key>[A-Za-z0-9]+)=(?<value>[^ ]+)")) {
         $values[$match.Groups["key"].Value] = $match.Groups["value"].Value
     }
-    $overrideMatch = [regex]::Match($sourceLine, "overrides=(?<count>[0-9]+)")
-    if (!$overrideMatch.Success) { throw "$Label probe omitted the override count" }
+    $filesMatch = [regex]::Match($sourceLine, "files=(?<count>[0-9]+)")
+    if (!$filesMatch.Success) { throw "$Label probe omitted the loose file count" }
+    if ($sourceLine -notmatch "mode=standalone-loose") {
+        throw "$Label did not run in standalone loose mode"
+    }
 
     return [PSCustomObject]@{
         Label = $Label
-        Overrides = [int]$overrideMatch.Groups["count"].Value
+        Files = [int]$filesMatch.Groups["count"].Value
         Size = [int64]$values["size"]
         Bytes = [int64]$values["bytes"]
         Sha256 = $values["sha256"]
         Sector2048 = $values["sector2048"]
+        Sector2336 = $values["sector2336"]
         Sector2352 = $values["sector2352"]
     }
 }
 
-function Write-Pattern([string]$Path, [int]$Length, [int]$Seed) {
-    $parent = Split-Path $Path
-    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+function Invoke-ExpectedFailure(
+    [string]$Label,
+    [string]$GamePath,
+    [string]$RequiredMessage
+) {
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = (& $exePath --loose $fixtureRoot --probe-file $GamePath 2>&1 | Out-String)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldPreference
+    }
+    [IO.File]::WriteAllText((Join-Path $runRoot "$Label.log"), $output)
+    if ($exitCode -eq 0) { throw "$Label unexpectedly succeeded" }
+    $normalizedOutput = ($output -replace "\s+", " ")
+    $normalizedMessage = ($RequiredMessage -replace "\s+", " ")
+    if ($normalizedOutput -notmatch [regex]::Escape($normalizedMessage)) {
+        throw "$Label did not report '$RequiredMessage'`n$output"
+    }
+    return [PSCustomObject]@{
+        Label = $Label
+        ExpectedFailure = $true
+        ExitCode = $exitCode
+        Message = $RequiredMessage
+    }
+}
+
+function New-Pattern([int]$Length, [int]$Seed) {
     $bytes = [byte[]]::new($Length)
     for ($i = 0; $i -lt $bytes.Length; $i++) {
         $bytes[$i] = [byte](($i * 37 + $Seed) -band 0xFF)
     }
-    [IO.File]::WriteAllBytes($Path, $bytes)
     return ,$bytes
+}
+
+function Expand-CookedSector([byte[]]$Cooked, [int]$Prefix, [int]$Suffix) {
+    $result = [byte[]]::new($Prefix + $Cooked.Length + $Suffix)
+    [Array]::Copy($Cooked, 0, $result, $Prefix, $Cooked.Length)
+    return ,$result
 }
 
 $results = [Collections.Generic.List[object]]::new()
 $baselineSystem = Invoke-Probe "baseline-system" "SYSTEM.CNF"
+$baselineData = Invoke-Probe "baseline-data" "COMMON.EXP"
 $baselineVideo = Invoke-Probe "baseline-video" "VIDEO/ACTLOGO.STR"
 $results.Add($baselineSystem)
+$results.Add($baselineData)
 $results.Add($baselineVideo)
+Assert-Equal $baselineSystem.Files 69 "standalone required-file count"
 
-$exactRoot = Join-Path $runRoot "exact"
-$exactPath = Join-Path $exactRoot "SYSTEM.CNF"
-[byte[]]$exactBytes = Write-Pattern $exactPath 97 11
-$exact = Invoke-Probe "exact-mutated-size" "SYSTEM.CNF" $exactRoot
-$results.Add($exact)
-Assert-Equal $exact.Overrides 1 "exact override count"
-Assert-Equal $exact.Size 97 "exact loose size"
-Assert-Equal $exact.Bytes 97 "exact loose read length"
-Assert-Equal $exact.Sha256 (Get-Sha256 $exactBytes) "exact loose content"
-$padded = [byte[]]::new(2048)
-[Array]::Copy($exactBytes, $padded, $exactBytes.Length)
-Assert-Equal $exact.Sector2048 (Get-Sha256 $padded) "exact cooked-sector override"
-Assert-Equal $exact.Sector2352 $baselineSystem.Sector2352 "exact raw-sector fallback"
+$dataPath = Join-Path $fixtureRoot "COMMON.EXP"
+$originalData = [IO.File]::ReadAllBytes($dataPath)
+[byte[]]$mutatedData = New-Pattern 4097 11
+[IO.File]::WriteAllBytes($dataPath, $mutatedData)
+$mutated = Invoke-Probe "exact-mutated-size" "COMMON.EXP"
+$results.Add($mutated)
+Assert-Equal $mutated.Size 4097 "exact loose size"
+Assert-Equal $mutated.Bytes 4097 "exact loose read length"
+Assert-Equal $mutated.Sha256 (Get-Sha256 $mutatedData) "exact loose content"
+$firstCooked = [byte[]]::new(2048)
+[Array]::Copy($mutatedData, $firstCooked, 2048)
+Assert-Equal $mutated.Sector2048 (Get-Sha256 $firstCooked) "mutated cooked sector"
+Assert-Equal $mutated.Sector2336 (Get-Sha256 (Expand-CookedSector $firstCooked 8 280)) "mutated 2336 sector"
+Assert-Equal $mutated.Sector2352 (Get-Sha256 (Expand-CookedSector $firstCooked 24 280)) "mutated 2352 sector"
+[IO.File]::WriteAllBytes($dataPath, $originalData)
 
-Remove-Item -LiteralPath $exactPath
-$deleted = Invoke-Probe "deleted-fallback" "SYSTEM.CNF" $exactRoot
-$results.Add($deleted)
-Assert-Equal $deleted.Overrides 0 "deleted override count"
-Assert-Equal $deleted.Size $baselineSystem.Size "deleted disc size fallback"
-Assert-Equal $deleted.Sha256 $baselineSystem.Sha256 "deleted disc content fallback"
+$decoyPath = Join-Path $fixtureRoot "mods/COMMON.EXP"
+New-Item -ItemType Directory -Path (Split-Path $decoyPath) -Force | Out-Null
+[IO.File]::WriteAllBytes($decoyPath, (New-Pattern 73 23))
+$exactWins = Invoke-Probe "exact-path-beats-decoy" "COMMON.EXP"
+$results.Add($exactWins)
+Assert-Equal $exactWins.Sha256 $baselineData.Sha256 "exact path authority"
 
-$singleRoot = Join-Path $runRoot "single-basename"
-$singlePath = Join-Path $singleRoot "nested/SYSTEM.CNF"
-[byte[]]$singleBytes = Write-Pattern $singlePath 71 23
-$single = Invoke-Probe "single-basename" "SYSTEM.CNF" $singleRoot
-$results.Add($single)
-Assert-Equal $single.Overrides 1 "single-basename override count"
-Assert-Equal $single.Sha256 (Get-Sha256 $singleBytes) "single-basename content"
+$missingPath = Join-Path $fixtureRoot "missing/COMMON.EXP"
+New-Item -ItemType Directory -Path (Split-Path $missingPath) -Force | Out-Null
+Move-Item -LiteralPath $dataPath -Destination $missingPath
+try {
+    $missing = Invoke-ExpectedFailure "missing-required-no-fallback" "SYSTEM.CNF" "Standalone loose install is missing required assets (no BIN/CUE fallback): COMMON.EXP"
+    $results.Add($missing)
+} finally {
+    Move-Item -LiteralPath $missingPath -Destination $dataPath
+}
 
-$ambiguousRoot = Join-Path $runRoot "ambiguous-basename"
-[void](Write-Pattern (Join-Path $ambiguousRoot "a/SYSTEM.CNF") 73 31)
-[void](Write-Pattern (Join-Path $ambiguousRoot "b/SYSTEM.CNF") 79 47)
-$ambiguous = Invoke-Probe "ambiguous-basename" "SYSTEM.CNF" $ambiguousRoot
-$results.Add($ambiguous)
-Assert-Equal $ambiguous.Overrides 0 "ambiguous-basename override count"
-Assert-Equal $ambiguous.Sha256 $baselineSystem.Sha256 "ambiguous-basename disc fallback"
+$musicPath = Join-Path $fixtureRoot "music/BOOGIE.ogg"
+$missingMusicPath = Join-Path $fixtureRoot "missing/BOOGIE.ogg"
+Move-Item -LiteralPath $musicPath -Destination $missingMusicPath
+try {
+    $missingMusic = Invoke-ExpectedFailure "missing-music-no-fallback" "SYSTEM.CNF" "Loose music track 02 is missing"
+    $results.Add($missingMusic)
+} finally {
+    Move-Item -LiteralPath $missingMusicPath -Destination $musicPath
+}
 
-$rawRoot = Join-Path $runRoot "raw-sector"
-$rawPath = Join-Path $rawRoot "VIDEO/ACTLOGO.STR"
-[byte[]]$rawBytes = Write-Pattern $rawPath 4133 59
-$raw = Invoke-Probe "raw-sector" "VIDEO/ACTLOGO.STR" $rawRoot
+$videoPath = Join-Path $fixtureRoot "VIDEO/ACTLOGO.STR"
+[byte[]]$rawStream = New-Pattern (2336 * 2) 59
+[IO.File]::WriteAllBytes($videoPath, $rawStream)
+$raw = Invoke-Probe "raw-stream-mutated-size" "VIDEO/ACTLOGO.STR"
 $results.Add($raw)
-Assert-Equal $raw.Overrides 1 "raw-file override count"
-Assert-Equal $raw.Size 4133 "raw-file changed size"
-Assert-Equal $raw.Sha256 (Get-Sha256 $rawBytes) "raw-file loose content"
-$rawFirstSector = [byte[]]::new(2048)
-[Array]::Copy($rawBytes, $rawFirstSector, 2048)
-Assert-Equal $raw.Sector2048 (Get-Sha256 $rawFirstSector) "raw-file cooked-sector override"
-Assert-Equal $raw.Sector2352 $baselineVideo.Sector2352 "raw-file 2352-byte disc fallback"
+Assert-Equal $raw.Size 4096 "raw stream logical size"
+Assert-Equal $raw.Bytes 4096 "raw stream logical read length"
+$logicalStream = [byte[]]::new(4096)
+[Array]::Copy($rawStream, 8, $logicalStream, 0, 2048)
+[Array]::Copy($rawStream, 2336 + 8, $logicalStream, 2048, 2048)
+Assert-Equal $raw.Sha256 (Get-Sha256 $logicalStream) "raw stream logical content"
+$rawFirst = [byte[]]::new(2336)
+[Array]::Copy($rawStream, $rawFirst, 2336)
+$rawCooked = [byte[]]::new(2048)
+[Array]::Copy($rawFirst, 8, $rawCooked, 0, 2048)
+Assert-Equal $raw.Sector2048 (Get-Sha256 $rawCooked) "raw stream cooked sector"
+Assert-Equal $raw.Sector2336 (Get-Sha256 $rawFirst) "raw stream full sector"
+Assert-Equal $raw.Sector2352 (Get-Sha256 (Expand-CookedSector $rawFirst 16 0)) "raw stream 2352 synthesis"
 
 $summaryPath = Join-Path $runRoot "summary.json"
 [IO.File]::WriteAllText(
     $summaryPath,
-    ($results | ConvertTo-Json -Depth 4))
-Write-Host "[loose-test] PASS mutation size deletion fallback basename ambiguity and raw-sector boundary"
+    ($results | ConvertTo-Json -Depth 5))
+Write-Host "[loose-test] PASS standalone mutation size exact-path missing-file raw-stream and music cases"
 Write-Host "[loose-test] evidence=$summaryPath"

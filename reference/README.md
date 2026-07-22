@@ -50,14 +50,14 @@ dotnet build reference/generated/recompiled/Vigilante8PC.csproj -c Release --no-
 The same self-contained executable is deployed to two locations:
 
 - `BINCUE/Vigilante8PC.exe` tests the direct BIN/CUE setup.
-- `PS1 game/Vigilante8PC.exe` tests the extracted files in `PS1 game`
-  as live overrides, with the sibling CUE supplying untouched files and raw
-  audiovisual sectors.
+- `PS1 game/Vigilante8PC.exe` tests the standalone extracted files in
+  `PS1 game`; it does not consult the sibling `BINCUE` directory.
 
-Both copies discover the CUE automatically and have the same binary hash. The
-executable defaults Vigilante 8's own Music and Sound Effects controls to 0
-without changing Windows volume or the host mixer. `LOOSE_FILES.md` documents
-the override boundary and optional command-line controls.
+Both copies have the same binary hash. Their neighboring data selects direct
+disc or standalone loose mode. The executable defaults Vigilante 8's own Music
+and Sound Effects controls to 0 without changing Windows volume or the host
+mixer. `LOOSE_FILES.md` documents the modding boundary, stream formats, and
+optional command-line controls.
 
 ### High-resolution presentation
 
@@ -87,10 +87,10 @@ surface independently of the current monitor size.
 
 Host audio uses the bundled SDL2 runtime to queue the reference SPU, XA, and
 Red Book CD-audio mix as 44.1 kHz stereo signed-16 output, so the handoff does
-not require a separate OpenAL installation. The CUE reader preserves the full
-disc TOC and all twelve audio tracks; `CdlPlay` streams their raw stereo sectors
-through the original CD-volume registers while data seeks retain a separate
-drive position.
+not require a separate OpenAL installation. Direct-disc mode reads the mixed
+mode TOC and raw CD audio. Standalone mode presents the same retail track
+positions from the named `music/*.ogg` files and decodes XA from full loose
+Mode 2 sectors; both routes retain the original CD-volume path.
 
 For deterministic automation, set `RECOMPONE_INPUT_FILE` to a committed
 poll-indexed fixture. The current reachability baseline is

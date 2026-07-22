@@ -1,6 +1,6 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 12:05 EDT
+Last updated: 2026-07-22 12:28 EDT
 Status: ACTIVE
 
 ## Goal
@@ -18,7 +18,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
       failing arena is fixed or documented with reproducible evidence.
 - [x] Cooperative and Versus split-screen each reach active gameplay in clean,
       independent runs and remain stable under simultaneous two-pad input.
-- [ ] Direct BIN/CUE and standalone loose-file deployments use the same
+- [x] Direct BIN/CUE and standalone loose-file deployments use the same
       executable and pass focused regressions after any runtime changes; the
       loose deployment must work with the entire `BINCUE` tree unavailable.
 - [ ] Temporary test processes and handoff logs are cleaned; cards and settings
@@ -47,10 +47,10 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 
 ### Other autonomous coverage
 
-- [ ] Replace the CUE-backed override layer with a standalone loose filesystem
+- [x] Replace the CUE-backed override layer with a standalone loose filesystem
       that boots, streams STR/XA, plays loose music, and reaches gameplay with
       no BIN/CUE files available.
-- [ ] Exercise exact-path content mutation, size changes, missing-file errors,
+- [x] Exercise exact-path content mutation, size changes, missing-file errors,
       ambiguous basename rejection, and cooked/raw stream reads in an isolated
       standalone tree suitable for future mods.
 - [x] Add non-invasive live-controller diagnostics and validate SDL/XInput
@@ -60,7 +60,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [ ] Extend gameplay coverage into Quest where deterministic automation permits.
 - [ ] Audit and either fix or explicitly disable the unsupported single-file
       C# mod/runtime-detour path.
-- [ ] Refresh stale reference documentation and deployed-path instructions.
+- [x] Refresh stale reference documentation and deployed-path instructions.
 - [ ] Audit available state-trace/comparison scaffolding and advance the
       PS1-versus-reference fidelity work as far as local inputs permit.
 
@@ -123,3 +123,19 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
   close/reopen rescan with the same Player 1 assignment. Suppressed motor tests
   routed independent start/stop requests to both controller slots; physical
   vibration strength and real unplug/replug feel remain user sign-off items.
+- 2026-07-22: Standalone loose mode now resolves the retail ISO layout from an
+  embedded metadata-only manifest, requires all 69 content assets at exact
+  paths, streams 23 full-sector STR/XA files, and maps twelve named OGG tracks
+  to their original CD positions. With the entire `BINCUE` directory renamed
+  away, the published single-file host streamed ACTLOGO, loaded SHELL/LOAD and
+  OILFIELD, initialized SDL audio, and sustained active gameplay.
+- 2026-07-22: The replacement loose regression suite passed live content and
+  length changes, exact-path precedence over decoys, explicit missing data and
+  music errors with no fallback, and cooked/full-sector stream hashes. A long
+  result run decoded `SOUNDS/DEFEAT.XA` from loose sectors; incremental OGG
+  sector decoding then passed the normal 15-second liveness gate for 90 seconds.
+- 2026-07-22: Final direct-disc and standalone deployments are byte-identical
+  at SHA256 `C8B218A06905FB672443128B827A148495958B3F6899B56E98D30CA90647BFE9`.
+  Default probes selected CUE mode in `BINCUE` and standalone mode in `PS1 game`;
+  both cards and settings remained byte-identical through media conversion and
+  executable deployment.

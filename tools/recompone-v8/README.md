@@ -21,3 +21,8 @@ Options:
 
 `overlay_paths.json` separates source-proven disc paths from layout assumptions.
 Validate its terrain paths against the actual disc before the first execution.
+
+`prepare_loose_media.py` is the one-time bridge from a legally obtained disc
+to the standalone/moddable asset tree. It writes the metadata-only retail LBA
+manifest and expands `.STR`/`.XA` files to complete 2336-byte Mode 2 sectors.
+The resulting `PS1 game` deployment does not need or search for BIN/CUE files.

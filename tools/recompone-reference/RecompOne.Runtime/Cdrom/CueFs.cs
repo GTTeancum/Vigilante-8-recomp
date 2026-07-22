@@ -356,6 +356,7 @@ public sealed class CueFs : IDisposable
 
     public void Dispose()
     {
+        _looseCdda?.Dispose();
         _bin?.Dispose();
         lock (_looseIoGate)
         {
