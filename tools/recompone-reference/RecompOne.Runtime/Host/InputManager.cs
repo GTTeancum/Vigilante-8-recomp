@@ -26,8 +26,12 @@ internal static unsafe class InputManager
     const int RightStickDown = 109;
     static bool _topBarToggle;
     static bool _fullscreenToggle;
-    static readonly List<(int Start, int End, ushort Mask)> _scriptedInput = new();
+    readonly record struct ScriptedPulse(string? Stage, int Start, int End, ushort Mask);
+
+    static readonly List<ScriptedPulse> _scriptedInput = new();
     static int _inputPoll;
+    static string? _scriptStage;
+    static int _stagePoll;
 
     
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
@@ -72,6 +76,8 @@ internal static unsafe class InputManager
     {
         _scriptedInput.Clear();
         _inputPoll = 0;
+        _scriptStage = null;
+        _stagePoll = 0;
 
         string? script = Environment.GetEnvironmentVariable("RECOMPONE_INPUT_SCRIPT");
         string? scriptFile = Environment.GetEnvironmentVariable("RECOMPONE_INPUT_FILE");
@@ -89,8 +95,17 @@ internal static unsafe class InputManager
         }
         if (string.IsNullOrWhiteSpace(script)) return;
 
+        string? stage = null;
         foreach (string raw in script.Split([';', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
+            if (raw.StartsWith('[') && raw.EndsWith(']'))
+            {
+                stage = NormalizeStage(raw[1..^1]);
+                if (stage.Length == 0)
+                    throw new InvalidOperationException("Scripted input stage name cannot be empty");
+                continue;
+            }
+
             string[] sides = raw.Split('=', 2, StringSplitOptions.TrimEntries);
             string[] range = sides[0].Split('+', 2, StringSplitOptions.TrimEntries);
             if (sides.Length != 2 || range.Length != 2 ||
@@ -120,20 +135,50 @@ internal static unsafe class InputManager
                     _ => throw new InvalidOperationException($"Unknown scripted controller button: {button}"),
                 };
             }
-            _scriptedInput.Add((start, start + duration, mask));
+            _scriptedInput.Add(new ScriptedPulse(stage, start, start + duration, mask));
         }
 
-        Console.Error.WriteLine($"[Input] loaded {_scriptedInput.Count} scripted input pulses");
+        int staged = _scriptedInput.Count(pulse => pulse.Stage != null);
+        Console.Error.WriteLine(
+            $"[Input] loaded {_scriptedInput.Count} scripted input pulses ({staged} stage-relative)");
+    }
+
+    static string NormalizeStage(string stage) =>
+        stage.Trim().ToLowerInvariant().Replace(' ', '_').Replace('-', '_');
+
+    internal static void SignalScriptStage(string stage)
+    {
+        if (_scriptedInput.Count == 0) return;
+        stage = NormalizeStage(stage);
+        if (_scriptStage == stage) return;
+
+        _scriptStage = stage;
+        _stagePoll = 0;
+        Console.Error.WriteLine($"[Input] stage '{stage}' at absolute poll {_inputPoll}");
     }
 
     static void ApplyScriptedInput()
     {
         int poll = _inputPoll++;
+        int stagePoll = _stagePoll++;
         foreach (var pulse in _scriptedInput)
         {
-            if (poll < pulse.Start || poll >= pulse.End) continue;
-            if (poll == pulse.Start)
-                Console.Error.WriteLine($"[Input] scripted pulse at poll {poll}: mask=0x{pulse.Mask:X4}");
+            int currentPoll;
+            if (pulse.Stage == null)
+                currentPoll = poll;
+            else if (pulse.Stage == _scriptStage)
+                currentPoll = stagePoll;
+            else
+                continue;
+
+            if (currentPoll < pulse.Start || currentPoll >= pulse.End) continue;
+            if (currentPoll == pulse.Start)
+            {
+                string location = pulse.Stage == null
+                    ? $"absolute poll {poll}"
+                    : $"stage '{pulse.Stage}' poll {stagePoll} (absolute {poll})";
+                Console.Error.WriteLine($"[Input] scripted pulse at {location}: mask=0x{pulse.Mask:X4}");
+            }
             Controller.State &= (ushort)~pulse.Mask;
         }
     }

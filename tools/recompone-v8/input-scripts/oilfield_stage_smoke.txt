@@ -1,0 +1,34 @@
+# Stage-synchronized candidate path to one-player Oilfield gameplay.
+# Headings are recognized from original SHELL font draws, then activated at the
+# first original Pad_Tick/Tick_PadOnly call where that menu accepts input.
+
+[press_start]
+1+2=START
+
+[main_menu]
+1+2=DOWN
+10+2=CROSS
+
+[player_count]
+5+2=CROSS
+
+[choose_player]
+5+2=CROSS
+
+[select_location]
+5+2=RIGHT
+15+2=RIGHT
+25+2=RIGHT
+35+2=RIGHT
+45+2=RIGHT
+55+2=RIGHT
+65+2=RIGHT
+75+2=RIGHT
+85+2=RIGHT
+95+2=RIGHT
+
+[location_oilfield]
+1+2=CROSS
+
+[choose_enemies]
+5+2=CROSS

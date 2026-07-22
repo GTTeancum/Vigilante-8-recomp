@@ -91,6 +91,9 @@ MAIN_NATIVE_CALLBACK_STARTS = (
     0x80038A0C,
     0x80038CF8,
     0x80038D18,
+    # Weapon/event callback installed at object +0x64 by FUN_8003C61C.
+    # It dispatches events 0-14 and ends immediately before FUN_80039274.
+    0x80038FC0,
     0x80039274,
     0x8003935C,
     0x8003959C,
@@ -145,10 +148,17 @@ SHELL_INTERNAL_EXTENTS = {
     # Player-count jump-table entries are callable functions in Ghidra, but
     # two of them branch back into the middle of the owning menu routine.
     0x8010281C: 0x80102BDC,
+    # Computed main-menu case helpers tail back into this input/dispatch loop.
+    0x8010CCC8: 0x8010D034,
 }
 LOAD_INTERNAL_EXTENTS = {
     # Jump-table case helpers tail back into the owning mesh routine here.
     0x80101364: 0x80101574,
+}
+SKIRESRT_INTERNAL_EXTENTS = {
+    # Indirect terrain helper called through a relocated callback pointer.
+    # The routine returns at 0x801005DC before FUN_801005E0 begins.
+    0x80100424: 0x801005E0,
 }
 OVERLAY_ENTRYPOINTS = {
     # Exported terrain callbacks recorded in each DLL header at file offset
@@ -508,6 +518,8 @@ def main() -> int:
             counts[name] = add_explicit_tail_targets(function_map, SHELL_CARD_CALLBACKS)
         elif name == "LOAD":
             counts[name] = add_explicit_extents(function_map, LOAD_INTERNAL_EXTENTS)
+        elif name == "SKIRESRT":
+            counts[name] = add_explicit_extents(function_map, SKIRESRT_INTERNAL_EXTENTS)
         overlays.append(
             {
                 "name": name,
@@ -567,6 +579,30 @@ def main() -> int:
                 "overlay": "main",
                 "address": "80025400",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.ValidateTerrainQuery",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80044080",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.ApplyUserGameVolume",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80019A58",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceMenuText",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800120D4",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceMenuPad",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800126F0",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceMenuPad",
                 "mode": "pre",
             },
             {

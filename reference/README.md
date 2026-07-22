@@ -50,6 +50,10 @@ dotnet build reference/generated/recompiled/Vigilante8Reference.csproj -c Releas
 The verified handoff is also copied to `PS1 game/RecompOneReference/`. Launch
 it with `PS1 game/Run RecompOne Reference.cmd`.
 
+That launcher sets Vigilante 8's own Music and Sound Effects controls to 0 for
+the working handoff without changing Windows volume or the host mixer. Direct
+test launches remain audible unless `RECOMPONE_V8_GAME_VOLUME=0` is set.
+
 Host audio uses the bundled SDL2 runtime to queue the reference SPU/XA mix as
 44.1 kHz stereo signed-16 output, so the handoff does not require a separate
 OpenAL installation.
@@ -58,6 +62,13 @@ For deterministic automation, set `RECOMPONE_INPUT_FILE` to a committed
 poll-indexed fixture. The current reachability baseline is
 `tools/recompone-v8/input-scripts/oilfield_gameplay_smoke.txt`; it proves the
 path into gameplay but does not yet carry a PS1-fidelity claim.
+
+Stage-relative sections such as `[press_start]` reset their local poll counter
+when the original SHELL text renderer draws a recognized menu heading. The
+validated `oilfield_stage_smoke.txt` uses this mechanism so movie/CD wall-clock
+variation cannot move button pulses onto a different menu. It accepts the arena
+only after the original shell renders `Oil Fields` rather than relying on the
+current cursor or a fixed delay.
 
 ## Prepare the reference configuration
 
@@ -90,12 +101,14 @@ by the vendored RecompOne projects. RecompOne is
 an immature upstream tool, so bring-up fixes belong in the vendored reference
 lane unless they reveal a defect in the native V8 implementation.
 
-The preparation script currently emits 2,398 main-executable functions and 502
-overlay functions; runtime discovery brings the generated total to 2,978. The
+The preparation script currently emits 2,399 main-executable functions and 504
+overlay functions; runtime discovery brings the generated total to 2,981. The
 Release build has been validated with .NET 10.0.302. Scripted navigation,
 steering, acceleration, and weapon inputs sustained active Oilfield gameplay
 for 272.7 seconds without a runtime error, followed by a separate deployed-copy
-smoke test. The latest visual proof is
+smoke test. The stage-aware fixture also completed two generated-build runs and
+one deployed-build run, each remaining active in Oilfield past 55 seconds with
+no fatal runtime marker. The latest visual proof is
 `reference/traces/recompone_gameplay_deployed.png`.
 
 See `REFERENCE_PLAN.md` for the architecture and `VERTICAL_SLICE.md` for the

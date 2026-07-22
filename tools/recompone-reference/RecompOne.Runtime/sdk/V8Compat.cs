@@ -1,5 +1,6 @@
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Dispatch;
+using RecompOne.Runtime.Host;
 using RecompOne.Runtime.Memory;
 
 namespace RecompOne.Runtime.Sdk;
@@ -16,9 +17,16 @@ public static class V8Compat
     static int _heapOperation;
     static int _objectEventSerial;
     static bool _linkedOverlayRangesReserved;
+    static readonly bool _traceMenuText =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MENU_TEXT") == "1";
+    static readonly bool _zeroGameVolume =
+        Environment.GetEnvironmentVariable("RECOMPONE_V8_GAME_VOLUME") == "0";
+    static bool _zeroGameVolumeLogged;
     static string _lastHeapOperation = "heap initialization";
+    static string? _lastMenuStage;
     static readonly Dictionary<uint, HeapAllocation> _liveHeapAllocations = new();
     static readonly Dictionary<uint, List<string>> _objectHistory = new();
+    static readonly HashSet<string> _seenMenuText = new(StringComparer.Ordinal);
 
     public static void Alloc(CpuContext c, IMemory m)
     {
@@ -451,6 +459,67 @@ public static class V8Compat
     static string ReadVec3(IMemory m, uint address) =>
         $"({unchecked((int)m.ReadU32(address))},{unchecked((int)m.ReadU32(address + 4u))}," +
         $"{unchecked((int)m.ReadU32(address + 8u))})";
+
+    public static void TraceMenuText(CpuContext c, IMemory m)
+    {
+        string text = ReadAscii(m, c.A1, 48);
+        if (_traceMenuText && text.Length != 0 && _seenMenuText.Add(text))
+            Console.Error.WriteLine($"[V8Compat] menu text: {text}");
+
+        string? stage = text switch
+        {
+            "PRESS START" => "press_start",
+            "ARCADE" => "main_menu",
+            "1 PLAYER" => "player_count",
+            "SELECT LOCATION" => "select_location",
+            "Oil Fields" => "location_oilfield",
+            "CHOOSE PLAYER" => "choose_player",
+            "CHOOSE ENEMIES" => "choose_enemies",
+            "GAME STATUS" => "game_status",
+            _ => null,
+        };
+        if (stage != null)
+            _lastMenuStage = stage;
+    }
+
+    public static void TraceMenuPad(CpuContext c, IMemory m)
+    {
+        if (_lastMenuStage != null)
+            InputManager.SignalScriptStage(_lastMenuStage);
+    }
+
+    public static void ApplyUserGameVolume(CpuContext c, IMemory m)
+    {
+        if (!_zeroGameVolume) return;
+
+        // These are Vigilante 8's own Music and Sound Effects slider values.
+        // Keep the host mixer untouched so this behaves like an in-game option.
+        m.WriteU16(0x80065C04u, 0);
+        m.WriteU16(0x80065BE8u, 0);
+        c.A1 = 0u;
+        c.A2 = 0u;
+        if (!_zeroGameVolumeLogged)
+        {
+            _zeroGameVolumeLogged = true;
+            Console.Error.WriteLine(
+                "[V8Compat] in-game audio controls: Music=0 Sound Effects=0");
+        }
+    }
+
+    static string ReadAscii(IMemory m, uint address, int maxLength)
+    {
+        if (!IsRetailRamRange(address, 1u)) return string.Empty;
+        Span<char> chars = stackalloc char[maxLength];
+        int length = 0;
+        while (length < chars.Length)
+        {
+            byte value = m.ReadU8(address + (uint)length);
+            if (value == 0) break;
+            if (value is < 0x20 or > 0x7E) return string.Empty;
+            chars[length++] = (char)value;
+        }
+        return new string(chars[..length]);
+    }
 
     public static void TraceBinParse(CpuContext c, IMemory m)
     {
