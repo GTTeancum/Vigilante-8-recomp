@@ -26,3 +26,6 @@ Validate its terrain paths against the actual disc before the first execution.
 to the standalone/moddable asset tree. It writes the metadata-only retail LBA
 manifest and expands `.STR`/`.XA` files to complete 2336-byte Mode 2 sectors.
 The resulting `PS1 game` deployment does not need or search for BIN/CUE files.
+That exact-path tree is also the supported asset-mod surface. C# runtime hooks
+are confined to framework-dependent development builds until their detour
+dependency supports the deployed single-file layout.

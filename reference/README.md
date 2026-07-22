@@ -59,6 +59,13 @@ and Sound Effects controls to 0 without changing Windows volume or the host
 mixer. `LOOSE_FILES.md` documents the modding boundary, stream formats, and
 optional command-line controls.
 
+Loose files are also the supported mod surface for the deployed single-file
+executable. The experimental C# runtime-hook loader remains usable in the
+framework-dependent development build, but is explicitly disabled in the
+single-file handoff because MonoMod RuntimeDetour does not support that publish
+layout. The host reports this boundary instead of silently accepting inactive
+hooks.
+
 ### High-resolution presentation
 
 The host Display settings now provide 1280x720, 1920x1080, 2560x1440, and

@@ -32,6 +32,15 @@ asset elsewhere does not satisfy its retail path. Replacing MIPS instructions
 inside `SLUS_005.10` or a `.DLL` does not create newly recompiled host code;
 their data portions can still be replaced.
 
+This exact-path design is the supported mod foundation in the deployed
+single-file release: texture, model, level, sound-data, movie, music, and other
+data replacements remain independent of BIN/CUE files. The experimental C#
+`mods/` hook loader is intentionally disabled in that release because its
+MonoMod runtime-detour dependency does not support one-file applications. It
+remains available in framework-dependent development builds, which now compile
+source mods from loaded assembly metadata and have a verified pre-hook path.
+This prevents a C# hook from appearing to load while actually doing nothing.
+
 `VIDEO/*.STR` and `SOUNDS/*.XA` use 2336-byte Mode 2 sectors so their subheaders
 and complete movie/XA payloads remain available without a BIN. Each such file
 must have a length divisible by 2336. `music/*.ogg` supplies the twelve Red Book

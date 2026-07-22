@@ -1,4 +1,6 @@
 using System.Text;
+using System.Reflection;
+using System.Reflection.Metadata;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Emit;
@@ -9,6 +11,7 @@ namespace RecompOne.Runtime.Modding;
 public static class ModCompiler
 {
     static List<MetadataReference>? _references;
+    static readonly List<AssemblyMetadata> _metadata = [];
 
     public static byte[]? Compile(string modId, IReadOnlyList<(string Path, string Text)> sources)
     {
@@ -29,13 +32,31 @@ public static class ModCompiler
         return ms.ToArray();
     }
 
-    static List<MetadataReference> References()
+    static unsafe List<MetadataReference> References()
     {
         if (_references != null) return _references;
-        _references = AppDomain.CurrentDomain.GetAssemblies()
-            .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
-            .Select(a => (MetadataReference)MetadataReference.CreateFromFile(a.Location))
-            .ToList();
+
+        // Assembly.Location is empty for assemblies bundled into a single-file
+        // executable. Read their loaded metadata instead so source mods compile
+        // identically in framework-dependent and published single-file builds.
+        _references = [];
+        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (assembly.IsDynamic ||
+                !assembly.TryGetRawMetadata(out byte* metadata, out int length))
+                continue;
+
+            ModuleMetadata module = ModuleMetadata.CreateFromMetadata(
+                (IntPtr)metadata, length);
+            AssemblyMetadata image = AssemblyMetadata.Create(module);
+            _metadata.Add(image);
+            _references.Add(image.GetReference(
+                filePath: $"{assembly.GetName().Name}.dll"));
+        }
+
+        if (_references.Count == 0)
+            throw new InvalidOperationException(
+                "No runtime metadata was available for C# mod compilation.");
         return _references;
     }
 }

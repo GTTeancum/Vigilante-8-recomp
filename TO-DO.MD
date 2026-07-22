@@ -1,6 +1,6 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 12:28 EDT
+Last updated: 2026-07-22 12:56 EDT
 Status: ACTIVE
 
 ## Goal
@@ -58,7 +58,7 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [x] Exercise hot-plug state handling and rumble calls where automation permits.
 - [ ] Test the victory/result path without directly writing gameplay state.
 - [ ] Extend gameplay coverage into Quest where deterministic automation permits.
-- [ ] Audit and either fix or explicitly disable the unsupported single-file
+- [x] Audit and either fix or explicitly disable the unsupported single-file
       C# mod/runtime-detour path.
 - [x] Refresh stale reference documentation and deployed-path instructions.
 - [ ] Audit available state-trace/comparison scaffolding and advance the
@@ -139,3 +139,9 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
   Default probes selected CUE mode in `BINCUE` and standalone mode in `PS1 game`;
   both cards and settings remained byte-identical through media conversion and
   executable deployment.
+- 2026-07-22: The loose exact-path tree is confirmed as the deployed mod
+  foundation, with no disc fallback. The C# loader now compiles source from
+  loaded assembly metadata and a framework-dependent build verified a real
+  `main/start` pre-hook. MonoMod declares single-file applications unsupported,
+  so the deployed layout now rejects C# source mods with an explicit diagnostic
+  instead of reporting inactive hooks as loaded; loose asset mods remain active.

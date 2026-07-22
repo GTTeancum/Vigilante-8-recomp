@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Security.Cryptography;
@@ -27,8 +28,25 @@ public static class ModLoader
 
     public static void LoadAll(string? root = null)
     {
-        root ??= Path.GetFullPath("mods");
+        root ??= Environment.GetEnvironmentVariable("RECOMPONE_MOD_DIR");
+        root = Path.GetFullPath(root ?? "mods");
         Directory.CreateDirectory(root);
+
+        if (IsSingleFileApplication())
+        {
+            bool hasSourceMods = Directory.EnumerateDirectories(root)
+                    .Any(dir => !Path.GetFileName(dir).StartsWith('.')) ||
+                Directory.EnumerateFiles(root, "*.zip").Any();
+            if (hasSourceMods)
+            {
+                Console.Error.WriteLine(
+                    "[Mods] C# source mods are disabled in the single-file release: " +
+                    "its runtime-detour dependency does not support single-file applications. " +
+                    "Loose asset replacement remains supported; use a framework-dependent " +
+                    "development build to test C# hooks.");
+            }
+            return;
+        }
 
         var candidates = Discover(root);
         if (candidates.Count == 0) return;
@@ -63,6 +81,12 @@ public static class ModLoader
 
         Console.WriteLine($"[Mods] loaded {_loaded.Count}/{ordered.Count} mod(s), {HookManager.HookedFunctionCount} function(s) hooked");
     }
+
+    [UnconditionalSuppressMessage(
+        "SingleFile", "IL3000",
+        Justification = "An empty entry-assembly Location is intentionally used to detect the unsupported single-file detour configuration.")]
+    static bool IsSingleFileApplication() =>
+        string.IsNullOrEmpty(Assembly.GetEntryAssembly()?.Location);
 
     static List<Candidate> Discover(string root)
     {
