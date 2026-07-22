@@ -1,7 +1,7 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 15:07 EDT
-Status: BLOCKED ON USER SIGN-OFF
+Last updated: 2026-07-22 15:22 EDT
+Status: ACTIVE - USER-FOUND DEFECT REMEDIATION
 
 ## Goal
 
@@ -66,6 +66,9 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 
 ### Future QOL and presentation
 
+- [ ] Add widescreen gameplay support by expanding the horizontal 3D view;
+      preserve the original aspect ratio and placement of HUD/UI elements, and
+      pillarbox intros and menus rather than stretching them.
 - [ ] Add a PS1 color-dithering toggle and default the enhanced presentation
       mode to undithered output so flat textures and gradients remain clean;
       retain authentic ordered dithering in the fidelity/reference mode.

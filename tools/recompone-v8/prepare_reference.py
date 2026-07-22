@@ -171,6 +171,10 @@ MAIN_INTERNAL_ENTRYPOINTS = (
     0x8001A704,
     0x8001A838,
     0x8001B670,
+    # AIRGRAVE's exported event callback invokes this third object-lookup
+    # wrapper. The overlay entry point was absent from Ghidra's function list,
+    # so overlay JAL discovery could not see the otherwise ordinary call.
+    0x80021830,
     0x80021DB0,
     0x80021E5C,
     0x8003D0D0,
