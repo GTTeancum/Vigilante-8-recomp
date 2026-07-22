@@ -121,6 +121,24 @@ is stage-relative: after the original 300-tick minimum it sends Circle at poll
 soft/full vehicle destruction, and the result state. No fixture input writes
 gameplay state directly.
 
+The front-end Options regressions are
+`tools/recompone-v8/input-scripts/options_audio_smoke.txt` and
+`tools/recompone-v8/input-scripts/options_full_smoke.txt`. The first enters the
+original Audio editor, changes Music, Sound Effects, and stereo/mono in both
+directions, then cancels and proves that the retail settings were restored. The
+second traverses Game Status, Memory Card, Difficulty, both Controller pages,
+Audio, Screen Adjustment, and Credits. It moves both screen-offset axes in both
+directions, cancels to the original offsets, and launches the complete retail
+credits movie.
+
+The pause regression is
+`tools/recompone-v8/input-scripts/oilfield_pause_smoke.txt`. It changes the CD
+Track row, resumes gameplay, enters and cancels the quit confirmation, resumes
+again, then selects Yes and exits the match through the original pause return.
+The reference advances host input only inside the retail confirmation loop,
+whose asynchronous PS1 pad polling otherwise has no scheduling point in a
+statically recompiled host process.
+
 ## Prepare the reference configuration
 
 From the repository root:
@@ -152,8 +170,8 @@ by the vendored RecompOne projects. RecompOne is
 an immature upstream tool, so bring-up fixes belong in the vendored reference
 lane unless they reveal a defect in the native V8 implementation.
 
-The preparation script currently emits 2,407 main-executable functions and 504
-overlay functions; runtime discovery brings the generated total to 2,989. The
+The preparation script currently emits 2,408 main-executable functions and 506
+overlay functions; runtime discovery brings the generated total to 2,992. The
 Release build has been validated with .NET 10.0.302. Scripted navigation,
 steering, acceleration, and weapon inputs sustained active Oilfield gameplay
 for 272.7 seconds without a runtime error, followed by a separate deployed-copy
@@ -181,8 +199,17 @@ the user visually accepted the complete vehicle-physics presentation.
 The committed match fixture has also completed a clean original-disc run from
 boot through damage, enemy and player destruction, the visibly rendered retail
 `YOU LOSE!` result overlay, its accepted Circle input, and normal teardown. The
-run logged no unmapped call or runtime-fault marker. See `VERTICAL_SLICE.md` for
-the remaining pause/options, audio, graphics, and final state-comparison gates.
+run logged no unmapped call or runtime-fault marker.
+
+The original Options hub now completes all eight pages with visible captures.
+The Audio editor restores its initial values after bidirectional changes, the
+Screen Adjustment editor restores `(0,0)` after moving both axes, and the
+Credits selection played all 1,251 queued frames through its authored reset and
+normal loop restart. The pause fixture completed CD-track selection, resume,
+confirmation cancel, a second resume, and confirmed quit with no runtime-fault
+marker. Alternate Quest and two-player front-end branches remain to close the
+full Menus gate. See `VERTICAL_SLICE.md` for those routes plus the remaining
+audio, graphics, and final state-comparison gates.
 
 See `REFERENCE_PLAN.md` for the architecture and `VERTICAL_SLICE.md` for the
 active acceptance gates.

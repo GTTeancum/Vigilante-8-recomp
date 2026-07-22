@@ -1,0 +1,44 @@
+# Stage-synchronized traversal of all eight original Options pages. The Screen
+# Adjustment page enters edit mode, moves each axis in both directions, and
+# cancels to restore the original offsets before advancing to Credits.
+
+10+2=START
+
+[press_start]
+1+2=START
+
+[player_count]
+1+2=DOWN
+5+2=DOWN
+10+2=CROSS
+
+[game_status]
+30+2=DOWN
+
+[memory_card]
+30+2=DOWN
+
+[difficulty_setting]
+30+2=DOWN
+
+[controller_1]
+30+2=DOWN
+
+[controller_2]
+30+2=DOWN
+
+[audio_settings]
+30+2=DOWN
+
+[screen_adjustment]
+5+2=CROSS
+20+2=DOWN
+40+2=UP
+60+2=RIGHT
+80+2=LEFT
+100+2=TRIANGLE
+130+2=DOWN
+
+[credits]
+
+[options_return]

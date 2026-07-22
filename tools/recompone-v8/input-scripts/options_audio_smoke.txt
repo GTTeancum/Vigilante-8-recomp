@@ -1,0 +1,36 @@
+# Stage-synchronized exercise of the original front-end audio-options screen.
+# The first Cross enters edit mode; both volume rows and the stereo row are
+# changed in each direction before two Triangle edges leave edit mode and then
+# return to the 1P/2P/Options menu.
+
+10+2=START
+
+[press_start]
+1+2=START
+
+[player_count]
+1+2=DOWN
+5+2=DOWN
+10+2=CROSS
+
+[game_status]
+10+2=DOWN
+30+2=DOWN
+50+2=DOWN
+70+2=DOWN
+90+2=DOWN
+
+[audio_settings]
+5+2=CROSS
+20+2=DOWN
+40+2=UP
+60+2=RIGHT
+80+2=DOWN
+100+2=UP
+120+2=RIGHT
+140+2=DOWN
+160+2=UP
+180+2=TRIANGLE
+200+2=TRIANGLE
+
+[options_return]

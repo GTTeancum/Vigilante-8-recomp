@@ -35,6 +35,10 @@ MAIN_DYNAMIC_CALLBACK_EXTENTS[0x80022044] = 0x800220D4
 MAIN_DYNAMIC_CALLBACK_EXTENTS[0x8002B98C] = 0x8002BC18
 MAIN_DYNAMIC_CALLBACK_EXTENTS.update(
     {
+        # Event dispatcher stored at object +0x64. The preceding callback
+        # returns at 0x8003AB60; this routine owns the case table through its
+        # epilogue at 0x8003B134, before the next callback at 0x8003B138.
+        0x8003AB64: 0x8003B138,
         0x8003C61C: 0x8003CB64,
         0x8003CB64: 0x8003CD0C,
         0x8003CD0C: 0x8003CE24,
@@ -173,6 +177,11 @@ SHELL_INTERNAL_EXTENTS = {
     # Player-count jump-table entries are callable functions in Ghidra, but
     # two of them branch back into the middle of the owning menu routine.
     0x8010281C: 0x80102BDC,
+    # The options hub's computed page helpers tail back to the owning routine's
+    # resource/setup restart and steady-state input loop. Generated case
+    # helpers dispatch these labels as relocated callable continuations.
+    0x8010C2FC: 0x8010C690,
+    0x8010C480: 0x8010C690,
     # Computed main-menu case helpers tail back into this input/dispatch loop.
     0x8010CCC8: 0x8010D034,
 }
@@ -692,6 +701,12 @@ def main() -> int:
             },
             {
                 "overlay": "main",
+                "address": "80012A90",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TracePauseMenuPost",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
                 "address": "80044080",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.ApplyUserGameVolume",
                 "mode": "pre",
@@ -707,6 +722,12 @@ def main() -> int:
                 "address": "800120D4",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TraceMenuPad",
                 "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800120D4",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceMenuPadPost",
+                "mode": "post",
             },
             {
                 "overlay": "main",

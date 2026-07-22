@@ -25,6 +25,8 @@ public static class V8Compat
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VEHICLE") == "1";
     static readonly bool _traceWeapons =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_WEAPONS") == "1";
+    static readonly bool _traceOptions =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OPTIONS") == "1";
     static int _vehiclePhysicsTick;
     static uint _integratingVehicle;
     static int _integratingVehicleTick;
@@ -52,6 +54,16 @@ public static class V8Compat
     static bool _capturedVehicleDestruction;
     static bool _resultScreenReached;
     static bool _gameplayStage;
+    static bool _optionsMenuActive;
+    static bool _pauseResumePending;
+    static int _pauseScreenCount;
+    static int _pauseConfirmCount;
+    static int _pauseResumeCount;
+    static int _optionsAudioSetCount;
+    static ushort _lastPauseRawPad = 0xFFFF;
+    static uint _lastPauseMappedPad;
+    static int _lastScreenX = int.MinValue;
+    static int _lastScreenY = int.MinValue;
     static bool _zeroGameVolumeLogged;
     static string _lastHeapOperation = "heap initialization";
     static string? _lastMenuStage;
@@ -525,6 +537,12 @@ public static class V8Compat
             _lastMenuStage = null;
             InputManager.SignalScriptStage("gameplay");
         }
+        else if (_pauseResumePending)
+        {
+            _pauseResumePending = false;
+            _lastMenuStage = null;
+            InputManager.SignalScriptStage($"gameplay_resumed_{++_pauseResumeCount}");
+        }
         TracePlayerWeaponState(m, player, tick);
         if (!_traceVehicle || tick > 900) return;
         if (tick is 1 or 15 or 30 or 60 or 120 or 180 or 300 or 420 or 510 or 600 or 720 or 780 or 840 or 900)
@@ -810,7 +828,61 @@ public static class V8Compat
         if (_traceMenuText && text.Length != 0 && _seenMenuText.Add(text))
             Console.Error.WriteLine($"[V8Compat] menu text: {text}");
 
-        string? stage = text switch
+        string? stage;
+        if (text == "PAUSED")
+        {
+            stage = $"pause_{++_pauseScreenCount}";
+        }
+        else if (text == "ARE YOU SURE?")
+        {
+            stage = $"pause_confirm_{++_pauseConfirmCount}";
+        }
+        else if (text == "GAME STATUS")
+        {
+            _optionsMenuActive = true;
+            stage = "game_status";
+        }
+        else if (text == "MEMORY CARD SLOT 1" && _optionsMenuActive)
+        {
+            stage = "memory_card";
+        }
+        else if (text == "DIFFICULTY SETTING" && _optionsMenuActive)
+        {
+            stage = "difficulty_setting";
+        }
+        else if (text == "CONTROLLER" && _optionsMenuActive)
+        {
+            stage = "controller_1";
+        }
+        else if (text == "UNPLUGGED" && _optionsMenuActive)
+        {
+            stage = "controller_2";
+        }
+        else if (text == "AUDIO SETTINGS")
+        {
+            stage = "audio_settings";
+            if (_traceOptions)
+                Console.Error.WriteLine($"[V8Options] event=enter {ReadAudioOptions(m)}");
+        }
+        else if (text == "SCREEN ADJUSTMENT" && _optionsMenuActive)
+        {
+            stage = "screen_adjustment";
+            if (_traceOptions)
+                Console.Error.WriteLine($"[V8Options] event=screen-enter {ReadScreenOptions(m)}");
+        }
+        else if (text == "CREDITS" && _optionsMenuActive)
+        {
+            stage = "credits";
+        }
+        else if (text == "1 PLAYER" && _optionsMenuActive)
+        {
+            _optionsMenuActive = false;
+            stage = "options_return";
+            if (_traceOptions)
+                Console.Error.WriteLine(
+                    $"[V8Options] event=return {ReadAudioOptions(m)} {ReadScreenOptions(m)}");
+        }
+        else stage = text switch
         {
             "PRESS START" => "press_start",
             "ARCADE" => "main_menu",
@@ -819,7 +891,6 @@ public static class V8Compat
             "Oil Fields" => "location_oilfield",
             "CHOOSE PLAYER" => "choose_player",
             "CHOOSE ENEMIES" => "choose_enemies",
-            "GAME STATUS" => "game_status",
             _ => null,
         };
         if (stage == "press_start")
@@ -827,18 +898,83 @@ public static class V8Compat
             _gameplayStage = false;
             _vehiclePhysicsTick = 0;
         }
-        if (!_gameplayStage && stage != null)
+        if (stage != null &&
+            (!_gameplayStage || stage.StartsWith("pause_", StringComparison.Ordinal)))
             _lastMenuStage = stage;
     }
 
     public static void TraceMenuPad(CpuContext c, IMemory m)
     {
-        if (!_gameplayStage && _lastMenuStage != null)
-            InputManager.SignalScriptStage(_lastMenuStage);
+        if (_lastMenuStage != null &&
+            (!_gameplayStage || _lastMenuStage.StartsWith("pause_", StringComparison.Ordinal)))
+        {
+            int captureDelay = _lastMenuStage switch
+            {
+                "memory_card" => 20,
+                "difficulty_setting" or "controller_1" or "controller_2" or
+                "audio_settings" or "screen_adjustment" => 12,
+                _ => 0,
+            };
+            InputManager.SignalScriptStage(_lastMenuStage, captureDelay);
+            if (_traceOptions && _lastMenuStage == "screen_adjustment")
+            {
+                int screenX = unchecked((sbyte)m.ReadU8(0x8006531Cu));
+                int screenY = unchecked((sbyte)m.ReadU8(0x8006531Du));
+                if (screenX != _lastScreenX || screenY != _lastScreenY)
+                {
+                    _lastScreenX = screenX;
+                    _lastScreenY = screenY;
+                    Console.Error.WriteLine(
+                        $"[V8Options] event=screen-change screenX={screenX} screenY={screenY}");
+                }
+            }
+            if (_lastMenuStage.StartsWith("pause_confirm_", StringComparison.Ordinal))
+            {
+                // The retail confirmation loop polls the asynchronous pad
+                // hardware without waiting for VSync. The host must advance a
+                // frame here so live and scripted controller state can change.
+                Runtime.PresentFrame();
+            }
+        }
+    }
+
+    public static void TracePauseMenuPost(CpuContext c, IMemory m)
+    {
+        bool quit = c.V0 != 0u;
+        Console.Error.WriteLine(
+            $"[V8Pause] event=return result={(quit ? "quit" : "resume")} tick={_vehiclePhysicsTick}");
+        _lastMenuStage = null;
+        if (quit)
+        {
+            _gameplayStage = false;
+            InputManager.SignalScriptStage("pause_quit");
+        }
+        else
+        {
+            _pauseResumePending = true;
+        }
+    }
+
+    public static void TraceMenuPadPost(CpuContext c, IMemory m)
+    {
+        if (!_traceMenuText || _lastMenuStage == null ||
+            !_lastMenuStage.StartsWith("pause_confirm_", StringComparison.Ordinal)) return;
+        ushort raw = RecompOne.Runtime.Hardware.Controller.State;
+        uint mapped = m.ReadU32(0x80065930u);
+        if (raw == _lastPauseRawPad && mapped == _lastPauseMappedPad) return;
+        _lastPauseRawPad = raw;
+        _lastPauseMappedPad = mapped;
+        Console.Error.WriteLine(
+            $"[V8PauseInput] stage={_lastMenuStage} raw=0x{raw:X4} mapped=0x{mapped:X8}");
     }
 
     public static void ApplyUserGameVolume(CpuContext c, IMemory m)
     {
+        if (_traceOptions && ++_optionsAudioSetCount <= 32)
+        {
+            Console.Error.WriteLine(
+                $"[V8Options] event=apply stereo={c.A0} music={c.A1} sfx={c.A2}");
+        }
         if (!_zeroGameVolume) return;
 
         // These are Vigilante 8's own Music and Sound Effects slider values.
@@ -854,6 +990,14 @@ public static class V8Compat
                 "[V8Compat] in-game audio controls: Music=0 Sound Effects=0");
         }
     }
+
+    static string ReadAudioOptions(IMemory m) =>
+        $"music={m.ReadU16(0x80065C04u)} sfx={m.ReadU16(0x80065BE8u)} " +
+        $"stereo={m.ReadU8(0x800658ACu)}";
+
+    static string ReadScreenOptions(IMemory m) =>
+        $"screenX={unchecked((sbyte)m.ReadU8(0x8006531Cu))} " +
+        $"screenY={unchecked((sbyte)m.ReadU8(0x8006531Du))}";
 
     public static void TranslateOverlayDmaSource(CpuContext c, IMemory m)
     {

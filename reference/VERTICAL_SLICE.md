@@ -76,6 +76,30 @@ framebuffer hashes, and reached the retail `PRESS START` renderer with no
 runtime error marker. The Intros gate is complete for the fixed slice. The
 broader Graphics gate still includes menus, gameplay, pause, and results.
 
+## Current menu status
+
+The deterministic one-player route captures the original player-count,
+Arcade/Quest, location, player, and enemy screens at their retail input-ready
+boundaries. The Options hub now traverses all eight original pages: Game Status,
+Memory Card, Difficulty, Controller 1, Controller 2, Audio, Screen, and Credits.
+Focused captures show each page. The Audio editor changed Music, Sound Effects,
+and stereo/mono in both directions before cancel restored the initial state.
+Screen Adjustment moved both axes in both directions and restored offsets
+`(0,0)`. Selecting Credits started `VIDEO/CREDITS.STR`; the run presented its
+full 1,251-frame loop through the authored frame reset and normal restart without
+a runtime-fault marker.
+
+The Oil Fields pause fixture exercises CD-track changes, Resume, the original
+Are You Sure? confirmation, cancellation, a second gameplay resume, and a
+confirmed Yes/quit return. The confirmation loop polls PS1 pad state without a
+VSync, so the host advances one presentation/input frame only at that original
+poll site. This preserves the retail decision logic while supplying the
+asynchronous input edge the statically recompiled process otherwise cannot see.
+
+The fixed one-player slice's menu and pause path is complete. Quest-route and
+two-player Cooperative/Versus branches remain before the broader full Menus
+gate is closed.
+
 ## Current physics status
 
 The original player's first integration tick isolated the severe spawn/drop
