@@ -120,10 +120,30 @@ A focused 35-second run collected a weapon pickup, built-in-gun firing, selected
 weapon firing, ammo change, projectile registration, impact, and retirement.
 The trace recorded 34 player projectile spawns, 34 registrations, 34 retirements,
 and three impacts. The selected missile slot changed from 12 rounds to 11 after
-firing. The process remained responsive through the full run with no unmapped
-call, exception, fatal, heap, or terrain marker. Damage-state transitions and a
-vehicle destruction remain open, so this is a lifecycle milestone rather than
-the complete Weapons gate.
+firing.
+
+The committed `oilfield_match_smoke.txt` fixture extends that route through the
+original damage, destruction, and post-match logic. A clean boot-to-results run
+recorded the trace's full 128-transition damage sample, an enemy soft kill and
+full destruction, then the player's full destruction at tick 7,424. The retail
+result builder ran at tick 7,459 with mode 1, the original alive flag cleared,
+and all three player damage zones at zero. Player-owned projectiles continued to
+use the original spawn, registration, impact, and retirement callbacks; no test
+hook changed health, damage, AI, or match state. This completes the fixed-slice
+Weapons gate at runtime, subject to the same PS1-versus-reference state audit as
+the final fidelity gate.
+
+## Current match-end status
+
+The result-stage capture is delayed 60 input polls after `ResultScreen_Build`,
+because the builder creates the layout before a later ordering table presents
+it. The resulting original-disc capture visibly contains `YOU LOSE!`, the
+player-versus-enemies score, and the `Press O to replay, X to quit` prompt. The
+fixture waits through the original 300-tick minimum, sends the mapped Circle
+edge at result poll 320, and reaches normal teardown, arena cleanup, and disc
+reload. The complete run had no unmapped call, unhandled exception, fatal,
+terrain, or heap-exhaustion marker. The Match end gate is complete for the
+fixed slice.
 
 ## Commit discipline
 

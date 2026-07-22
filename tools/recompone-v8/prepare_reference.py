@@ -100,6 +100,10 @@ MAIN_NATIVE_CALLBACK_STARTS = (
     0x8003828C,
     0x80038324,
     0x8003846C,
+    # Weapon-slot event dispatcher stored directly at object +0x64. The
+    # preceding callback returns at 0x80038808 and this entry starts with its
+    # own stack-frame prologue; its body ends before callback 0x80038A0C.
+    0x8003880C,
     0x80038A0C,
     0x80038CF8,
     0x80038D18,
@@ -655,6 +659,36 @@ def main() -> int:
                 "address": "80031454",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TracePlayerWeaponHitPost",
                 "mode": "post",
+            },
+            {
+                "overlay": "main",
+                "address": "8002C6FC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceVehicleDamagePre",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8002C6FC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceVehicleDamagePost",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
+                "address": "8002BD84",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceVehicleFullDestroy",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8002BE84",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceVehicleSoftKill",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8001392C",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceResultScreen",
+                "mode": "pre",
             },
             {
                 "overlay": "main",

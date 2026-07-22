@@ -41,9 +41,16 @@ public static class V8Compat
     static uint _pendingPlayerSpawnCaller;
     static uint _pendingPlayerHitProjectile;
     static uint _pendingPlayerHitTarget;
-    static ushort _pendingPlayerHitHealth;
+    static string? _pendingPlayerHitState;
+    static uint _pendingVehicleDamageTarget;
+    static uint _pendingVehicleDamageCaller;
+    static int _pendingVehicleDamageImpulse;
+    static string? _pendingVehicleDamageState;
+    static int _vehicleDamageChangeCount;
     static bool _capturedPlayerProjectile;
     static bool _capturedPlayerWeaponHit;
+    static bool _capturedVehicleDestruction;
+    static bool _resultScreenReached;
     static bool _gameplayStage;
     static bool _zeroGameVolumeLogged;
     static string _lastHeapOperation = "heap initialization";
@@ -184,7 +191,7 @@ public static class V8Compat
         {
             Console.Error.WriteLine(
                 $"[V8Weapon] tick={_vehiclePhysicsTick} event=retire projectile=0x{c.A0:X8} " +
-                $"flags=0x{m.ReadU32(c.A0):X8} kind={m.ReadU8(c.A0 + 8u)} " +
+                $"flags=0x{m.ReadU32(c.A0):X8} state8={m.ReadU8(c.A0 + 8u)} " +
                 $"callback=0x{m.ReadU32(c.A0 + 0x64u):X8} pos={ReadVec3(m, c.A0 + 0x24u)}");
         }
     }
@@ -195,7 +202,7 @@ public static class V8Compat
         m = Dispatcher.UnwrapMemory(m);
         Console.Error.WriteLine(
             $"[V8Weapon] tick={_vehiclePhysicsTick} event=register projectile=0x{c.A0:X8} " +
-            $"flags=0x{m.ReadU32(c.A0):X8} kind={m.ReadU8(c.A0 + 8u)} " +
+            $"flags=0x{m.ReadU32(c.A0):X8} state8={m.ReadU8(c.A0 + 8u)} " +
             $"callback=0x{m.ReadU32(c.A0 + 0x64u):X8} life={m.ReadU16(c.A0 + 0x94u)} " +
             $"pos={ReadVec3(m, c.A0 + 0x24u)} vel={ReadVec3(m, c.A0 + 0x88u)}");
         if (!_capturedPlayerProjectile)
@@ -602,12 +609,13 @@ public static class V8Compat
     static void TracePlayerWeaponState(IMemory m, uint player, int tick)
     {
         if (!_traceWeapons) return;
+        uint primary = m.ReadU32(player + 0x10Cu);
         string state =
             $"selected={m.ReadU8(player + 0xB3u)} " +
-            $"primary={ReadWeaponSlot(m, m.ReadU32(player + 0x10Cu))} " +
-            $"slot0={ReadWeaponSlot(m, m.ReadU32(player + 0x110u))} " +
-            $"slot1={ReadWeaponSlot(m, m.ReadU32(player + 0x114u))} " +
-            $"slot2={ReadWeaponSlot(m, m.ReadU32(player + 0x118u))}";
+            $"primary=0x{primary:X8}/cb=0x{ReadObjectCallback(m, primary):X8} " +
+            $"slot0={ReadWeaponSlotState(m, m.ReadU32(player + 0x110u))} " +
+            $"slot1={ReadWeaponSlotState(m, m.ReadU32(player + 0x114u))} " +
+            $"slot2={ReadWeaponSlotState(m, m.ReadU32(player + 0x118u))}";
         if (state == _lastWeaponState) return;
         _lastWeaponState = state;
         if (++_weaponStateChangeCount <= 256)
@@ -651,23 +659,21 @@ public static class V8Compat
         uint target = m.ReadU32(c.A1);
         _pendingPlayerHitProjectile = c.A0;
         _pendingPlayerHitTarget = target;
-        _pendingPlayerHitHealth = IsRetailRamRange(target, 0x12u) ? m.ReadU16(target + 0x0Cu) : (ushort)0;
+        _pendingPlayerHitState = ReadVehicleDamageState(m, target);
         Console.Error.WriteLine(
             $"[V8Weapon] tick={_vehiclePhysicsTick} event=hit-pre projectile=0x{c.A0:X8} " +
             $"target=0x{target:X8} kind={(IsRetailRamRange(target, 5u) ? m.ReadU8(target + 4u) : 0)} " +
-            $"health={_pendingPlayerHitHealth} effect={c.A2} sfx={unchecked((int)c.A3)}");
+            $"damage={_pendingPlayerHitState} effect={c.A2} sfx={unchecked((int)c.A3)}");
     }
 
     public static void TracePlayerWeaponHitPost(CpuContext c, IMemory m)
     {
         if (!_traceWeapons || _pendingPlayerHitProjectile == 0u) return;
         m = Dispatcher.UnwrapMemory(m);
-        ushort health = IsRetailRamRange(_pendingPlayerHitTarget, 0x12u)
-            ? m.ReadU16(_pendingPlayerHitTarget + 0x0Cu)
-            : (ushort)0;
+        string damageState = ReadVehicleDamageState(m, _pendingPlayerHitTarget);
         Console.Error.WriteLine(
             $"[V8Weapon] tick={_vehiclePhysicsTick} event=hit-post projectile=0x{_pendingPlayerHitProjectile:X8} " +
-            $"target=0x{_pendingPlayerHitTarget:X8} health={_pendingPlayerHitHealth}->{health} " +
+            $"target=0x{_pendingPlayerHitTarget:X8} damage={_pendingPlayerHitState}->{damageState} " +
             $"result={unchecked((int)c.V0)}");
         if (!_capturedPlayerWeaponHit)
         {
@@ -676,6 +682,80 @@ public static class V8Compat
         }
         _pendingPlayerHitProjectile = 0u;
         _pendingPlayerHitTarget = 0u;
+        _pendingPlayerHitState = null;
+    }
+
+    public static void TraceVehicleDamagePre(CpuContext c, IMemory m)
+    {
+        if (!_traceWeapons || unchecked((int)c.A1) >= 0) return;
+        m = Dispatcher.UnwrapMemory(m);
+        if (!IsRetailRamRange(c.A0, 0xF8u) || m.ReadU8(c.A0 + 4u) != 2u) return;
+
+        _pendingVehicleDamageTarget = c.A0;
+        _pendingVehicleDamageCaller = c.RA;
+        _pendingVehicleDamageImpulse = unchecked((int)c.A1);
+        _pendingVehicleDamageState = ReadVehicleDamageState(m, c.A0);
+    }
+
+    public static void TraceVehicleDamagePost(CpuContext c, IMemory m)
+    {
+        if (!_traceWeapons || _pendingVehicleDamageTarget == 0u) return;
+        m = Dispatcher.UnwrapMemory(m);
+        uint target = _pendingVehicleDamageTarget;
+        string before = _pendingVehicleDamageState ?? "unavailable";
+        string after = ReadVehicleDamageState(m, target);
+        if ((before != after || c.V0 != 0u) && ++_vehicleDamageChangeCount <= 128)
+        {
+            uint player = m.ReadU32(c.GP + 0x7D0u);
+            Console.Error.WriteLine(
+                $"[V8Damage] tick={_vehiclePhysicsTick} target=0x{target:X8} " +
+                $"role={(target == player ? "player" : "other")} impulse={_pendingVehicleDamageImpulse} " +
+                $"caller=0x{_pendingVehicleDamageCaller:X8} state={before}->{after} " +
+                $"result={unchecked((int)c.V0)}");
+        }
+        _pendingVehicleDamageTarget = 0u;
+        _pendingVehicleDamageState = null;
+    }
+
+    public static void TraceVehicleFullDestroy(CpuContext c, IMemory m) =>
+        TraceVehicleDestruction(c, m, "full");
+
+    public static void TraceVehicleSoftKill(CpuContext c, IMemory m) =>
+        TraceVehicleDestruction(c, m, "soft");
+
+    static void TraceVehicleDestruction(CpuContext c, IMemory m, string mode)
+    {
+        if (!_traceWeapons) return;
+        m = Dispatcher.UnwrapMemory(m);
+        if (!IsRetailRamRange(c.A0, 0xF8u) || m.ReadU8(c.A0 + 4u) != 2u) return;
+        uint player = m.ReadU32(c.GP + 0x7D0u);
+        Console.Error.WriteLine(
+            $"[V8Destroy] tick={_vehiclePhysicsTick} target=0x{c.A0:X8} " +
+            $"role={(c.A0 == player ? "player" : "other")} mode={mode} " +
+            $"caller=0x{c.RA:X8} state={ReadVehicleDamageState(m, c.A0)}");
+        if (!_capturedVehicleDestruction)
+        {
+            _capturedVehicleDestruction = true;
+            HostWindow.RequestDisplayCapture("vehicle_destroy_first");
+        }
+    }
+
+    public static void TraceResultScreen(CpuContext c, IMemory m)
+    {
+        if (!_traceWeapons || _resultScreenReached) return;
+        m = Dispatcher.UnwrapMemory(m);
+        _resultScreenReached = true;
+        uint player = m.ReadU32(c.GP + 0x7D0u);
+        Console.Error.WriteLine(
+            $"[V8Result] tick={_vehiclePhysicsTick} mode={m.ReadU8(c.GP + 0x15u)} " +
+            $"aliveFlag={unchecked((int)m.ReadU32(c.GP + 0x24u))} " +
+            $"timer={unchecked((int)m.ReadU32(c.GP + 0x624u))} " +
+            $"player=0x{player:X8} state={ReadVehicleDamageState(m, player)}");
+        // ResultScreen_Build runs before the result layout has reached the
+        // displayed ordering table. Capture after several result-stage polls
+        // so the proof contains the rendered overlay rather than the final
+        // destroyed-vehicle frame.
+        InputManager.SignalScriptStage("result_screen", captureDelayPolls: 60);
     }
 
     static string ReadWeaponSlot(IMemory m, uint address)
@@ -684,6 +764,29 @@ public static class V8Compat
         return $"0x{address:X8}/kind={m.ReadU8(address + 8u)}/status={unchecked((short)m.ReadU16(address + 6u))}/" +
                $"ammo={m.ReadU16(address + 0x0Cu)}/cb=0x{m.ReadU32(address + 0x64u):X8}";
     }
+
+    static string ReadWeaponSlotState(IMemory m, uint address)
+    {
+        if (!IsRetailRamRange(address, 0x68u)) return $"0x{address:X8}";
+        return $"0x{address:X8}/kind={m.ReadU8(address + 8u)}/" +
+               $"ammo={m.ReadU16(address + 0x0Cu)}/cb=0x{m.ReadU32(address + 0x64u):X8}";
+    }
+
+    static uint ReadObjectCallback(IMemory m, uint address) =>
+        IsRetailRamRange(address, 0x68u) ? m.ReadU32(address + 0x64u) : 0u;
+
+    static string ReadVehicleDamageState(IMemory m, uint address)
+    {
+        if (!IsRetailRamRange(address, 0xF8u) || m.ReadU8(address + 4u) != 2u)
+            return "not-vehicle";
+        return $"hp={m.ReadU16(address + 0x0Cu)}/{m.ReadU16(address + 0x0Eu)}," +
+               $"zones=({ReadNodeHealth(m, m.ReadU32(address + 0xECu))}," +
+               $"{ReadNodeHealth(m, m.ReadU32(address + 0xF0u))}," +
+               $"{ReadNodeHealth(m, m.ReadU32(address + 0xF4u))})";
+    }
+
+    static string ReadNodeHealth(IMemory m, uint address) =>
+        IsRetailRamRange(address, 0x0Eu) ? m.ReadU16(address + 0x0Cu).ToString() : "-";
 
     static string ReadVec3(IMemory m, uint address) =>
         $"({unchecked((int)m.ReadU32(address))},{unchecked((int)m.ReadU32(address + 4u))}," +

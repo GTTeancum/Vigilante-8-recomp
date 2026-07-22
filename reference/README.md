@@ -110,6 +110,17 @@ creation, final registration, impacts, and retirement. The trace is deliberately
 scoped to player-owned projectiles so sustained firing does not bury failures in
 unrelated arena-object logging.
 
+The full match regression is
+`tools/recompone-v8/input-scripts/oilfield_match_smoke.txt`. It follows the same
+stage-synchronized retail route, continuously exercises both fire paths while
+the original AI and damage systems remain in control, and continues until a
+real vehicle destruction reaches `ResultScreen_Build`. The result-screen input
+is stage-relative: after the original 300-tick minimum it sends Circle at poll
+320, exercising normal result dismissal and match teardown. With
+`RECOMPONE_TRACE_WEAPONS=1`, the run also records aggregate/zone damage,
+soft/full vehicle destruction, and the result state. No fixture input writes
+gameplay state directly.
+
 ## Prepare the reference configuration
 
 From the repository root:
@@ -141,8 +152,8 @@ by the vendored RecompOne projects. RecompOne is
 an immature upstream tool, so bring-up fixes belong in the vendored reference
 lane unless they reveal a defect in the native V8 implementation.
 
-The preparation script currently emits 2,406 main-executable functions and 504
-overlay functions; runtime discovery brings the generated total to 2,988. The
+The preparation script currently emits 2,407 main-executable functions and 504
+overlay functions; runtime discovery brings the generated total to 2,989. The
 Release build has been validated with .NET 10.0.302. Scripted navigation,
 steering, acceleration, and weapon inputs sustained active Oilfield gameplay
 for 272.7 seconds without a runtime error, followed by a separate deployed-copy
@@ -166,6 +177,12 @@ gameplay run without a runtime error marker. The user visually accepted those
 motions as correct. Focused collision tracing then captured the original impulse
 response and upright recovery through tick 900 without a runtime error marker;
 the user visually accepted the complete vehicle-physics presentation.
+
+The committed match fixture has also completed a clean original-disc run from
+boot through damage, enemy and player destruction, the visibly rendered retail
+`YOU LOSE!` result overlay, its accepted Circle input, and normal teardown. The
+run logged no unmapped call or runtime-fault marker. See `VERTICAL_SLICE.md` for
+the remaining pause/options, audio, graphics, and final state-comparison gates.
 
 See `REFERENCE_PLAN.md` for the architecture and `VERTICAL_SLICE.md` for the
 active acceptance gates.

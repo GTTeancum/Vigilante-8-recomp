@@ -32,6 +32,8 @@ internal static unsafe class InputManager
     static int _inputPoll;
     static string? _scriptStage;
     static int _stagePoll;
+    static int _stageCapturePoll = -1;
+    static string? _stageCaptureLabel;
     static bool _disableLiveInput;
 
     
@@ -91,6 +93,8 @@ internal static unsafe class InputManager
         _inputPoll = 0;
         _scriptStage = null;
         _stagePoll = 0;
+        _stageCapturePoll = -1;
+        _stageCaptureLabel = null;
 
         string? script = Environment.GetEnvironmentVariable("RECOMPONE_INPUT_SCRIPT");
         string? scriptFile = Environment.GetEnvironmentVariable("RECOMPONE_INPUT_FILE");
@@ -159,7 +163,7 @@ internal static unsafe class InputManager
     static string NormalizeStage(string stage) =>
         stage.Trim().ToLowerInvariant().Replace(' ', '_').Replace('-', '_');
 
-    internal static void SignalScriptStage(string stage)
+    internal static void SignalScriptStage(string stage, int captureDelayPolls = 0)
     {
         if (_scriptedInput.Count == 0) return;
         stage = NormalizeStage(stage);
@@ -167,7 +171,14 @@ internal static unsafe class InputManager
 
         _scriptStage = stage;
         _stagePoll = 0;
-        HostWindow.RequestDisplayCapture(stage);
+        _stageCapturePoll = captureDelayPolls;
+        _stageCaptureLabel = stage;
+        if (captureDelayPolls == 0)
+        {
+            HostWindow.RequestDisplayCapture(stage);
+            _stageCapturePoll = -1;
+            _stageCaptureLabel = null;
+        }
         Console.Error.WriteLine($"[Input] stage '{stage}' at absolute poll {_inputPoll}");
     }
 
@@ -175,6 +186,14 @@ internal static unsafe class InputManager
     {
         int poll = _inputPoll++;
         int stagePoll = _stagePoll++;
+        if (_stageCapturePoll == stagePoll && _stageCaptureLabel != null)
+        {
+            HostWindow.RequestDisplayCapture(_stageCaptureLabel);
+            Console.Error.WriteLine(
+                $"[Input] requested stage '{_stageCaptureLabel}' capture at poll {stagePoll}");
+            _stageCapturePoll = -1;
+            _stageCaptureLabel = null;
+        }
         foreach (var pulse in _scriptedInput)
         {
             int currentPoll;
