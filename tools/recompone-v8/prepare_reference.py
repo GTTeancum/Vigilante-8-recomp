@@ -5,12 +5,165 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 
 OVERLAY_BASE = "0x80100000"
-
-
+CODE_LABEL_PATTERN = re.compile(r"(?:_OBJ_|^caseD_|^switchD_|^LAB_)")
+SHELL_CARD_CALLBACKS = tuple(range(0x80110D00, 0x80110DA0, 0x14))
+MAIN_INTERRUPT_TAILS = (0x80011CCC, 0x80011F0C)
+MAIN_FUNCTION_EXTENTS = {
+    # Ghidra stopped at the first computed primitive handler even though the
+    # function's jump tables cover the renderer block through 0x8001D36C.
+    0x8001BE5C: 0x8001D370,
+}
+MAIN_DYNAMIC_CALLBACK_EXTENTS = {
+    # Twelve 0x24-byte wrappers are referenced only through a callback table,
+    # so Ghidra did not promote them to functions. Each supplies a different
+    # descriptor pointer to the common handler at 0x8002A350.
+    address: address + 0x24
+    for address in range(0x8002A3E8, 0x8002A598, 0x24)
+}
+# Object update callback referenced from runtime state rather than a direct JAL.
+# Ghidra stopped the preceding function at this exact address.
+MAIN_DYNAMIC_CALLBACK_EXTENTS[0x8002E2BC] = 0x8002E604
+MAIN_DYNAMIC_CALLBACK_EXTENTS[0x800129AC] = 0x800129E8
+MAIN_DYNAMIC_CALLBACK_EXTENTS[0x80022CB0] = 0x80022CD0
+MAIN_DYNAMIC_CALLBACK_EXTENTS[0x80021E5C] = 0x80021F30
+MAIN_DYNAMIC_CALLBACK_EXTENTS[0x80022044] = 0x800220D4
+MAIN_DYNAMIC_CALLBACK_EXTENTS[0x8002B98C] = 0x8002BC18
+MAIN_DYNAMIC_CALLBACK_EXTENTS.update(
+    {
+        0x8003C61C: 0x8003CB64,
+        0x8003CB64: 0x8003CD0C,
+        0x8003CD0C: 0x8003CE24,
+        # Indirect per-vehicle arena update routine immediately following
+        # FUN_8003D1E8; its address is stored in runtime state, not JAL-called.
+        0x8003D214: 0x8003D898,
+        0x8003FA78: 0x8003FAC4,
+        0x800402B8: 0x8004035C,
+        0x8004035C: 0x80040378,
+        # Oilfield steam puffs use the second small particle callback in the
+        # 0x8004042C block, installed directly as object callback 0x80040470.
+        0x80040470: 0x800404C4,
+    }
+)
+MAIN_NATIVE_CALLBACK_STARTS = (
+    # Indirect object callbacks recovered as standalone functions by the
+    # native decompilation. These do not have direct JAL xrefs, so several
+    # appear only as undefined gaps in Ghidra's function inventory.
+    0x8002BDD0,
+    0x8002BFB8,
+    0x8002C210,
+    0x8002E2BC,
+    0x80030F34,
+    0x80031634,
+    0x80031AFC,
+    0x80031BBC,
+    0x80031FA0,
+    0x800321C0,
+    0x8003277C,
+    0x80032AA4,
+    0x80032C60,
+    0x8003302C,
+    0x80033290,
+    0x800336FC,
+    0x80033C74,
+    0x8003403C,
+    0x80034920,
+    0x80034CEC,
+    0x80034E70,
+    0x80034EF8,
+    0x8003502C,
+    0x800352AC,
+    0x8003565C,
+    0x800359C0,
+    0x800363E0,
+    0x80036AD8,
+    0x800372B0,
+    0x800378D0,
+    0x80037B94,
+    0x800380C8,
+    0x8003828C,
+    0x80038324,
+    0x8003846C,
+    0x80038A0C,
+    0x80038CF8,
+    0x80038D18,
+    0x80039274,
+    0x8003935C,
+    0x8003959C,
+    0x8003A084,
+    0x8003A9DC,
+    0x8003B138,
+    0x8003B1E0,
+    0x8003B8D4,
+    0x8003BDE0,
+    0x8003C61C,
+    0x8003CB64,
+    0x8003E7B4,
+    0x8003E80C,
+    0x8003E868,
+    0x8003E8A0,
+    0x8003ED38,
+    0x8003EE88,
+    0x8003EFC8,
+    0x8003F45C,
+    0x8004007C,
+    0x8004042C,
+    0x800404C4,
+    0x80040540,
+    0x80040894,
+    0x80040B38,
+)
+MAIN_INTERNAL_ENTRYPOINTS = (
+    # Constant tail branches emitted from recovered helper/case functions.
+    # These enter valid code inside larger Ghidra-owned extents.
+    0x80016860,
+    0x80016940,
+    0x80019530,
+    0x800197A4,
+    0x8001A6A8,
+    0x8001A704,
+    0x8001A838,
+    0x8001B670,
+    0x80021DB0,
+    0x80021E5C,
+    0x8003D0D0,
+    0x8003D988,
+    0x8003DC10,
+    0x8003DFB0,
+    0x8003DFD8,
+    0x8003F4F0,
+    0x8003F600,
+    0x8003F684,
+    0x800523E4,
+    0x80053ECC,
+)
+SHELL_INTERNAL_EXTENTS = {
+    # Player-count jump-table entries are callable functions in Ghidra, but
+    # two of them branch back into the middle of the owning menu routine.
+    0x8010281C: 0x80102BDC,
+}
+LOAD_INTERNAL_EXTENTS = {
+    # Jump-table case helpers tail back into the owning mesh routine here.
+    0x80101364: 0x80101574,
+}
+OVERLAY_ENTRYPOINTS = {
+    # Exported terrain callbacks recorded in each DLL header at file offset
+    # 0x0C. Several have no direct JAL xref, so Ghidra omitted them.
+    "AIRGRAVE": 0x801000EC,
+    "CANYNLND": 0x8010007C,
+    "CASNOCTY": 0x8010013C,
+    "HOOVRDAM": 0x8010036C,
+    "OILFIELD": 0x801000E4,
+    "SANDFACT": 0x801000F4,
+    "SCRTBASE": 0x80100200,
+    "SKIRESRT": 0x8010016C,
+    "VALLYFRM": 0x801002C4,
+    "WILDWEST": 0x80100234,
+}
 def read_json(path: Path):
     with path.open("r", encoding="utf-8") as stream:
         return json.load(stream)
@@ -21,6 +174,82 @@ def write_json(path: Path, value) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as stream:
         json.dump(value, stream, indent=2)
         stream.write("\n")
+
+
+def extend_functions(output: Path, extents: dict[int, int]) -> int:
+    function_map = read_json(output)
+    for entry in function_map["functions"]:
+        address = int(entry["address"], 16)
+        if address in extents:
+            entry["size"] = extents[address] - address
+    write_json(output, function_map)
+    return len(function_map["functions"])
+
+
+def add_explicit_extents(output: Path, extents: dict[int, int]) -> int:
+    function_map = read_json(output)
+    known = {int(entry["address"], 16) for entry in function_map["functions"]}
+    for address, end in extents.items():
+        if address not in known:
+            function_map["functions"].append(
+                {
+                    "address": f"0x{address:08X}",
+                    "name": f"LAB_{address:08x}",
+                    "size": end - address,
+                }
+            )
+    function_map["functions"].sort(key=lambda item: int(item["address"], 16))
+    write_json(output, function_map)
+    return len(function_map["functions"])
+
+
+def add_explicit_starts(output: Path, addresses: tuple[int, ...]) -> int:
+    function_map = read_json(output)
+    known = {int(entry["address"], 16) for entry in function_map["functions"]}
+    starts = sorted(known)
+    for address in addresses:
+        if address in known:
+            continue
+        end = next((start for start in starts if start > address), None)
+        if end is None:
+            raise ValueError(f"no following function after explicit start 0x{address:08X}")
+        function_map["functions"].append(
+            {
+                "address": f"0x{address:08X}",
+                "name": f"FUN_{address:08x}",
+                "size": end - address,
+            }
+        )
+        known.add(address)
+        starts.append(address)
+        starts.sort()
+    function_map["functions"].sort(key=lambda item: int(item["address"], 16))
+    write_json(output, function_map)
+    return len(function_map["functions"])
+
+
+def add_bounded_explicit_starts(output: Path, addresses: tuple[int, ...]) -> int:
+    """Add adjacent standalone routines omitted from the function inventory."""
+    function_map = read_json(output)
+    known = {int(entry["address"], 16) for entry in function_map["functions"]}
+    boundaries = sorted(known | set(addresses))
+    for address in addresses:
+        if address in known:
+            continue
+        end = next((start for start in boundaries if start > address), None)
+        if end is None:
+            raise ValueError(f"no following function after explicit start 0x{address:08X}")
+        function_map["functions"].append(
+            {
+                "address": f"0x{address:08X}",
+                "name": f"LAB_{address:08x}",
+                "size": end - address,
+            }
+        )
+        known.add(address)
+    function_map["functions"].sort(key=lambda item: int(item["address"], 16))
+    write_json(output, function_map)
+    return len(function_map["functions"])
 
 
 def convert_inventory(source: Path, output: Path, address_min: int, address_max: int) -> int:
@@ -43,6 +272,185 @@ def convert_inventory(source: Path, output: Path, address_min: int, address_max:
     return len(functions)
 
 
+def add_symbol_branch_targets(inventory: Path, symbols: Path, output: Path) -> int:
+    function_map = read_json(output)
+    inventory_entries = sorted(
+        read_json(inventory), key=lambda entry: int(entry["address"], 16)
+    )
+    known = {int(entry["address"], 16) for entry in function_map["functions"]}
+    functions = [
+        (int(entry["address"], 16), int(entry.get("size", 0)))
+        for entry in inventory_entries
+        if int(entry.get("size", 0)) > 0
+    ]
+    code_min = functions[0][0]
+    code_max = max(address + size for address, size in functions)
+
+    labels = {}
+    with symbols.open("r", encoding="utf-8") as stream:
+        for raw in stream:
+            parts = raw.rstrip().split("\t", 2)
+            if len(parts) != 3 or parts[1] != "Label":
+                continue
+            address = int(parts[0], 16)
+            name = parts[2]
+            if (
+                code_min <= address < code_max
+                and address not in known
+                and CODE_LABEL_PATTERN.search(name)
+            ):
+                labels.setdefault(address, name)
+
+    for address, name in labels.items():
+        containing_end = next(
+            (
+                start + size
+                for start, size in functions
+                if start < address < start + size
+            ),
+            None,
+        )
+        if containing_end is not None:
+            end = containing_end
+        else:
+            end = next(
+                (start for start, _ in functions if start > address), code_max
+            )
+        size = end - address
+        if size <= 0:
+            continue
+        function_map["functions"].append(
+            {
+                "address": f"0x{address:08X}",
+                "name": name,
+                "size": size,
+            }
+        )
+
+    function_map["functions"].sort(key=lambda item: int(item["address"], 16))
+    write_json(output, function_map)
+    return len(function_map["functions"])
+
+
+def add_explicit_tail_targets(output: Path, addresses: tuple[int, ...]) -> int:
+    function_map = read_json(output)
+    known = {int(entry["address"], 16) for entry in function_map["functions"]}
+    for index, address in enumerate(addresses):
+        if address in known:
+            continue
+        end = addresses[index + 1] if index + 1 < len(addresses) else address + 0x14
+        function_map["functions"].append(
+            {"address": f"0x{address:08X}", "name": f"LAB_{address:08x}", "size": end - address}
+        )
+    function_map["functions"].sort(key=lambda item: int(item["address"], 16))
+    write_json(output, function_map)
+    return len(function_map["functions"])
+
+
+def add_external_direct_targets(inventory: Path, mips_dir: Path, output: Path) -> int:
+    function_map = read_json(output)
+    inventory_entries = sorted(
+        read_json(inventory), key=lambda entry: int(entry["address"], 16)
+    )
+    source_functions = {
+        int(entry["address"], 16): int(entry.get("size", 0))
+        for entry in inventory_entries
+        if int(entry.get("size", 0)) > 0
+    }
+    known = {int(entry["address"], 16) for entry in function_map["functions"]}
+    starts = sorted(source_functions)
+    code_min = starts[0]
+    code_max = max(start + source_functions[start] for start in starts)
+    target_pattern = re.compile(
+        r"^([0-9a-fA-F]{8}):.*\b(?:b\w*|j)\s+[^#\r\n]*?0x([0-9a-fA-F]{8})\b"
+    )
+    recovered = set()
+
+    for disasm in mips_dir.glob("*.s"):
+        try:
+            owner = int(disasm.stem, 16)
+        except ValueError:
+            continue
+        owner_size = source_functions.get(owner)
+        if owner_size is None:
+            continue
+        lines = disasm.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line in lines:
+            match = target_pattern.search(line)
+            if match is None:
+                continue
+            instruction = int(match.group(1), 16)
+            target = int(match.group(2), 16)
+            if not (code_min <= target < code_max):
+                continue
+            instruction_in_owner = owner <= instruction < owner + owner_size
+            target_in_owner = owner <= target < owner + owner_size
+            if instruction_in_owner and target_in_owner:
+                continue
+            if target not in known:
+                recovered.add(target)
+
+    for address in sorted(recovered):
+        end = next((start for start in starts if start > address), code_max)
+        size = end - address
+        if size <= 0 or size > 0x400:
+            continue
+        function_map["functions"].append(
+            {
+                "address": f"0x{address:08X}",
+                "name": f"LAB_{address:08x}",
+                "size": size,
+            }
+        )
+
+    function_map["functions"].sort(key=lambda item: int(item["address"], 16))
+    write_json(output, function_map)
+    return len(function_map["functions"])
+
+
+def add_overlay_main_targets(
+    inventory: Path, overlay_analysis: Path, output: Path
+) -> int:
+    function_map = read_json(output)
+    inventory_entries = sorted(
+        read_json(inventory), key=lambda entry: int(entry["address"], 16)
+    )
+    starts = [int(entry["address"], 16) for entry in inventory_entries]
+    sizes = {
+        int(entry["address"], 16): int(entry.get("size", 0))
+        for entry in inventory_entries
+    }
+    code_min = starts[0]
+    code_max = max(start + sizes[start] for start in starts)
+    known = {int(entry["address"], 16) for entry in function_map["functions"]}
+    call_pattern = re.compile(r"\bjal\s+0x([0-9a-fA-F]{8})\b")
+    targets = set()
+
+    for disasm in overlay_analysis.glob("*/mips/*.s"):
+        text = disasm.read_text(encoding="utf-8", errors="replace")
+        for match in call_pattern.finditer(text):
+            target = int(match.group(1), 16)
+            if code_min <= target < code_max and target not in known:
+                targets.add(target)
+
+    for address in sorted(targets):
+        end = next((start for start in starts if start > address), code_max)
+        size = end - address
+        if size <= 0 or size > 0x1000:
+            continue
+        function_map["functions"].append(
+            {
+                "address": f"0x{address:08X}",
+                "name": f"FUN_{address:08x}",
+                "size": size,
+            }
+        )
+
+    function_map["functions"].sort(key=lambda item: int(item["address"], 16))
+    write_json(output, function_map)
+    return len(function_map["functions"])
+
+
 def relative_posix(target: Path, start: Path) -> str:
     import os
 
@@ -63,8 +471,23 @@ def main() -> int:
 
     counts = {}
     main_source = repo / "analysis" / "SLUS_005.10" / "functions.json"
+    main_symbols = repo / "analysis" / "SLUS_005.10" / "symbols.txt"
     main_map = maps / "SLUS_005.10.json"
     counts["main"] = convert_inventory(main_source, main_map, 0x80000000, 0x80200000)
+    counts["main"] = extend_functions(main_map, MAIN_FUNCTION_EXTENTS)
+    counts["main"] = add_explicit_extents(main_map, MAIN_DYNAMIC_CALLBACK_EXTENTS)
+    counts["main"] = add_symbol_branch_targets(main_source, main_symbols, main_map)
+    counts["main"] = add_external_direct_targets(
+        main_source, repo / "analysis" / "SLUS_005.10" / "mips", main_map
+    )
+    counts["main"] = add_overlay_main_targets(
+        main_source, repo / "analysis" / "dll", main_map
+    )
+    counts["main"] = add_explicit_tail_targets(main_map, MAIN_INTERRUPT_TAILS)
+    counts["main"] = add_bounded_explicit_starts(
+        main_map, MAIN_NATIVE_CALLBACK_STARTS
+    )
+    counts["main"] = add_explicit_starts(main_map, MAIN_INTERNAL_ENTRYPOINTS)
 
     overlays = []
     for name, path_info in overlay_manifest.items():
@@ -73,12 +496,25 @@ def main() -> int:
             raise FileNotFoundError(f"missing overlay inventory: {source}")
         function_map = maps / f"{name}.json"
         counts[name] = convert_inventory(source, function_map, 0x80100000, 0x80200000)
+        counts[name] = add_symbol_branch_targets(
+            source, repo / "analysis" / "dll" / name / "symbols.txt", function_map
+        )
+        if name in OVERLAY_ENTRYPOINTS:
+            counts[name] = add_explicit_starts(
+                function_map, (OVERLAY_ENTRYPOINTS[name],)
+            )
+        if name == "SHELL":
+            counts[name] = add_explicit_extents(function_map, SHELL_INTERNAL_EXTENTS)
+            counts[name] = add_explicit_tail_targets(function_map, SHELL_CARD_CALLBACKS)
+        elif name == "LOAD":
+            counts[name] = add_explicit_extents(function_map, LOAD_INTERNAL_EXTENTS)
         overlays.append(
             {
                 "name": name,
                 "funcMap": relative_posix(function_map, config_dir),
                 "base": OVERLAY_BASE,
                 "file": path_info["file"],
+                "v8Relocate": True,
             }
         )
 
@@ -96,7 +532,122 @@ def main() -> int:
         "overlays": overlays,
         "stubs": [],
         "ignored": [],
-        "patches": [],
+        "patches": [
+            {
+                "overlay": "main",
+                "address": "80045004",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.Alloc",
+                "mode": "replace",
+            },
+            {
+                "overlay": "main",
+                "address": "80045088",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.Free",
+                "mode": "replace",
+            },
+            {
+                "overlay": "main",
+                "address": "80015368",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.Fatal",
+                "mode": "replace",
+            },
+            {
+                "overlay": "main",
+                "address": "800165CC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.ServiceDisplayTransitionWait",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800128BC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.ServiceDrawSyncWait",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80025400",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.ValidateTerrainQuery",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80020890",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceObjectSchedule",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800205F8",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceObjectRetire",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800202F4",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TrackObjectOwner",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80040378",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TrackReturnedObjectOwner",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
+                "address": "80015A20",
+                "target": "RecompOne.Runtime.Sdk.LibCd.ReadV8FileBytes",
+                "mode": "replace",
+            },
+            {
+                "overlay": "main",
+                "address": "80015BF0",
+                "target": "RecompOne.Runtime.Sdk.LibCd.SeekV8File",
+                "mode": "replace",
+            },
+            {
+                "overlay": "main",
+                "address": "8001570C",
+                "target": "RecompOne.Runtime.Sdk.LibCd.BeginV8FileRead",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8004F8EC",
+                "target": "RecompOne.Runtime.Sdk.LibGpu.MoveImage",
+                "mode": "replace",
+            },
+            {
+                "overlay": "main",
+                "address": "800156D4",
+                "target": "RecompOne.Runtime.Sdk.LibCd.WaitForV8Sector",
+                "mode": "replace",
+            },
+            {
+                "overlay": "SHELL",
+                "address": "80111260",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.WaitCardEvent",
+                "mode": "replace",
+            },
+            {
+                "overlay": "SHELL",
+                "address": "801100F4",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.WaitCardOperation",
+                "mode": "replace",
+            },
+            {
+                "overlay": "SHELL",
+                "address": "8010DE20",
+                "target": "RecompOne.Runtime.Sdk.LibCdStream.StGetNext",
+                "mode": "replace",
+            },
+            {
+                "overlay": "SHELL",
+                "address": "8010DD70",
+                "target": "RecompOne.Runtime.Sdk.LibCdStream.StFreeRing",
+                "mode": "replace",
+            }
+        ],
     }
     config_path = output / "v8.recompone.json"
     write_json(config_path, config)

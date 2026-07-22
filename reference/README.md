@@ -20,29 +20,36 @@ this checkout remains one ordinary repository with no submodule setup.
 
 ## Asset placement
 
-Put a legally obtained Vigilante 8 BIN/CUE set under:
+This checkout uses the legally obtained Vigilante 8 BIN/CUE set under:
 
 ```text
-reference/assets/disc/
+BINCUE/Vigilante 8 (USA).cue
 ```
 
-The entire `reference/assets/` tree is ignored by Git. Do not commit disc
-images, extracted copyrighted assets, generated recompiler output, or traces.
+Pass a different cue path to the preparation script when needed. Disc images,
+extracted copyrighted assets, generated recompiler output, and runtime traces
+remain local and must not be committed.
 
-The default expected cue name is:
+## Build and run
 
-```text
-reference/assets/disc/Vigilante8.cue
+From the repository root:
+
+```powershell
+python tools/recompone-v8/prepare_reference.py --cue "BINCUE/Vigilante 8 (USA).cue"
+dotnet run --project tools/recompone-reference/RecompOne.Recompiler/RecompOne.Recompiler.csproj -c Release --no-build -- reference/generated/v8.recompone.json
+dotnet build reference/generated/recompiled/Vigilante8Reference.csproj -c Release --no-restore
+& "reference/generated/recompiled/bin/Release/net10.0/Vigilante8Reference.exe" "BINCUE/Vigilante 8 (USA).cue"
 ```
 
-Another name can be passed to the preparation script.
+The verified handoff is also copied to `PS1 game/RecompOneReference/`. Launch
+it with `PS1 game/Run RecompOne Reference.cmd`.
 
 ## Prepare the reference configuration
 
 From the repository root:
 
 ```powershell
-python tools/recompone-v8/prepare_reference.py
+python tools/recompone-v8/prepare_reference.py --cue "BINCUE/Vigilante 8 (USA).cue"
 ```
 
 The script converts the checked-in Ghidra function inventories into
@@ -68,9 +75,12 @@ by the vendored RecompOne projects. RecompOne is
 an immature upstream tool, so bring-up fixes belong in the vendored reference
 lane unless they reveal a defect in the native V8 implementation.
 
-The preparation script currently emits 1,112 main-executable functions and 278
-overlay functions from the checked-in inventories. Generation has been
-validated without assets. A full RecompOne build was not possible on the
-staging machine because it has .NET 9 rather than the required .NET 10 SDK.
+The preparation script currently emits 2,398 main-executable functions and 502
+overlay functions; runtime discovery brings the generated total to 2,978. The
+Release build has been validated with .NET 10.0.302. Scripted navigation,
+steering, acceleration, and weapon inputs sustained active Oilfield gameplay
+for 272.7 seconds without a runtime error, followed by a separate deployed-copy
+smoke test. The latest visual proof is
+`reference/traces/recompone_gameplay_deployed.png`.
 
 See `REFERENCE_PLAN.md` for the order of work when the project is unparked.

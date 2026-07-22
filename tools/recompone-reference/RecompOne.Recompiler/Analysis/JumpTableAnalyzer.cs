@@ -120,6 +120,21 @@ public static class JumpTableAnalyzer
             }
         }
 
+        // Vigilante 8 selects between two adjacent primitive-handler tables by
+        // conditionally adding 0x40 to the table base before the indexed load.
+        // The simple linear register tracker above intentionally invalidates
+        // that ambiguous state, so preserve the two concrete tables here.
+        if (func.Start == 0x8001BE5Cu)
+        {
+            uint[] entries = ReadEntries(elf, 0x8001CD60u, func)
+                .Concat(ReadEntries(elf, 0x8001CDA0u, func))
+                .Distinct()
+                .ToArray();
+            foreach (uint dispatch in new[] { 0x8001C0D8u, 0x8001CD04u })
+                if (entries.Length > 0 && result.All(table => table.JrVram != dispatch))
+                    result.Add(new JumpTable { JrVram = dispatch, Entries = entries });
+        }
+
         return result;
     }
 

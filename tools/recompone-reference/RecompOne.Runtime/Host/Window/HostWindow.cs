@@ -31,6 +31,8 @@ internal static class HostWindow
     static Task? _ramTask;
     static volatile bool _ramReady;
     static int _ramFrame;
+    static int _displayProbeFrame;
+    static uint _lastDisplayHash;
 
     static bool _layoutPending = true;
     static bool _closed;
@@ -147,7 +149,7 @@ internal static class HostWindow
         Hle.GlVram.Scale = ConfigManager.View.NativeResolution ? 1 : 4;
         _glBackend = new Hle.GlBackend(_gl);
         _glBackend.InitGl();
-        Hle.GpuHle.Active = _glBackend.Ready;
+        Hle.GpuHle.Active = false;
         Hle.GpuHle.Backend = _glBackend;
         Hle.GpuHle.NativeResolution = ConfigManager.View.NativeResolution;
 
@@ -316,10 +318,36 @@ internal static class HostWindow
         int needed = w * h * 3;
         if (_rgbDisplay.Length < needed) _rgbDisplay = new byte[needed];
         ConvertDisplay(gpu, w, h);
+        ProbeDisplay(gpu, w, h);
         gl.BindTexture(TextureTarget.Texture2D, _displayTex);
         gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgb, (uint)w, (uint)h, 0,
             PixelFormat.Rgb, PixelType.UnsignedByte, _rgbDisplay.AsSpan(0, needed));
         OutputPanel.SetTexture(_displayTex, w, h);
+    }
+
+    static void ProbeDisplay(Gpu gpu, int w, int h)
+    {
+        if (++_displayProbeFrame % 120 != 1) return;
+
+        int pixels = w * h;
+        int nonzero = 0;
+        uint hash = 2166136261u;
+        for (int i = 0; i < pixels; i++)
+        {
+            int o = i * 3;
+            uint rgb = (uint)(_rgbDisplay[o] | (_rgbDisplay[o + 1] << 8) | (_rgbDisplay[o + 2] << 16));
+            if (rgb != 0) nonzero++;
+            hash = (hash ^ rgb) * 16777619u;
+        }
+
+        if (hash == _lastDisplayHash) return;
+        _lastDisplayHash = hash;
+        Console.WriteLine($"[GPU] framebuffer {w}x{h} nonzero={nonzero} hash=0x{hash:X8}");
+
+        using var dump = File.Create("recompone_vram_latest.ppm");
+        byte[] header = System.Text.Encoding.ASCII.GetBytes($"P6\n{w} {h}\n255\n");
+        dump.Write(header);
+        dump.Write(_rgbDisplay, 0, pixels * 3);
     }
 
     static ushort[] _vramView = new ushort[Gpu.VramWidth * Gpu.VramHeight];

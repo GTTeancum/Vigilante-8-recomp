@@ -9,5 +9,6 @@ public interface IOverlay
     int LbaStart => -1;
     uint Base => 0;
     uint Size => 0;
+    uint ImageSize => 0;
     IReadOnlyDictionary<uint, Action<CpuContext, IMemory>> Functions { get; }
 }

@@ -26,6 +26,8 @@ internal static unsafe class InputManager
     const int RightStickDown = 109;
     static bool _topBarToggle;
     static bool _fullscreenToggle;
+    static readonly List<(int Start, int End, ushort Mask)> _scriptedInput = new();
+    static int _inputPoll;
 
     
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
@@ -33,6 +35,7 @@ internal static unsafe class InputManager
 
     public static void Initialize(IInputContext input)
     {
+        ParseScriptedInput();
         if (input.Keyboards.Count > 0)
         {
             _keyboard = input.Keyboards[0];
@@ -61,7 +64,62 @@ internal static unsafe class InputManager
         PollGamepadEvents();
         PollKeyboard();
         PollGamepads();
+        ApplyScriptedInput();
         Controller.Connected2 = _pad1 != null || HasAnyKey(ConfigManager.Game.Keys2);
+    }
+
+    static void ParseScriptedInput()
+    {
+        string? script = Environment.GetEnvironmentVariable("RECOMPONE_INPUT_SCRIPT");
+        if (string.IsNullOrWhiteSpace(script)) return;
+
+        foreach (string raw in script.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            string[] sides = raw.Split('=', 2, StringSplitOptions.TrimEntries);
+            string[] range = sides[0].Split('+', 2, StringSplitOptions.TrimEntries);
+            if (sides.Length != 2 || range.Length != 2 ||
+                !int.TryParse(range[0], out int start) || !int.TryParse(range[1], out int duration) ||
+                start < 0 || duration <= 0)
+                throw new InvalidOperationException($"Invalid RECOMPONE_INPUT_SCRIPT entry: {raw}");
+
+            ushort mask = 0;
+            foreach (string button in sides[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                mask |= button.ToUpperInvariant() switch
+                {
+                    "CROSS" => Controller.Cross,
+                    "CIRCLE" => Controller.Circle,
+                    "SQUARE" => Controller.Square,
+                    "TRIANGLE" => Controller.Triangle,
+                    "START" => Controller.Start,
+                    "SELECT" => Controller.Select,
+                    "UP" => Controller.Up,
+                    "DOWN" => Controller.Down,
+                    "LEFT" => Controller.Left,
+                    "RIGHT" => Controller.Right,
+                    "L1" => Controller.L1,
+                    "R1" => Controller.R1,
+                    "L2" => Controller.L2,
+                    "R2" => Controller.R2,
+                    _ => throw new InvalidOperationException($"Unknown scripted controller button: {button}"),
+                };
+            }
+            _scriptedInput.Add((start, start + duration, mask));
+        }
+
+        Console.Error.WriteLine($"[Input] loaded {_scriptedInput.Count} scripted input pulses");
+    }
+
+    static void ApplyScriptedInput()
+    {
+        int poll = _inputPoll++;
+        foreach (var pulse in _scriptedInput)
+        {
+            if (poll < pulse.Start || poll >= pulse.End) continue;
+            if (poll == pulse.Start)
+                Console.Error.WriteLine($"[Input] scripted pulse at poll {poll}: mask=0x{pulse.Mask:X4}");
+            Controller.State &= (ushort)~pulse.Mask;
+        }
     }
 
     public static int? GetFirstPressedPadButton(int pad = 0)

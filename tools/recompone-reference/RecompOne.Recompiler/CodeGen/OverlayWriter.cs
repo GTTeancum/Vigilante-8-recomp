@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 using System.Text.RegularExpressions;
 using RecompOne.Recompiler.Analysis;
@@ -13,7 +14,7 @@ namespace RecompOne.Recompiler.CodeGen;
 
 public static class OverlayWriter
 {
-    record OverlayResult(string Name, List<MipsFunction> Functions, int LbaStart, uint Base, uint Size, MipsInstruction[] Instructions);
+    record OverlayResult(string Name, List<MipsFunction> Functions, int LbaStart, uint Base, uint Size, uint ImageSize, MipsInstruction[] Instructions);
 
     public static void Write(RecompOneConfig config, CueFs fs, string outDir)
     {
@@ -104,7 +105,7 @@ public static class OverlayWriter
             if (elfInfo != null) AnalyzeJumpTables(funcs, elfInfo, "main");
 
             ApplyStubsAndIgnored(funcs, config.Stubs, config.Ignored);
-            overlayResults.Add(new OverlayResult("main", funcs, -1, 0, 0, mainInstrs));
+            overlayResults.Add(new OverlayResult("main", funcs, -1, 0, 0, 0, mainInstrs));
         }
 
         foreach (var overlayConfig in config.Overlays)
@@ -151,6 +152,13 @@ public static class OverlayWriter
                 continue;
             }
 
+            if (overlayConfig.V8Relocate)
+            {
+                if (overlayConfig.Base == null)
+                    throw new InvalidOperationException($"overlay '{overlayConfig.Name}' requires a base for V8 relocation");
+                discBin = RelocateV8Overlay(discBin, Convert.ToUInt32(overlayConfig.Base, 16));
+            }
+
             var rawElf = overlayConfig.Elf != null ? ElfReader.Read(overlayConfig.Elf) : null;
             var rawMap = overlayConfig.Map != null ? MapReader.Read(overlayConfig.Map) : null;
 
@@ -195,7 +203,10 @@ public static class OverlayWriter
             ApplyStubsAndIgnored(funcs, overlayConfig.Stubs.Concat(config.Stubs), overlayConfig.Ignored.Concat(config.Ignored));
             
             uint ovlBase = overlayConfig.Base != null ? Convert.ToUInt32(overlayConfig.Base, 16) + (uint)overlayConfig.Rebase : 0;
-            overlayResults.Add(new OverlayResult(overlayConfig.Name, funcs, overlayLba, ovlBase, (uint)discBin.Length, instrs));
+            uint imageSize = discBin.Length >= 4
+                ? BinaryPrimitives.ReadUInt32LittleEndian(discBin.AsSpan(0, 4))
+                : 0u;
+            overlayResults.Add(new OverlayResult(overlayConfig.Name, funcs, overlayLba, ovlBase, (uint)discBin.Length, imageSize, instrs));
         }
 
         var allFuncs = overlayResults.SelectMany(o => o.Functions).ToList();
@@ -222,7 +233,7 @@ public static class OverlayWriter
         foreach (var result in overlayResults)
         {
             Console.WriteLine($"[Recompiler] emiting {result.Name}.cs ({result.Functions.Count} functions)");
-            EmitOverlayFile(result.Name, result.Functions, className, knownFuncs, config.Debug, result.LbaStart,  result.Base, result.Size, result.Instructions, outDir);
+            EmitOverlayFile(result.Name, result.Functions, className, knownFuncs, config.Debug, result.LbaStart, result.Base, result.Size, result.ImageSize, result.Instructions, outDir);
         }
 
         Console.WriteLine("[Recompiler] Emitting Entry.cs");
@@ -260,7 +271,7 @@ public static class OverlayWriter
         Console.WriteLine($"[Recompiler] linear sweep found {swept.Count} function(s) (+{callees.Count} callees) in {overlayName}");
     }
 
-    static void EmitOverlayFile(string overlayName, List<MipsFunction> funcs, string className, Dictionary<uint, string> knownFuncs, bool debug, int lbaStart, uint ovlBase, uint ovlSize, MipsInstruction[] instrs, string outDir)
+    static void EmitOverlayFile(string overlayName, List<MipsFunction> funcs, string className, Dictionary<uint, string> knownFuncs, bool debug, int lbaStart, uint ovlBase, uint ovlSize, uint imageSize, MipsInstruction[] instrs, string outDir)
     {
         var sb = new StringBuilder();
         sb.AppendLine("using RecompOne.Runtime.Context;");
@@ -297,6 +308,7 @@ public static class OverlayWriter
         sb.AppendLine($"    public int LbaStart => {lbaStart};");
         sb.AppendLine($"    public uint Base => 0x{ovlBase:X8}u;");
         sb.AppendLine($"    public uint Size => 0x{ovlSize:X}u;");
+        sb.AppendLine($"    public uint ImageSize => 0x{imageSize:X}u;");
         sb.AppendLine("    public IReadOnlyDictionary<uint, Action<CpuContext, IMemory>> Functions { get; } =");
         sb.AppendLine("        new Dictionary<uint, Action<CpuContext, IMemory>>");
         sb.AppendLine("        {");
@@ -383,6 +395,52 @@ public static class OverlayWriter
             BitConverter.GetBytes(w).CopyTo(data, i);
         }
         return data;
+    }
+
+    static byte[] RelocateV8Overlay(byte[] source, uint loadBase)
+    {
+        byte[] image = (byte[])source.Clone();
+        uint imageEnd = BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(0, 4));
+        if (imageEnd == 0 || imageEnd > image.Length)
+            throw new InvalidDataException($"invalid V8 overlay image size 0x{imageEnd:X}");
+
+        int pos = checked((int)imageEnd);
+        while (true)
+        {
+            if (pos + 4 > image.Length)
+                throw new InvalidDataException($"V8 relocation table overran at 0x{pos:X}");
+            uint entry = BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(pos, 4));
+            if (entry == uint.MaxValue) break;
+            pos += 4;
+
+            int target = checked((int)(entry & 0xFFFFFFFCu));
+            switch (entry & 3u)
+            {
+                case 0:
+                    uint absolute = BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(target, 4));
+                    BinaryPrimitives.WriteUInt32LittleEndian(image.AsSpan(target, 4), absolute + loadBase);
+                    break;
+                case 1:
+                    if (pos + 4 > image.Length)
+                        throw new InvalidDataException("truncated V8 HI16 relocation");
+                    uint symbol = BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(pos, 4));
+                    pos += 4;
+                    ushort high = (ushort)((loadBase + symbol + 0x8000u) >> 16);
+                    BinaryPrimitives.WriteUInt16LittleEndian(image.AsSpan(target, 2), high);
+                    break;
+                case 2:
+                    ushort low = BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(target, 2));
+                    BinaryPrimitives.WriteUInt16LittleEndian(image.AsSpan(target, 2), (ushort)(low + loadBase));
+                    break;
+                case 3:
+                    uint jump = BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(target, 4));
+                    uint adjustment = unchecked(loadBase << 4) >> 6;
+                    BinaryPrimitives.WriteUInt32LittleEndian(image.AsSpan(target, 4), jump + adjustment);
+                    break;
+            }
+        }
+
+        return image;
     }
     static void AnalyzeJumpTables(List<MipsFunction> funcs, FunctionInfo elf, string name)
     {

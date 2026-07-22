@@ -30,6 +30,7 @@ public static class LibCdStream
     static Thread? _thread;
     static volatile bool _run;
     static readonly object _lock = new();
+    static bool _loggedScan;
 
     public static void StSetRing(CpuContext c, IMemory m)
     {
@@ -42,6 +43,7 @@ public static class LibCdStream
             ResetRing(m);
         }
         EnsureThread();
+        Console.WriteLine($"[CdStream] ring base=0x{_statusBase:X8} slots={_slots}");
         Log.Sdk($"StSetRing base=0x{_statusBase:X8} slots={_slots} data=0x{_dataBase:X8}");
     }
 
@@ -108,6 +110,7 @@ public static class LibCdStream
         if (!InUse) return;
         _pendingLba = lba;
         _reading = true;
+        Console.WriteLine($"[CdStream] read start LBA={lba}");
         EnsureThread();
     }
 
@@ -158,6 +161,12 @@ public static class LibCdStream
             try { lock (LibCd.DiscLock) sec = cd.ReadSectorData(_streamLba, 2336); }
             catch { Thread.Sleep(2); continue; }
 
+            if (!_loggedScan)
+            {
+                _loggedScan = true;
+                Console.WriteLine($"[CdStream] scanning LBA={_streamLba} submode=0x{sec[2]:X2} magic=0x{Read16(sec, 8):X4} chunk={Read16(sec, 12)} count={Read16(sec, 14)}");
+            }
+
             if ((sec[2] & 0x04) != 0) { XaAudio.DecodeSector(sec, 8, sec[3]); _streamLba++; continue; }
             if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
 
@@ -178,6 +187,8 @@ public static class LibCdStream
             }
 
             if (!CollectFrame(cd, m, start, n)) continue;
+
+            Console.WriteLine($"[CdStream] frame LBA={_streamLba} chunks={n}");
 
             lock (_lock)
             {

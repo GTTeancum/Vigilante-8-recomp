@@ -43,6 +43,7 @@ public static class LibCd
     static bool _xaActive;
     static byte _filterFile;
     static byte _filterChannel;
+    static int _v8FileStartLba = -1;
 
     internal static readonly object DiscLock = new();
     static readonly object _posGate = new();
@@ -297,7 +298,9 @@ public static class LibCd
             case ReadN:
                 _readActive = true;
                 Dispatcher.LoadByLba(CurrentLba);
+                Console.Error.WriteLine($"[LibCd] ReadN start LBA={CurrentLba} ready=0x{_cbReady:X8} data=0x{_cbData:X8}");
                 EnsureXaThread();
+                DeliverInitialReadyCallback(m);
                 break;
             case ReadS:
                 _xaActive = true;
@@ -336,6 +339,88 @@ public static class LibCd
         for (int i = 1; i < _lastResult.Length; i++) _lastResult[i] = 0;
         if (result != 0) WriteResult(m, result);
         return 0;
+    }
+
+    static void DeliverInitialReadyCallback(IMemory m)
+    {
+        if (_cbReady == 0 || Runtime.Cpu == null) return;
+
+        var c = Runtime.Cpu;
+        var snap = c.Snapshot();
+        _lastIntr = DataReady;
+        c.A0 = DataReady;
+        c.A1 = 0;
+        Dispatcher.Call(c, m, _cbReady);
+        AdvancePos(1);
+        Dispatcher.LoadByLba(CurrentLba);
+        if (_cbData != 0)
+        {
+            c.A0 = DataReady;
+            c.A1 = 0;
+            Dispatcher.Call(c, m, _cbData);
+        }
+        c.Restore(snap);
+    }
+
+    public static void WaitForV8Sector(CpuContext c, IMemory m)
+    {
+        uint consumedPtr = m.ReadU32(c.GP + 0x6A4u);
+        uint producedPtr = m.ReadU32(c.GP + 0x6A8u);
+        if (producedPtr == consumedPtr)
+        {
+            DeliverInitialReadyCallback(m);
+            producedPtr = m.ReadU32(c.GP + 0x6A8u);
+        }
+        m.WriteU32(c.GP + 0x6A4u, producedPtr);
+        c.V0 = consumedPtr;
+    }
+
+    public static void BeginV8FileRead(CpuContext c, IMemory m)
+    {
+        _v8FileStartLba = unchecked((int)c.A0);
+    }
+
+    // Vigilante 8's file reader consumes a two-sector callback ring. On the
+    // original console the CD interrupt can refill that ring during a long
+    // memcpy; the recompiled single-threaded path cannot reproduce that timing
+    // safely. Read the same 2048-byte sectors directly while retaining the
+    // game's byte-offset state and public reader semantics.
+    public static void ReadV8FileBytes(CpuContext c, IMemory m)
+    {
+        if (_v8FileStartLba < 0 || Runtime.Cd == null)
+            throw new InvalidOperationException("Vigilante 8 file read started without a disc/LBA");
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint destination = c.A0;
+        uint length = c.A1;
+        uint offset = m.ReadU32(c.GP + 0x6ACu);
+        uint copied = 0u;
+        while (copied < length)
+        {
+            int lba = _v8FileStartLba + (int)(offset >> 11);
+            int inSector = (int)(offset & 0x7FFu);
+            byte[] sector;
+            lock (DiscLock) sector = Runtime.Cd.ReadSectorData(lba, 2048);
+            int take = Math.Min((int)(length - copied), 2048 - inSector);
+            for (int i = 0; i < take; i++)
+            {
+                uint writeAddress = destination + copied + (uint)i;
+                m.WriteU8(writeAddress, sector[inSector + i]);
+            }
+            copied += (uint)take;
+            offset += (uint)take;
+        }
+
+        m.WriteU32(c.GP + 0x6ACu, offset);
+        c.V0 = 1u;
+    }
+
+    public static void SeekV8File(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        uint current = m.ReadU32(c.GP + 0x6ACu);
+        uint target = c.A1 == 0u ? c.A0 : current + c.A0;
+        m.WriteU32(c.GP + 0x6ACu, target);
     }
 
     static int SyncResult(IMemory m, uint result)

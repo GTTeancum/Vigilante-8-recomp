@@ -41,17 +41,24 @@ public static class BiosA
         m.WriteU32(ptr + 0x24u, 0u);
     }
 
-    public static uint FirstFile(IMemory m, uint wildPtr, uint dirPtr)
+    public static uint FirstFile(CpuContext c, IMemory m, uint wildPtr, uint dirPtr)
     {
         string wild = Bios.ReadString(m, wildPtr);
         var card = CardFor(wild);
-        if (card == null) return 0u;
+        if (card == null) { BiosB.DeliverEventIntr(c, m, 0xF4000001u, 0x8000u); return 0u; }
         _ff = card.Match(CardName(wild));
         _ffIdx = 0;
-        return NextFileEntry(m, dirPtr);
+        uint result = NextFileEntry(m, dirPtr);
+        BiosB.DeliverEventIntr(c, m, 0xF4000001u, 0x0004u);
+        return result;
     }
 
-    public static uint NextFile(IMemory m, uint dirPtr) => NextFileEntry(m, dirPtr);
+    public static uint NextFile(CpuContext c, IMemory m, uint dirPtr)
+    {
+        uint result = NextFileEntry(m, dirPtr);
+        BiosB.DeliverEventIntr(c, m, 0xF4000001u, 0x0004u);
+        return result;
+    }
 
     static uint NextFileEntry(IMemory m, uint dirPtr)
     {
@@ -162,7 +169,7 @@ public static class BiosA
                     int n = (int)Math.Min(c.A2, (uint)(cre.size - cre.pos));
                     for (int i = 0; i < n; i++) m.WriteU8(c.A1 + (uint)i, cre.card.ReadByte(cre.chain, cre.pos + i));
                     _cardFiles[fd] = (cre.card, cre.chain, cre.size, cre.pos + n);
-                    BiosB.DeliverEvent(0xF4000001u, 0x0004u);
+                    BiosB.DeliverEventIntr(c, m, 0xF4000001u, 0x0004u);
                     c.V0 = (uint)n; LastErrno = 0; break;
                 }
                 if (!_openFiles.TryGetValue(fd, out var re)) { c.V0 = 0xFFFFFFFFu; LastErrno = 9; break; }
@@ -186,7 +193,7 @@ public static class BiosA
                     for (int i = 0; i < n; i++) cwe.card.WriteByte(cwe.chain, cwe.pos + i, m.ReadU8(c.A1 + (uint)i));
                     cwe.card.Flush();
                     _cardFiles[fd] = (cwe.card, cwe.chain, cwe.size, cwe.pos + n);
-                    BiosB.DeliverEvent(0xF4000001u, 0x0004u);
+                    BiosB.DeliverEventIntr(c, m, 0xF4000001u, 0x0004u);
                     c.V0 = (uint)n; LastErrno = 0; break;
                 }
                 c.V0 = 0xFFFFFFFFu; LastErrno = 9; break;
@@ -350,10 +357,35 @@ public static class BiosA
             case 0x43: c.V0 = 0u; break;
             case 0x44: break;
             case 0x45: break;
-            case 0x46: case 0x47: case 0x48: case 0x49:
-            case 0x4A: case 0x4B: case 0x4C: break;
-            case 0x4D: c.V0 = 0u; break;
-            case 0x4E: break;
+            case 0x46: case 0x47:
+            {
+                var gpu = Runtime.Gpu;
+                if (gpu == null) { c.V0 = 0u; break; }
+                uint width = c.A2 & 0xFFFFu;
+                uint height = c.A3 & 0xFFFFu;
+                uint source = m.ReadU32(c.SP + 0x10u);
+                gpu.WriteGp0(0xA0000000u);
+                gpu.WriteGp0(((c.A1 & 0xFFFFu) << 16) | (c.A0 & 0xFFFFu));
+                gpu.WriteGp0((height << 16) | width);
+                uint words = (width * height + 1u) / 2u;
+                for (uint i = 0; i < words; i++) gpu.WriteGp0(m.ReadU32(source + i * 4u));
+                c.V0 = 0u;
+                break;
+            }
+            case 0x48:
+                Console.WriteLine($"[GPU] GP1 command 0x{c.A0:X8}");
+                Runtime.Gpu?.WriteGp1(c.A0);
+                break;
+            case 0x49: Runtime.Gpu?.WriteGp0(c.A0); c.V0 = 0u; break;
+            case 0x4A:
+                if (Runtime.Gpu != null)
+                    for (uint i = 0; i < c.A1; i++) Runtime.Gpu.WriteGp0(m.ReadU32(c.A0 + i * 4u));
+                c.V0 = 0u;
+                break;
+            case 0x4B: Sdk.LibGpu.DrawOTag(c, m); break;
+            case 0x4C: break;
+            case 0x4D: c.V0 = Runtime.Gpu?.ReadStat() ?? 0u; break;
+            case 0x4E: c.V0 = 0u; break;
             case 0x51: c.V0 = 0u; break;
             case 0x53: case 0x54: case 0x55: case 0x56:
             case 0x5C: case 0x67: case 0x68:

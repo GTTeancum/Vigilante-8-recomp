@@ -8,6 +8,7 @@ public enum RunMode { Retail, Devkit }
 
 public static class Runtime
 {
+    static bool? _lastDisplayEnabled;
     public static CpuContext? Cpu { get; private set; }
     public static IMemory? Mem { get; private set; }
     public static Gpu? Gpu;
@@ -44,6 +45,11 @@ public static class Runtime
 
     public static void PresentFrame()
     {
+        if (Gpu != null && _lastDisplayEnabled != Gpu.DisplayEnabled)
+        {
+            _lastDisplayEnabled = Gpu.DisplayEnabled;
+            Console.WriteLine($"[GPU] display={Gpu.DisplayEnabled} area={Gpu.DisplayX},{Gpu.DisplayY} {Gpu.DisplayWidth}x{Gpu.DisplayHeight} hle={Hle.GpuHle.Active}");
+        }
         HostWindow.Present(Gpu);
         Audio.Attach(Spu);
         FrameClock.Throttle();

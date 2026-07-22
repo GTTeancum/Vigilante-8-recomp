@@ -7,6 +7,27 @@ namespace RecompOne.Runtime.Sdk;
 public static class LibGpu
 {
 
+    public static void MoveImage(CpuContext c, IMemory m)
+    {
+        var gpu = Runtime.Gpu;
+        uint rect = c.A0;
+        int sx = S16(m, rect + 0x00u);
+        int sy = S16(m, rect + 0x02u);
+        int w = S16(m, rect + 0x04u);
+        int h = S16(m, rect + 0x06u);
+        if (gpu == null || w <= 0 || h <= 0)
+        {
+            c.V0 = 0xFFFFFFFFu;
+            return;
+        }
+
+        gpu.WriteGp0(0x80000000u);
+        gpu.WriteGp0(((uint)(ushort)sy << 16) | (ushort)sx);
+        gpu.WriteGp0(((uint)(ushort)c.A2 << 16) | (ushort)c.A1);
+        gpu.WriteGp0(((uint)(ushort)h << 16) | (ushort)w);
+        c.V0 = 0u;
+    }
+
     public static void DrawOTag(CpuContext c, IMemory m)
     {
         var gpu = Runtime.Gpu;

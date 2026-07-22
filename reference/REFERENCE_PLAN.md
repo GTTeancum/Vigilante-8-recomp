@@ -58,3 +58,9 @@ known HUD/menu globals.
 RecompOne earns a permanent place in the workflow once one meaningful original
 gameplay path can be replayed and compared at the state level. It remains a
 reference tool; the existing C project remains authoritative for the port.
+
+The executable-gameplay portion of this rule was reached on 2026-07-21:
+Oilfield ran under scripted steering, acceleration, and weapon input for 272.7
+seconds without a runtime error, and the deployed copy passed a second active
+smoke test. Shared state-trace capture and first-divergence comparison remain
+the next reference-lane work rather than prerequisites for running the game.

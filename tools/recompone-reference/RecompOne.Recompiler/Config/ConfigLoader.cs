@@ -49,6 +49,7 @@ public sealed class OverlayConfig
     [JsonPropertyName("lba")] public int Lba { get; set; } = -1;
     [JsonPropertyName("size")] public int? Size { get; set; }
     [JsonPropertyName("decrypt")] public bool Decrypt { get; set; }
+    [JsonPropertyName("v8Relocate")] public bool V8Relocate { get; set; }
     [JsonPropertyName("rebase")] public int Rebase { get; set; } = 0;
     [JsonPropertyName("functions")] public FunctionEntry[] Functions { get; set; } = [];
     [JsonPropertyName("linearSweep")] public bool? LinearSweep { get; set; }
