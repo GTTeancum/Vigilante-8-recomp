@@ -26,6 +26,11 @@ public static class V8Compat
     static int _vehiclePhysicsTick;
     static uint _integratingVehicle;
     static int _integratingVehicleTick;
+    static uint _collidingVehicle;
+    static int _collidingVehicleTick;
+    static int _playerCollisionCount;
+    static byte _collidingOtherKind;
+    static bool _capturedVehicleCollision;
     static bool _gameplayStage;
     static bool _zeroGameVolumeLogged;
     static string _lastHeapOperation = "heap initialization";
@@ -475,8 +480,8 @@ public static class V8Compat
             _lastMenuStage = null;
             InputManager.SignalScriptStage("gameplay");
         }
-        if (!_traceVehicle || tick > 720) return;
-        if (tick is 1 or 15 or 30 or 60 or 120 or 180 or 300 or 420 or 510 or 600 or 720)
+        if (!_traceVehicle || tick > 900) return;
+        if (tick is 1 or 15 or 30 or 60 or 120 or 180 or 300 or 420 or 510 or 600 or 720 or 780 or 840 or 900)
             HostWindow.RequestDisplayCapture($"physics_{tick:000}");
         Console.Error.WriteLine(
             $"[V8Physics] tick={tick} phase=begin obj=0x{player:X8} " +
@@ -490,7 +495,7 @@ public static class V8Compat
         if (!_traceVehicle) return;
         m = Dispatcher.UnwrapMemory(m);
         uint player = m.ReadU32(c.GP + 0x7D0u);
-        if (player == 0u || c.A0 != player || _vehiclePhysicsTick > 720) return;
+        if (player == 0u || c.A0 != player || _vehiclePhysicsTick > 900) return;
 
         _integratingVehicle = player;
         _integratingVehicleTick = _vehiclePhysicsTick;
@@ -512,9 +517,56 @@ public static class V8Compat
             $"ang={ReadVec3(m, player + 0x90u)} matrix={ReadMatrix(m, player + 0x10u)}");
     }
 
+    public static void TracePlayerCollisionPre(CpuContext c, IMemory m)
+    {
+        if (!_traceVehicle || c.A1 == 0u) return;
+        m = Dispatcher.UnwrapMemory(m);
+        uint player = m.ReadU32(c.GP + 0x7D0u);
+        if (player == 0u || c.A0 != player) return;
+
+        uint node = c.A1;
+        uint other = m.ReadU32(node);
+        uint subObject = m.ReadU32(node + 0x10u);
+        int collision = ++_playerCollisionCount;
+        byte otherKind = other == 0u ? (byte)0 : m.ReadU8(other + 4u);
+        if (collision > 32) return;
+        _collidingVehicle = player;
+        _collidingVehicleTick = _vehiclePhysicsTick;
+        _collidingOtherKind = otherKind;
+        Console.Error.WriteLine(
+            $"[V8Collision] count={collision} tick={_collidingVehicleTick} phase=pre " +
+            $"other=0x{other:X8} kind={otherKind} " +
+            $"sub=0x{subObject:X8} subKind={(subObject == 0u ? 0 : m.ReadU8(subObject + 4u))} " +
+            $"contact={ReadVec3(m, node + 0x14u)} normal={ReadShortVec3(m, node + 0x20u)} " +
+            $"penetration={unchecked((int)m.ReadU32(node + 0x30u))} " +
+            $"vel={ReadVec3(m, player + 0x80u)} ang={ReadVec3(m, player + 0x90u)}");
+    }
+
+    public static void TracePlayerCollisionPost(CpuContext c, IMemory m)
+    {
+        if (!_traceVehicle || _collidingVehicle == 0u) return;
+        m = Dispatcher.UnwrapMemory(m);
+        uint player = _collidingVehicle;
+        int tick = _collidingVehicleTick;
+        _collidingVehicle = 0u;
+        Console.Error.WriteLine(
+            $"[V8Collision] count={_playerCollisionCount} tick={tick} phase=post " +
+            $"vel={ReadVec3(m, player + 0x80u)} ang={ReadVec3(m, player + 0x90u)} " +
+            $"matrix={ReadMatrix(m, player + 0x10u)}");
+        if (_collidingOtherKind == 2 && !_capturedVehicleCollision)
+        {
+            _capturedVehicleCollision = true;
+            HostWindow.RequestDisplayCapture("collision_vehicle_first");
+        }
+    }
+
     static string ReadVec3(IMemory m, uint address) =>
         $"({unchecked((int)m.ReadU32(address))},{unchecked((int)m.ReadU32(address + 4u))}," +
         $"{unchecked((int)m.ReadU32(address + 8u))})";
+
+    static string ReadShortVec3(IMemory m, uint address) =>
+        $"({unchecked((short)m.ReadU16(address))},{unchecked((short)m.ReadU16(address + 2u))}," +
+        $"{unchecked((short)m.ReadU16(address + 4u))})";
 
     static string ReadMatrix(IMemory m, uint address) =>
         $"[{unchecked((short)m.ReadU16(address))},{unchecked((short)m.ReadU16(address + 2u))}," +

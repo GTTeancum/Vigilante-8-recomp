@@ -622,6 +622,18 @@ def main() -> int:
             },
             {
                 "overlay": "main",
+                "address": "8002D82C",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TracePlayerCollisionPre",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8002D82C",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TracePlayerCollisionPost",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
                 "address": "80044080",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.ApplyUserGameVolume",
                 "mode": "pre",

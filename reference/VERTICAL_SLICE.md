@@ -93,8 +93,17 @@ independently of movie, menu, CD, or host timing. A 55-second corrected run
 executed all three control phases, presented changing Oil Fields frames, and
 reported no runtime fault. The user visually accepted these motions as correct.
 This completes the visual baseline for those Physics sub-gates; collision and
-recovery plus PS1-versus-reference state comparison remain open before the full
-Physics gate is closed.
+recovery were then exercised by the same fixture. The first focused
+vehicle-to-vehicle response occurred at tick 572: the original collision code
+changed player velocity from `(-7463,73,-13293)` to
+`(23413,-13219,551395)` and angular velocity from `(-213,321,290)` to
+`(-85,3431,-181)`. Despite that impulse and continued vehicle/projectile
+contacts, the vehicle stayed upright and returned to near-level matrices at
+ticks 720, 780, 840, and 900 (`upY` 4072, 4093, 4038, and 4097). The corrected
+35-second focused run reached tick 900 with no runtime fault marker. This passes
+the runtime collision-and-recovery behavior needed before weapon work; the
+PS1-versus-reference state comparison remains open before the full fidelity
+gate is closed.
 
 ## Commit discipline
 

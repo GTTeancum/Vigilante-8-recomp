@@ -92,8 +92,14 @@ stage begins at the first original player-vehicle physics tick, waits 180 ticks
 for spawn/drop and suspension settling, then exercises acceleration,
 acceleration plus steering, and braking. Set `RECOMPONE_TRACE_VEHICLE=1` to log
 the player's fixed-point position, velocity, angular velocity, force, torque,
-and rotation matrix for the first 720 physics ticks and to request captures at
+and rotation matrix for the first 900 physics ticks and to request captures at
 the selected settle and control boundaries.
+
+The same trace records the first 32 player collision callbacks before and after
+the original response code, including other-object kind, contact data,
+velocity, angular velocity, and rotation matrix. It saves one focused capture
+at the first vehicle-to-vehicle contact without flooding the trace directory
+during persistent contact.
 
 ## Prepare the reference configuration
 
