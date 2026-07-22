@@ -33,6 +33,9 @@ MAIN_DYNAMIC_CALLBACK_EXTENTS[0x800129AC] = 0x800129E8
 MAIN_DYNAMIC_CALLBACK_EXTENTS[0x80022CB0] = 0x80022CD0
 MAIN_DYNAMIC_CALLBACK_EXTENTS[0x80021E5C] = 0x80021F30
 MAIN_DYNAMIC_CALLBACK_EXTENTS[0x80022044] = 0x800220D4
+# Object factory callback selected by LOAD.DLL for arena records. The address
+# is stored in DAT_80065A34 and reached only through FUN_80021B80's JALR.
+MAIN_DYNAMIC_CALLBACK_EXTENTS[0x800222A8] = 0x80022320
 MAIN_DYNAMIC_CALLBACK_EXTENTS[0x8002B98C] = 0x8002BC18
 MAIN_DYNAMIC_CALLBACK_EXTENTS.update(
     {
@@ -198,9 +201,29 @@ LOAD_INTERNAL_EXTENTS = {
     0x80101364: 0x80101574,
 }
 SKIRESRT_INTERNAL_EXTENTS = {
+    # GTE terrain clipping helper. Capstone/Ghidra do not recognize its first
+    # COP2 instruction as a normal function prologue, but six relocated JALs
+    # enter this exact address and the routine ends before the next helper.
+    0x8010038C: 0x80100424,
     # Indirect terrain helper called through a relocated callback pointer.
     # The routine returns at 0x801005DC before FUN_801005E0 begins.
     0x80100424: 0x801005E0,
+}
+ARENA_DYNAMIC_CALLBACK_EXTENTS = {
+    "CANYNLND": {
+        # Small event callback stored at object +0x64; it starts immediately
+        # after FUN_80100CBC's epilogue and ends at the image padding.
+        0x80101274: 0x801012A0,
+    },
+    "HOOVRDAM": {
+        # Same source event callback shape, placed after FUN_80101A98.
+        0x80101B5C: 0x80101B88,
+    },
+    "WILDWEST": {
+        # Per-object event callback stored at +0x64. It follows the prior
+        # routine's epilogue and ends at FUN_801004CC's prologue.
+        0x801004A0: 0x801004CC,
+    },
 }
 OVERLAY_ENTRYPOINTS = {
     # Exported terrain callbacks recorded in each DLL header at file offset
@@ -562,6 +585,10 @@ def main() -> int:
             counts[name] = add_explicit_extents(function_map, LOAD_INTERNAL_EXTENTS)
         elif name == "SKIRESRT":
             counts[name] = add_explicit_extents(function_map, SKIRESRT_INTERNAL_EXTENTS)
+        if name in ARENA_DYNAMIC_CALLBACK_EXTENTS:
+            counts[name] = add_explicit_extents(
+                function_map, ARENA_DYNAMIC_CALLBACK_EXTENTS[name]
+            )
         overlays.append(
             {
                 "name": name,
@@ -605,6 +632,30 @@ def main() -> int:
                 "address": "80015368",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.Fatal",
                 "mode": "replace",
+            },
+            {
+                "overlay": "main",
+                "address": "800159B4",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceStreamOpen",
+                "mode": "pre",
+            },
+            {
+                "overlay": "LOAD",
+                "address": "8010167C",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceLevelLoadEntry",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80021B80",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceLevelFactoryPre",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80021B80",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceLevelFactoryPost",
+                "mode": "post",
             },
             {
                 "overlay": "main",

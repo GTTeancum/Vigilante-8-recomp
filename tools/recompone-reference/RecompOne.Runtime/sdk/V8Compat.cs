@@ -29,6 +29,13 @@ public static class V8Compat
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OPTIONS") == "1";
     static readonly bool _traceAnimation =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_ANIMATION") == "1";
+    static readonly int _soakHeartbeatTicks =
+        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_SOAK_HEARTBEAT_TICKS"),
+            out int heartbeatTicks)
+            ? Math.Max(1, heartbeatTicks)
+            : 0;
+    static readonly string? _automationTargetLocation =
+        Environment.GetEnvironmentVariable("RECOMPONE_TARGET_LOCATION");
     static int _vehiclePhysicsTick;
     static uint _integratingVehicle;
     static int _integratingVehicleTick;
@@ -461,6 +468,46 @@ public static class V8Compat
         throw new InvalidOperationException($"Vigilante 8 fatal error: {message} (0x{address:X8})");
     }
 
+    public static void TraceLevelLoadEntry(CpuContext c, IMemory m)
+    {
+        if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_LEVEL_LOAD") != "1") return;
+        Console.WriteLine($"[LevelLoad] entry path=0x{c.A0:X8} '{ReadAscii(m, c.A0)}' " +
+            $"label=0x{c.A1:X8} kind={c.A2}");
+    }
+
+    public static void TraceStreamOpen(CpuContext c, IMemory m)
+    {
+        if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_LEVEL_LOAD") != "1") return;
+        Console.WriteLine($"[LevelLoad] stream-open path=0x{c.A0:X8} '{ReadAscii(m, c.A0)}' " +
+            $"sp=0x{c.SP:X8} s3=0x{c.S3:X8}");
+    }
+
+    public static void TraceLevelFactoryPre(CpuContext c, IMemory m)
+    {
+        if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_LEVEL_LOAD") != "1") return;
+        Console.WriteLine($"[LevelLoad] factory-enter callback=0x{c.A0:X8} object=0x{c.A1:X8} " +
+            $"kind={c.A2} caller-s3=0x{c.S3:X8} sp=0x{c.SP:X8}");
+    }
+
+    public static void TraceLevelFactoryPost(CpuContext c, IMemory m)
+    {
+        if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_LEVEL_LOAD") != "1") return;
+        Console.WriteLine($"[LevelLoad] factory-exit result=0x{c.V0:X8} caller-s3=0x{c.S3:X8} " +
+            $"sp=0x{c.SP:X8}");
+    }
+
+    static string ReadAscii(IMemory m, uint address)
+    {
+        var chars = new List<byte>(96);
+        for (int i = 0; i < 95; i++)
+        {
+            byte value = m.ReadU8(address + (uint)i);
+            if (value == 0) break;
+            chars.Add(value is >= 0x20 and < 0x7F ? value : (byte)'?');
+        }
+        return System.Text.Encoding.ASCII.GetString(chars.ToArray());
+    }
+
     // The PS1 continues delivering VSync interrupts while the game spins in
     // FUN_800165cc waiting for its transition callback. Recompiled code runs on
     // one host thread, so explicitly advance frames until that callback sets the
@@ -565,6 +612,13 @@ public static class V8Compat
             _pauseResumePending = false;
             _lastMenuStage = null;
             InputManager.SignalScriptStage($"gameplay_resumed_{++_pauseResumeCount}");
+        }
+        if (_soakHeartbeatTicks > 0 &&
+            (tick == 1 || tick % _soakHeartbeatTicks == 0))
+        {
+            Console.Error.WriteLine(
+                $"[Soak] gameplay tick={tick} player=0x{player:X8} " +
+                $"pos={ReadVec3(m, player + 0x24u)} vel={ReadVec3(m, player + 0x80u)}");
         }
         TracePlayerWeaponState(m, player, tick);
         if (!_traceVehicle || tick > 900) return;
@@ -912,7 +966,6 @@ public static class V8Compat
             "COOPERATIVE" => "two_player_mode",
             "1 PLAYER" => "player_count",
             "SELECT LOCATION" => "select_location",
-            "Oil Fields" => "location_oilfield",
             "QUEST ROUTE" => "quest_route",
             "CHOOSE PLAYER" => "choose_player",
             "CHOOSE PLAYERS" => "choose_players",
@@ -920,6 +973,12 @@ public static class V8Compat
             "CHOOSE ENEMIES" => "choose_enemies",
             _ => null,
         };
+        if (stage == null && TryGetLocationStage(text, out string? locationStage) &&
+            ((_automationTargetLocation == null && text == "Oil Fields") ||
+             text.Equals(_automationTargetLocation, StringComparison.OrdinalIgnoreCase)))
+        {
+            stage = locationStage;
+        }
         if (stage == "press_start")
         {
             _gameplayStage = false;
@@ -928,6 +987,25 @@ public static class V8Compat
         if (stage != null &&
             (!_gameplayStage || stage.StartsWith("pause_", StringComparison.Ordinal)))
             _lastMenuStage = stage;
+    }
+
+    static bool TryGetLocationStage(string text, out string? stage)
+    {
+        stage = text switch
+        {
+            "Ski Resort" => "location_ski_resort",
+            "Canyonlands" => "location_canyonlands",
+            "Casino City" => "location_casino_city",
+            "Valley Farms" => "location_valley_farms",
+            "Hoover Dam" => "location_hoover_dam",
+            "Ghost Town" => "location_ghost_town",
+            "Aircraft Graveyard" => "location_aircraft_graveyard",
+            "Oil Fields" => "location_oilfield",
+            "Sand Factory" => "location_sand_factory",
+            "Secret Base" => "location_secret_base",
+            _ => null,
+        };
+        return stage != null;
     }
 
     public static void TraceMenuPad(CpuContext c, IMemory m)

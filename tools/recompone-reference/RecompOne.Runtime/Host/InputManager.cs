@@ -26,7 +26,8 @@ internal static unsafe class InputManager
     const int RightStickDown = 109;
     static bool _topBarToggle;
     static bool _fullscreenToggle;
-    readonly record struct ScriptedPulse(string? Stage, int Start, int End, ushort Mask);
+    readonly record struct ScriptedPulse(
+        string? Stage, int Start, int End, ushort Pad1Mask, ushort Pad2Mask);
 
     static readonly List<ScriptedPulse> _scriptedInput = new();
     static int _inputPoll;
@@ -136,10 +137,27 @@ internal static unsafe class InputManager
                 start < 0 || duration <= 0)
                 throw new InvalidOperationException($"Invalid RECOMPONE_INPUT_SCRIPT entry: {raw}");
 
-            ushort mask = 0;
-            foreach (string button in sides[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            ushort pad1Mask = 0;
+            ushort pad2Mask = 0;
+            foreach (string token in sides[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                mask |= button.ToUpperInvariant() switch
+                string button = token;
+                int pad = 1;
+                int colon = token.IndexOf(':');
+                if (colon >= 0)
+                {
+                    string prefix = token[..colon].Trim();
+                    button = token[(colon + 1)..].Trim();
+                    pad = prefix.ToUpperInvariant() switch
+                    {
+                        "P1" or "PAD1" => 1,
+                        "P2" or "PAD2" => 2,
+                        _ => throw new InvalidOperationException(
+                            $"Unknown scripted controller prefix: {prefix}"),
+                    };
+                }
+
+                ushort mask = button.ToUpperInvariant() switch
                 {
                     "CROSS" => Controller.Cross,
                     "CIRCLE" => Controller.Circle,
@@ -157,8 +175,11 @@ internal static unsafe class InputManager
                     "R2" => Controller.R2,
                     _ => throw new InvalidOperationException($"Unknown scripted controller button: {button}"),
                 };
+                if (pad == 1) pad1Mask |= mask;
+                else pad2Mask |= mask;
             }
-            _scriptedInput.Add(new ScriptedPulse(stage, start, start + duration, mask));
+            _scriptedInput.Add(new ScriptedPulse(
+                stage, start, start + duration, pad1Mask, pad2Mask));
         }
 
         int staged = _scriptedInput.Count(pulse => pulse.Stage != null);
@@ -216,9 +237,12 @@ internal static unsafe class InputManager
                 string location = pulse.Stage == null
                     ? $"absolute poll {poll}"
                     : $"stage '{pulse.Stage}' poll {stagePoll} (absolute {poll})";
-                Console.Error.WriteLine($"[Input] scripted pulse at {location}: mask=0x{pulse.Mask:X4}");
+                Console.Error.WriteLine(
+                    $"[Input] scripted pulse at {location}: " +
+                    $"p1=0x{pulse.Pad1Mask:X4} p2=0x{pulse.Pad2Mask:X4}");
             }
-            Controller.State &= (ushort)~pulse.Mask;
+            Controller.State &= (ushort)~pulse.Pad1Mask;
+            Controller.State2 &= (ushort)~pulse.Pad2Mask;
         }
     }
 

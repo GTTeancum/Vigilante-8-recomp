@@ -295,7 +295,8 @@ public static class OverlayWriter
                 Debug = debug,
                 JumpTablesByJr = func.JumpTables.ToDictionary(j => j.JrVram),
                 RaReturnJrs = FunctionDetector.ComputeRaReturnJrs(func),
-                AllInstructions = instrs
+                AllInstructions = instrs,
+                RelocatableOverlay = true
             };
             sb.Append(FunctionEmitter.Emit(func, ctx));
         }

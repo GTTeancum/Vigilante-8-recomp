@@ -30,6 +30,15 @@ public static class Dispatcher
     public static IMemory UnwrapMemory(IMemory memory) =>
         memory is RelocatedMemory relocated ? relocated.Inner : memory;
 
+    public static uint NormalizeLinkedAddress(IMemory memory, uint address)
+    {
+        if (memory is not RelocatedMemory relocated) return address;
+        uint actualBase = relocated.LinkedBase + relocated.Delta;
+        return address >= actualBase && address - actualBase < relocated.Size
+            ? address - relocated.Delta
+            : address;
+    }
+
     public static void AssociateObjectOwner(uint address, IMemory memory)
     {
         if (address == 0u || memory is not RelocatedMemory relocated) return;

@@ -280,7 +280,10 @@ public static class InstructionEmitter
             if (rs == 31 || ctx.RaReturnJrs.Contains(pc)) sb.AppendLine($"{indent}return;");
             else if (ctx.JumpTablesByJr.TryGetValue(pc, out var jtbl))
             {
-                sb.AppendLine($"{indent}switch ({RS})");
+                string selector = ctx.RelocatableOverlay
+                    ? $"Dispatcher.NormalizeLinkedAddress(m, {RS})"
+                    : RS;
+                sb.AppendLine($"{indent}switch ({selector})");
                 sb.AppendLine($"{indent}{{");
                 foreach (uint entry in jtbl.Entries.Distinct())
                     sb.AppendLine($"{indent}    case 0x{entry:X8}u: goto L{entry:X8};");
@@ -321,6 +324,7 @@ public sealed class FunctionContext
     public Dictionary<uint, JumpTable> JumpTablesByJr = [];
     public HashSet<uint> RaReturnJrs = [];
     public MipsInstruction[] AllInstructions = [];
+    public bool RelocatableOverlay;
     
     public uint SkipNopPadding(uint addr) //faltru can end up in padding
     {

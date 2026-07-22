@@ -26,6 +26,7 @@ internal static class HostWindow
     static PresentationRenderer? _presentationRenderer;
 
     static byte[] _rgbDisplay = [];
+    static ushort[] _hleDisplay = [];
     static byte[] _rgbVram = [];
     static byte[] _ramFront = new byte[Memory.RamLogger.Width * Memory.RamLogger.Height * 4];
     static byte[] _ramBack = new byte[Memory.RamLogger.Width * Memory.RamLogger.Height * 4];
@@ -49,6 +50,8 @@ internal static class HostWindow
     static int _presentationFrame;
     static readonly bool _capturePresentation =
         Environment.GetEnvironmentVariable("RECOMPONE_PRESENTATION_CAPTURE") == "1";
+    static readonly bool _windowVisible =
+        Environment.GetEnvironmentVariable("RECOMPONE_WINDOW_VISIBLE") != "0";
     static readonly int _displayProbeInterval =
         int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_DISPLAY_PROBE_INTERVAL"), out int interval)
             ? Math.Max(1, interval)
@@ -69,6 +72,7 @@ internal static class HostWindow
             {
                 Size = new Vector2D<int>(outputSize.width, outputSize.height),
                 Title = title,
+                IsVisible = _windowVisible,
                 VSync = false,
                 UpdatesPerSecond = 0,
                 FramesPerSecond = 0,
@@ -278,6 +282,7 @@ internal static class HostWindow
                     gpu.DisplayWidth, gpu.DisplayHeight,
                     gpu.Display24Bit,
                     outW: wf.X, outH: wf.Y);
+                ProbeHleDisplay(_glBackend, gpu, gpu.DisplayWidth, gpu.DisplayHeight);
                 if (tex != 0) PresentTexture(gl, tex, tw, th, aspect);
                 gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                 gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
@@ -415,6 +420,34 @@ internal static class HostWindow
         _requestedDisplayCapture = null;
         bool periodicProbe = ++_displayProbeFrame % _displayProbeInterval == 1;
         if (!periodicProbe && string.IsNullOrEmpty(captureLabel)) return;
+
+        RecordDisplayProbe(w, h, captureLabel);
+    }
+
+    static void ProbeHleDisplay(Hle.IGpuBackend backend, Gpu gpu, int w, int h)
+    {
+        string? captureLabel = _requestedDisplayCapture;
+        _requestedDisplayCapture = null;
+        bool periodicProbe = ++_displayProbeFrame % _displayProbeInterval == 1;
+        if (!periodicProbe && string.IsNullOrEmpty(captureLabel)) return;
+
+        int pixels = w * h;
+        if (_hleDisplay.Length < pixels) _hleDisplay = new ushort[pixels];
+        if (_rgbDisplay.Length < pixels * 3) _rgbDisplay = new byte[pixels * 3];
+        backend.ReadVram(gpu.DisplayX, gpu.DisplayY, w, h, _hleDisplay.AsSpan(0, pixels));
+        for (int i = 0, o = 0; i < pixels; i++)
+        {
+            ushort px = _hleDisplay[i];
+            _rgbDisplay[o++] = (byte)((px & 0x1F) << 3);
+            _rgbDisplay[o++] = (byte)(((px >> 5) & 0x1F) << 3);
+            _rgbDisplay[o++] = (byte)(((px >> 10) & 0x1F) << 3);
+        }
+
+        RecordDisplayProbe(w, h, captureLabel);
+    }
+
+    static void RecordDisplayProbe(int w, int h, string? captureLabel)
+    {
 
         int pixels = w * h;
         int nonzero = 0;
