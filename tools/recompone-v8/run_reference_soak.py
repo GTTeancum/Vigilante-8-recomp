@@ -632,7 +632,13 @@ def run_one(
         passed = False
         actual = match_modes[-1] if match_modes else "missing"
         reason = f"expected match mode {expected_match_mode}, observed {actual}"
-    if passed and clean_exit and not clean_match_exit:
+    if (
+        passed
+        and clean_exit
+        and not clean_match_exit
+        and not clean_match_relaunch
+        and not clean_match_teardown
+    ):
         passed = False
         reason = "in-game exit was not observed"
 

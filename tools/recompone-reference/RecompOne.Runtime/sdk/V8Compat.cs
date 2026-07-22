@@ -108,9 +108,9 @@ public static class V8Compat
     static Timer? _animationWatchdog;
     static CpuContext? _animationWatchContext;
     static IMemory? _animationWatchMemory;
-    static uint _casinoScatterObject;
-    static uint _casinoScatterMode;
-    static bool _casinoScatterEndFixLogged;
+    static uint _cursorClearingAnimationObject;
+    static uint _cursorClearingAnimationMode;
+    static bool _cursorClearingAnimationFixLogged;
     static StreamWriter? _stateTraceWriter;
     static bool _stateTraceUnavailable;
 
@@ -170,29 +170,30 @@ public static class V8Compat
             $"callback=0x{m.ReadU32(obj + 0x64u):X8} history={history}");
     }
 
-    public static void TraceCasinoScatterPre(CpuContext c, IMemory m)
+    public static void TraceCursorClearingAnimationPre(CpuContext c, IMemory m)
     {
-        _casinoScatterObject = c.A0;
-        _casinoScatterMode = c.A1;
+        _cursorClearingAnimationObject = c.A0;
+        _cursorClearingAnimationMode = c.A1;
     }
 
-    public static void FixCasinoScatterAnimationEnd(CpuContext c, IMemory m)
+    public static void FixCursorClearingAnimationEnd(CpuContext c, IMemory m)
     {
-        if (_casinoScatterMode != 5u || _casinoScatterObject == 0u) return;
+        if (_cursorClearingAnimationMode != 5u || _cursorClearingAnimationObject == 0u) return;
         m = Dispatcher.UnwrapMemory(m);
-        if (m.ReadU32(_casinoScatterObject + 0x60u) != 0u) return;
+        if (m.ReadU32(_cursorClearingAnimationObject + 0x60u) != 0u) return;
 
-        // The Casino City scatter object clears its animation cursor on event
-        // 5 but returns zero. Object_PreTick then follows address zero as if it
-        // were another keyframe. Return the animation walker's documented
-        // negative abort value when this exact end-of-sequence state occurs.
+        // Some arena callbacks clear their animation cursor on event 5 but
+        // return zero. Object_PreTick then follows address zero as if it were
+        // another keyframe. Return the animation walker's documented negative
+        // abort value only for this exact end-of-sequence state.
         c.V0 = 0xFFFFFFFFu;
-        if (!_casinoScatterEndFixLogged)
+        if (!_cursorClearingAnimationFixLogged)
         {
-            _casinoScatterEndFixLogged = true;
+            _cursorClearingAnimationFixLogged = true;
             Console.Error.WriteLine(
-                $"[V8Compat] Casino City scatter animation ended cleanly " +
-                $"object=0x{_casinoScatterObject:X8}");
+                $"[V8Compat] cursor-clearing animation ended cleanly " +
+                $"object=0x{_cursorClearingAnimationObject:X8} " +
+                $"callback=0x{m.ReadU32(_cursorClearingAnimationObject + 0x64u):X8}");
         }
     }
 

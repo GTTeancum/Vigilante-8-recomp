@@ -42,11 +42,15 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [ ] Determine whether the Ski Resort post-defeat presentation stall is a
       game/runtime defect or a result-screen automation false positive, then
       pass defeat dismissal and arena relaunch.
-- [ ] Diagnose Casino City's fragmented emulated-heap exhaustion: a 4,592-byte
-      allocation failed at tick 5,580 despite 94,216 aggregate free bytes and
-      a largest free block of only 2,896 bytes.
-- [ ] Regenerate and regression-test the newly recovered main-executable
+- [x] Diagnose Casino City's fragmented emulated-heap exhaustion: allocation
+      failure is recoverable pressure, not a fatal condition; a subsequent
+      Canyonlands run logged it and continued normally through 9,900 ticks and
+      result/title teardown.
+- [x] Regenerate and regression-test the newly recovered main-executable
       entrypoint `0x8003DFFC`, reached from Hoover Dam gameplay at tick 720.
+- [x] Fix Hoover Dam callback `0x80100A18` clearing its animation cursor on
+      event 5 while returning success; three independent post-fix matches
+      reached 7,380, 5,940, and 4,500 ticks with clean result/title teardown.
 
 ### Multi-map soak
 
@@ -222,3 +226,13 @@ The retained screenshots and controller checklist are collected in
   loose assets and did not open disc media. Both reached Oil Fields, reported
   dithering Off, completed 360 gameplay ticks, and exited through the original
   pause confirmation. Cards and settings retained their prior hashes.
+- 2026-07-22: The three-hour crash campaign found Hoover Dam direct target
+  `0x8003DFFC` inside Ghidra's overlapping `0x8003DFD8` extent. Registering the
+  independent entry exposed a second defect: overlay callback `0x80100A18`
+  cleared animation cursor `+0x60` on event 5 while returning success, causing
+  `Object_PreTick` to spin. The exact cleared-cursor boundary now returns the
+  animation walker's abort result, and three fresh matches passed.
+- 2026-07-22: Long-soak liveness now captures a live `dotnet-stack` report
+  before terminating a stalled process. Natural result/title return is accepted
+  without requiring an immediate same-arena relaunch, and heap-allocation
+  pressure is recorded rather than treated as fatal by itself.

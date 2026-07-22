@@ -830,13 +830,25 @@ def main() -> int:
             {
                 "overlay": "CASNOCTY",
                 "address": "80101A90",
-                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceCasinoScatterPre",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceCursorClearingAnimationPre",
                 "mode": "pre",
             },
             {
                 "overlay": "CASNOCTY",
                 "address": "80101A90",
-                "target": "RecompOne.Runtime.Sdk.V8Compat.FixCasinoScatterAnimationEnd",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.FixCursorClearingAnimationEnd",
+                "mode": "post",
+            },
+            {
+                "overlay": "HOOVRDAM",
+                "address": "80100A18",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceCursorClearingAnimationPre",
+                "mode": "pre",
+            },
+            {
+                "overlay": "HOOVRDAM",
+                "address": "80100A18",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.FixCursorClearingAnimationEnd",
                 "mode": "post",
             },
             {
