@@ -1,6 +1,7 @@
 using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Dispatch;
 using RecompOne.Runtime.Hardware;
+using RecompOne.Runtime.Sdk;
 
 namespace RecompOne.Runtime.Memory;
 
@@ -81,6 +82,7 @@ public sealed class PSMemory : IMemory
         if (phys >= MemoryMap.BiosBase && phys < MemoryMap.BiosBase + MemoryMap.BiosSize)
             return _bios.AsSpan((int)(phys - MemoryMap.BiosBase), size);
 
+        V8Compat.TraceUnmappedMemoryAddress(address, size);
         throw new InvalidOperationException($"unmapped address: 0x{address:X8}");
     }
 

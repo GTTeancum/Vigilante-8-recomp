@@ -113,6 +113,9 @@ public static class V8Compat
     static bool _cursorClearingAnimationFixLogged;
     static uint _childCursorClearingAnimationObject;
     static bool _childCursorClearingAnimationFixLogged;
+    static CpuContext? _collisionNeighborContext;
+    static uint _collisionNeighborSubject;
+    static bool _collisionFaultTraceActive;
     static StreamWriter? _stateTraceWriter;
     static bool _stateTraceUnavailable;
 
@@ -224,6 +227,41 @@ public static class V8Compat
             Console.Error.WriteLine(
                 $"[V8Compat] child cursor-clearing animation ended cleanly " +
                 $"object=0x{obj:X8} callback=0x800378D0");
+        }
+    }
+
+    public static void TraceCollisionNeighborScanPre(CpuContext c, IMemory m)
+    {
+        _collisionNeighborContext = c;
+        _collisionNeighborSubject = c.A0;
+    }
+
+    public static void TraceCollisionNeighborScanPost(CpuContext c, IMemory m)
+    {
+        _collisionNeighborContext = null;
+        _collisionNeighborSubject = 0u;
+    }
+
+    public static void TraceUnmappedMemoryAddress(uint address, int size)
+    {
+        CpuContext? c = _collisionNeighborContext;
+        if (c == null || _collisionFaultTraceActive) return;
+        _collisionFaultTraceActive = true;
+        try
+        {
+            Console.Error.WriteLine(
+                $"[V8CollisionFault] address=0x{address:X8} size={size} " +
+                $"subject=0x{_collisionNeighborSubject:X8} " +
+                $"a0=0x{c.A0:X8} a1=0x{c.A1:X8} a2=0x{c.A2:X8} a3=0x{c.A3:X8} " +
+                $"v0=0x{c.V0:X8} v1=0x{c.V1:X8} " +
+                $"s0=0x{c.S0:X8} s1=0x{c.S1:X8} s2=0x{c.S2:X8} " +
+                $"s3=0x{c.S3:X8} s4=0x{c.S4:X8} " +
+                $"t0=0x{c.T0:X8} t1=0x{c.T1:X8} t2=0x{c.T2:X8} " +
+                $"t3=0x{c.T3:X8} sp=0x{c.SP:X8} ra=0x{c.RA:X8}");
+        }
+        finally
+        {
+            _collisionFaultTraceActive = false;
         }
     }
 

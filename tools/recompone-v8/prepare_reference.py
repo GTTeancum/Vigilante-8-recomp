@@ -829,6 +829,18 @@ def main() -> int:
             },
             {
                 "overlay": "main",
+                "address": "80024998",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceCollisionNeighborScanPre",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80024998",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceCollisionNeighborScanPost",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
                 "address": "800378D0",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TraceChildCursorClearingAnimationPre",
                 "mode": "pre",
