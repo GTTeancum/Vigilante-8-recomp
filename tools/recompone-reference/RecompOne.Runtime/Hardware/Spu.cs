@@ -371,6 +371,11 @@ public sealed class Spu
                     mixL += xl * (short)_cdVolL >> 15;
                     mixR += xr * (short)_cdVolR >> 15;
                 }
+                if (CddaAudio.Next(out short cl, out short cr))
+                {
+                    mixL += cl * (short)_cdVolL >> 15;
+                    mixR += cr * (short)_cdVolR >> 15;
+                }
                 mixL = Math.Clamp(mixL, -32768, 32767) * _mainCurL >> 15;
                 mixR = Math.Clamp(mixR, -32768, 32767) * _mainCurR >> 15;
                 dst[n * 2] = (short)mixL;

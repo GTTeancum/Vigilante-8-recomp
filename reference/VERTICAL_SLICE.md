@@ -162,6 +162,26 @@ hook changed health, damage, AI, or match state. This completes the fixed-slice
 Weapons gate at runtime, subject to the same PS1-versus-reference state audit as
 the final fidelity gate.
 
+## Current audio status
+
+The CUE reader now builds the retail multi-file table of contents: track 1 is
+the data track and tracks 2-13 are raw 44.1 kHz stereo CD audio. The host
+implements `CdlGetTN`, `CdlGetTD`, and `CdlPlay`, streams 2,352-byte audio
+sectors into a paced ring buffer, and mixes them through the original SPU CD
+left/right volume registers. CD playback owns a position separate from the
+latest `CdlSetloc`, matching the drive behavior needed for music to continue
+while the shell locates ordinary assets.
+
+An audible Oil Fields run presented the 1-13 TOC, started menu track 2 at its
+authored pregap, retained playback through later data seeks, and started a
+gameplay-selected track without an unmapped-sector stop. The pause regression
+then changed track 2 to track 3 and back through the original CD Track row.
+Focused sector traces recorded nonzero source peaks up to 17,724, proving that
+the runtime is consuming PCM from the audio BIN files rather than mixing a
+silent placeholder. XA stream pacing, SPU voice allocation/loop/stop evidence,
+and an audible mixed-output capture/check remain open before the Audio gate can
+pass.
+
 ## Current match-end status
 
 The result-stage capture is delayed 60 input polls after `ResultScreen_Build`,

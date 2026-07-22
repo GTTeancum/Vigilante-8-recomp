@@ -377,6 +377,18 @@ public sealed class CdController
         return _fs.ReadSectorData(lba, size);
     }
 
+    public int FirstTrackNumber => _fs.FirstTrackNumber;
+    public int LastTrackNumber => _fs.LastTrackNumber;
+    public int LeadOutLba => _fs.LeadOutLba;
+    public bool TryGetTrackStartLba(int trackNumber, out int lba) =>
+        _fs.TryGetTrackStartLba(trackNumber, out lba);
+    public bool TryReadAudioSector(
+        int lba,
+        out byte[] sector,
+        out int trackNumber,
+        out int trackEndLba) =>
+        _fs.TryReadAudioSector(lba, out sector, out trackNumber, out trackEndLba);
+
     public void QueueAsyncSeekL(byte mm, byte ss, byte ff)
     {
         _seekLba = BcdToLba(mm, ss, ff);

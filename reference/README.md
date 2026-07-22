@@ -54,9 +54,12 @@ That launcher sets Vigilante 8's own Music and Sound Effects controls to 0 for
 the working handoff without changing Windows volume or the host mixer. Direct
 test launches remain audible unless `RECOMPONE_V8_GAME_VOLUME=0` is set.
 
-Host audio uses the bundled SDL2 runtime to queue the reference SPU/XA mix as
-44.1 kHz stereo signed-16 output, so the handoff does not require a separate
-OpenAL installation.
+Host audio uses the bundled SDL2 runtime to queue the reference SPU, XA, and
+Red Book CD-audio mix as 44.1 kHz stereo signed-16 output, so the handoff does
+not require a separate OpenAL installation. The CUE reader preserves the full
+disc TOC and all twelve audio tracks; `CdlPlay` streams their raw stereo sectors
+through the original CD-volume registers while data seeks retain a separate
+drive position.
 
 For deterministic automation, set `RECOMPONE_INPUT_FILE` to a committed
 poll-indexed fixture. The current reachability baseline is
@@ -218,6 +221,13 @@ marker. Separate clean fixtures also presented and navigated the Quest route,
 Cooperative, Versus, and both two-player selector layouts. See
 `VERTICAL_SLICE.md` for the remaining audio, graphics, and final
 state-comparison gates.
+
+The original CD-audio path now sees the retail 1-13 TOC rather than a synthetic
+single data track. Focused audible runs started menu track 2 and gameplay track
+8, continued menu music across unrelated asset seeks, and used the pause CD
+Track row to move from track 2 to track 3 and back. Sector traces show nonzero
+PCM peaks from the actual BIN audio files. XA pacing, SPU voice lifecycle, and
+an output capture/check remain open in the Audio gate.
 
 See `REFERENCE_PLAN.md` for the architecture and `VERTICAL_SLICE.md` for the
 active acceptance gates.

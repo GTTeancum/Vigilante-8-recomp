@@ -19,6 +19,8 @@ public static class LibCd
         Setmode = 0x0E,
         GetlocL = 0x10,
         GetlocP = 0x11,
+        GetTN = 0x13,
+        GetTD = 0x14,
         SeekL = 0x15,
         SeekP = 0x16,
         ReadS = 0x1B;
@@ -43,6 +45,11 @@ public static class LibCd
 
     static bool _readActive;
     static bool _xaActive;
+    static volatile bool _cddaActive;
+    static int _cddaLba;
+    static int _cddaPendingReportLba = -1;
+    static volatile int _cddaTrackNumber;
+    static int _cddaLastReportSecond = -1;
     static byte _filterFile;
     static byte _filterChannel;
     static int _v8FileStartLba = -1;
@@ -140,6 +147,7 @@ public static class LibCd
 
     internal static void Tick()
     {
+        DispatchCddaReport();
         bool xaMode = (_mode & 0x40) != 0;
 
         if (_readActive && xaMode) return;
@@ -173,10 +181,75 @@ public static class LibCd
     {
         while (_xaRun)
         {
-            if (_readActive && (_mode & 0x40) != 0 && Runtime.Cd != null)
+            if (_cddaActive && Runtime.Cd != null)
+                PumpCdda();
+            else if (_readActive && (_mode & 0x40) != 0 && Runtime.Cd != null)
                 PumpXa();
             Thread.Sleep(2);
         }
+    }
+
+    static void PumpCdda()
+    {
+        var cd = Runtime.Cd;
+        if (cd == null) return;
+        const int MinBufferFrames = 4096;
+        const int MaxScan = 16;
+        int scanned = 0;
+
+        while (_cddaActive && CddaAudio.BufferedFrames < MinBufferFrames && scanned++ < MaxScan)
+        {
+            int lba = _cddaLba;
+            byte[] sector;
+            int trackNumber;
+            int trackEndLba;
+            lock (DiscLock)
+            {
+                if (!cd.TryReadAudioSector(lba, out sector, out trackNumber, out trackEndLba))
+                {
+                    _cddaActive = false;
+                    Console.Error.WriteLine($"[CDDA] stopped at unmapped audio LBA {lba}");
+                    return;
+                }
+            }
+
+            _cddaTrackNumber = trackNumber;
+            CddaAudio.QueueSector(sector, trackNumber, lba);
+            _cddaLba = lba + 1;
+            int reportSecond = lba / 75;
+            if (reportSecond != _cddaLastReportSecond)
+            {
+                _cddaLastReportSecond = reportSecond;
+                Interlocked.Exchange(ref _cddaPendingReportLba, lba);
+            }
+            if (lba + 1 >= trackEndLba) return;
+        }
+    }
+
+    static void DispatchCddaReport()
+    {
+        int lba = Interlocked.Exchange(ref _cddaPendingReportLba, -1);
+        if (lba < 0 || _cbReady == 0 || Runtime.Cpu == null || Runtime.Mem == null) return;
+
+        IntToPos(lba, out byte mm, out byte ss, out byte ff);
+        _lastResult[0] = _status;
+        _lastResult[1] = ToBcd(_cddaTrackNumber);
+        _lastResult[2] = 1;
+        _lastResult[3] = mm;
+        _lastResult[4] = ss;
+        _lastResult[5] = ff;
+        _lastResult[6] = mm;
+        _lastResult[7] = ss;
+
+        var c = Runtime.Cpu;
+        var m = Runtime.Mem;
+        const uint resultAddress = 0x8000FF00u;
+        WriteResult(m, resultAddress);
+        var snap = c.Snapshot();
+        c.A0 = DataReady;
+        c.A1 = resultAddress;
+        Dispatcher.Call(c, m, _cbReady);
+        c.Restore(snap);
     }
 
     static void PumpXa()
@@ -281,6 +354,12 @@ public static class LibCd
         _cbSync = _cbReady = _cbData = 0;
         _readActive = false;
         _xaActive = false;
+        _cddaActive = false;
+        _cddaLba = 0;
+        _cddaPendingReportLba = -1;
+        _cddaTrackNumber = 0;
+        _cddaLastReportSecond = -1;
+        CddaAudio.Reset();
         _filterFile = _filterChannel = 0;
         Array.Clear(_pos);
         Array.Clear(_lastResult);
@@ -321,6 +400,8 @@ public static class LibCd
                 if (param != 0) { _filterFile = m.ReadU8(param); _filterChannel = m.ReadU8(param + 1); }
                 break;
             case ReadN:
+                _cddaActive = false;
+                CddaAudio.Reset();
                 _readActive = true;
                 Dispatcher.LoadByLba(CurrentLba);
                 Console.Error.WriteLine($"[LibCd] ReadN start LBA={CurrentLba} ready=0x{_cbReady:X8} data=0x{_cbData:X8}");
@@ -328,6 +409,8 @@ public static class LibCd
                 DeliverInitialReadyCallback(m);
                 break;
             case ReadS:
+                _cddaActive = false;
+                CddaAudio.Reset();
                 _xaActive = true;
                 _readActive = false;
                 LibCdStream.OnReadStream(CurrentLba);
@@ -347,13 +430,51 @@ public static class LibCd
                 _lastResult[7] = 0;
                 if (result != 0) WriteResult(m, result);
                 return 0;
+            case GetTN:
+                if (Runtime.Cd == null) return -1;
+                _lastResult[0] = _status;
+                _lastResult[1] = ToBcd(Runtime.Cd.FirstTrackNumber);
+                _lastResult[2] = ToBcd(Runtime.Cd.LastTrackNumber);
+                for (int i = 3; i < _lastResult.Length; i++) _lastResult[i] = 0;
+                if (result != 0) WriteResult(m, result);
+                Console.Error.WriteLine(
+                    $"[CDDA] TOC tracks={Runtime.Cd.FirstTrackNumber}-{Runtime.Cd.LastTrackNumber}");
+                return 0;
+            case GetTD:
+                if (Runtime.Cd == null) return -1;
+                int trackNumber = param == 0 ? 0 : Bcd(m.ReadU8(param));
+                int trackLba;
+                if (trackNumber == 0) trackLba = Runtime.Cd.LeadOutLba;
+                else if (!Runtime.Cd.TryGetTrackStartLba(trackNumber, out trackLba)) return -1;
+                IntToPos(trackLba, out byte tdMm, out byte tdSs, out byte tdFf);
+                _lastResult[0] = _status;
+                _lastResult[1] = tdMm;
+                _lastResult[2] = tdSs;
+                _lastResult[3] = tdFf;
+                for (int i = 4; i < _lastResult.Length; i++) _lastResult[i] = 0;
+                if (result != 0) WriteResult(m, result);
+                return 0;
             case Pause: case Stop: case Init:
                 LibCdStream.OnStopStream();
                 _readActive = false;
                 _xaActive = false;
+                _cddaActive = false;
+                CddaAudio.Reset();
                 Dispatcher.ClearPending();
                 break;
-            case Nop: case Play: case Mute:
+            case Play:
+                _readActive = false;
+                _xaActive = false;
+                _cddaLba = CurrentLba;
+                _cddaActive = true;
+                _cddaPendingReportLba = -1;
+                _cddaLastReportSecond = -1;
+                XaAudio.Reset();
+                CddaAudio.Reset();
+                EnsureXaThread();
+                Console.Error.WriteLine($"[CDDA] play LBA={_cddaLba} mode=0x{_mode:X2}");
+                break;
+            case Nop: case Mute:
             case Demute: case SeekL: case SeekP:
                 break;
             default:

@@ -117,6 +117,18 @@ public sealed class CueFs : IDisposable
 
     public byte[] ReadSectorData(int lba, int size) => _bin.ReadSectorData(lba, size);
 
+    public int FirstTrackNumber => _bin.FirstTrackNumber;
+    public int LastTrackNumber => _bin.LastTrackNumber;
+    public int LeadOutLba => _bin.LeadOutLba;
+    public bool TryGetTrackStartLba(int trackNumber, out int lba) =>
+        _bin.TryGetTrackStartLba(trackNumber, out lba);
+    public bool TryReadAudioSector(
+        int lba,
+        out byte[] sector,
+        out int trackNumber,
+        out int trackEndLba) =>
+        _bin.TryReadAudioSector(lba, out sector, out trackNumber, out trackEndLba);
+
     public byte[] ReadSectors(int lba, int size) => ReadExtent(lba, size);
 
     private string? Search(Entry dir, string basePath, string name)
