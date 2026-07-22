@@ -86,6 +86,15 @@ Stage-synchronized fixtures also save `recompone_capture_<stage>.ppm` at each
 recognized menu input boundary, so menu evidence comes from the exact retail
 screen that accepted the scripted action.
 
+The focused vehicle regression is
+`tools/recompone-v8/input-scripts/oilfield_physics_smoke.txt`. Its `gameplay`
+stage begins at the first original player-vehicle physics tick, waits 180 ticks
+for spawn/drop and suspension settling, then exercises acceleration,
+acceleration plus steering, and braking. Set `RECOMPONE_TRACE_VEHICLE=1` to log
+the player's fixed-point position, velocity, angular velocity, force, torque,
+and rotation matrix for the first 720 physics ticks and to request captures at
+the selected settle and control boundaries.
+
 ## Prepare the reference configuration
 
 From the repository root:
@@ -117,8 +126,8 @@ by the vendored RecompOne projects. RecompOne is
 an immature upstream tool, so bring-up fixes belong in the vendored reference
 lane unless they reveal a defect in the native V8 implementation.
 
-The preparation script currently emits 2,399 main-executable functions and 504
-overlay functions; runtime discovery brings the generated total to 2,981. The
+The preparation script currently emits 2,406 main-executable functions and 504
+overlay functions; runtime discovery brings the generated total to 2,988. The
 Release build has been validated with .NET 10.0.302. Scripted navigation,
 steering, acceleration, and weapon inputs sustained active Oilfield gameplay
 for 272.7 seconds without a runtime error, followed by a separate deployed-copy
@@ -131,6 +140,15 @@ The original-disc boot path also completes all three unskipped movie streams
 with visible decoded output and reaches the retail `PRESS START` renderer. The
 handoff launcher retains normal movie-skip input while setting only Vigilante
 8's in-game Music and Sound Effects controls to zero.
+
+The vehicle spawn/drop instability was traced to the host GTE `OP` operation:
+writing MAC1 also changed IR1 before MAC2 and MAC3 read their source vector.
+The runtime now snapshots all three source IR registers before producing any
+result, matching the instruction's simultaneous source reads. The deterministic
+Oil Fields exercise retains an upright, near-orthonormal vehicle matrix through
+settling, acceleration, steering, and braking, and completed a 55-second active
+gameplay run without a runtime error marker. The user visually accepted those
+motions as correct; collision and recovery remain separate Physics-gate work.
 
 See `REFERENCE_PLAN.md` for the architecture and `VERTICAL_SLICE.md` for the
 active acceptance gates.

@@ -1,0 +1,44 @@
+# Stage-synchronized one-player Oil Fields physics exercise.
+# The gameplay stage begins on the first original player-vehicle physics tick,
+# so the drive sequence is independent of movie, menu, CD, and host timing.
+# The absolute START pulse skips the boot movies for this focused regression;
+# movie timing and presentation are covered by the separate intro fixture.
+
+10+2=START
+
+[press_start]
+1+2=START
+
+[main_menu]
+1+2=DOWN
+10+2=CROSS
+
+[player_count]
+5+2=CROSS
+
+[choose_player]
+5+2=CROSS
+
+[select_location]
+5+2=RIGHT
+15+2=RIGHT
+25+2=RIGHT
+35+2=RIGHT
+45+2=RIGHT
+55+2=RIGHT
+65+2=RIGHT
+75+2=RIGHT
+85+2=RIGHT
+95+2=RIGHT
+
+[location_oilfield]
+1+2=CROSS
+
+[choose_enemies]
+5+2=CROSS
+
+[gameplay]
+# Let the original spawn/drop and suspension settle before applying controls.
+180+120=CROSS
+300+120=CROSS,RIGHT
+420+90=SQUARE

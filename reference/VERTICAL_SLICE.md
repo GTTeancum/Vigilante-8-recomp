@@ -76,6 +76,26 @@ framebuffer hashes, and reached the retail `PRESS START` renderer with no
 runtime error marker. The Intros gate is complete for the fixed slice. The
 broader Graphics gate still includes menus, gameplay, pause, and results.
 
+## Current physics status
+
+The original player's first integration tick isolated the severe spawn/drop
+instability to the host GTE `OP` implementation, before suspension or terrain
+collision could create the visible motion. `OP` was updating IR1 while
+computing MAC1, then incorrectly consuming that new value while computing MAC2
+and MAC3. Snapshotting IR1-IR3 before all three calculations preserves the
+original instruction's simultaneous source reads.
+
+With that correction, the vehicle remains upright and its rotation matrix stays
+near orthonormal throughout spawn/drop, stationary settling, acceleration,
+steering, and braking. The committed `oilfield_physics_smoke.txt` fixture starts
+its control timing on the first player physics tick and reproduces the sequence
+independently of movie, menu, CD, or host timing. A 55-second corrected run
+executed all three control phases, presented changing Oil Fields frames, and
+reported no runtime fault. The user visually accepted these motions as correct.
+This completes the visual baseline for those Physics sub-gates; collision and
+recovery plus PS1-versus-reference state comparison remain open before the full
+Physics gate is closed.
+
 ## Commit discipline
 
 Commit after each coherent gate or fix with its focused validation evidence in

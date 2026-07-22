@@ -187,7 +187,29 @@ public static class Dispatcher
             addr >= linked.LinkedBase && addr - linked.LinkedBase < linked.Size)
             addr += linked.Delta;
         else if (hasOwner && addr >= owner.Base && addr - owner.Base < owner.Size)
-            addr += owner.Delta;
+        {
+            uint linkedAddr = addr;
+            uint ownerAddr = linkedAddr + owner.Delta;
+            if (_funcMap.ContainsKey(ownerAddr))
+            {
+                addr = ownerAddr;
+            }
+            else if (_relocatedAliases.TryGetValue(linkedAddr, out uint currentDelta) &&
+                     _funcMap.ContainsKey(linkedAddr + currentDelta))
+            {
+                // LOAD constructs arena objects before the terrain DLL is in
+                // memory. Those objects can retain LOAD ownership after their
+                // linked callback slot is handed to the newly loaded arena.
+                // Use the owner's relocation when it resolves; otherwise the
+                // current alias is the only executable instance of that
+                // original linked callback.
+                addr = linkedAddr + currentDelta;
+            }
+            else
+            {
+                addr = ownerAddr;
+            }
+        }
         else if (!_funcMap.ContainsKey(addr) && _relocatedAliases.TryGetValue(addr, out uint aliasDelta))
             addr += aliasDelta;
         if (!_funcMap.ContainsKey(addr))

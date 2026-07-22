@@ -79,14 +79,23 @@ MAIN_NATIVE_CALLBACK_STARTS = (
     0x800352AC,
     0x8003565C,
     0x800359C0,
+    # Deferred object callback reached by the sustained Oil Fields vehicle
+    # exercise; the next known native callback begins at 0x800363E0.
+    0x80035CF8,
     0x800363E0,
     # Deferred object callback stored at object +0x64. The next independently
     # installed native callback begins at 0x80036AD8.
     0x80036910,
     0x80036AD8,
+    # Deferred object callback observed at object +0x64 during the corrected
+    # Oil Fields physics smoke; the next native callback begins at 0x800372B0.
+    0x80036D48,
     0x800372B0,
     0x800378D0,
     0x80037B94,
+    # Deferred object callback stored at object +0x64. Its native body ends at
+    # the next known callback, 0x800380C8.
+    0x80037D34,
     0x800380C8,
     0x8003828C,
     0x80038324,
@@ -99,13 +108,22 @@ MAIN_NATIVE_CALLBACK_STARTS = (
     0x80038FC0,
     0x80039274,
     0x8003935C,
+    # Native code materializes this address and stores it in an object's
+    # callback slot; its body ends at the next callback, 0x8003959C.
+    0x80039458,
     0x8003959C,
     0x8003A084,
+    # Deferred object callback between the known 0x8003A084 and 0x8003A9DC
+    # callbacks, reached during the longer Oil Fields physics exercise.
+    0x8003A56C,
     0x8003A9DC,
     0x8003B138,
     0x8003B1E0,
     0x8003B8D4,
     0x8003BDE0,
+    # Deferred object callback reached after the deterministic braking phase;
+    # Ghidra resumes with the next direct function at 0x8003C288.
+    0x8003BEA8,
     0x8003C61C,
     0x8003CB64,
     0x8003E7B4,
@@ -583,6 +601,24 @@ def main() -> int:
                 "address": "80025400",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.ValidateTerrainQuery",
                 "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8002F9BC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceVehiclePhysicsTick",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800173FC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceVehicleIntegratePre",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800173FC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceVehicleIntegratePost",
+                "mode": "post",
             },
             {
                 "overlay": "main",

@@ -21,6 +21,12 @@ public static class V8Compat
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MENU_TEXT") == "1";
     static readonly bool _zeroGameVolume =
         Environment.GetEnvironmentVariable("RECOMPONE_V8_GAME_VOLUME") == "0";
+    static readonly bool _traceVehicle =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VEHICLE") == "1";
+    static int _vehiclePhysicsTick;
+    static uint _integratingVehicle;
+    static int _integratingVehicleTick;
+    static bool _gameplayStage;
     static bool _zeroGameVolumeLogged;
     static string _lastHeapOperation = "heap initialization";
     static string? _lastMenuStage;
@@ -456,9 +462,67 @@ public static class V8Compat
         }
     }
 
+    public static void TraceVehiclePhysicsTick(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        uint player = m.ReadU32(c.GP + 0x7D0u);
+        if (player == 0u || c.A0 != player) return;
+
+        int tick = ++_vehiclePhysicsTick;
+        if (tick == 1)
+        {
+            _gameplayStage = true;
+            _lastMenuStage = null;
+            InputManager.SignalScriptStage("gameplay");
+        }
+        if (!_traceVehicle || tick > 720) return;
+        if (tick is 1 or 15 or 30 or 60 or 120 or 180 or 300 or 420 or 510 or 600 or 720)
+            HostWindow.RequestDisplayCapture($"physics_{tick:000}");
+        Console.Error.WriteLine(
+            $"[V8Physics] tick={tick} phase=begin obj=0x{player:X8} " +
+            $"flags=0x{m.ReadU32(player):X8} upY={unchecked((short)m.ReadU16(player + 0x18u))} " +
+            $"pos={ReadVec3(m, player + 0x24u)} vel={ReadVec3(m, player + 0x80u)} " +
+            $"ang={ReadVec3(m, player + 0x90u)} matrix={ReadMatrix(m, player + 0x10u)}");
+    }
+
+    public static void TraceVehicleIntegratePre(CpuContext c, IMemory m)
+    {
+        if (!_traceVehicle) return;
+        m = Dispatcher.UnwrapMemory(m);
+        uint player = m.ReadU32(c.GP + 0x7D0u);
+        if (player == 0u || c.A0 != player || _vehiclePhysicsTick > 720) return;
+
+        _integratingVehicle = player;
+        _integratingVehicleTick = _vehiclePhysicsTick;
+        Console.Error.WriteLine(
+            $"[V8Physics] tick={_integratingVehicleTick} phase=force " +
+            $"force={ReadVec3(m, c.A1)} torque={ReadVec3(m, c.A2)}");
+    }
+
+    public static void TraceVehicleIntegratePost(CpuContext c, IMemory m)
+    {
+        if (!_traceVehicle || _integratingVehicle == 0u) return;
+        m = Dispatcher.UnwrapMemory(m);
+        uint player = _integratingVehicle;
+        int tick = _integratingVehicleTick;
+        _integratingVehicle = 0u;
+        Console.Error.WriteLine(
+            $"[V8Physics] tick={tick} phase=integrated " +
+            $"pos={ReadVec3(m, player + 0x24u)} vel={ReadVec3(m, player + 0x80u)} " +
+            $"ang={ReadVec3(m, player + 0x90u)} matrix={ReadMatrix(m, player + 0x10u)}");
+    }
+
     static string ReadVec3(IMemory m, uint address) =>
         $"({unchecked((int)m.ReadU32(address))},{unchecked((int)m.ReadU32(address + 4u))}," +
         $"{unchecked((int)m.ReadU32(address + 8u))})";
+
+    static string ReadMatrix(IMemory m, uint address) =>
+        $"[{unchecked((short)m.ReadU16(address))},{unchecked((short)m.ReadU16(address + 2u))}," +
+        $"{unchecked((short)m.ReadU16(address + 4u))};" +
+        $"{unchecked((short)m.ReadU16(address + 6u))},{unchecked((short)m.ReadU16(address + 8u))}," +
+        $"{unchecked((short)m.ReadU16(address + 10u))};" +
+        $"{unchecked((short)m.ReadU16(address + 12u))},{unchecked((short)m.ReadU16(address + 14u))}," +
+        $"{unchecked((short)m.ReadU16(address + 16u))}]";
 
     public static void TraceMenuText(CpuContext c, IMemory m)
     {
@@ -478,13 +542,18 @@ public static class V8Compat
             "GAME STATUS" => "game_status",
             _ => null,
         };
-        if (stage != null)
+        if (stage == "press_start")
+        {
+            _gameplayStage = false;
+            _vehiclePhysicsTick = 0;
+        }
+        if (!_gameplayStage && stage != null)
             _lastMenuStage = stage;
     }
 
     public static void TraceMenuPad(CpuContext c, IMemory m)
     {
-        if (_lastMenuStage != null)
+        if (!_gameplayStage && _lastMenuStage != null)
             InputManager.SignalScriptStage(_lastMenuStage);
     }
 

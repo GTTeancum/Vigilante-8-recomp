@@ -230,9 +230,16 @@ public static class Gte
                 SetMac(3, (long)IR3 * IR3, sf, lm);
                 break;
             case 0x0C:
-                SetMac(1, (long)RT[4] * IR3 - (long)RT[8] * IR2, sf, lm);
-                SetMac(2, (long)RT[8] * IR1 - (long)RT[0] * IR3, sf, lm);
-                SetMac(3, (long)RT[0] * IR2 - (long)RT[4] * IR1, sf, lm);
+                // OP reads all three source IR registers before writing any
+                // result. SetMac also updates IRn, so retain the original
+                // vector or MAC2/MAC3 incorrectly consume earlier results.
+                int opIr1 = IR1, opIr2 = IR2, opIr3 = IR3;
+                long opMac1 = (long)RT[4] * opIr3 - (long)RT[8] * opIr2;
+                long opMac2 = (long)RT[8] * opIr1 - (long)RT[0] * opIr3;
+                long opMac3 = (long)RT[0] * opIr2 - (long)RT[4] * opIr1;
+                SetMac(1, opMac1, sf, lm);
+                SetMac(2, opMac2, sf, lm);
+                SetMac(3, opMac3, sf, lm);
                 break;
             case 0x3D:
                 SetMac(1, (long)IR0 * IR1, sf, lm);
