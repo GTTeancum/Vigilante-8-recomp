@@ -16,6 +16,7 @@ public static class LibEtc
 
         Runtime.PresentFrame();
         _vcount++;
+        V8Compat.TraceGameplayHeartbeat(c, m);
         c.V0 = 0;
     }
 }

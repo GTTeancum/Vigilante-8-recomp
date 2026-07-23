@@ -34,6 +34,8 @@ public static class V8Compat
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_ANIMATION") == "1";
     static readonly bool _victoryAutopilot =
         Environment.GetEnvironmentVariable("RECOMPONE_V8_VICTORY_AUTOPILOT") == "1";
+    static readonly bool _whammyMatrix =
+        Environment.GetEnvironmentVariable("RECOMPONE_V8_WHAMMY_MATRIX") == "1";
     static readonly string? _stateTracePath =
         Environment.GetEnvironmentVariable("RECOMPONE_STATE_TRACE_PATH");
     static readonly int _soakHeartbeatTicks =
@@ -43,6 +45,8 @@ public static class V8Compat
             : 0;
     static readonly string? _automationTargetLocation =
         Environment.GetEnvironmentVariable("RECOMPONE_TARGET_LOCATION");
+    static readonly string? _automationTargetCharacter =
+        Environment.GetEnvironmentVariable("RECOMPONE_TARGET_CHARACTER");
     static readonly string? _automationTargetTwoPlayerMode =
         Environment.GetEnvironmentVariable("RECOMPONE_TARGET_TWO_PLAYER_MODE");
     static readonly int _automationGameplayCaptureDelay =
@@ -57,6 +61,8 @@ public static class V8Compat
             : 0;
     static bool _soakTeardownSignaled;
     static int _vehiclePhysicsTick;
+    static int _gameplayHeartbeatTick;
+    static uint _lastGameplayFrameCounter = uint.MaxValue;
     static uint _integratingVehicle;
     static int _integratingVehicleTick;
     static uint _collidingVehicle;
@@ -80,6 +86,43 @@ public static class V8Compat
     static int _vehicleDamageChangeCount;
     static uint _victoryAutopilotTarget;
     static ushort _victoryAutopilotInput;
+    static readonly int[] _whammyMatrixKinds = BuildWhammyMatrixKinds();
+    static int _whammyMatrixIndex;
+    static int _whammyMatrixCurrentKind;
+    static uint _whammyMatrixCurrentWeapon;
+    static int _whammyMatrixCurrentSlot;
+    static int _whammyMatrixPartnerKind;
+    static uint _whammyMatrixPartnerWeapon;
+    static int _whammyMatrixPartnerSlot;
+    static ushort _whammyMatrixArmedAmmo;
+    static int _whammyMatrixCurrentAttachTick;
+    static bool _whammyMatrixMutating;
+    static uint _pendingWhammyOwner;
+    static byte _pendingWhammyCount;
+    static int _pendingWhammyKind;
+    static uint _pendingWhammyProjectile;
+    static uint _pendingWhammyTarget;
+    static byte _lastPlayerWhammyCount;
+    static uint _pendingSpecialWeapon;
+    static int _pendingSpecialKind;
+    static uint _pendingSpecialCode;
+    static ushort _pendingSpecialAmmo;
+    static int _activeMatrixWeaponKind;
+    static uint _lastSpecialCommandCode = uint.MaxValue;
+    static uint _lastSpecialCommandFlags = uint.MaxValue;
+    static int _lastInjectedSpecialAttachTick = -1;
+    static int _lastInjectedSpecialOpportunity = -1;
+    static readonly HashSet<int> _whammyMatrixFiredKinds = new();
+    static readonly HashSet<int> _whammyMatrixConfirmedKinds = new();
+    static readonly HashSet<string> _specialAttackCoverage = new();
+    static readonly Dictionary<int, uint[]> _specialAttackCodes = new()
+    {
+        [1] = [0x422u, 0x424u],
+        [2] = [0x442u, 0x444u],
+        [3] = [0x242u, 0x244u],
+        [4] = [0x222u, 0x224u],
+        [5] = [0x132u, 0x134u],
+    };
     static bool _capturedPlayerProjectile;
     static bool _capturedPlayerWeaponHit;
     static bool _capturedVehicleDestruction;
@@ -103,6 +146,9 @@ public static class V8Compat
     static readonly Dictionary<uint, HeapAllocation> _liveHeapAllocations = new();
     static readonly Dictionary<uint, List<string>> _objectHistory = new();
     static readonly HashSet<uint> _playerProjectiles = new();
+    static readonly Dictionary<uint, int> _matrixWeaponKinds = new();
+    static readonly Dictionary<uint, int> _playerProjectileMatrixKinds = new();
+    static readonly Dictionary<byte, int> _matrixProjectileTypeKinds = new();
     static readonly HashSet<string> _seenMenuText = new(StringComparer.Ordinal);
     static readonly Dictionary<uint, uint> _lastAnimationPointers = new();
     static Timer? _animationWatchdog;
@@ -119,6 +165,18 @@ public static class V8Compat
     static bool _missingDiagonalNeighborFixLogged;
     static StreamWriter? _stateTraceWriter;
     static bool _stateTraceUnavailable;
+
+    static int[] BuildWhammyMatrixKinds()
+    {
+        int start = int.TryParse(
+            Environment.GetEnvironmentVariable("RECOMPONE_V8_WHAMMY_START_KIND"),
+            out int configured)
+            ? Math.Clamp(configured, 1, 6)
+            : 1;
+        return Enumerable.Range(0, 6)
+            .Select(offset => ((start - 1 + offset) % 6) + 1)
+            .ToArray();
+    }
 
     public static void TraceAnimationObject(CpuContext c, IMemory m)
     {
@@ -427,21 +485,46 @@ public static class V8Compat
     public static void TraceObjectRetire(CpuContext c, IMemory m)
     {
         m = Dispatcher.UnwrapMemory(m);
+        _matrixWeaponKinds.Remove(c.A0);
         RecordObjectEvent(c.A0,
             $"retire flags=0x{m.ReadU32(c.A0):X8} cb=0x{m.ReadU32(c.A0 + 0x64u):X8} caller=0x{c.RA:X8}");
-        if (_traceWeapons && _playerProjectiles.Remove(c.A0))
+        if ((_traceWeapons || _whammyMatrix) && _playerProjectiles.Remove(c.A0))
         {
-            Console.Error.WriteLine(
-                $"[V8Weapon] tick={_vehiclePhysicsTick} event=retire projectile=0x{c.A0:X8} " +
-                $"flags=0x{m.ReadU32(c.A0):X8} state8={m.ReadU8(c.A0 + 8u)} " +
-                $"callback=0x{m.ReadU32(c.A0 + 0x64u):X8} pos={ReadVec3(m, c.A0 + 0x24u)}");
+            _playerProjectileMatrixKinds.Remove(c.A0);
+            if (_traceWeapons)
+            {
+                Console.Error.WriteLine(
+                    $"[V8Weapon] tick={_vehiclePhysicsTick} event=retire projectile=0x{c.A0:X8} " +
+                    $"flags=0x{m.ReadU32(c.A0):X8} state8={m.ReadU8(c.A0 + 8u)} " +
+                    $"callback=0x{m.ReadU32(c.A0 + 0x64u):X8} pos={ReadVec3(m, c.A0 + 0x24u)}");
+            }
         }
     }
 
     public static void TracePlayerProjectileRegister(CpuContext c, IMemory m)
     {
-        if (!_traceWeapons || !_playerProjectiles.Contains(c.A0)) return;
         m = Dispatcher.UnwrapMemory(m);
+        if (_whammyMatrix &&
+            _activeMatrixWeaponKind != 0 &&
+            IsRetailRamRange(c.A0, 0x84u))
+        {
+            uint player = m.ReadU32(c.GP + 0x7D0u);
+            if (m.ReadU32(c.A0 + 0x80u) == player &&
+                (m.ReadU32(c.A0) & 0x800000u) != 0u)
+            {
+                int kind = _activeMatrixWeaponKind;
+                _playerProjectiles.Add(c.A0);
+                _playerProjectileMatrixKinds[c.A0] = kind;
+                _matrixProjectileTypeKinds[m.ReadU8(c.A0 + 0x0Au)] = kind;
+                if (_whammyMatrixFiredKinds.Add(kind))
+                {
+                    Console.Error.WriteLine(
+                        $"[V8Whammy] tick={_gameplayHeartbeatTick} " +
+                        $"event=fired weaponKind={kind} projectile=0x{c.A0:X8}");
+                }
+            }
+        }
+        if (!_traceWeapons || !_playerProjectiles.Contains(c.A0)) return;
         Console.Error.WriteLine(
             $"[V8Weapon] tick={_vehiclePhysicsTick} event=register projectile=0x{c.A0:X8} " +
             $"flags=0x{m.ReadU32(c.A0):X8} state8={m.ReadU8(c.A0 + 8u)} " +
@@ -645,6 +728,7 @@ public static class V8Compat
 
     static bool IsRetailRamRange(uint address, uint size)
     {
+        if (address == 0u) return false;
         uint physical = MemoryMap.ToPhysical(address);
         return physical < MemoryMap.RetailRamSize && size <= MemoryMap.RetailRamSize - physical;
     }
@@ -738,6 +822,7 @@ public static class V8Compat
     // raises gp+0x168. Without this bridge FUN_800128BC spins forever.
     public static void ServiceDrawSyncWait(CpuContext c, IMemory m)
     {
+        TraceGameplayHeartbeat(c, m);
         if (m.ReadU32(c.GP + 0x168u) != 0u) return;
 
         const uint drawSyncCallbackSlot = 0x80065030u;
@@ -800,7 +885,47 @@ public static class V8Compat
         uint player = m.ReadU32(c.GP + 0x7D0u);
         if (player == 0u || c.A0 != player) return;
 
-        int tick = ++_vehiclePhysicsTick;
+        int tick = _gameplayHeartbeatTick;
+        if (!_traceVehicle || tick > 900) return;
+        if (tick is 1 or 15 or 30 or 60 or 120 or 180 or 300 or 420 or 510 or 600 or 720 or 780 or 840 or 900)
+            HostWindow.RequestDisplayCapture($"physics_{tick:000}");
+        Console.Error.WriteLine(
+            $"[V8Physics] tick={tick} phase=begin obj=0x{player:X8} " +
+            $"flags=0x{m.ReadU32(player):X8} upY={unchecked((short)m.ReadU16(player + 0x18u))} " +
+            $"pos={ReadVec3(m, player + 0x24u)} vel={ReadVec3(m, player + 0x80u)} " +
+            $"ang={ReadVec3(m, player + 0x90u)} matrix={ReadMatrix(m, player + 0x10u)}");
+    }
+
+    public static void TraceGameplayHeartbeat(CpuContext c, IMemory m)
+    {
+        if (_whammyMatrixMutating) return;
+        m = Dispatcher.UnwrapMemory(m);
+        uint player = m.ReadU32(c.GP + 0x7D0u);
+        if (!IsRetailRamRange(player, 0xF8u) ||
+            m.ReadU8(player + 4u) != 2u)
+            return;
+
+        byte matchMode = m.ReadU8(c.GP + 0x15u);
+        bool arenaTransition = _lastMenuStage == "choose_enemies";
+        if (matchMode is not (1 or 3 or 4) && !arenaTransition)
+            return;
+
+        uint frameCounter = m.ReadU32(c.GP + 0x0Cu);
+        if (frameCounter == _lastGameplayFrameCounter)
+            return;
+        _lastGameplayFrameCounter = frameCounter;
+
+        int tick = ++_gameplayHeartbeatTick;
+        _vehiclePhysicsTick = tick;
+        if (_whammyMatrix)
+        {
+            uint lockedTarget = m.ReadU32(player + 0xE4u);
+            _victoryAutopilotTarget = IsLiveVehicle(m, lockedTarget, player)
+                ? lockedTarget
+                : FindNearestLiveVehicle(m, player);
+            TraceWhammyCounter(m, player, tick);
+        }
+        UpdateWhammyMatrix(c, m, player, tick);
         UpdateVictoryAutopilot(m, player, tick);
         WriteStateTrace(m, c.GP, player, tick);
         if (!_soakTeardownSignaled && _soakTeardownTick > 0 && tick >= _soakTeardownTick)
@@ -829,24 +954,471 @@ public static class V8Compat
                 : $" player2=0x{player2:X8} pos2={ReadVec3(m, player2 + 0x24u)} " +
                   $"vel2={ReadVec3(m, player2 + 0x80u)}";
             Console.Error.WriteLine(
-                $"[Soak] gameplay tick={tick} match_mode={m.ReadU8(c.GP + 0x15u)} " +
-                $"player=0x{player:X8} " +
+                $"[Soak] gameplay tick={tick} frame={frameCounter} match_mode={matchMode} " +
+                $"player=0x{player:X8} callback=0x{m.ReadU32(player + 0x64u):X8} " +
                 $"pos={ReadVec3(m, player + 0x24u)} vel={ReadVec3(m, player + 0x80u)}" +
                 player2State);
         }
         TracePlayerWeaponState(m, player, tick);
-        if (!_traceVehicle || tick > 900) return;
-        if (tick is 1 or 15 or 30 or 60 or 120 or 180 or 300 or 420 or 510 or 600 or 720 or 780 or 840 or 900)
-            HostWindow.RequestDisplayCapture($"physics_{tick:000}");
-        Console.Error.WriteLine(
-            $"[V8Physics] tick={tick} phase=begin obj=0x{player:X8} " +
-            $"flags=0x{m.ReadU32(player):X8} upY={unchecked((short)m.ReadU16(player + 0x18u))} " +
-            $"pos={ReadVec3(m, player + 0x24u)} vel={ReadVec3(m, player + 0x80u)} " +
-            $"ang={ReadVec3(m, player + 0x90u)} matrix={ReadMatrix(m, player + 0x10u)}");
     }
 
-    public static ushort GetAutomationInputMask() =>
-        _victoryAutopilot ? _victoryAutopilotInput : (ushort)0;
+    static void TraceWhammyCounter(IMemory m, uint player, int tick)
+    {
+        byte count = m.ReadU8(player + 0xB9u);
+        if (count > _lastPlayerWhammyCount)
+        {
+            byte projectileType = m.ReadU8(player + 0xB8u);
+            _matrixProjectileTypeKinds.TryGetValue(projectileType, out int kind);
+            if (kind != 0 && _whammyMatrixFiredKinds.Contains(kind))
+            {
+                _whammyMatrixConfirmedKinds.Add(kind);
+                Console.Error.WriteLine(
+                    $"[V8Whammy] tick={tick} event=confirmed-counter " +
+                    $"weaponKind={kind} projectileType={projectileType} " +
+                    $"counter={_lastPlayerWhammyCount}->{count} " +
+                    $"confirmedKinds=" +
+                    $"{string.Join(',', _whammyMatrixConfirmedKinds.Order())}");
+            }
+            else
+            {
+                Console.Error.WriteLine(
+                    $"[V8Whammy] tick={tick} event=counter-unmapped " +
+                    $"projectileType={projectileType} " +
+                    $"counter={_lastPlayerWhammyCount}->{count}");
+            }
+        }
+        _lastPlayerWhammyCount = count;
+    }
+
+    public static ushort GetAutomationInputMask()
+    {
+        if (!_victoryAutopilot && !_whammyMatrix)
+            return 0;
+
+        if (_victoryAutopilotInput != 0)
+            return _victoryAutopilotInput;
+
+        // Input polling can begin after the final enemy-selection confirmation
+        // but before the first gameplay heartbeat while the arena transition
+        // is still being serviced. Arm only in that narrow transition; doing
+        // so globally would corrupt passcode and front-end navigation.
+        ushort fire = _whammyMatrix
+            ? Controller.L2
+            : (ushort)(Controller.R2 | Controller.L2);
+        return _lastMenuStage == "choose_enemies" || _gameplayStage
+            ? (ushort)(fire | Controller.Cross)
+            : (ushort)0;
+    }
+
+    static uint FindNearestLiveVehicle(IMemory m, uint player)
+    {
+        uint best = 0u;
+        ulong bestDistance = ulong.MaxValue;
+        foreach (uint listAddress in new[] {
+                     0x80065A18u, 0x80065A60u, 0x80065A80u, 0x80065AC0u })
+        {
+            uint node = m.ReadU32(listAddress);
+            var visited = new HashSet<uint>();
+            for (int count = 0;
+                 count < 4096 && IsRetailRamRange(node, 12u) && visited.Add(node);
+                 count++)
+            {
+                uint next = m.ReadU32(node);
+                if (next == 0u) break;
+                uint candidate = m.ReadU32(node + 8u);
+                if (IsLiveVehicle(m, candidate, player))
+                {
+                    long dx = unchecked((int)m.ReadU32(candidate + 0x24u)) -
+                              (long)unchecked((int)m.ReadU32(player + 0x24u));
+                    long dz = unchecked((int)m.ReadU32(candidate + 0x2Cu)) -
+                              (long)unchecked((int)m.ReadU32(player + 0x2Cu));
+                    ulong distance = (ulong)(dx * dx + dz * dz);
+                    if (distance < bestDistance)
+                    {
+                        best = candidate;
+                        bestDistance = distance;
+                    }
+                }
+                node = next;
+            }
+        }
+        return best;
+    }
+
+    static bool IsLiveVehicle(IMemory m, uint candidate, uint player) =>
+        candidate != player &&
+        IsRetailRamRange(candidate, 0xF8u) &&
+        m.ReadU8(candidate + 4u) == 2u &&
+        m.ReadU16(candidate + 0x0Cu) > 0u;
+
+    static void UpdateWhammyMatrix(CpuContext c, IMemory m, uint player, int tick)
+    {
+        if (!_whammyMatrix) return;
+        if (tick == 1)
+        {
+            Console.Error.WriteLine(
+                $"[V8Whammy] tick=1 event=matrix-start " +
+                $"order={string.Join(',', _whammyMatrixKinds)}");
+            uint baseOne = EnsureMatrixWeapon(c, m, player, 1, 0);
+            uint baseTwo = EnsureMatrixWeapon(c, m, player, 2, 1);
+            Console.Error.WriteLine(
+                $"[V8Whammy] tick=1 event=pair-base " +
+                $"kind1=0x{baseOne:X8} kind2=0x{baseTwo:X8}");
+        }
+
+        if (_whammyMatrixCurrentWeapon != 0u &&
+            IsRetailRamRange(_whammyMatrixCurrentWeapon, 0x0Eu))
+        {
+            ApplyMatrixPairSelection(m, player, tick);
+            ushort ammo = m.ReadU16(_whammyMatrixCurrentWeapon + 0x0Cu);
+            if (ammo < _whammyMatrixArmedAmmo &&
+                _whammyMatrixFiredKinds.Add(_whammyMatrixCurrentKind))
+            {
+                Console.Error.WriteLine(
+                    $"[V8Whammy] tick={tick} event=fired " +
+                    $"weaponKind={_whammyMatrixCurrentKind} ammo={ammo}");
+            }
+        }
+
+        const int attributionSettleTicks = 180;
+        const int maximumWeaponWindowTicks = 1500;
+        if (_whammyMatrixCurrentWeapon != 0u)
+        {
+            int age = tick - _whammyMatrixCurrentAttachTick;
+            bool fired = _whammyMatrixFiredKinds.Contains(_whammyMatrixCurrentKind);
+            bool confirmed = _whammyMatrixConfirmedKinds.Contains(_whammyMatrixCurrentKind);
+            bool specialsComplete =
+                _whammyMatrixCurrentKind == 6 ||
+                SpecialAttacksComplete(_whammyMatrixCurrentKind);
+            if (age < attributionSettleTicks ||
+                ((!confirmed || !specialsComplete) &&
+                 age < maximumWeaponWindowTicks))
+                return;
+
+            Console.Error.WriteLine(
+                $"[V8Whammy] tick={tick} event=window-" +
+                $"{(fired && confirmed ? "complete" : "timeout")} " +
+                $"weaponKind={_whammyMatrixCurrentKind} age={age} " +
+                $"fired={fired} confirmed={confirmed} " +
+                $"specialsComplete={specialsComplete}");
+            _whammyMatrixCurrentWeapon = 0u;
+            _whammyMatrixPartnerWeapon = 0u;
+        }
+
+        if (_whammyMatrixIndex >= _whammyMatrixKinds.Length)
+            return;
+
+        int kind = _whammyMatrixKinds[_whammyMatrixIndex];
+        int partnerKind = kind == 1 ? 2 : 1;
+        uint partnerWeapon = EnsureMatrixWeapon(
+            c, m, player, partnerKind, partnerKind - 1);
+        uint weapon = EnsureMatrixWeapon(
+            c, m, player, kind, kind <= 2 ? kind - 1 : 2);
+        if (weapon == 0u)
+        {
+            Console.Error.WriteLine(
+                $"[V8Whammy] tick={tick} event=attach-failed weaponKind={kind}");
+            return;
+        }
+        if (partnerWeapon == 0u)
+        {
+            Console.Error.WriteLine(
+                $"[V8Whammy] tick={tick} event=partner-attach-failed " +
+                $"weaponKind={kind} partnerKind={partnerKind}");
+            return;
+        }
+
+        int slot = FindMatrixWeaponSlot(m, player, weapon);
+        int partnerSlot = FindMatrixWeaponSlot(m, player, partnerWeapon);
+        if (slot < 0 || partnerSlot < 0 || slot == partnerSlot)
+        {
+            Console.Error.WriteLine(
+                $"[V8Whammy] tick={tick} event=pair-slot-missing " +
+                $"weaponKind={kind} weapon=0x{weapon:X8} slot={slot} " +
+                $"partnerKind={partnerKind} partner=0x{partnerWeapon:X8} " +
+                $"partnerSlot={partnerSlot}");
+            return;
+        }
+
+        m.WriteU16(weapon + 0x0Cu, 100);
+        m.WriteU16(partnerWeapon + 0x0Cu, 100);
+        _whammyMatrixCurrentKind = kind;
+        _whammyMatrixCurrentWeapon = weapon;
+        _whammyMatrixCurrentSlot = slot;
+        _whammyMatrixPartnerKind = partnerKind;
+        _whammyMatrixPartnerWeapon = partnerWeapon;
+        _whammyMatrixPartnerSlot = partnerSlot;
+        _whammyMatrixArmedAmmo = 100;
+        _whammyMatrixCurrentAttachTick = tick;
+        _whammyMatrixIndex++;
+        ApplyMatrixPairSelection(m, player, tick);
+        Console.Error.WriteLine(
+            $"[V8Whammy] tick={tick} event=armed weaponKind={kind} " +
+            $"weapon=0x{weapon:X8} callback=0x{m.ReadU32(weapon + 0x64u):X8} " +
+            $"slot={slot} partnerKind={partnerKind} " +
+            $"partner=0x{partnerWeapon:X8} partnerSlot={partnerSlot} " +
+            $"target=0x{_victoryAutopilotTarget:X8}");
+    }
+
+    static void ApplyMatrixPairSelection(IMemory m, uint player, int tick)
+    {
+        if (_whammyMatrixCurrentWeapon == 0u ||
+            _whammyMatrixPartnerWeapon == 0u)
+            return;
+        int slot = (tick & 1) == 0
+            ? _whammyMatrixCurrentSlot
+            : _whammyMatrixPartnerSlot;
+        m.WriteU8(player + 0xB3u, (byte)slot);
+    }
+
+    static int FindMatrixWeaponSlot(IMemory m, uint player, uint weapon)
+    {
+        for (int index = 0; index < 3; index++)
+        {
+            if (m.ReadU32(player + 0x110u + (uint)index * 4u) == weapon)
+                return index;
+        }
+        return -1;
+    }
+
+    static uint EnsureMatrixWeapon(
+        CpuContext c, IMemory m, uint player, int kind,
+        int preferredReplacementSlot)
+    {
+        foreach (var entry in _matrixWeaponKinds)
+        {
+            if (entry.Value == kind &&
+                FindMatrixWeaponSlot(m, player, entry.Key) >= 0)
+                return entry.Key;
+        }
+
+        m.WriteU8(player + 0xB3u, (byte)preferredReplacementSlot);
+        uint weapon = AttachMatrixWeapon(c, m, player, kind);
+        if (weapon != 0u)
+            _matrixWeaponKinds[weapon] = kind;
+        return weapon;
+    }
+
+    static uint AttachMatrixWeapon(CpuContext c, IMemory m, uint player, int kind)
+    {
+        (int Slot, uint Callback, ushort BoneKind) standard = kind switch
+        {
+            1 => (0, 0x80031FA0u, 0x8011),
+            2 => (17, 0x8003302Cu, 0x8012),
+            3 => (7, 0x800336FCu, 0x8013),
+            4 => (10, 0x80034920u, 0x8014),
+            5 => (13, 0x8003565Cu, 0x8015),
+            _ => (-1, 0u, 0),
+        };
+
+        uint bank;
+        uint callback;
+        uint bone;
+        int slot;
+        if (kind == 6)
+        {
+            bank = m.ReadU32(player + 0x58u);
+            callback = CallGameFunction(c, m, 0x8003D1E8u, m.ReadU8(player + 0xD0u));
+            bone = CallGameFunction(c, m, 0x8001B038u, player, 0x801Fu);
+            slot = IsRetailRamRange(bone, 0x1Cu)
+                ? unchecked((short)m.ReadU16(bone + 0x1Au))
+                : -1;
+        }
+        else
+        {
+            // The retail pickup callback keeps ordinary weapon models in the
+            // shared resource bank. Only the character-specific weapon above
+            // is allocated from the vehicle's own model bank.
+            bank = m.ReadU32(0x800737DCu);
+            callback = standard.Callback;
+            bone = CallGameFunction(c, m, 0x8001B038u, player, standard.BoneKind);
+            slot = standard.Slot;
+        }
+
+        if (!IsRetailRamRange(bank, 4u) || callback == 0u || slot < 0)
+            return 0u;
+
+        _whammyMatrixMutating = true;
+        try
+        {
+            uint child = CallGameFunction(
+                c, m, 0x8001AC44u, bank, unchecked((ushort)slot), 0x84u, 8u);
+            if (!IsRetailRamRange(child, 0x84u))
+                return 0u;
+
+            m.WriteU32(child, 0x00010000u);
+            m.WriteU32(child + 0x64u, callback);
+            CallGameFunction(c, m, callback, child, 1u, 0u);
+            m.WriteU16(child + 0x0Eu, m.ReadU16(child + 0x0Cu));
+            m.WriteU32(child + 0x80u, bone);
+            if (IsRetailRamRange(bone, 0x16u))
+            {
+                for (uint offset = 0; offset < 6u; offset++)
+                    m.WriteU8(child + 0x40u + offset, m.ReadU8(bone + 0x10u + offset));
+            }
+            m.WriteU32(child + 0x48u, 0u);
+            m.WriteU32(child + 0x4Cu, 0u);
+            m.WriteU32(child + 0x50u, 0u);
+            CallGameFunction(c, m, 0x8001D708u, child);
+            CallGameFunction(c, m, 0x80020744u, child);
+            CallGameFunction(c, m, 0x8002CBE8u, player, child);
+            return child;
+        }
+        finally
+        {
+            _whammyMatrixMutating = false;
+        }
+    }
+
+    static uint CallGameFunction(
+        CpuContext c, IMemory m, uint address,
+        uint a0 = 0u, uint a1 = 0u, uint a2 = 0u, uint a3 = 0u)
+    {
+        var snapshot = c.Snapshot();
+        c.A0 = a0;
+        c.A1 = a1;
+        c.A2 = a2;
+        c.A3 = a3;
+        Dispatcher.Call(c, m, address);
+        uint result = c.V0;
+        c.Restore(snapshot);
+        return result;
+    }
+
+    public static void TraceSprintf(CpuContext c, IMemory m)
+    {
+        if (!_whammyMatrix || c.A1 != 0x80065738u) return;
+        Console.Error.WriteLine(
+            $"[V8Whammy] tick={_gameplayHeartbeatTick} event=display " +
+            $"multiplier={unchecked((int)c.A2)} " +
+            $"confirmedKinds={string.Join(',', _whammyMatrixConfirmedKinds.Order())}");
+    }
+
+    public static void TraceSpecialAttackPre(CpuContext c, IMemory m)
+    {
+        if (!_whammyMatrix) return;
+        m = Dispatcher.UnwrapMemory(m);
+        if (!_matrixWeaponKinds.TryGetValue(c.A0, out int kind))
+            return;
+        if (c.A1 is 9u or 0xBu)
+            _activeMatrixWeaponKind = kind;
+        if (c.A1 != 9u || kind is < 1 or > 5 ||
+            !IsRetailRamRange(c.A0, 0x0Eu))
+            return;
+
+        _pendingSpecialWeapon = c.A0;
+        _pendingSpecialKind = kind;
+        _pendingSpecialCode = c.A2 & 0xFFFu;
+        _pendingSpecialAmmo = m.ReadU16(c.A0 + 0x0Cu);
+    }
+
+    public static void TraceWeaponCommandState(CpuContext c, IMemory m)
+    {
+        if (!_whammyMatrix) return;
+        m = Dispatcher.UnwrapMemory(m);
+        if (!IsRetailRamRange(c.A1, 12u)) return;
+        const int initialDelayTicks = 30;
+        const int commandPeriodTicks = 300;
+        const int opportunitiesPerWindow = 5;
+        int tick = _gameplayHeartbeatTick;
+        int age = tick - _whammyMatrixCurrentAttachTick;
+        if (_gameplayStage &&
+            _whammyMatrixCurrentWeapon != 0u &&
+            age >= initialDelayTicks)
+        {
+            if (_lastInjectedSpecialAttachTick !=
+                _whammyMatrixCurrentAttachTick)
+            {
+                _lastInjectedSpecialAttachTick =
+                    _whammyMatrixCurrentAttachTick;
+                _lastInjectedSpecialOpportunity = -1;
+            }
+
+            int opportunity =
+                (age - initialDelayTicks) / commandPeriodTicks;
+            if (opportunity < opportunitiesPerWindow &&
+                opportunity != _lastInjectedSpecialOpportunity)
+            {
+                _lastInjectedSpecialOpportunity = opportunity;
+                uint injected =
+                    MissingSpecialAttackCode(_whammyMatrixCurrentKind);
+                int commandKind = _whammyMatrixCurrentKind;
+                if (injected == 0u)
+                {
+                    commandKind = _whammyMatrixPartnerKind;
+                    injected = MissingSpecialAttackCode(commandKind);
+                }
+                if (injected != 0u)
+                {
+                    m.WriteU32(c.A1 + 4u, injected);
+                    m.WriteU32(
+                        c.A1 + 8u, m.ReadU32(c.A1 + 8u) | 0x20000u);
+                    Console.Error.WriteLine(
+                        $"[V8SpecialInput] tick={tick} " +
+                        $"event=command-injected weaponKind={commandKind} " +
+                        $"code=0x{injected:X3}");
+                }
+            }
+        }
+        uint code = m.ReadU32(c.A1 + 4u);
+        uint flags = m.ReadU32(c.A1 + 8u);
+        if (code == _lastSpecialCommandCode &&
+            flags == _lastSpecialCommandFlags)
+            return;
+        _lastSpecialCommandCode = code;
+        _lastSpecialCommandFlags = flags;
+        if (code != 0u || (flags & 0x20000u) != 0u)
+        {
+            Console.Error.WriteLine(
+                $"[V8SpecialInput] tick={_gameplayHeartbeatTick} " +
+                $"code=0x{code:X8} flags=0x{flags:X8}");
+        }
+    }
+
+    static uint MissingSpecialAttackCode(int kind)
+    {
+        if (!_specialAttackCodes.TryGetValue(kind, out uint[]? codes))
+            return 0u;
+        foreach (uint code in codes)
+        {
+            if (!_specialAttackCoverage.Contains($"{kind}:{code:X3}"))
+                return code;
+        }
+        return 0u;
+    }
+
+    static bool SpecialAttacksComplete(int kind) =>
+        _specialAttackCodes.TryGetValue(kind, out uint[]? codes) &&
+        codes.All(code =>
+            _specialAttackCoverage.Contains($"{kind}:{code:X3}"));
+
+    public static void TraceSpecialAttackPost(CpuContext c, IMemory m)
+    {
+        _activeMatrixWeaponKind = 0;
+        if (_pendingSpecialWeapon == 0u) return;
+        m = Dispatcher.UnwrapMemory(m);
+        uint weapon = _pendingSpecialWeapon;
+        int kind = _pendingSpecialKind;
+        uint code = _pendingSpecialCode;
+        ushort before = _pendingSpecialAmmo;
+        _pendingSpecialWeapon = 0u;
+
+        if (!IsRetailRamRange(weapon, 0x0Eu))
+            return;
+        ushort after = m.ReadU16(weapon + 0x0Cu);
+        if (after >= before)
+            return;
+
+        string coverage = $"{kind}:{code:X3}";
+        if (_specialAttackCoverage.Add(coverage))
+        {
+            Console.Error.WriteLine(
+                $"[V8Special] tick={_gameplayHeartbeatTick} " +
+                $"event=fired weaponKind={kind} code=0x{code:X3} " +
+                $"ammo={before}->{after} coverage=" +
+                $"{string.Join(',', _specialAttackCoverage.Order())}");
+        }
+    }
 
     static void WriteStateTrace(IMemory m, uint gp, uint player, int tick)
     {
@@ -943,9 +1515,11 @@ public static class V8Compat
 
     static void UpdateVictoryAutopilot(IMemory m, uint player, int tick)
     {
-        if (!_victoryAutopilot) return;
+        if (!_victoryAutopilot && !_whammyMatrix) return;
 
-        ushort fire = (ushort)(Controller.R2 | Controller.L2);
+        ushort fire = _whammyMatrix
+            ? Controller.L2
+            : (ushort)(Controller.R2 | Controller.L2);
         uint target = _victoryAutopilotTarget;
         if (!IsRetailRamRange(target, 0xF8u) || m.ReadU8(target + 4u) != 2u)
         {
@@ -1018,10 +1592,36 @@ public static class V8Compat
 
     public static void TracePlayerCollisionPre(CpuContext c, IMemory m)
     {
-        if (!_traceVehicle || c.A1 == 0u) return;
         m = Dispatcher.UnwrapMemory(m);
         uint player = m.ReadU32(c.GP + 0x7D0u);
-        if (player == 0u || c.A0 != player) return;
+        if (_whammyMatrix &&
+            IsRetailRamRange(player, 0xBAu) &&
+            IsRetailRamRange(c.A1, 4u))
+        {
+            uint projectile = m.ReadU32(c.A1);
+            if (IsRetailRamRange(projectile, 0x84u) &&
+                m.ReadU32(projectile + 0x80u) == player)
+            {
+                int kind = 0;
+                if (!_playerProjectileMatrixKinds.TryGetValue(
+                        projectile, out kind))
+                {
+                    _matrixProjectileTypeKinds.TryGetValue(
+                        m.ReadU8(projectile + 0x0Au), out kind);
+                }
+                if (kind != 0 && _whammyMatrixFiredKinds.Contains(kind))
+                {
+                    _pendingWhammyOwner = player;
+                    _pendingWhammyCount = m.ReadU8(player + 0xB9u);
+                    _pendingWhammyKind = kind;
+                    _pendingWhammyProjectile = projectile;
+                    _pendingWhammyTarget = c.A0;
+                }
+            }
+        }
+
+        if (!_traceVehicle || c.A1 == 0u || player == 0u || c.A0 != player)
+            return;
 
         uint node = c.A1;
         uint other = m.ReadU32(node);
@@ -1043,8 +1643,28 @@ public static class V8Compat
 
     public static void TracePlayerCollisionPost(CpuContext c, IMemory m)
     {
-        if (!_traceVehicle || _collidingVehicle == 0u) return;
         m = Dispatcher.UnwrapMemory(m);
+        if (_pendingWhammyOwner != 0u)
+        {
+            byte count = m.ReadU8(_pendingWhammyOwner + 0xB9u);
+            if (count != _pendingWhammyCount)
+            {
+                _whammyMatrixConfirmedKinds.Add(_pendingWhammyKind);
+                Console.Error.WriteLine(
+                    $"[V8Whammy] tick={_gameplayHeartbeatTick} " +
+                    $"event=confirmed-hit weaponKind={_pendingWhammyKind} " +
+                    $"projectile=0x{_pendingWhammyProjectile:X8} " +
+                    $"target=0x{_pendingWhammyTarget:X8} " +
+                    $"counter={_pendingWhammyCount}->{count} " +
+                    $"confirmedKinds={string.Join(',', _whammyMatrixConfirmedKinds.Order())}");
+            }
+            _pendingWhammyOwner = 0u;
+            _pendingWhammyProjectile = 0u;
+            _pendingWhammyTarget = 0u;
+        }
+
+        if (!_traceVehicle || _collidingVehicle == 0u)
+            return;
         uint player = _collidingVehicle;
         int tick = _collidingVehicleTick;
         _collidingVehicle = 0u;
@@ -1077,7 +1697,7 @@ public static class V8Compat
 
     public static void TracePlayerChildSpawnPre(CpuContext c, IMemory m)
     {
-        if (!_traceWeapons) return;
+        if (!_traceWeapons && !_whammyMatrix) return;
         m = Dispatcher.UnwrapMemory(m);
         uint player = m.ReadU32(c.GP + 0x7D0u);
         if (player == 0u || c.A0 != player) return;
@@ -1093,16 +1713,33 @@ public static class V8Compat
 
     public static void TracePlayerChildSpawnPost(CpuContext c, IMemory m)
     {
-        if (!_traceWeapons || !_pendingPlayerChildSpawn) return;
+        if ((!_traceWeapons && !_whammyMatrix) || !_pendingPlayerChildSpawn) return;
         m = Dispatcher.UnwrapMemory(m);
         _pendingPlayerChildSpawn = false;
         uint projectile = c.V0;
         if (projectile == 0u) return;
         _playerProjectiles.Add(projectile);
-        Console.Error.WriteLine(
-            $"[V8Weapon] tick={_vehiclePhysicsTick} event=spawn-post projectile=0x{projectile:X8} " +
-            $"weapon=0x{_pendingPlayerSpawnWeapon:X8} kind={_pendingPlayerSpawnKind} " +
-            $"caller=0x{_pendingPlayerSpawnCaller:X8} pos={ReadVec3(m, projectile + 0x24u)}");
+        if (_whammyMatrix &&
+            _matrixWeaponKinds.TryGetValue(
+                _pendingPlayerSpawnWeapon, out int matrixKind))
+        {
+            _playerProjectileMatrixKinds[projectile] = matrixKind;
+            _matrixProjectileTypeKinds[m.ReadU8(projectile + 0x0Au)] =
+                matrixKind;
+            if (_whammyMatrixFiredKinds.Add(matrixKind))
+            {
+                Console.Error.WriteLine(
+                    $"[V8Whammy] tick={_gameplayHeartbeatTick} event=fired " +
+                    $"weaponKind={matrixKind} projectile=0x{projectile:X8}");
+            }
+        }
+        if (_traceWeapons)
+        {
+            Console.Error.WriteLine(
+                $"[V8Weapon] tick={_vehiclePhysicsTick} event=spawn-post projectile=0x{projectile:X8} " +
+                $"weapon=0x{_pendingPlayerSpawnWeapon:X8} kind={_pendingPlayerSpawnKind} " +
+                $"caller=0x{_pendingPlayerSpawnCaller:X8} pos={ReadVec3(m, projectile + 0x24u)}");
+        }
     }
 
     public static void TracePlayerWeaponHitPre(CpuContext c, IMemory m)
@@ -1206,7 +1843,8 @@ public static class V8Compat
             $"[V8Result] tick={_vehiclePhysicsTick} mode={m.ReadU8(c.GP + 0x15u)} " +
             $"aliveFlag={unchecked((int)m.ReadU32(c.GP + 0x24u))} " +
             $"timer={unchecked((int)m.ReadU32(c.GP + 0x624u))} " +
-            $"player=0x{player:X8} state={ReadVehicleDamageState(m, player)}");
+            $"player=0x{player:X8} callback=0x{ReadObjectCallback(m, player):X8} " +
+            $"state={ReadVehicleDamageState(m, player)}");
         // ResultScreen_Build runs before the result layout has reached the
         // displayed ordering table. Capture after several result-stage polls
         // so the proof contains the rendered overlay rather than the final
@@ -1363,6 +2001,11 @@ public static class V8Compat
         {
             stage = locationStage;
         }
+        if (stage == null && TryGetCharacterStage(text, out string? characterStage) &&
+            text.Equals(_automationTargetCharacter, StringComparison.OrdinalIgnoreCase))
+        {
+            stage = characterStage;
+        }
         if (stage == "press_start")
         {
             _gameplayStage = false;
@@ -1387,6 +2030,16 @@ public static class V8Compat
             "Oil Fields" => "location_oilfield",
             "Sand Factory" => "location_sand_factory",
             "Secret Base" => "location_secret_base",
+            _ => null,
+        };
+        return stage != null;
+    }
+
+    static bool TryGetCharacterStage(string text, out string? stage)
+    {
+        stage = text switch
+        {
+            "\"Y\" the Alien" => "character_y_the_alien",
             _ => null,
         };
         return stage != null;

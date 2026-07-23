@@ -64,6 +64,15 @@ MAIN_NATIVE_CALLBACK_STARTS = (
     0x8002BDD0,
     0x8002BFB8,
     0x8002C210,
+    # Five adjacent terrain accessors occupy the Ghidra gap after
+    # FUN_80029C64. Arena overlays call them indirectly; each ends at its own
+    # JR RA boundary. Sand Factory first exposed the final masked-height
+    # accessor at 0x80029DA4.
+    0x80029CB4,
+    0x80029CF4,
+    0x80029D3C,
+    0x80029D80,
+    0x80029DA4,
     0x8002E2BC,
     0x80030F34,
     0x80031634,
@@ -88,8 +97,10 @@ MAIN_NATIVE_CALLBACK_STARTS = (
     0x8003565C,
     0x800359C0,
     # Deferred object callback reached by the sustained Oil Fields vehicle
-    # exercise; the next known native callback begins at 0x800363E0.
+    # exercise. Y the Alien's special-weapon lookup returns the independent
+    # callback prologue at 0x8003607C within the former broad extent.
     0x80035CF8,
+    0x8003607C,
     0x800363E0,
     # Deferred object callback stored at object +0x64. The next independently
     # installed native callback begins at 0x80036AD8.
@@ -226,6 +237,12 @@ ARENA_DYNAMIC_CALLBACK_EXTENTS = {
     "HOOVRDAM": {
         # Same source event callback shape, placed after FUN_80101A98.
         0x80101B5C: 0x80101B88,
+    },
+    "SCRTBASE": {
+        # Radar-ping callback passed to Object_ScheduleCallback by
+        # FUN_80100200. Its independent prologue and return occupy the code
+        # immediately before that exported radar-sweep routine.
+        0x801001AC: 0x80100200,
     },
     "WILDWEST": {
         # Per-object event callback stored at +0x64. It follows the prior
@@ -691,6 +708,18 @@ def main() -> int:
             },
             {
                 "overlay": "main",
+                "address": "8002B98C",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceGameplayHeartbeat",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8002D494",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceWeaponCommandState",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
                 "address": "800173FC",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TraceVehicleIntegratePre",
                 "mode": "pre",
@@ -725,6 +754,26 @@ def main() -> int:
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TracePlayerChildSpawnPost",
                 "mode": "post",
             },
+            *[
+                {
+                    "overlay": "main",
+                    "address": address,
+                    "target": (
+                        "RecompOne.Runtime.Sdk.V8Compat."
+                        f"TraceSpecialAttack{phase.title()}"
+                    ),
+                    "mode": phase,
+                }
+                for address in (
+                    "80031FA0",
+                    "8003302C",
+                    "800336FC",
+                    "80034920",
+                    "8003565C",
+                    "8003607C",
+                )
+                for phase in ("pre", "post")
+            ],
             {
                 "overlay": "main",
                 "address": "80031454",
@@ -765,6 +814,12 @@ def main() -> int:
                 "overlay": "main",
                 "address": "8001392C",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TraceResultScreen",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80053004",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceSprintf",
                 "mode": "pre",
             },
             {

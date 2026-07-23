@@ -1,9 +1,34 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-22 19:20 EDT
-Status: BLOCKED - USER SIGN-OFF
+Last updated: 2026-07-23 EDT
+Status: ACTIVE - FIVE-HOUR Y/WHAMMY CRASH HUNT
 
-## Goal
+## Current goal
+
+Run a five-hour standalone loose-files crash campaign with the following hard
+coverage gates:
+
+- [ ] Play every match as Y the Alien.
+- [ ] Exercise all ten retail levels, explicitly including Sand Factory and
+      Secret Base.
+- [ ] Let every launched level reach the original result screen; elapsed-time
+      survival or forced pause exits do not count as completed matches.
+- [ ] Programmatically attach all six retail weapon kinds through the original
+      allocation, callback, bone, and weapon-slot routines.
+- [ ] Fire every attached weapon in selected-weapon pairs and retain exact
+      hit-counter WHAMMY confirmation for kinds 1 through 6.
+- [ ] Enter both original directional-plus-machine-gun special-attack commands
+      for each of the five standard weapons and retain callback/ammo-consumption
+      proof for all ten attacks.
+- [ ] Continue launching varied-map coverage for at least five wall-clock hours,
+      then let the final bounded match finish.
+- [ ] Preserve and classify every crash, hang, unmapped call, early exit,
+      liveness false positive, and unmet coverage gate.
+- [ ] Commit coherent harness or source-backed defect corrections frequently;
+      publish the final validated executable byte-identically to `PS1 game` and
+      `BINCUE` without changing cards or settings.
+
+## Previous soak goal
 
 Run deterministic soak coverage across multiple retail maps, validate split-screen
 gameplay separately, close every actionable reference-handoff gap that does not

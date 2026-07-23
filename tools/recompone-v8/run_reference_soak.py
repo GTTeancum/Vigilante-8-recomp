@@ -44,6 +44,22 @@ ARENAS = [
 ]
 ARENA_BY_KEY = {arena.key: arena for arena in ARENAS}
 BONUS_ARENAS = {"sand_factory", "secret_base"}
+PLAYERS = {
+    "default": (None, None),
+    "y_the_alien": ('"Y" the Alien', "character_y_the_alien"),
+}
+SPECIAL_ATTACK_CODES = {
+    "1:422",
+    "1:424",
+    "2:442",
+    "2:444",
+    "3:242",
+    "3:244",
+    "4:222",
+    "4:224",
+    "5:132",
+    "5:134",
+}
 
 FATAL_MARKERS = {
     "unmapped call": "unmapped call",
@@ -86,9 +102,18 @@ class RunResult:
     result_screen_seen: bool
     clean_match_relaunch: bool
     clean_match_teardown: bool
+    natural_match_completion: bool
+    whammy_fired_kinds: list[int]
+    whammy_confirmed_kinds: list[int]
+    whammy_matrix_complete: bool
+    whammy_start_kind: int | None
+    special_attack_codes: list[str]
+    special_attack_complete: bool
     heap_exhaustion_count: int
     hang_stack: str | None
     source_overrides: int | None
+    player: str
+    character_seen: bool
     stdout_log: str
     stderr_log: str
 
@@ -111,10 +136,51 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--mode", choices=("arcade", "coop", "versus"), default="arcade")
+    parser.add_argument(
+        "--player",
+        choices=tuple(PLAYERS),
+        default="default",
+        help="Player vehicle to select; locked choices are unlocked in-process through retail passcodes.",
+    )
     parser.add_argument("--seconds", type=float, default=120.0, help="Gameplay soak time per arena.")
     parser.add_argument("--entry-timeout", type=float, default=45.0)
     parser.add_argument("--heartbeat-timeout", type=float, default=15.0)
     parser.add_argument("--cycles", type=int, default=1)
+    parser.add_argument(
+        "--campaign-hours",
+        type=float,
+        help=(
+            "Keep launching complete arena matches until this many wall-clock hours "
+            "have elapsed. The first full map rotation always finishes."
+        ),
+    )
+    parser.add_argument(
+        "--require-match-completion",
+        action="store_true",
+        help=(
+            "Treat --seconds as the maximum gameplay time and pass only after the "
+            "original game reaches its result screen."
+        ),
+    )
+    parser.add_argument(
+        "--whammy-matrix",
+        action="store_true",
+        help=(
+            "Programmatically attach every retail weapon kind and fire each "
+            "in selected-weapon pairs to exercise WHAMMY combinations, while "
+            "also entering both special-attack commands for all five standard "
+            "weapons."
+        ),
+    )
+    parser.add_argument(
+        "--whammy-start-kind",
+        type=int,
+        choices=range(1, 7),
+        help=(
+            "Start the WHAMMY matrix with this weapon kind. By default campaign "
+            "runs rotate kinds 1 through 6."
+        ),
+    )
     parser.add_argument(
         "--clean-exit",
         action="store_true",
@@ -149,10 +215,87 @@ def location_script(target: Arena) -> list[str]:
     return lines
 
 
-def gameplay_script(mode: str, seconds: float, clean_exit: bool) -> list[str]:
+def passcode_script(code: str, stage: str) -> list[str]:
+    """Enter one fourteen-character retail passcode from the blank editor."""
+    if len(code) != 14 or any(ch != "_" and not ("A" <= ch <= "Z") for ch in code):
+        raise ValueError(f"unsupported Vigilante 8 passcode: {code!r}")
+
+    lines = [f"[{stage}]"]
+    poll = 10
+    for index, ch in enumerate(code):
+        target = 26 if ch == "_" else ord(ch) - ord("A")
+        down = (target - 26) % 27
+        up = (26 - target) % 27
+        direction, count = ("DOWN", down) if down <= up else ("UP", up)
+        for _ in range(count):
+            lines.append(f"{poll}+2={direction}")
+            poll += 4
+        if index + 1 < len(code):
+            lines.append(f"{poll}+2=RIGHT")
+            poll += 6
+    lines.extend([f"{poll + 4}+2=CROSS", ""])
+    return lines
+
+
+def unlock_bonus_script() -> list[str]:
+    """Unlock Y and both bonus arenas without touching the saved memory cards."""
+    lines = [
+        "[player_count]",
+        "1+2=DOWN",
+        "5+2=DOWN",
+        "10+2=CROSS",
+        "",
+        "[game_status]",
+        "30+2=CROSS",
+        "60+2=CIRCLE",
+        "",
+    ]
+    lines.extend(passcode_script("INVITE_VISITOR", "passcode"))
+    lines.extend(
+        [
+            "[game_status_return]",
+            "30+2=CROSS",
+            "60+2=CIRCLE",
+            "",
+        ]
+    )
+    lines.extend(passcode_script("SECRET_LOCALES", "passcode_2"))
+    lines.extend(
+        [
+            "[game_status_return_2]",
+            "30+2=TRIANGLE",
+            "",
+            "[options_return]",
+            "30+2=CROSS",
+            "",
+        ]
+    )
+    return lines
+
+
+def player_script(player: str) -> list[str]:
+    display, stage = PLAYERS[player]
+    if display is None or stage is None:
+        return ["[choose_player]", "5+2=CROSS", ""]
+
+    lines = ["[choose_player]"]
+    for poll in range(5, 255, 10):
+        lines.append(f"{poll}+2=RIGHT")
+    lines.extend(["", f"[{stage}]", "1+2=CROSS", ""])
+    return lines
+
+
+def gameplay_script(
+    mode: str, seconds: float, clean_exit: bool, whammy_matrix: bool
+) -> list[str]:
     polls = max(1200, int(seconds * 90) + 1200)
     lines = ["[gameplay]"]
-    if mode == "arcade":
+    if whammy_matrix:
+        # The runtime alternates two selected weapons, enters every retail
+        # special-attack sequence, and supplies movement. Scripted held inputs
+        # would destroy the required press/release edges.
+        pass
+    elif mode == "arcade":
         lines.extend(
             [
                 f"120+{polls}=P1:CROSS",
@@ -205,7 +348,14 @@ def gameplay_script(mode: str, seconds: float, clean_exit: bool) -> list[str]:
     return lines
 
 
-def build_fixture(arena: Arena, mode: str, seconds: float, clean_exit: bool) -> str:
+def build_fixture(
+    arena: Arena,
+    mode: str,
+    seconds: float,
+    clean_exit: bool,
+    player: str,
+    whammy_matrix: bool,
+) -> str:
     lines = [
         "# Generated by run_reference_soak.py",
         "10+2=START",
@@ -215,6 +365,8 @@ def build_fixture(arena: Arena, mode: str, seconds: float, clean_exit: bool) -> 
         "",
     ]
     if mode == "arcade":
+        if player != "default" or arena.key in BONUS_ARENAS:
+            lines.extend(unlock_bonus_script())
         lines.extend(
             [
                 "[main_menu]",
@@ -224,11 +376,9 @@ def build_fixture(arena: Arena, mode: str, seconds: float, clean_exit: bool) -> 
                 "[player_count]",
                 "5+2=CROSS",
                 "",
-                "[choose_player]",
-                "5+2=CROSS",
-                "",
             ]
         )
+        lines.extend(player_script(player))
     else:
         direction = "DOWN" if mode == "coop" else "UP"
         lines.extend(
@@ -261,7 +411,7 @@ def build_fixture(arena: Arena, mode: str, seconds: float, clean_exit: bool) -> 
                 "",
             ]
         )
-    lines.extend(gameplay_script(mode, seconds, clean_exit))
+    lines.extend(gameplay_script(mode, seconds, clean_exit, whammy_matrix))
     return "\n".join(lines)
 
 
@@ -399,13 +549,20 @@ def run_one(
     entry_timeout: float,
     heartbeat_timeout: float,
     clean_exit: bool,
+    player: str,
+    require_match_completion: bool,
+    whammy_matrix: bool,
+    whammy_start_kind: int | None,
 ) -> RunResult:
     stem = f"{cycle:02d}_{mode}_{arena.key}"
     fixture_path = output / f"{stem}.input.txt"
     stdout_path = output / f"{stem}.stdout.log"
     stderr_path = output / f"{stem}.stderr.log"
     fixture_path.write_text(
-        build_fixture(arena, mode, seconds, clean_exit), encoding="utf-8"
+        build_fixture(
+            arena, mode, seconds, clean_exit, player, whammy_matrix
+        ),
+        encoding="utf-8",
     )
 
     env = os.environ.copy()
@@ -417,6 +574,9 @@ def run_one(
     env["RECOMPONE_SOAK_HEARTBEAT_TICKS"] = "180"
     env["RECOMPONE_DISPLAY_PROBE_INTERVAL"] = "60"
     env["RECOMPONE_TARGET_LOCATION"] = arena.display
+    player_display, player_stage = PLAYERS[player]
+    if player_display is not None:
+        env["RECOMPONE_TARGET_CHARACTER"] = player_display
     if mode != "arcade":
         env["RECOMPONE_TARGET_TWO_PLAYER_MODE"] = (
             "COOPERATIVE" if mode == "coop" else "VERSUS"
@@ -425,6 +585,11 @@ def run_one(
     env["RECOMPONE_TRACE_RESULTS"] = "1"
     env["RECOMPONE_TRACE_ANIMATION"] = "1"
     env["RECOMPONE_GAMEPLAY_CAPTURE_DELAY_POLLS"] = "300"
+    if whammy_matrix:
+        env["RECOMPONE_V8_WHAMMY_MATRIX"] = "1"
+        env["RECOMPONE_TRACE_WEAPONS"] = "1"
+        if whammy_start_kind is not None:
+            env["RECOMPONE_V8_WHAMMY_START_KIND"] = str(whammy_start_kind)
     if clean_exit:
         env["RECOMPONE_SOAK_TEARDOWN_TICKS"] = str(max(180, round(seconds * 60)))
 
@@ -513,6 +678,14 @@ def run_one(
                     passed = True
                     reason = "clean match completion and title return"
                     break
+                if (
+                    require_match_completion
+                    and result_started is not None
+                    and now - result_started >= 2.0
+                ):
+                    passed = True
+                    reason = "natural match completion reached the result screen"
+                    break
 
                 clean_match_exit = "[Input] stage 'pause_quit'" in text
                 if clean_exit and clean_match_exit:
@@ -532,8 +705,11 @@ def run_one(
                 else:
                     gameplay_elapsed = now - gameplay_started
                     if not clean_exit and gameplay_elapsed >= seconds:
-                        passed = True
-                        reason = "completed requested gameplay duration"
+                        if require_match_completion:
+                            reason = "natural match completion timeout"
+                        else:
+                            passed = True
+                            reason = "completed requested gameplay duration"
                         break
                     if clean_exit and gameplay_elapsed >= seconds + 30.0:
                         reason = "in-game exit timeout"
@@ -593,16 +769,56 @@ def run_one(
         and "[LibCd] ReadN start LBA=1472" in post_result_text
         and "[CDDA] play LBA=109500" in post_result_text
     )
+    natural_match_completion = result_screen_seen
     heap_exhaustion_count = text.lower().count("heap exhausted")
     overrides_match = re.search(
         r"(?:standalone loose files|CUE overrides|loose-file overrides)=(\d+)",
         text,
     )
     source_overrides = int(overrides_match.group(1)) if overrides_match else 0
+    character_seen = (
+        player_stage is None or f"[Input] stage '{player_stage}'" in text
+    )
+    whammy_fired_kinds = sorted(
+        {
+            int(value)
+            for value in re.findall(
+                r"\[V8Whammy\].*?event=fired.*?weaponKind=(\d+)", text
+            )
+        }
+    )
+    whammy_confirmed_kinds = sorted(
+        {
+            int(value)
+            for value in re.findall(
+                r"\[V8Whammy\].*?event=confirmed.*?weaponKind=(\d+)", text
+            )
+        }
+    )
+    whammy_matrix_complete = (
+        whammy_fired_kinds == [1, 2, 3, 4, 5, 6]
+        and whammy_confirmed_kinds == [1, 2, 3, 4, 5, 6]
+    )
+    special_attack_codes = sorted(
+        {
+            f"{kind}:{code.upper()}"
+            for kind, code in re.findall(
+                r"\[V8Special\].*?event=fired.*?weaponKind=(\d+)"
+                r".*?code=0x([0-9A-Fa-f]+)",
+                text,
+            )
+        }
+    )
+    special_attack_complete = SPECIAL_ATTACK_CODES.issubset(
+        special_attack_codes
+    )
 
     if passed and not overlay_seen:
         passed = False
         reason = f"target overlay {arena.overlay} was not loaded"
+    if passed and not character_seen:
+        passed = False
+        reason = f"target player {player} was not selected"
     if passed and not audio_ready:
         passed = False
         reason = "SDL audio did not initialize"
@@ -642,6 +858,9 @@ def run_one(
     ):
         passed = False
         reason = "in-game exit was not observed"
+    if passed and require_match_completion and not natural_match_completion:
+        passed = False
+        reason = "natural result screen was not observed"
 
     ended = time.time()
     gameplay_seconds = 0.0 if gameplay_started is None else ended - gameplay_started
@@ -671,9 +890,18 @@ def run_one(
         result_screen_seen=result_screen_seen,
         clean_match_relaunch=clean_match_relaunch,
         clean_match_teardown=clean_match_teardown,
+        natural_match_completion=natural_match_completion,
+        whammy_fired_kinds=whammy_fired_kinds,
+        whammy_confirmed_kinds=whammy_confirmed_kinds,
+        whammy_matrix_complete=whammy_matrix_complete,
+        whammy_start_kind=whammy_start_kind if whammy_matrix else None,
+        special_attack_codes=special_attack_codes,
+        special_attack_complete=special_attack_complete,
         heap_exhaustion_count=heap_exhaustion_count,
         hang_stack=str(hang_stack) if hang_stack else None,
         source_overrides=source_overrides,
+        player=player,
+        character_seen=character_seen,
         stdout_log=str(stdout_path),
         stderr_log=str(stderr_path),
     )
@@ -700,6 +928,10 @@ def main() -> int:
         raise SystemExit("durations and timeouts must be positive")
     if args.cycles <= 0:
         raise SystemExit("cycles must be positive")
+    if args.campaign_hours is not None and args.campaign_hours <= 0:
+        raise SystemExit("campaign hours must be positive")
+    if args.clean_exit and args.require_match_completion:
+        raise SystemExit("--clean-exit and --require-match-completion are mutually exclusive")
 
     arenas = selected_arenas(args.maps)
     output = (
@@ -710,12 +942,29 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
 
     results: list[RunResult] = []
-    for cycle in range(1, args.cycles + 1):
+    campaign_started = time.time()
+    campaign_deadline = (
+        campaign_started + args.campaign_hours * 3600.0
+        if args.campaign_hours is not None
+        else None
+    )
+    cycle = 1
+    while cycle <= args.cycles or (
+        campaign_deadline is not None
+        and (cycle == 1 or time.time() < campaign_deadline)
+    ):
         for arena in arenas:
+            if campaign_deadline is not None and cycle > 1 and time.time() >= campaign_deadline:
+                break
             print(
                 f"[soak] cycle={cycle} mode={args.mode} arena={arena.key} "
                 f"duration={args.seconds:.1f}s",
                 flush=True,
+            )
+            whammy_start_kind = (
+                args.whammy_start_kind
+                if args.whammy_start_kind is not None
+                else (len(results) % 6) + 1
             )
             result = run_one(
                 exe,
@@ -728,6 +977,10 @@ def main() -> int:
                 args.entry_timeout,
                 args.heartbeat_timeout,
                 args.clean_exit,
+                args.player,
+                args.require_match_completion,
+                args.whammy_matrix,
+                whammy_start_kind,
             )
             results.append(result)
             status = "PASS" if result.passed else "FAIL"
@@ -740,8 +993,87 @@ def main() -> int:
                 json.dumps([asdict(item) for item in results], indent=2),
                 encoding="utf-8",
             )
+            fired_union = sorted(
+                {kind for item in results for kind in item.whammy_fired_kinds}
+            )
+            confirmed_union = sorted(
+                {kind for item in results for kind in item.whammy_confirmed_kinds}
+            )
+            special_attack_union = sorted(
+                {
+                    code
+                    for item in results
+                    for code in item.special_attack_codes
+                }
+            )
+            natural_completions = {
+                item.key: sum(
+                    result.arena == item.key and result.natural_match_completion
+                    for result in results
+                )
+                for item in arenas
+            }
+            (output / "campaign.json").write_text(
+                json.dumps(
+                    {
+                        "started_at": datetime.fromtimestamp(campaign_started).astimezone().isoformat(),
+                        "deadline_at": (
+                            datetime.fromtimestamp(campaign_deadline).astimezone().isoformat()
+                            if campaign_deadline is not None
+                            else None
+                        ),
+                        "elapsed_seconds": round(time.time() - campaign_started, 3),
+                        "player": args.player,
+                        "maps": [item.key for item in arenas],
+                        "require_match_completion": args.require_match_completion,
+                        "whammy_matrix": args.whammy_matrix,
+                        "whammy_fired_kinds": fired_union,
+                        "whammy_confirmed_kinds": confirmed_union,
+                        "special_attack_codes": special_attack_union,
+                        "special_attack_complete": (
+                            SPECIAL_ATTACK_CODES.issubset(special_attack_union)
+                        ),
+                        "natural_match_completions": natural_completions,
+                        "failures": sum(not item.passed for item in results),
+                        "runs_completed": len(results),
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
             if not result.passed and not args.continue_on_failure:
                 return 1
+        cycle += 1
+
+    if args.whammy_matrix:
+        fired_union = sorted(
+            {kind for result in results for kind in result.whammy_fired_kinds}
+        )
+        confirmed_union = sorted(
+            {kind for result in results for kind in result.whammy_confirmed_kinds}
+        )
+        special_attack_union = sorted(
+            {
+                code
+                for result in results
+                for code in result.special_attack_codes
+            }
+        )
+        special_attack_complete = SPECIAL_ATTACK_CODES.issubset(
+            special_attack_union
+        )
+        if (
+            fired_union != [1, 2, 3, 4, 5, 6]
+            or confirmed_union != [1, 2, 3, 4, 5, 6]
+            or not special_attack_complete
+        ):
+            print(
+                f"[soak] WHAMMY coverage incomplete: fired={fired_union} "
+                f"confirmed={confirmed_union} "
+                f"special-attacks={special_attack_union}",
+                flush=True,
+            )
+            return 1
 
     passed = sum(result.passed for result in results)
     print(f"[soak] complete: {passed}/{len(results)} passed; output={output}")
