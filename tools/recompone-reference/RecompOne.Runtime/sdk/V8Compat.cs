@@ -96,6 +96,7 @@ public static class V8Compat
     static int _whammyMatrixPartnerSlot;
     static ushort _whammyMatrixArmedAmmo;
     static int _whammyMatrixCurrentAttachTick;
+    static int _whammyMatrixNextAttachTick;
     static bool _whammyMatrixMutating;
     static uint _pendingWhammyOwner;
     static byte _pendingWhammyCount;
@@ -1107,6 +1108,9 @@ public static class V8Compat
 
         if (_whammyMatrixIndex >= _whammyMatrixKinds.Length)
             return;
+        if (tick < _whammyMatrixNextAttachTick)
+            return;
+        _whammyMatrixNextAttachTick = tick + 120;
 
         int kind = _whammyMatrixKinds[_whammyMatrixIndex];
         int partnerKind = kind == 1 ? 2 : 1;
@@ -1150,6 +1154,7 @@ public static class V8Compat
         _whammyMatrixPartnerSlot = partnerSlot;
         _whammyMatrixArmedAmmo = 100;
         _whammyMatrixCurrentAttachTick = tick;
+        _whammyMatrixNextAttachTick = tick;
         _whammyMatrixIndex++;
         ApplyMatrixPairSelection(m, player, tick);
         Console.Error.WriteLine(
@@ -1192,12 +1197,45 @@ public static class V8Compat
                 return entry.Key;
         }
 
+        uint expectedCallback = MatrixWeaponCallback(c, m, player, kind);
+        if (expectedCallback != 0u)
+        {
+            for (int index = 0; index < 3; index++)
+            {
+                uint existing = m.ReadU32(
+                    player + 0x110u + (uint)index * 4u);
+                if (!IsRetailRamRange(existing, 0x68u) ||
+                    m.ReadU32(existing + 0x64u) != expectedCallback)
+                    continue;
+                _matrixWeaponKinds[existing] = kind;
+                Console.Error.WriteLine(
+                    $"[V8Whammy] tick={_gameplayHeartbeatTick} " +
+                    $"event=adopt-existing weaponKind={kind} " +
+                    $"weapon=0x{existing:X8} slot={index}");
+                return existing;
+            }
+        }
+
         m.WriteU8(player + 0xB3u, (byte)preferredReplacementSlot);
         uint weapon = AttachMatrixWeapon(c, m, player, kind);
         if (weapon != 0u)
             _matrixWeaponKinds[weapon] = kind;
         return weapon;
     }
+
+    static uint MatrixWeaponCallback(
+        CpuContext c, IMemory m, uint player, int kind) =>
+        kind switch
+        {
+            1 => 0x80031FA0u,
+            2 => 0x8003302Cu,
+            3 => 0x800336FCu,
+            4 => 0x80034920u,
+            5 => 0x8003565Cu,
+            6 => CallGameFunction(
+                c, m, 0x8003D1E8u, m.ReadU8(player + 0xD0u)),
+            _ => 0u,
+        };
 
     static uint AttachMatrixWeapon(CpuContext c, IMemory m, uint player, int kind)
     {
@@ -1218,7 +1256,7 @@ public static class V8Compat
         if (kind == 6)
         {
             bank = m.ReadU32(player + 0x58u);
-            callback = CallGameFunction(c, m, 0x8003D1E8u, m.ReadU8(player + 0xD0u));
+            callback = MatrixWeaponCallback(c, m, player, kind);
             bone = CallGameFunction(c, m, 0x8001B038u, player, 0x801Fu);
             slot = IsRetailRamRange(bone, 0x1Cu)
                 ? unchecked((short)m.ReadU16(bone + 0x1Au))
@@ -1350,6 +1388,12 @@ public static class V8Compat
                 }
                 if (injected != 0u)
                 {
+                    uint commandWeapon =
+                        commandKind == _whammyMatrixCurrentKind
+                            ? _whammyMatrixCurrentWeapon
+                            : _whammyMatrixPartnerWeapon;
+                    if (IsRetailRamRange(commandWeapon, 0x0Eu))
+                        m.WriteU16(commandWeapon + 0x0Cu, 100);
                     m.WriteU32(c.A1 + 4u, injected);
                     m.WriteU32(
                         c.A1 + 8u, m.ReadU32(c.A1 + 8u) | 0x20000u);
