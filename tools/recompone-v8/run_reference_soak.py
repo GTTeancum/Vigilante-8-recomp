@@ -572,7 +572,10 @@ def run_one(
     env["RECOMPONE_WINDOW_VISIBLE"] = "0"
     env["RECOMPONE_V8_GAME_VOLUME"] = "0"
     env["RECOMPONE_SOAK_HEARTBEAT_TICKS"] = "180"
-    env["RECOMPONE_DISPLAY_PROBE_INTERVAL"] = "60"
+    # Synchronous high-resolution VRAM readback is diagnostic work, not part
+    # of retail rendering. Ten-second sampling still leaves ample margin for
+    # the 60-second liveness timeout while avoiding a readback every second.
+    env["RECOMPONE_DISPLAY_PROBE_INTERVAL"] = "600"
     env["RECOMPONE_TARGET_LOCATION"] = arena.display
     player_display, player_stage = PLAYERS[player]
     if player_display is not None:
@@ -584,6 +587,7 @@ def run_one(
     env["RECOMPONE_TRACE_LEVEL_LOAD"] = "1"
     env["RECOMPONE_TRACE_RESULTS"] = "1"
     env["RECOMPONE_TRACE_ANIMATION"] = "1"
+    env["RECOMPONE_VALIDATE_HEAP"] = "1"
     env["RECOMPONE_GAMEPLAY_CAPTURE_DELAY_POLLS"] = "300"
     if whammy_matrix:
         env["RECOMPONE_V8_WHAMMY_MATRIX"] = "1"

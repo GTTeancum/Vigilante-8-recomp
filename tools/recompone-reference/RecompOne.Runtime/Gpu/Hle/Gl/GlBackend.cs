@@ -23,6 +23,8 @@ public sealed class GlBackend : IGpuBackend
 
     readonly GlVertex[] _verts = new GlVertex[MaxVerts];
     int _count;
+    ushort[] _readCache = Array.Empty<ushort>();
+    bool _readCacheValid;
 
     HleDrawEnv _env;
 
@@ -245,6 +247,7 @@ public sealed class GlBackend : IGpuBackend
 
     void Begin(in PrimFlags f, int vertsNeeded)
     {
+        _readCacheValid = false;
         bool transparent = f.SemiTrans;
         int blend = f.BlendMode;
         var target = Classify();
@@ -326,6 +329,7 @@ public sealed class GlBackend : IGpuBackend
 
     public void FillRect(int x, int y, int w, int h, ushort color15)
     {
+        _readCacheValid = false;
         Flush();
         _vram.Fill(x, y, w, h, color15);
         foreach (var rt in _rts)
@@ -354,6 +358,7 @@ public sealed class GlBackend : IGpuBackend
 
     public void CopyVram(int sx, int sy, int dx, int dy, int w, int h)
     {
+        _readCacheValid = false;
         Flush();
         WritebackDirtyIntersecting(sx, sy, w, h);
         _vram.CopyRect(sx, sy, dx, dy, w, h);
@@ -362,6 +367,7 @@ public sealed class GlBackend : IGpuBackend
 
     public void WriteVram(int x, int y, int w, int h, ReadOnlySpan<ushort> px)
     {
+        _readCacheValid = false;
         Flush();
         _vram.WriteRect(x, y, w, h, px);
         SyncRtsFromVram(x, y, w, h);
@@ -370,13 +376,55 @@ public sealed class GlBackend : IGpuBackend
     public void ReadVram(int x, int y, int w, int h, Span<ushort> px)
     {
         Flush();
-        WritebackDirtyIntersecting(x, y, w, h);
-        _vram.ReadRect(x, y, w, h, px);
+        if (!_readCacheValid && (long)w * h > 64)
+        {
+            WritebackDirtyIntersecting(x, y, w, h);
+            _vram.ReadRect(x, y, w, h, px);
+            return;
+        }
+
+        int cacheWidth = VramShadow.Width;
+        int cacheHeight = VramShadow.Height;
+        int cachePixels = cacheWidth * cacheHeight;
+        if (!_readCacheValid)
+        {
+            if (_readCache.Length < cachePixels)
+                _readCache = new ushort[cachePixels];
+            WritebackDirtyIntersecting(0, 0, cacheWidth, cacheHeight);
+            _vram.ReadRect(
+                0, 0, cacheWidth, cacheHeight,
+                _readCache.AsSpan(0, cachePixels));
+            _readCacheValid = true;
+        }
+
+        int rows = Math.Min(h, px.Length / Math.Max(1, w));
+        if (x >= 0 && y >= 0 &&
+            x + w <= cacheWidth && y + rows <= cacheHeight)
+        {
+            for (int row = 0; row < rows; row++)
+            {
+                _readCache.AsSpan((y + row) * cacheWidth + x, w)
+                    .CopyTo(px.Slice(row * w, w));
+            }
+            return;
+        }
+
+        for (int row = 0; row < rows; row++)
+        {
+            int sourceY = (y + row) & (cacheHeight - 1);
+            for (int col = 0; col < w; col++)
+            {
+                int sourceX = (x + col) & (cacheWidth - 1);
+                px[row * w + col] =
+                    _readCache[sourceY * cacheWidth + sourceX];
+            }
+        }
     }
 
     public unsafe void Flush()
     {
         if (_count == 0) return;
+        _readCacheValid = false;
 
         var rt = _kTarget;
         uint destTex;

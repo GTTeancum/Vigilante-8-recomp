@@ -32,6 +32,8 @@ public static class V8Compat
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OPTIONS") == "1";
     static readonly bool _traceAnimation =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_ANIMATION") == "1";
+    static readonly bool _validateHeap =
+        Environment.GetEnvironmentVariable("RECOMPONE_VALIDATE_HEAP") == "1";
     static readonly bool _victoryAutopilot =
         Environment.GetEnvironmentVariable("RECOMPONE_V8_VICTORY_AUTOPILOT") == "1";
     static readonly bool _whammyMatrix =
@@ -103,6 +105,10 @@ public static class V8Compat
     static int _pendingWhammyKind;
     static uint _pendingWhammyProjectile;
     static uint _pendingWhammyTarget;
+    static int _pendingDirectWhammyKind;
+    static uint _pendingDirectWhammyProjectile;
+    static uint _pendingDirectWhammyTarget;
+    static int _pendingDirectWhammyTick;
     static byte _lastPlayerWhammyCount;
     static uint _pendingSpecialWeapon;
     static int _pendingSpecialKind;
@@ -375,8 +381,8 @@ public static class V8Compat
         const uint headAddress = 0x8005ED4Cu;
         ReserveLinkedOverlayRanges(m, headAddress);
         int operation = ++_heapOperation;
-        ValidateFreeList(m, $"before alloc #{operation} request={requestedBytes} caller=0x{c.RA:X8}");
-        ValidateLiveAllocations(m, $"before alloc #{operation} request={requestedBytes} caller=0x{c.RA:X8}");
+        bool validateNow = _validateHeap &&
+            (operation == 1 || (operation & 0xFF) == 0);
         uint predecessor = m.ReadU32(headAddress);
         uint head = predecessor;
         var visited = new HashSet<uint>();
@@ -401,9 +407,16 @@ public static class V8Compat
                     m.WriteU32(headAddress, predecessor);
                 }
                 c.V0 = block + 8u;
-                _liveHeapAllocations[c.V0] = new HeapAllocation(units, requestedBytes, c.RA, operation);
-                _lastHeapOperation = $"alloc #{operation} ptr=0x{c.V0:X8} bytes={requestedBytes} units={units} caller=0x{c.RA:X8}";
-                ValidateFreeList(m, $"after {_lastHeapOperation}");
+                if (_validateHeap)
+                {
+                    _liveHeapAllocations[c.V0] = new HeapAllocation(units, requestedBytes, c.RA, operation);
+                    _lastHeapOperation = $"alloc #{operation} ptr=0x{c.V0:X8} bytes={requestedBytes} units={units} caller=0x{c.RA:X8}";
+                    if (validateNow)
+                    {
+                        ValidateFreeList(m, $"after {_lastHeapOperation}");
+                        ValidateLiveAllocations(m, $"after {_lastHeapOperation}");
+                    }
+                }
                 return;
             }
 
@@ -435,8 +448,10 @@ public static class V8Compat
 
         const uint headAddress = 0x8005ED4Cu;
         int operation = ++_heapOperation;
-        ValidateFreeList(m, $"before free #{operation} ptr=0x{c.A0:X8} caller=0x{c.RA:X8}");
-        ReconcileFreedAllocation(m, c.A0, operation, c.RA);
+        if (_validateHeap)
+            ReconcileFreedAllocation(m, c.A0, operation, c.RA);
+        bool validateNow = _validateHeap &&
+            (operation == 1 || (operation & 0xFF) == 0);
         uint block = c.A0 - 8u;
         uint predecessor = m.ReadU32(headAddress);
         var visited = new HashSet<uint>();
@@ -466,8 +481,15 @@ public static class V8Compat
 
                 m.WriteU32(headAddress, predecessor);
                 m.WriteU32(predecessor, block);
-                _lastHeapOperation = $"free #{operation} ptr=0x{c.A0:X8} caller=0x{c.RA:X8}";
-                ValidateFreeList(m, $"after {_lastHeapOperation}");
+                if (_validateHeap)
+                {
+                    _lastHeapOperation = $"free #{operation} ptr=0x{c.A0:X8} caller=0x{c.RA:X8}";
+                    if (validateNow)
+                    {
+                        ValidateFreeList(m, $"after {_lastHeapOperation}");
+                        ValidateLiveAllocations(m, $"after {_lastHeapOperation}");
+                    }
+                }
                 return;
             }
             predecessor = successor;
@@ -925,8 +947,9 @@ public static class V8Compat
                 ? lockedTarget
                 : FindNearestLiveVehicle(m, player);
             TraceWhammyCounter(m, player, tick);
+            if (IsLivePlayerVehicle(m, player))
+                UpdateWhammyMatrix(c, m, player, tick);
         }
-        UpdateWhammyMatrix(c, m, player, tick);
         UpdateVictoryAutopilot(m, player, tick);
         WriteStateTrace(m, c.GP, player, tick);
         if (!_soakTeardownSignaled && _soakTeardownTick > 0 && tick >= _soakTeardownTick)
@@ -970,12 +993,22 @@ public static class V8Compat
         {
             byte projectileType = m.ReadU8(player + 0xB8u);
             _matrixProjectileTypeKinds.TryGetValue(projectileType, out int kind);
+            bool directHitAttribution = false;
+            if (kind == 0 &&
+                _pendingDirectWhammyKind != 0 &&
+                tick - _pendingDirectWhammyTick is >= 0 and <= 2)
+            {
+                kind = _pendingDirectWhammyKind;
+                directHitAttribution = true;
+                _matrixProjectileTypeKinds[projectileType] = kind;
+            }
             if (kind != 0 && _whammyMatrixFiredKinds.Contains(kind))
             {
                 _whammyMatrixConfirmedKinds.Add(kind);
                 Console.Error.WriteLine(
                     $"[V8Whammy] tick={tick} event=confirmed-counter " +
                     $"weaponKind={kind} projectileType={projectileType} " +
+                    $"attribution={(directHitAttribution ? "direct-hit" : "projectile-type")} " +
                     $"counter={_lastPlayerWhammyCount}->{count} " +
                     $"confirmedKinds=" +
                     $"{string.Join(',', _whammyMatrixConfirmedKinds.Order())}");
@@ -987,6 +1020,16 @@ public static class V8Compat
                     $"projectileType={projectileType} " +
                     $"counter={_lastPlayerWhammyCount}->{count}");
             }
+            _pendingDirectWhammyKind = 0;
+            _pendingDirectWhammyProjectile = 0u;
+            _pendingDirectWhammyTarget = 0u;
+        }
+        else if (_pendingDirectWhammyKind != 0 &&
+                 tick - _pendingDirectWhammyTick > 2)
+        {
+            _pendingDirectWhammyKind = 0;
+            _pendingDirectWhammyProjectile = 0u;
+            _pendingDirectWhammyTarget = 0u;
         }
         _lastPlayerWhammyCount = count;
     }
@@ -1051,6 +1094,11 @@ public static class V8Compat
         IsRetailRamRange(candidate, 0xF8u) &&
         m.ReadU8(candidate + 4u) == 2u &&
         m.ReadU16(candidate + 0x0Cu) > 0u;
+
+    static bool IsLivePlayerVehicle(IMemory m, uint player) =>
+        IsRetailRamRange(player, 0xF8u) &&
+        m.ReadU8(player + 4u) == 2u &&
+        m.ReadU16(player + 0x0Cu) > 0u;
 
     static void UpdateWhammyMatrix(CpuContext c, IMemory m, uint player, int tick)
     {
@@ -1239,68 +1287,44 @@ public static class V8Compat
 
     static uint AttachMatrixWeapon(CpuContext c, IMemory m, uint player, int kind)
     {
-        (int Slot, uint Callback, ushort BoneKind) standard = kind switch
-        {
-            1 => (0, 0x80031FA0u, 0x8011),
-            2 => (17, 0x8003302Cu, 0x8012),
-            3 => (7, 0x800336FCu, 0x8013),
-            4 => (10, 0x80034920u, 0x8014),
-            5 => (13, 0x8003565Cu, 0x8015),
-            _ => (-1, 0u, 0),
-        };
-
-        uint bank;
-        uint callback;
-        uint bone;
-        int slot;
-        if (kind == 6)
-        {
-            bank = m.ReadU32(player + 0x58u);
-            callback = MatrixWeaponCallback(c, m, player, kind);
-            bone = CallGameFunction(c, m, 0x8001B038u, player, 0x801Fu);
-            slot = IsRetailRamRange(bone, 0x1Cu)
-                ? unchecked((short)m.ReadU16(bone + 0x1Au))
-                : -1;
-        }
-        else
-        {
-            // The retail pickup callback keeps ordinary weapon models in the
-            // shared resource bank. Only the character-specific weapon above
-            // is allocated from the vehicle's own model bank.
-            bank = m.ReadU32(0x800737DCu);
-            callback = standard.Callback;
-            bone = CallGameFunction(c, m, 0x8001B038u, player, standard.BoneKind);
-            slot = standard.Slot;
-        }
-
-        if (!IsRetailRamRange(bank, 4u) || callback == 0u || slot < 0)
+        uint callback = MatrixWeaponCallback(c, m, player, kind);
+        if (callback == 0u || kind is < 1 or > 6)
             return 0u;
 
         _whammyMatrixMutating = true;
         try
         {
-            uint child = CallGameFunction(
-                c, m, 0x8001AC44u, bank, unchecked((ushort)slot), 0x84u, 8u);
-            if (!IsRetailRamRange(child, 0x84u))
-                return 0u;
-
-            m.WriteU32(child, 0x00010000u);
-            m.WriteU32(child + 0x64u, callback);
-            CallGameFunction(c, m, callback, child, 1u, 0u);
-            m.WriteU16(child + 0x0Eu, m.ReadU16(child + 0x0Cu));
-            m.WriteU32(child + 0x80u, bone);
-            if (IsRetailRamRange(bone, 0x16u))
+            bool hasEmptySlot = false;
+            for (int index = 0; index < 3; index++)
             {
-                for (uint offset = 0; offset < 6u; offset++)
-                    m.WriteU8(child + 0x40u + offset, m.ReadU8(bone + 0x10u + offset));
+                if (m.ReadU32(player + 0x110u + (uint)index * 4u) == 0u)
+                {
+                    hasEmptySlot = true;
+                    break;
+                }
             }
-            m.WriteU32(child + 0x48u, 0u);
-            m.WriteU32(child + 0x4Cu, 0u);
-            m.WriteU32(child + 0x50u, 0u);
-            CallGameFunction(c, m, 0x8001D708u, child);
-            CallGameFunction(c, m, 0x80020744u, child);
-            CallGameFunction(c, m, 0x8002CBE8u, player, child);
-            return child;
+            if (!hasEmptySlot)
+            {
+                int replacement = Math.Clamp(
+                    kind <= 2 ? kind - 1 : 2, 0, 2);
+                CallGameFunction(c, m, 0x8002CA94u, player, (uint)replacement);
+            }
+
+            // FUN_8002CCE8 is the retail starting-weapon attachment path. It
+            // allocates the exact 0x80-byte object, initializes its callback,
+            // resolves the vehicle bone, links the transform, and owns the
+            // slot update. Reusing it avoids the overlapping heap ownership
+            // caused by manually assembling a 0x84-byte approximation.
+            CallGameFunction(c, m, 0x8002CCE8u, player, 1u << kind);
+            for (int index = 0; index < 3; index++)
+            {
+                uint weapon = m.ReadU32(
+                    player + 0x110u + (uint)index * 4u);
+                if (IsRetailRamRange(weapon, 0x68u) &&
+                    m.ReadU32(weapon + 0x64u) == callback)
+                    return weapon;
+            }
+            return 0u;
         }
         finally
         {
@@ -1788,9 +1812,22 @@ public static class V8Compat
 
     public static void TracePlayerWeaponHitPre(CpuContext c, IMemory m)
     {
-        if (!_traceWeapons || !_playerProjectiles.Contains(c.A0) || c.A1 == 0u) return;
+        if ((!_traceWeapons && !_whammyMatrix) || c.A1 == 0u) return;
         m = Dispatcher.UnwrapMemory(m);
         uint target = m.ReadU32(c.A1);
+        if (_whammyMatrix &&
+            _playerProjectileMatrixKinds.TryGetValue(c.A0, out int matrixKind))
+        {
+            uint player = m.ReadU32(c.GP + 0x7D0u);
+            if (IsLiveVehicle(m, target, player))
+            {
+                _pendingDirectWhammyKind = matrixKind;
+                _pendingDirectWhammyProjectile = c.A0;
+                _pendingDirectWhammyTarget = target;
+                _pendingDirectWhammyTick = _gameplayHeartbeatTick;
+            }
+        }
+        if (!_traceWeapons || !_playerProjectiles.Contains(c.A0)) return;
         _pendingPlayerHitProjectile = c.A0;
         _pendingPlayerHitTarget = target;
         _pendingPlayerHitState = ReadVehicleDamageState(m, target);

@@ -55,7 +55,7 @@ internal static class HostWindow
     static readonly int _displayProbeInterval =
         int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_DISPLAY_PROBE_INTERVAL"), out int interval)
             ? Math.Max(1, interval)
-            : 120;
+            : 0;
 
     static bool _layoutPending = true;
     static bool _closed;
@@ -420,7 +420,8 @@ internal static class HostWindow
     {
         string? captureLabel = _requestedDisplayCapture;
         _requestedDisplayCapture = null;
-        bool periodicProbe = ++_displayProbeFrame % _displayProbeInterval == 1;
+        bool periodicProbe = _displayProbeInterval > 0 &&
+            ++_displayProbeFrame % _displayProbeInterval == 1;
         if (!periodicProbe && string.IsNullOrEmpty(captureLabel)) return;
 
         RecordDisplayProbe(w, h, captureLabel);
@@ -430,7 +431,8 @@ internal static class HostWindow
     {
         string? captureLabel = _requestedDisplayCapture;
         _requestedDisplayCapture = null;
-        bool periodicProbe = ++_displayProbeFrame % _displayProbeInterval == 1;
+        bool periodicProbe = _displayProbeInterval > 0 &&
+            ++_displayProbeFrame % _displayProbeInterval == 1;
         if (!periodicProbe && string.IsNullOrEmpty(captureLabel)) return;
 
         int pixels = w * h;

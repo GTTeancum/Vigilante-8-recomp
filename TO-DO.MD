@@ -1,32 +1,53 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
 Last updated: 2026-07-23 EDT
-Status: ACTIVE - FIVE-HOUR Y/WHAMMY CRASH HUNT
+Status: AUTONOMOUS WORK EXHAUSTED - AWAITING USER SIGN-OFF
 
 ## Current goal
 
 Run a five-hour standalone loose-files crash campaign with the following hard
 coverage gates:
 
-- [ ] Play every match as Y the Alien.
-- [ ] Exercise all ten retail levels, explicitly including Sand Factory and
+- [x] Play every match as Y the Alien.
+- [x] Exercise all ten retail levels, explicitly including Sand Factory and
       Secret Base.
-- [ ] Let every launched level reach the original result screen; elapsed-time
+- [x] Let every launched level reach the original result screen; elapsed-time
       survival or forced pause exits do not count as completed matches.
-- [ ] Programmatically attach all six retail weapon kinds through the original
+- [x] Programmatically attach all six retail weapon kinds through the original
       allocation, callback, bone, and weapon-slot routines.
-- [ ] Fire every attached weapon in selected-weapon pairs and retain exact
+- [x] Fire every attached weapon in selected-weapon pairs and retain exact
       hit-counter WHAMMY confirmation for kinds 1 through 6.
-- [ ] Enter both original directional-plus-machine-gun special-attack commands
+- [x] Enter both original directional-plus-machine-gun special-attack commands
       for each of the five standard weapons and retain callback/ammo-consumption
       proof for all ten attacks.
-- [ ] Continue launching varied-map coverage for at least five wall-clock hours,
+- [x] Continue launching varied-map coverage for at least five wall-clock hours,
       then let the final bounded match finish.
-- [ ] Preserve and classify every crash, hang, unmapped call, early exit,
+- [x] Preserve and classify every crash, hang, unmapped call, early exit,
       liveness false positive, and unmet coverage gate.
-- [ ] Commit coherent harness or source-backed defect corrections frequently;
+- [x] Commit coherent harness or source-backed defect corrections frequently;
       publish the final validated executable byte-identically to `PS1 game` and
       `BINCUE` without changing cards or settings.
+
+2026-07-23 post-soak evidence: the five-hour campaign ran 18,013.526 seconds,
+completed 75 bounded runs, naturally completed every arena at least four times,
+confirmed all six WHAMMY kinds, and proved all ten special attacks. Retained
+failures were classified as heap-validator false liveness, old manual weapon
+attachment heap-header overwrites, and an Aircraft Graveyard frame-pacing
+liveness sensitivity; no exact `Unmapped call` occurred. Focused fixed-binary
+regressions passed Ghost Town, Casino City, Ski Resort, and Aircraft Graveyard
+to natural result screens, with Aircraft requiring a 60-second liveness window
+because its sampled stack was sleeping in `FrameClock.Throttle`.
+
+2026-07-23 closeout: post-soak fixes removed the test-induced manual weapon
+allocation path, gated/sampled expensive heap validation, disabled periodic
+display probes by default, and cached tiny VRAM reads. The final published
+single-file `Vigilante8PC.exe` is deployed byte-identically to `PS1 game` and
+`BINCUE` at SHA256
+`7628FBFD9E1B701F0D55B6F0BC016D8ACE0425DD5E95FAC6CFCDFB22D61D07DF`. Source
+probes confirmed `PS1 game` selects standalone loose files with 69 assets and
+does not open disc media, while `BINCUE` selects the direct CUE. Both deployed
+copies passed independent Oil Fields gameplay smoke runs with clean in-game
+exits.
 
 ## Previous soak goal
 
