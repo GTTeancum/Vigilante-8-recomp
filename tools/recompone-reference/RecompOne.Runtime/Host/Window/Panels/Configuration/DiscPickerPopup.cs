@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Text;
 using ImGuiNET;
-using NativeFileDialogSharp;
 using RecompOne.Runtime.Config;
 
 namespace RecompOne.Runtime.Host.Window;
@@ -96,37 +95,7 @@ internal sealed class DiscPickerPopup : IPanel
 
     void OpenBrowser()
     {
-        try
-        {
-            var currentPath = Encoding.UTF8.GetString(_pathBuf).TrimEnd('\0').Trim();
-            string? defaultDir = null;
-            if (currentPath.Length > 0 && File.Exists(currentPath))
-                defaultDir = Path.GetDirectoryName(Path.GetFullPath(currentPath));
-            else if (currentPath.Length > 0 && Directory.Exists(currentPath))
-                defaultDir = Path.GetFullPath(currentPath);
-
-            var result = Dialog.FileOpen("cue", defaultDir);
-            if (result.IsOk && !string.IsNullOrWhiteSpace(result.Path))
-            {
-                SetPathBuf(result.Path);
-            }
-            else if (result.IsError)
-            {
-                _error = $"Dialog error: {result.ErrorMessage}";
-            }
-        }
-        catch (Exception ex)
-        {
-            _error = $"Failed to open th native picker: {ex.Message}";
-        }
-    }
-
-    void SetPathBuf(string path)
-    {
-        _pathBuf = new byte[BufSize];
-        var bytes = Encoding.UTF8.GetBytes(path);
-        Array.Copy(bytes, _pathBuf, Math.Min(bytes.Length, BufSize - 1));
-        _error = "";
+        _error = "Native file picker removed from the standalone runtime; type or paste the CUE path.";
     }
 
     void TryConfirm()

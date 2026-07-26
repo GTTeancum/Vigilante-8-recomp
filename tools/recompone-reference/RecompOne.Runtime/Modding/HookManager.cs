@@ -1,5 +1,4 @@
 using System.Reflection;
-using MonoMod.RuntimeDetour;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Memory;
 
@@ -13,7 +12,7 @@ public static class HookManager
         public readonly List<Action<CpuContext, IMemory>> Posts = [];
         public Action<Action<CpuContext, IMemory>, CpuContext, IMemory>? Replace;
         public ModInfo? ReplaceOwner;
-        public Hook? Hook;
+        public bool Hooked;
     }
 
     static readonly Dictionary<MethodInfo, FunctionHooks> _hooks = [];
@@ -83,13 +82,19 @@ public static class HookManager
     {
         foreach (var (target, hooks) in _hooks)
         {
-            if (hooks.Hook != null) continue;
-            var state = hooks;
-            hooks.Hook = new Hook(target,
-                (Action<Action<CpuContext, IMemory>, CpuContext, IMemory>)((orig, c, m) => Invoke(state, orig, c, m)));
+            if (hooks.Hooked) continue;
+            hooks.Hooked = true;
+            Console.Error.WriteLine(
+                $"[Mods] runtime detours are disabled in the standalone runtime; ignored hook for {target.Name}");
         }
     }
 
+    /*
+     * External source mods used to install MonoMod detours here. The shipping
+     * runtime no longer carries that dependency: compatibility hooks are wired
+     * directly by the generated dispatch table, which is also the portable path
+     * we can move toward Xbox.
+     */
     static void Invoke(FunctionHooks hooks, Action<CpuContext, IMemory> orig, CpuContext c, IMemory m)
     {
         bool skip = false;
