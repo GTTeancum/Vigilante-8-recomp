@@ -67,4 +67,10 @@ public class ViewConfig
         get => GetString("AntiAliasing", "FXAA");
         set => SetString("AntiAliasing", value);
     }
+
+    public string LevelOfDetail
+    {
+        get => GetString("LevelOfDetail", "Stock");
+        set => SetString("LevelOfDetail", value);
+    }
 }

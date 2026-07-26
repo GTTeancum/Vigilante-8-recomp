@@ -702,6 +702,18 @@ def main() -> int:
             },
             {
                 "overlay": "main",
+                "address": "80021460",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.DrawMaxTerrainLod",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8001DE08",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.ApplyModelLevelOfDetail",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
                 "address": "8002F9BC",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TraceVehiclePhysicsTick",
                 "mode": "pre",

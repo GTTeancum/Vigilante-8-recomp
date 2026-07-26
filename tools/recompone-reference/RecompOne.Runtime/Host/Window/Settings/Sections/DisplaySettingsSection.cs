@@ -7,6 +7,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
 {
     static readonly string[] OutputResolutions = ["1280x720", "1920x1080", "2560x1440", "3840x2160"];
     static readonly string[] AntiAliasingModes = ["Off", "FXAA"];
+    static readonly string[] LevelOfDetailModes = ["Stock", "Maximum"];
 
     public string Id => "display";
     public string Title => "Display";
@@ -71,6 +72,31 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         ImGui.TextDisabled("Rasterizes PS1 polygons at 4x internal resolution.");
         if (ConfigManager.View.HighResolution3D != Hle.GpuHle.Active)
             ImGui.TextDisabled("A restart is required.");
+
+        string levelOfDetail = ConfigManager.View.LevelOfDetail;
+        if (!LevelOfDetailModes.Contains(levelOfDetail, StringComparer.OrdinalIgnoreCase))
+            levelOfDetail = LevelOfDetailModes[0];
+        string levelOfDetailLabel = levelOfDetail.Equals("Maximum", StringComparison.OrdinalIgnoreCase)
+            ? "Maximum (terrain + models)"
+            : "Stock (distance-based)";
+        if (ImGui.BeginCombo("Level of detail", levelOfDetailLabel))
+        {
+            foreach (string candidate in LevelOfDetailModes)
+            {
+                bool selected = candidate.Equals(levelOfDetail, StringComparison.OrdinalIgnoreCase);
+                string candidateLabel = candidate == "Maximum"
+                    ? "Maximum (terrain + models)"
+                    : "Stock (distance-based)";
+                if (ImGui.Selectable(candidateLabel, selected))
+                {
+                    ConfigManager.View.LevelOfDetail = candidate;
+                    ConfigManager.SaveView(PanelManager.Panels);
+                }
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+        ImGui.TextDisabled("Maximum keeps the highest-detail geometry at every distance.");
 
         bool ps1Dithering = ConfigManager.View.Ps1Dithering;
         if (ImGui.Checkbox("PS1 color dithering (fidelity)", ref ps1Dithering))

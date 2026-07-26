@@ -1,4 +1,5 @@
 using RecompOne.Runtime.Context;
+using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Dispatch;
 using RecompOne.Runtime.Hardware;
 using RecompOne.Runtime.Host;
@@ -152,6 +153,7 @@ public static class V8Compat
     static string? _lastMenuStage;
     static readonly Dictionary<uint, HeapAllocation> _liveHeapAllocations = new();
     static readonly Dictionary<uint, List<string>> _objectHistory = new();
+    static readonly Dictionary<uint, (uint HighMesh, uint LowMesh, uint Threshold)> _lodThresholds = new();
     static readonly HashSet<uint> _playerProjectiles = new();
     static readonly Dictionary<uint, int> _matrixWeaponKinds = new();
     static readonly Dictionary<uint, int> _playerProjectileMatrixKinds = new();
@@ -369,6 +371,12 @@ public static class V8Compat
 
     public static void Alloc(CpuContext c, IMemory m)
     {
+        AllocFromHead(c, m, 0x8005ED4Cu);
+    }
+
+    internal static void AllocFromHead(
+        CpuContext c, IMemory m, uint headAddress, bool reserveLinkedOverlayRanges = true)
+    {
         m = Dispatcher.UnwrapMemory(m);
         uint requestedBytes = c.A0;
         if (requestedBytes == 0u)
@@ -378,8 +386,8 @@ public static class V8Compat
         }
 
         uint units = (requestedBytes + 15u) >> 3;
-        const uint headAddress = 0x8005ED4Cu;
-        ReserveLinkedOverlayRanges(m, headAddress);
+        if (reserveLinkedOverlayRanges)
+            ReserveLinkedOverlayRanges(m, headAddress);
         int operation = ++_heapOperation;
         bool validateNow = _validateHeap &&
             (operation == 1 || (operation & 0xFF) == 0);
@@ -439,6 +447,11 @@ public static class V8Compat
 
     public static void Free(CpuContext c, IMemory m)
     {
+        FreeFromHead(c, m, 0x8005ED4Cu);
+    }
+
+    internal static void FreeFromHead(CpuContext c, IMemory m, uint headAddress)
+    {
         m = Dispatcher.UnwrapMemory(m);
         if (c.A0 == 0u) return;
 
@@ -446,7 +459,6 @@ public static class V8Compat
         if (_objectHistory.ContainsKey(c.A0))
             RecordObjectEvent(c.A0, $"heap-free caller=0x{c.RA:X8}");
 
-        const uint headAddress = 0x8005ED4Cu;
         int operation = ++_heapOperation;
         if (_validateHeap)
             ReconcileFreedAllocation(m, c.A0, operation, c.RA);
@@ -595,6 +607,19 @@ public static class V8Compat
             CarveFreeRange(m, headAddress, start, end);
         }
 
+        _linkedOverlayRangesReserved = true;
+    }
+
+    internal static void ReserveLinkedOverlayRangesForHeap(
+        IMemory m, uint headAddress) =>
+        ReserveLinkedOverlayRanges(Dispatcher.UnwrapMemory(m), headAddress);
+
+    internal static void ReserveHeapRange(
+        IMemory m, uint headAddress, uint reservedStart, uint reservedEnd)
+    {
+        if (_linkedOverlayRangesReserved) return;
+        CarveFreeRange(
+            Dispatcher.UnwrapMemory(m), headAddress, reservedStart, reservedEnd);
         _linkedOverlayRangesReserved = true;
     }
 
@@ -900,6 +925,91 @@ public static class V8Compat
                     $"Vigilante 8 terrain tile pointer is invalid: x=0x{c.A0:X8} z=0x{c.A1:X8} " +
                     $"block={bx},{bz} slot=0x{tileSlot:X8} tile=0x{tile:X8} caller=0x{c.RA:X8}");
         }
+    }
+
+    public static bool DrawMaxTerrainLod(CpuContext c, IMemory m)
+    {
+        if (!MaxLevelOfDetailEnabled())
+            return false;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint root = m.ReadU32(c.GP + 0x6FCu);
+        if (IsRetailRamRange(root, 16u))
+        {
+            var saved = c.Snapshot();
+            DrawAllTerrainLeaves(c, m, root, new HashSet<uint>());
+            c.Restore(saved);
+        }
+        return true;
+    }
+
+    static void DrawAllTerrainLeaves(
+        CpuContext c, IMemory m, uint node, HashSet<uint> visited)
+    {
+        if (!IsRetailRamRange(node, 16u) || !visited.Add(node))
+            return;
+
+        uint kind = m.ReadU32(node);
+        if (kind == 0u)
+        {
+            var saved = c.Snapshot();
+            c.A0 = node + 4u;
+            Dispatcher.Call(c, m, 0x800206F0u);
+            c.Restore(saved);
+            return;
+        }
+
+        if (kind is 1u or 2u)
+        {
+            DrawAllTerrainLeaves(c, m, m.ReadU32(node + 8u), visited);
+            DrawAllTerrainLeaves(c, m, m.ReadU32(node + 12u), visited);
+        }
+    }
+
+    public static void ApplyModelLevelOfDetail(CpuContext c, IMemory m) =>
+        ApplyModelLevelOfDetail(c.A0, m);
+
+    public static void ApplyModelLevelOfDetail(uint objectAddress, IMemory m)
+    {
+        if (!IsRetailRamRange(objectAddress, 0x70u))
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint highMesh = m.ReadU32(objectAddress + 0x30u);
+        uint lowMesh = m.ReadU32(objectAddress + 0x68u);
+        uint threshold = m.ReadU32(objectAddress + 0x6Cu);
+        if (MaxLevelOfDetailEnabled())
+        {
+            if (threshold != 0u)
+                _lodThresholds[objectAddress] = (highMesh, lowMesh, threshold);
+            m.WriteU32(objectAddress + 0x6Cu, 0u);
+            return;
+        }
+
+        if (threshold == 0u &&
+            _lodThresholds.TryGetValue(objectAddress, out var stock) &&
+            stock.HighMesh == highMesh &&
+            stock.LowMesh == lowMesh)
+        {
+            m.WriteU32(objectAddress + 0x6Cu, stock.Threshold);
+        }
+    }
+
+    static bool MaxLevelOfDetailEnabled()
+    {
+        string? environmentMode =
+            Environment.GetEnvironmentVariable("RECOMPONE_V8_LOD") ??
+            Environment.GetEnvironmentVariable("RECOMPONE_LOD_MODE");
+        if (!string.IsNullOrWhiteSpace(environmentMode))
+        {
+            return environmentMode.Equals("maximum", StringComparison.OrdinalIgnoreCase) ||
+                   environmentMode.Equals("max", StringComparison.OrdinalIgnoreCase) ||
+                   environmentMode.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                   environmentMode.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return ConfigManager.View.LevelOfDetail.Equals(
+            "Maximum", StringComparison.OrdinalIgnoreCase);
     }
 
     public static void TraceVehiclePhysicsTick(CpuContext c, IMemory m)
@@ -2409,7 +2519,7 @@ public static class V8Compat
         c.V0 = blocking == 0u ? 1u : 0u;
     }
 
-    static void DispatchLinked(CpuContext c, IMemory m, uint address)
+    internal static void DispatchLinked(CpuContext c, IMemory m, uint address)
     {
         uint runtimeAddress = m is RelocatedMemory relocated ? address + relocated.Delta : address;
         Dispatcher.Call(c, m, runtimeAddress);
