@@ -21,6 +21,7 @@ public sealed partial class Gpu
     static HleVertex HV(in Vert v) => new()
     {
         X = v.X, Y = v.Y, R = (byte)v.R, G = (byte)v.G, B = (byte)v.B, U = (short)v.U, V = (short)v.V,
+        Z = v.Z, HasGteZ = v.HasGteZ,
     };
 
     PrimFlags PrimOf(bool tex, bool semi, bool raw, int clut, bool gouraud = false) => new()

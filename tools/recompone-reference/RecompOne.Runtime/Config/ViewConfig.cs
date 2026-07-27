@@ -56,6 +56,18 @@ public class ViewConfig
         set => SetBool("Ps1Dithering", value);
     }
 
+    public bool TextureSmoothing
+    {
+        get => GetBool("TextureSmoothing", true);
+        set => SetBool("TextureSmoothing", value);
+    }
+
+    public bool PerspectiveCorrectTextures
+    {
+        get => GetBool("PerspectiveCorrectTextures", true);
+        set => SetBool("PerspectiveCorrectTextures", value);
+    }
+
     public string OutputResolution
     {
         get => GetString("OutputResolution", "1920x1080");

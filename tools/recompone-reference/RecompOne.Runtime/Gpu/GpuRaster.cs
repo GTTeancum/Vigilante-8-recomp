@@ -3,7 +3,7 @@ namespace RecompOne.Runtime;
 //old soft raster
 public sealed partial class Gpu
 {
-    struct Vert { public int X, Y, R, G, B, U, V; }
+    struct Vert { public int X, Y, R, G, B, U, V, Z; public bool HasGteZ; }
 
     static readonly int[,] Dither =
     {
@@ -38,8 +38,16 @@ public sealed partial class Gpu
             v[i].R = cr; v[i].G = cg; v[i].B = cb;
 
             uint vw = _fifo[idx++];
-            v[i].X = _drawOffsetX + CoordX(vw);
-            v[i].Y = _drawOffsetY + CoordY(vw);
+            int rawX = CoordX(vw);
+            int rawY = CoordY(vw);
+            v[i].X = _drawOffsetX + rawX;
+            v[i].Y = _drawOffsetY + rawY;
+            if (Gte.TryGetScreenDepth(rawX, rawY, out ushort z) ||
+                Gte.TryGetScreenDepth(v[i].X, v[i].Y, out z))
+            {
+                v[i].Z = z;
+                v[i].HasGteZ = true;
+            }
 
             if (tex)
             {

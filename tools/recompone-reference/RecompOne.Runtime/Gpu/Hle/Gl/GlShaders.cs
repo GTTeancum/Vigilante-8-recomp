@@ -63,6 +63,7 @@ internal static class GlShaders
         layout(location = 2) in int   inClut;
         layout(location = 3) in int   inTexpage;
         layout(location = 4) in vec2  inUV;
+        layout(location = 5) in float inPerspectiveW;
 
         out vec4 vColor;
         out vec2 vUV;
@@ -77,7 +78,8 @@ internal static class GlShaders
 
         void main() {
             vec2 p = (inPos + uVertexOffset + uPosBias) * uFbInv - 1.0;
-            gl_Position = vec4(p, 0.0, 1.0);
+            float w = max(inPerspectiveW, 1.0);
+            gl_Position = vec4(p * w, 0.0, w);
 
             vColor = vec4(float(inColor & 0xFFu), float((inColor >> 8) & 0xFFu), float((inColor >> 16) & 0xFFu), 0.0) / 255.0;
             vDither = (inTexpage >> 10) & 1;
@@ -112,6 +114,7 @@ internal static class GlShaders
         uniform vec4  uBlendOpaque = vec4(1.0, 1.0, 1.0, 0.0);
         uniform float uSetMask;
         uniform int   uCheckMask;
+        uniform int   uTextureSmoothing;
         uniform int   uScale;
         uniform vec2  uPosBias;
 
@@ -126,6 +129,37 @@ internal static class GlShaders
         int fetch16(ivec2 c) {
             vec4 p = fetch(c);
             return u5(p.r) | (u5(p.g) << 5) | (u5(p.b) << 10) | (int(ceil(p.a)) << 15);
+        }
+        ivec2 textureWindow(ivec2 uv) {
+            uv = (uv & uTexWindow.xy) | uTexWindow.zw;
+            return uv & ivec2(0xff);
+        }
+        vec4 textureTexel(ivec2 uv) {
+            uv = textureWindow(uv);
+
+            if (texMode == 0) {
+                int s = fetch16(ivec2(pageBase.x + (uv.x >> 2), pageBase.y + uv.y));
+                int idx = (s >> ((uv.x & 3) << 2)) & 0xf;
+                return fetch(ivec2(clutBase.x + idx, clutBase.y));
+            } else if (texMode == 1) {
+                int s = fetch16(ivec2(pageBase.x + (uv.x >> 1), pageBase.y + uv.y));
+                int idx = (s >> ((uv.x & 1) << 3)) & 0xff;
+                return fetch(ivec2(clutBase.x + idx, clutBase.y));
+            }
+
+            return fetch(ivec2(pageBase.x + uv.x, pageBase.y + uv.y));
+        }
+        vec4 smoothedTexture(vec2 uvf, vec4 nearestTexel) {
+            vec2 p = uvf - vec2(0.5);
+            ivec2 uv0 = ivec2(floor(p));
+            vec2 f = fract(p);
+            vec4 c00 = textureTexel(uv0);
+            vec4 c10 = textureTexel(uv0 + ivec2(1, 0));
+            vec4 c01 = textureTexel(uv0 + ivec2(0, 1));
+            vec4 c11 = textureTexel(uv0 + ivec2(1, 1));
+            vec3 top = mix(c00.rgb, c10.rgb, f.x);
+            vec3 bottom = mix(c01.rgb, c11.rgb, f.x);
+            return vec4(mix(top, bottom, f.y), nearestTexel.a);
         }
         vec3 quant5(ivec3 c8) {
             if (vDither != 0) {
@@ -146,27 +180,16 @@ internal static class GlShaders
 
             int rawU = dFdx(vUV.x) < 0.0 ? int(ceil(vUV.x - 0.0001)) : int(floor(vUV.x + 0.0001));
             int rawV = dFdy(vUV.y) < 0.0 ? int(ceil(vUV.y - 0.0001)) : int(floor(vUV.y + 0.0001));
-            ivec2 uv = (ivec2(rawU, rawV) & uTexWindow.xy) | uTexWindow.zw;
-            uv &= ivec2(0xff);
-            vec4 texel;
+            vec4 nearestTexel = textureTexel(ivec2(rawU, rawV));
+            vec4 texel = uTextureSmoothing != 0
+                ? smoothedTexture(vUV, nearestTexel)
+                : nearestTexel;
 
-            if (texMode == 0) {
-                int s = fetch16(ivec2(pageBase.x + (uv.x >> 2), pageBase.y + uv.y));
-                int idx = (s >> ((uv.x & 3) << 2)) & 0xf;
-                texel = fetch(ivec2(clutBase.x + idx, clutBase.y));
-            } else if (texMode == 1) {
-                int s = fetch16(ivec2(pageBase.x + (uv.x >> 1), pageBase.y + uv.y));
-                int idx = (s >> ((uv.x & 1) << 3)) & 0xff;
-                texel = fetch(ivec2(clutBase.x + idx, clutBase.y));
-            } else {
-                texel = fetch(ivec2(pageBase.x + uv.x, pageBase.y + uv.y));
-            }
-
-            if (texel.rgb == vec3(0.0) && texel.a < 0.5) discard;
+            if (nearestTexel.rgb == vec3(0.0) && nearestTexel.a < 0.5) discard;
             ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
             ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
             FragColor = vec4(quant5(c8), max(texel.a, uSetMask));
-            BlendColor = texel.a >= 0.5 ? uBlend : uBlendOpaque;
+            BlendColor = nearestTexel.a >= 0.5 ? uBlend : uBlendOpaque;
         }
         """;
 

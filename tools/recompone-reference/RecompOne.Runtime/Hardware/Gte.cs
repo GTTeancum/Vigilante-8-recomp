@@ -10,6 +10,12 @@ public static class Gte
     static readonly short[] SY = new short[3];
     static readonly ushort[] SZ = new ushort[4];
     static readonly uint[] RGB = new uint[3];
+    const int ScreenDepthHistoryCount = 96;
+    static readonly short[] ScreenDepthX = new short[ScreenDepthHistoryCount];
+    static readonly short[] ScreenDepthY = new short[ScreenDepthHistoryCount];
+    static readonly ushort[] ScreenDepthZ = new ushort[ScreenDepthHistoryCount];
+    static int ScreenDepthWrite;
+    static int ScreenDepthFilled;
     static uint RES1;
     static int MAC0, MAC1, MAC2, MAC3;
     static uint LZCS, LZCR;
@@ -186,6 +192,7 @@ public static class Gte
         int ny = SatY((int)(sy >> 16));
         SX[0] = SX[1]; SX[1] = SX[2]; SX[2] = (short)nx;
         SY[0] = SY[1]; SY[1] = SY[2]; SY[2] = (short)ny;
+        RecordScreenDepth((short)nx, (short)ny, (ushort)sz);
 
         if (last)
         {
@@ -193,6 +200,32 @@ public static class Gte
             MAC0 = (int)dp;
             IR0 = SatIR0((int)(dp >> 12));
         }
+    }
+
+    static void RecordScreenDepth(short x, short y, ushort z)
+    {
+        ScreenDepthX[ScreenDepthWrite] = x;
+        ScreenDepthY[ScreenDepthWrite] = y;
+        ScreenDepthZ[ScreenDepthWrite] = z;
+        ScreenDepthWrite = (ScreenDepthWrite + 1) % ScreenDepthHistoryCount;
+        if (ScreenDepthFilled < ScreenDepthHistoryCount) ScreenDepthFilled++;
+    }
+
+    public static bool TryGetScreenDepth(int x, int y, out ushort z)
+    {
+        for (int i = 0; i < ScreenDepthFilled; i++)
+        {
+            int index = ScreenDepthWrite - 1 - i;
+            if (index < 0) index += ScreenDepthHistoryCount;
+            if (ScreenDepthX[index] == x && ScreenDepthY[index] == y)
+            {
+                z = ScreenDepthZ[index];
+                return z != 0;
+            }
+        }
+
+        z = 0;
+        return false;
     }
 
     public static void Execute(uint cmd)

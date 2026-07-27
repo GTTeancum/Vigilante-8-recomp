@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using RecompOne.Runtime.Config;
 using Silk.NET.OpenGL;
 
 namespace RecompOne.Runtime.Hle;
@@ -6,7 +7,7 @@ namespace RecompOne.Runtime.Hle;
 public sealed class GlBackend : IGpuBackend
 {
     [StructLayout(LayoutKind.Sequential)]
-    struct GlVertex { public float X, Y; public uint Color; public int Clut, Texpage; public float U, V; }
+    struct GlVertex { public float X, Y; public uint Color; public int Clut, Texpage; public float U, V, PerspectiveW; }
 
     const int MaxVerts = 0x40000;
 
@@ -32,8 +33,9 @@ public sealed class GlBackend : IGpuBackend
     bool _kTransparent;
     int _kBlend, _kSetMask, _kCheckMask;
     int _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY;
-    int _kClipX0, _kClipY0, _kClipX1, _kClipY1;
+    int _kClipX0, _kClipY0, _kClipX1, _kClipY1, _kTextureSmoothing;
     int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv;
+    int _uTextureSmoothing;
     int _uPresentOrigin, _uPresentSize, _uPresentTexSize, _uPresent24Origin, _uPresent24Size;
 
     public bool Ready { get; private set; }
@@ -54,6 +56,7 @@ public sealed class GlBackend : IGpuBackend
         _uBlendOpaque = _gl.GetUniformLocation(_progPrim, "uBlendOpaque");
         _uSetMask = _gl.GetUniformLocation(_progPrim, "uSetMask");
         _uCheckMask = _gl.GetUniformLocation(_progPrim, "uCheckMask");
+        _uTextureSmoothing = _gl.GetUniformLocation(_progPrim, "uTextureSmoothing");
         _uPosBias = _gl.GetUniformLocation(_progPrim, "uPosBias");
         _uFbInv = _gl.GetUniformLocation(_progPrim, "uFbInv");
 
@@ -85,6 +88,7 @@ public sealed class GlBackend : IGpuBackend
         _gl.EnableVertexAttribArray(2); _gl.VertexAttribIPointer(2, 1, VertexAttribIType.Int, stride, (void*)12);
         _gl.EnableVertexAttribArray(3); _gl.VertexAttribIPointer(3, 1, VertexAttribIType.Int, stride, (void*)16);
         _gl.EnableVertexAttribArray(4); _gl.VertexAttribPointer(4, 2, VertexAttribPointerType.Float, false, stride, (void*)20);
+        _gl.EnableVertexAttribArray(5); _gl.VertexAttribPointer(5, 1, VertexAttribPointerType.Float, false, stride, (void*)28);
 
         // fullscreen quad for present, real vbo since gl_VertexID without arrays does not draw on mesa for some reason?? or i did it wrong?
         _presentVao = _gl.GenVertexArray();
@@ -242,7 +246,8 @@ public sealed class GlBackend : IGpuBackend
         return _kTransparent == transparent && _kBlend == blend
             && _kSetMask == (_env.SetMask ? 1 : 0) && _kCheckMask == (_env.CheckMask ? 1 : 0)
             && _kTwAndX == twAndX && _kTwAndY == twAndY && _kTwOrX == twOrX && _kTwOrY == twOrY
-            && _kClipX0 == _env.ClipX0 && _kClipY0 == _env.ClipY0 && _kClipX1 == _env.ClipX1 && _kClipY1 == _env.ClipY1;
+            && _kClipX0 == _env.ClipX0 && _kClipY0 == _env.ClipY0 && _kClipX1 == _env.ClipX1 && _kClipY1 == _env.ClipY1
+            && _kTextureSmoothing == (ConfigManager.View.TextureSmoothing ? 1 : 0);
     }
 
     void Begin(in PrimFlags f, int vertsNeeded)
@@ -261,15 +266,17 @@ public sealed class GlBackend : IGpuBackend
         _kTwAndX = ~(_env.TwMaskX * 8) & 0xFF; _kTwAndY = ~(_env.TwMaskY * 8) & 0xFF;
         _kTwOrX = (_env.TwOffX & _env.TwMaskX) * 8; _kTwOrY = (_env.TwOffY & _env.TwMaskY) * 8;
         _kClipX0 = _env.ClipX0; _kClipY0 = _env.ClipY0; _kClipX1 = _env.ClipX1; _kClipY1 = _env.ClipY1;
+        _kTextureSmoothing = ConfigManager.View.TextureSmoothing ? 1 : 0;
     }
 
     bool DitherOf(in PrimFlags f) => _env.Dither && (f.Gouraud || (f.Textured && !f.RawTexture));
 
-    GlVertex V(in HleVertex v, in PrimFlags f, bool dither)
+    GlVertex V(in HleVertex v, in PrimFlags f, bool dither, bool perspectiveCorrect)
     {
         uint color = (f.Textured && f.RawTexture) ? 0x808080u : (uint)(v.R | (v.G << 8) | (v.B << 16));
         int tpage = f.Textured ? (f.TPage & 0x1FF) : 0x8000;
         if (dither) tpage |= 0x400;
+        float perspectiveW = perspectiveCorrect ? MathF.Max(1f, v.Z) : 1f;
         return new GlVertex
         {
             X = v.X, Y = v.Y,
@@ -277,6 +284,7 @@ public sealed class GlBackend : IGpuBackend
             Clut = f.Clut & 0x7FFF,
             Texpage = tpage,
             U = v.U, V = v.V,
+            PerspectiveW = perspectiveW,
         };
     }
 
@@ -284,7 +292,11 @@ public sealed class GlBackend : IGpuBackend
     {
         Begin(f, 3);
         bool dith = DitherOf(f);
-        _verts[_count++] = V(a, f, dith); _verts[_count++] = V(b, f, dith); _verts[_count++] = V(c, f, dith);
+        bool perspectiveCorrect = ConfigManager.View.PerspectiveCorrectTextures &&
+            f.Textured && a.HasGteZ && b.HasGteZ && c.HasGteZ;
+        _verts[_count++] = V(a, f, dith, perspectiveCorrect);
+        _verts[_count++] = V(b, f, dith, perspectiveCorrect);
+        _verts[_count++] = V(c, f, dith, perspectiveCorrect);
     }
 
     public void DrawRect(in HleRect r, in PrimFlags f)
@@ -294,8 +306,8 @@ public sealed class GlBackend : IGpuBackend
         var b = new HleVertex { X = r.X + r.W, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
         var c = new HleVertex { X = r.X, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
         var d = new HleVertex { X = r.X + r.W, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
-        _verts[_count++] = V(a, f, false); _verts[_count++] = V(b, f, false); _verts[_count++] = V(c, f, false);
-        _verts[_count++] = V(b, f, false); _verts[_count++] = V(d, f, false); _verts[_count++] = V(c, f, false);
+        _verts[_count++] = V(a, f, false, false); _verts[_count++] = V(b, f, false, false); _verts[_count++] = V(c, f, false, false);
+        _verts[_count++] = V(b, f, false, false); _verts[_count++] = V(d, f, false, false); _verts[_count++] = V(c, f, false, false);
     }
 
     public void DrawLine(in HleVertex a, in HleVertex b, in PrimFlags f)
@@ -324,7 +336,7 @@ public sealed class GlBackend : IGpuBackend
     void LineVert(float x, float y, in HleVertex src, in PrimFlags f, bool dither)
     {
         var v = src; v.X = x; v.Y = y;
-        _verts[_count++] = V(v, f, dither);
+        _verts[_count++] = V(v, f, dither, false);
     }
 
     public void FillRect(int x, int y, int w, int h, ushort color15)
@@ -479,6 +491,7 @@ public sealed class GlBackend : IGpuBackend
         _gl.Uniform1(_uSetMask, _kSetMask == 1 ? 1f : 0f);
         _gl.Uniform1(_uCheckMask, _kCheckMask);
         _gl.Uniform4(_uBlendOpaque, 1f, 1f, 1f, 0f);
+        _gl.Uniform1(_uTextureSmoothing, _kTextureSmoothing);
 
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
         _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, 0, _verts.AsSpan(0, _count));
