@@ -6,7 +6,8 @@ public sealed class GlDisplayRt
 {
     public int X, Y, W, H;
     public int Margin;
-    public uint Tex, Fbo;
+    public uint Tex, Fbo, MsaaFbo, MsaaColor;
+    public int Samples;
     public bool Dirty;
     public long Stamp;
     public long LastDrawFrame;
@@ -26,6 +27,8 @@ public sealed class GlDisplayRt
 
     public void Create(GL gl)
     {
+        Samples = Math.Clamp(Config.ConfigManager.View.MsaaSamples, 0, 8);
+        if (Samples == 1) Samples = 0;
         Tex = gl.GenTexture();
         gl.BindTexture(TextureTarget.Texture2D, Tex);
         gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Nearest);
@@ -42,12 +45,47 @@ public sealed class GlDisplayRt
         gl.ClearColor(0f, 0f, 0f, 0f);
         gl.Disable(EnableCap.ScissorTest);
         gl.Clear(ClearBufferMask.ColorBufferBit);
+
+        if (Samples > 1)
+        {
+            MsaaColor = gl.GenRenderbuffer();
+            gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, MsaaColor);
+            gl.RenderbufferStorageMultisample(RenderbufferTarget.Renderbuffer, (uint)Samples,
+                InternalFormat.Rgba8, (uint)TexW, (uint)TexH);
+            MsaaFbo = gl.GenFramebuffer();
+            gl.BindFramebuffer(FramebufferTarget.Framebuffer, MsaaFbo);
+            gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
+                RenderbufferTarget.Renderbuffer, MsaaColor);
+            gl.Clear(ClearBufferMask.ColorBufferBit);
+        }
+    }
+
+    public uint DrawFbo => MsaaFbo != 0 ? MsaaFbo : Fbo;
+
+    public void Resolve(GL gl)
+    {
+        if (MsaaFbo == 0) return;
+        gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, MsaaFbo);
+        gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, Fbo);
+        gl.BlitFramebuffer(0, 0, TexW, TexH, 0, 0, TexW, TexH,
+            ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+    }
+
+    public void CopyResolveToMsaa(GL gl)
+    {
+        if (MsaaFbo == 0) return;
+        gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, Fbo);
+        gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, MsaaFbo);
+        gl.BlitFramebuffer(0, 0, TexW, TexH, 0, 0, TexW, TexH,
+            ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
     }
 
     public void Destroy(GL gl)
     {
         if (Fbo != 0) gl.DeleteFramebuffer(Fbo);
+        if (MsaaFbo != 0) gl.DeleteFramebuffer(MsaaFbo);
+        if (MsaaColor != 0) gl.DeleteRenderbuffer(MsaaColor);
         if (Tex != 0) gl.DeleteTexture(Tex);
-        Fbo = Tex = 0;
+        Fbo = Tex = MsaaFbo = MsaaColor = 0;
     }
 }

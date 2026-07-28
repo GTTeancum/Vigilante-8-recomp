@@ -2,6 +2,7 @@ using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Dispatch;
 using RecompOne.Runtime.Hardware;
+using RecompOne.Runtime.Hle;
 using RecompOne.Runtime.Host;
 using RecompOne.Runtime.Memory;
 
@@ -69,6 +70,7 @@ public static class V82Compat
     static readonly bool _soakTransformCaptures =
         Environment.GetEnvironmentVariable("RECOMPONE_V82_SOAK_CAPTURE_TRANSFORMS") == "1";
     static bool _unlockRosterLogged;
+    static uint _lastLoggedCheatFlags = uint.MaxValue;
     static readonly int _soakHeartbeatFrames =
         int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_SOAK_HEARTBEAT_FRAMES"),
             out int heartbeatFrames)
@@ -121,13 +123,7 @@ public static class V82Compat
     {
         if (_extendedHeapInstalled || Runtime.Mode != RunMode.Devkit) return;
 
-        // The PC loose build already carries the original game's ten arenas,
-        // so expose the retail disc-swap flag for ordinary play as well as
-        // automated coverage. This remains process-local and never edits a
-        // memory-card image.
-        m.WriteU16(0x8006A832u, (ushort)(m.ReadU16(0x8006A832u) | 0x10u));
-        Console.Error.WriteLine(
-            "[V82Compat] enabled all ten original Vigilante 8 arenas for this run");
+        ApplyConfiguredCheats(m);
         if (_unlockRoster)
         {
             // The low nine bits are the retail completion flags for the nine
@@ -670,6 +666,17 @@ public static class V82Compat
             m.WriteU32(objectAddress + 0x3Cu, c.A1);
         c.A0 = objectAddress;
         c.A1 = savedA1;
+    }
+
+    public static void ExtendObjectDrawDistance(CpuContext c, IMemory m)
+    {
+        if (!ConfigManager.View.ExtendedDrawDistance || c.RA != 0x8002DA34u)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint distance = m.ReadU32(c.SP + 0x2Cu);
+        if (distance > 0x003FFFFFu && distance <= 0x007FFFFFu)
+            m.WriteU32(c.SP + 0x2Cu, 0x003FFFFFu);
     }
 
     static void ApplyLevelOfDetail(uint objectAddress, IMemory m)
@@ -1782,6 +1789,7 @@ public static class V82Compat
     // consumes any texture banks.
     public static void ResetMatchVram(CpuContext c, IMemory m)
     {
+        GpuHle.GameplayActive = true;
         var snapshot = c.Snapshot();
         c.A0 = 1u;
         Dispatcher.Call(c, Dispatcher.UnwrapMemory(m), 0x8002091Cu);
@@ -1799,6 +1807,7 @@ public static class V82Compat
         if (c.RA != 0x800137A0u)
             return;
         _matchVramActive = true;
+        GpuHle.GameplayActive = true;
         _matchVramSuccesses = 0;
         _matchVramFailures = 0;
         Console.Error.WriteLine(
@@ -2143,8 +2152,11 @@ public static class V82Compat
     // above its frame, then makes several hand-written helper calls. Separate
     // recompilation of those continuations can reuse that slot. Preserve it
     // across the two heap allocations that precede the second read.
-    public static void PreserveShellImageDecodePre(CpuContext c, IMemory m) =>
+    public static void PreserveShellImageDecodePre(CpuContext c, IMemory m)
+    {
+        GpuHle.GameplayActive = false;
         ShellImageDecodeFrames.Push((c.SP - 0x50u, c.A2));
+    }
 
     public static void PreserveShellImageDecodePost(CpuContext c, IMemory m)
     {
@@ -2227,6 +2239,7 @@ public static class V82Compat
     // spinning, so advance host frames until the original state reaches 2.
     public static void ServiceDisplayTransitionWait(CpuContext c, IMemory m)
     {
+        ApplyConfiguredCheats(m);
         if (_soakEnabled)
             m.WriteU16(0x8006A832u, (ushort)(m.ReadU16(0x8006A832u) | 0x10u));
         if (_unlockRoster)
@@ -2257,6 +2270,54 @@ public static class V82Compat
         _unlockRosterLogged = true;
         Console.Error.WriteLine(
             "[V82Compat] enabled all nine bonus drivers for this run");
+    }
+
+    const uint CheatFlagsAddress = 0x8006A830u;
+    const uint ReducedGravityAddress = 0x8006A82Cu;
+    const uint UpgradeTableAddress = 0x8006B9E8u;
+
+    public static void SetConfiguredCheatFlags(uint flags)
+    {
+        ConfigManager.Game.V82CheatFlags = flags & 0x001FFFFFu;
+        ConfigManager.SaveGame();
+        if (Runtime.Mem is { } memory)
+            ApplyConfiguredCheats(memory);
+    }
+
+    static void ApplyConfiguredCheats(IMemory memory)
+    {
+        IMemory m = Dispatcher.UnwrapMemory(memory);
+        uint flags = ConfigManager.Game.V82CheatFlags & 0x001FFFFFu;
+        m.WriteU32(CheatFlagsAddress, flags);
+        if (_lastLoggedCheatFlags != flags)
+        {
+            _lastLoggedCheatFlags = flags;
+            Console.Error.WriteLine(
+                $"[V82Cheats] native-flags=0x{flags:X6} " +
+                $"drive-only={((flags & (1u << 6)) != 0)} " +
+                $"old-levels={((flags & (1u << 20)) != 0)}");
+        }
+
+        // These are the two extra writes performed by the retail password
+        // handler in addition to setting its corresponding flag bit.
+        if ((flags & (1u << 1)) != 0)
+            m.WriteU32(ReducedGravityAddress, 0x1680u);
+        if ((flags & (1u << 7)) != 0)
+            SetAllVehicleUpgradeStats(m, 100);
+        else if ((flags & (1u << 8)) != 0)
+            SetAllVehicleUpgradeStats(m, 50);
+    }
+
+    static void SetAllVehicleUpgradeStats(IMemory m, byte value)
+    {
+        for (uint vehicle = 0; vehicle < 18; vehicle++)
+        {
+            uint record = UpgradeTableAddress + vehicle * 10u;
+            m.WriteU8(record + 6u, value);
+            m.WriteU8(record + 7u, value);
+            m.WriteU8(record + 8u, value);
+            m.WriteU8(record + 9u, value);
+        }
     }
 
     // The sequel links a newer card library at different SHELL addresses, but

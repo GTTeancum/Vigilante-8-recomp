@@ -7,7 +7,14 @@ namespace RecompOne.Runtime.Hle;
 public sealed class GlBackend : IGpuBackend
 {
     [StructLayout(LayoutKind.Sequential)]
-    struct GlVertex { public float X, Y; public uint Color; public int Clut, Texpage; public float U, V, PerspectiveW; }
+    struct GlVertex
+    {
+        public float X, Y;
+        public uint Color;
+        public int Clut, Texpage;
+        public float U, V, PerspectiveW;
+        public float BaryX, BaryY, BaryZ;
+    }
 
     const int MaxVerts = 0x40000;
 
@@ -35,7 +42,8 @@ public sealed class GlBackend : IGpuBackend
     int _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY;
     int _kClipX0, _kClipY0, _kClipX1, _kClipY1, _kTextureSmoothing;
     int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv;
-    int _uTextureSmoothing;
+    int _uTextureSmoothing, _uTextureMipmaps, _uAnisotropy, _uEnhancedShadows, _uEnhancedParticles, _uEnhancedFog;
+    int _uVectorFonts, _uVectorIcons;
     int _uPresentOrigin, _uPresentSize, _uPresentTexSize, _uPresent24Origin, _uPresent24Size;
 
     public bool Ready { get; private set; }
@@ -57,6 +65,13 @@ public sealed class GlBackend : IGpuBackend
         _uSetMask = _gl.GetUniformLocation(_progPrim, "uSetMask");
         _uCheckMask = _gl.GetUniformLocation(_progPrim, "uCheckMask");
         _uTextureSmoothing = _gl.GetUniformLocation(_progPrim, "uTextureSmoothing");
+        _uTextureMipmaps = _gl.GetUniformLocation(_progPrim, "uTextureMipmaps");
+        _uAnisotropy = _gl.GetUniformLocation(_progPrim, "uAnisotropy");
+        _uEnhancedShadows = _gl.GetUniformLocation(_progPrim, "uEnhancedShadows");
+        _uEnhancedParticles = _gl.GetUniformLocation(_progPrim, "uEnhancedParticles");
+        _uEnhancedFog = _gl.GetUniformLocation(_progPrim, "uEnhancedFog");
+        _uVectorFonts = _gl.GetUniformLocation(_progPrim, "uVectorFonts");
+        _uVectorIcons = _gl.GetUniformLocation(_progPrim, "uVectorIcons");
         _uPosBias = _gl.GetUniformLocation(_progPrim, "uPosBias");
         _uFbInv = _gl.GetUniformLocation(_progPrim, "uFbInv");
 
@@ -89,6 +104,7 @@ public sealed class GlBackend : IGpuBackend
         _gl.EnableVertexAttribArray(3); _gl.VertexAttribIPointer(3, 1, VertexAttribIType.Int, stride, (void*)16);
         _gl.EnableVertexAttribArray(4); _gl.VertexAttribPointer(4, 2, VertexAttribPointerType.Float, false, stride, (void*)20);
         _gl.EnableVertexAttribArray(5); _gl.VertexAttribPointer(5, 1, VertexAttribPointerType.Float, false, stride, (void*)28);
+        _gl.EnableVertexAttribArray(6); _gl.VertexAttribPointer(6, 3, VertexAttribPointerType.Float, false, stride, (void*)32);
 
         // fullscreen quad for present, real vbo since gl_VertexID without arrays does not draw on mesa for some reason?? or i did it wrong?
         _presentVao = _gl.GenVertexArray();
@@ -152,7 +168,9 @@ public sealed class GlBackend : IGpuBackend
             {
                 bool sameW = rt.W == fbW;
                 bool fitsH = rt.H >= fbH && rt.H - fbH <= FbSlackH;
-                if (sameW && fitsH && rt.Margin == GpuHle.WideMargin(rt.W))
+                int samples = Math.Clamp(ConfigManager.View.MsaaSamples, 0, 8);
+                if (samples == 1) samples = 0;
+                if (sameW && fitsH && rt.Margin == GpuHle.WideMargin(rt.W) && rt.Samples == samples)
                 {
                     rt.Stamp = ++_rtStamp;
                     return rt;
@@ -186,6 +204,7 @@ public sealed class GlBackend : IGpuBackend
 
     void Writeback(GlDisplayRt rt)
     {
+        rt.Resolve(_gl);
         int s = GlVram.Scale;
         _gl.Disable(EnableCap.ScissorTest);
         _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, rt.Fbo);
@@ -209,6 +228,7 @@ public sealed class GlBackend : IGpuBackend
         _gl.BlitFramebuffer(x0 * s, y0 * s, x1 * s, y1 * s,
             (x0 - rt.X + rt.Margin) * s, (y0 - rt.Y) * s, (x1 - rt.X + rt.Margin) * s, (y1 - rt.Y) * s,
             ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+        rt.CopyResolveToMsaa(_gl);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 
@@ -308,20 +328,51 @@ public sealed class GlBackend : IGpuBackend
         bool hasDepth = f.Textured && a.HasGteZ && b.HasGteZ && c.HasGteZ;
         bool perspectiveCorrect =
             ConfigManager.View.PerspectiveCorrectTextures && hasDepth;
-        _verts[_count++] = V(a, f, dith, perspectiveCorrect);
-        _verts[_count++] = V(b, f, dith, perspectiveCorrect);
-        _verts[_count++] = V(c, f, dith, perspectiveCorrect);
+        bool particle = f.Textured && f.SemiTrans && hasDepth;
+        bool shadow = !f.Textured && f.SemiTrans && a.HasGteZ && b.HasGteZ && c.HasGteZ &&
+            a.R < 96 && a.G < 96 && a.B < 96 && b.R < 96 && b.G < 96 && b.B < 96 &&
+            c.R < 96 && c.G < 96 && c.B < 96;
+        var va = V(a, f, dith, perspectiveCorrect); va.BaryX = 1f;
+        var vb = V(b, f, dith, perspectiveCorrect); vb.BaryY = 1f;
+        var vc = V(c, f, dith, perspectiveCorrect); vc.BaryZ = 1f;
+        if (particle) { va.Texpage |= 0x2000; vb.Texpage |= 0x2000; vc.Texpage |= 0x2000; }
+        if (shadow)
+        {
+            float oppositeA = MathF.Pow(b.X - c.X, 2f) + MathF.Pow(b.Y - c.Y, 2f);
+            float oppositeB = MathF.Pow(a.X - c.X, 2f) + MathF.Pow(a.Y - c.Y, 2f);
+            float oppositeC = MathF.Pow(a.X - b.X, 2f) + MathF.Pow(a.Y - b.Y, 2f);
+            int longest = oppositeA >= oppositeB && oppositeA >= oppositeC ? 0 :
+                oppositeB >= oppositeC ? 1 : 2;
+            va.Texpage |= 0x4000; vb.Texpage |= 0x4000; vc.Texpage |= 0x4000;
+            va.Clut = vb.Clut = vc.Clut = longest;
+        }
+        _verts[_count++] = va; _verts[_count++] = vb; _verts[_count++] = vc;
     }
 
     public void DrawRect(in HleRect r, in PrimFlags f)
     {
         Begin(f, 6);
-        var a = new HleVertex { X = r.X, Y = r.Y, R = r.R, G = r.G, B = r.B, U = r.U, V = r.V };
-        var b = new HleVertex { X = r.X + r.W, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
-        var c = new HleVertex { X = r.X, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
-        var d = new HleVertex { X = r.X + r.W, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
-        _verts[_count++] = V(a, f, false, false, true); _verts[_count++] = V(b, f, false, false, true); _verts[_count++] = V(c, f, false, false, true);
-        _verts[_count++] = V(b, f, false, false, true); _verts[_count++] = V(d, f, false, false, true); _verts[_count++] = V(c, f, false, false, true);
+        float anchor = 0f;
+        if (ConfigManager.View.HudAnchoring && GpuHle.GameplayActive && _kTarget is { Margin: > 0 } target)
+        {
+            float localCenter = r.X + r.W * 0.5f - target.X;
+            if (localCenter < target.W / 3f) anchor = -target.Margin;
+            else if (localCenter > target.W * 2f / 3f) anchor = target.Margin;
+        }
+        var a = new HleVertex { X = r.X + anchor, Y = r.Y, R = r.R, G = r.G, B = r.B, U = r.U, V = r.V };
+        var b = new HleVertex { X = r.X + r.W + anchor, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
+        var c = new HleVertex { X = r.X + anchor, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
+        var d = new HleVertex { X = r.X + r.W + anchor, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
+        bool fontLike = f.Textured && r.W <= 32 && r.H <= 32;
+        bool iconLike = f.Textured && !fontLike && r.W <= 96 && r.H <= 96;
+        int uiFlags = fontLike && ConfigManager.View.VectorFonts ? 0x2800 :
+            iconLike && ConfigManager.View.VectorIcons ? 0x4800 : 0;
+        var va = V(a, f, false, false, true); va.Texpage |= uiFlags;
+        var vb = V(b, f, false, false, true); vb.Texpage |= uiFlags;
+        var vc = V(c, f, false, false, true); vc.Texpage |= uiFlags;
+        var vd = V(d, f, false, false, true); vd.Texpage |= uiFlags;
+        _verts[_count++] = va; _verts[_count++] = vb; _verts[_count++] = vc;
+        _verts[_count++] = vb; _verts[_count++] = vd; _verts[_count++] = vc;
     }
 
     public void DrawLine(in HleVertex a, in HleVertex b, in PrimFlags f)
@@ -375,10 +426,11 @@ public sealed class GlBackend : IGpuBackend
     {
         float r = (color15 & 0x1F) / 31f, g = ((color15 >> 5) & 0x1F) / 31f, b = ((color15 >> 10) & 0x1F) / 31f;
         float a = (color15 & 0x8000) != 0 ? 1f : 0f;
-        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, rt.Fbo);
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, rt.DrawFbo);
         _gl.Disable(EnableCap.ScissorTest);
         _gl.ClearColor(r, g, b, a);
         _gl.Clear(ClearBufferMask.ColorBufferBit);
+        rt.Resolve(_gl);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 
@@ -461,7 +513,7 @@ public sealed class GlBackend : IGpuBackend
         }
         else
         {
-            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, rt.Fbo);
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, rt.DrawFbo);
             _gl.Viewport(0, 0, (uint)rt.TexW, (uint)rt.TexH);
             destTex = rt.Tex;
         }
@@ -505,7 +557,14 @@ public sealed class GlBackend : IGpuBackend
         _gl.Uniform1(_uSetMask, _kSetMask == 1 ? 1f : 0f);
         _gl.Uniform1(_uCheckMask, _kCheckMask);
         _gl.Uniform4(_uBlendOpaque, 1f, 1f, 1f, 0f);
-        _gl.Uniform1(_uTextureSmoothing, _kTextureSmoothing);
+            _gl.Uniform1(_uTextureSmoothing, _kTextureSmoothing);
+            _gl.Uniform1(_uTextureMipmaps, ConfigManager.View.TextureMipmaps ? 1 : 0);
+            _gl.Uniform1(_uAnisotropy, Math.Clamp(ConfigManager.View.AnisotropicFiltering, 1, 16));
+            _gl.Uniform1(_uEnhancedShadows, ConfigManager.View.EnhancedShadows ? 1 : 0);
+            _gl.Uniform1(_uEnhancedParticles, ConfigManager.View.EnhancedParticles ? 1 : 0);
+            _gl.Uniform1(_uEnhancedFog, ConfigManager.View.EnhancedFog ? 1 : 0);
+            _gl.Uniform1(_uVectorFonts, ConfigManager.View.VectorFonts ? 1 : 0);
+            _gl.Uniform1(_uVectorIcons, ConfigManager.View.VectorIcons ? 1 : 0);
 
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
         _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, 0, _verts.AsSpan(0, _count));
@@ -540,7 +599,12 @@ public sealed class GlBackend : IGpuBackend
         }
 
         _gl.Disable(EnableCap.ScissorTest);
-        if (rt != null) { rt.Dirty = true; rt.LastDrawFrame = _frame; }
+        if (rt != null)
+        {
+            rt.Resolve(_gl);
+            rt.Dirty = true;
+            rt.LastDrawFrame = _frame;
+        }
         _count = 0;
     }
 

@@ -8,6 +8,9 @@ internal sealed class DisplaySettingsSection : ISettingsSection
     static readonly string[] OutputResolutions = ["1280x720", "1920x1080", "2560x1440", "3840x2160"];
     static readonly string[] AntiAliasingModes = ["Off", "FXAA"];
     static readonly string[] LevelOfDetailModes = ["Stock", "Maximum"];
+    static readonly string[] GraphicsPresets = ["Original", "Enhanced", "Custom"];
+    static readonly int[] MsaaModes = [0, 2, 4, 8];
+    static readonly int[] AnisotropicModes = [1, 2, 4, 8, 16];
 
     public string Id => "display";
     public string Title => "Display";
@@ -15,6 +18,25 @@ internal sealed class DisplaySettingsSection : ISettingsSection
 
     public void Draw()
     {
+        string preset = ConfigManager.View.GraphicsPreset;
+        if (!GraphicsPresets.Contains(preset, StringComparer.OrdinalIgnoreCase))
+            preset = "Custom";
+        if (ImGui.BeginCombo("Graphics preset", preset))
+        {
+            foreach (string candidate in GraphicsPresets)
+            {
+                bool selected = candidate.Equals(preset, StringComparison.OrdinalIgnoreCase);
+                if (ImGui.Selectable(candidate, selected) && candidate != "Custom")
+                {
+                    ConfigManager.View.ApplyGraphicsPreset(candidate);
+                    ConfigManager.SaveView(PanelManager.Panels);
+                }
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+        ImGui.TextDisabled("Original restores PS1 presentation. Enhanced is the recommended Dreamcast/PS2-style setup.");
+
         string resolution = ConfigManager.View.OutputResolution;
         if (!OutputResolutions.Contains(resolution, StringComparer.OrdinalIgnoreCase))
             resolution = OutputResolutions[0];
@@ -46,13 +68,32 @@ internal sealed class DisplaySettingsSection : ISettingsSection
                 if (ImGui.Selectable(candidate, selected))
                 {
                     ConfigManager.View.AntiAliasing = candidate;
-                    ConfigManager.SaveView(PanelManager.Panels);
+                    SaveCustom();
                 }
                 if (selected) ImGui.SetItemDefaultFocus();
             }
             ImGui.EndCombo();
         }
-        ImGui.TextDisabled("FXAA affects presentation only; PS1 rendering stays native.");
+        ImGui.TextDisabled("FXAA is a final presentation pass.");
+
+        int msaa = ConfigManager.View.MsaaSamples;
+        string msaaLabel = msaa <= 1 ? "Off" : $"{msaa}x";
+        if (ImGui.BeginCombo("Multisample anti-aliasing", msaaLabel))
+        {
+            foreach (int candidate in MsaaModes)
+            {
+                bool selected = candidate == msaa;
+                string label = candidate == 0 ? "Off" : $"{candidate}x";
+                if (ImGui.Selectable(label, selected))
+                {
+                    ConfigManager.View.MsaaSamples = candidate;
+                    SaveCustom();
+                }
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+        ImGui.TextDisabled("Applies to high-resolution 3D render targets; restart required.");
 
         bool fullscreen = ConfigManager.View.Fullscreen;
         if (ImGui.Checkbox("Fullscreen", ref fullscreen))
@@ -67,7 +108,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         if (ImGui.Checkbox("High-resolution 3D (4x)", ref highResolution3D))
         {
             ConfigManager.View.HighResolution3D = highResolution3D;
-            ConfigManager.SaveView(PanelManager.Panels);
+            SaveCustom();
         }
         ImGui.TextDisabled("Rasterizes PS1 polygons at 4x internal resolution.");
         if (ConfigManager.View.HighResolution3D != Hle.GpuHle.Active)
@@ -77,15 +118,38 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         if (ImGui.Checkbox("Upscale/smooth in-game textures", ref textureSmoothing))
         {
             ConfigManager.View.TextureSmoothing = textureSmoothing;
-            ConfigManager.SaveView(PanelManager.Panels);
+            SaveCustom();
         }
         ImGui.TextDisabled("Reconstructs in-game PS1 textures without allocating assets over 512x512.");
+
+        bool mipmaps = ConfigManager.View.TextureMipmaps;
+        if (ImGui.Checkbox("3D texture mipmaps", ref mipmaps))
+        {
+            ConfigManager.View.TextureMipmaps = mipmaps;
+            SaveCustom();
+        }
+
+        int anisotropic = ConfigManager.View.AnisotropicFiltering;
+        if (ImGui.BeginCombo("Anisotropic filtering", $"{anisotropic}x"))
+        {
+            foreach (int candidate in AnisotropicModes)
+            {
+                bool selected = candidate == anisotropic;
+                if (ImGui.Selectable($"{candidate}x", selected))
+                {
+                    ConfigManager.View.AnisotropicFiltering = candidate;
+                    SaveCustom();
+                }
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
 
         bool perspectiveCorrectTextures = ConfigManager.View.PerspectiveCorrectTextures;
         if (ImGui.Checkbox("Fix PS1 texture projection", ref perspectiveCorrectTextures))
         {
             ConfigManager.View.PerspectiveCorrectTextures = perspectiveCorrectTextures;
-            ConfigManager.SaveView(PanelManager.Panels);
+            SaveCustom();
         }
         ImGui.TextDisabled("Uses recovered GTE depth history for perspective-correct texture interpolation.");
 
@@ -106,7 +170,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
                 if (ImGui.Selectable(candidateLabel, selected))
                 {
                     ConfigManager.View.LevelOfDetail = candidate;
-                    ConfigManager.SaveView(PanelManager.Panels);
+                    SaveCustom();
                 }
                 if (selected) ImGui.SetItemDefaultFocus();
             }
@@ -114,12 +178,70 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
         ImGui.TextDisabled("Maximum keeps the highest-detail geometry at every distance.");
 
+        bool widescreen = ConfigManager.View.Widescreen;
+        if (ImGui.Checkbox("Proper widescreen 3D", ref widescreen))
+        {
+            ConfigManager.View.Widescreen = widescreen;
+            SaveCustom();
+        }
+        bool hudAnchoring = ConfigManager.View.HudAnchoring;
+        if (ImGui.Checkbox("Anchor HUD to widescreen edges", ref hudAnchoring))
+        {
+            ConfigManager.View.HudAnchoring = hudAnchoring;
+            SaveCustom();
+        }
+
+        bool shadows = ConfigManager.View.EnhancedShadows;
+        if (ImGui.Checkbox("Soft projected shadows", ref shadows))
+        {
+            ConfigManager.View.EnhancedShadows = shadows;
+            SaveCustom();
+        }
+        bool particles = ConfigManager.View.EnhancedParticles;
+        if (ImGui.Checkbox("High-resolution filtered particles", ref particles))
+        {
+            ConfigManager.View.EnhancedParticles = particles;
+            SaveCustom();
+        }
+
+        bool fonts = ConfigManager.View.VectorFonts;
+        if (ImGui.Checkbox("MSDF-quality fonts", ref fonts))
+        {
+            ConfigManager.View.VectorFonts = fonts;
+            SaveCustom();
+        }
+        bool icons = ConfigManager.View.VectorIcons;
+        if (ImGui.Checkbox("Vector-capable logos and icons", ref icons))
+        {
+            ConfigManager.View.VectorIcons = icons;
+            SaveCustom();
+        }
+
+        bool drawDistance = ConfigManager.View.ExtendedDrawDistance;
+        if (ImGui.Checkbox("Extended draw distance", ref drawDistance))
+        {
+            ConfigManager.View.ExtendedDrawDistance = drawDistance;
+            SaveCustom();
+        }
+        bool fog = ConfigManager.View.EnhancedFog;
+        if (ImGui.Checkbox("Improved distance fog/haze", ref fog))
+        {
+            ConfigManager.View.EnhancedFog = fog;
+            SaveCustom();
+        }
+
         bool ps1Dithering = ConfigManager.View.Ps1Dithering;
         if (ImGui.Checkbox("PS1 color dithering (fidelity)", ref ps1Dithering))
         {
             ConfigManager.View.Ps1Dithering = ps1Dithering;
-            ConfigManager.SaveView(PanelManager.Panels);
+            SaveCustom();
         }
         ImGui.TextDisabled("Off by default; changes take effect immediately.");
+    }
+
+    static void SaveCustom()
+    {
+        ConfigManager.View.MarkGraphicsCustom();
+        ConfigManager.SaveView(PanelManager.Panels);
     }
 }

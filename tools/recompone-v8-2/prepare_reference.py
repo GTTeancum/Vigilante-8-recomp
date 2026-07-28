@@ -461,6 +461,14 @@ PROVEN_PATCHES = [
         "mode": "pre",
     },
     {
+        # func_8002D9E0 compares this transform's distance output against
+        # 0x003FFFFF immediately after return.
+        "overlay": "main",
+        "address": "80059AFC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExtendObjectDrawDistance",
+        "mode": "post",
+    },
+    {
         "overlay": "main",
         "address": "80033234",
         "target": "RecompOne.Runtime.Sdk.V82Compat.TraceCommonObjectLoadPre",

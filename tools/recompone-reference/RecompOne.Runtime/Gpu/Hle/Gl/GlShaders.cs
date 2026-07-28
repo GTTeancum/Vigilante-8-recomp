@@ -64,6 +64,7 @@ internal static class GlShaders
         layout(location = 3) in int   inTexpage;
         layout(location = 4) in vec2  inUV;
         layout(location = 5) in float inPerspectiveW;
+        layout(location = 6) in vec3  inBary;
 
         out vec4 vColor;
         out vec2 vUV;
@@ -73,6 +74,11 @@ internal static class GlShaders
         flat out int   vDither;
         flat out int   vSmooth;
         flat out int   vUiTexture;
+        flat out int   vParticle;
+        flat out int   vShadow;
+        flat out int   vLongestEdge;
+        noperspective out vec3 vBary;
+        out float vDepth;
 
         uniform vec2 uVertexOffset;
         uniform vec2 uPosBias;
@@ -87,6 +93,11 @@ internal static class GlShaders
             vDither = (inTexpage >> 10) & 1;
             vSmooth = (inTexpage >> 11) & 1;
             vUiTexture = (inTexpage >> 12) & 1;
+            vParticle = (inTexpage >> 13) & 1;
+            vShadow = (inTexpage >> 14) & 1;
+            vLongestEdge = inClut;
+            vBary = inBary;
+            vDepth = inPerspectiveW;
 
             if ((inTexpage & 0x8000) != 0) {
                 texMode = 4;
@@ -109,6 +120,11 @@ internal static class GlShaders
         flat in int   vDither;
         flat in int   vSmooth;
         flat in int   vUiTexture;
+        flat in int   vParticle;
+        flat in int   vShadow;
+        flat in int   vLongestEdge;
+        noperspective in vec3 vBary;
+        in float vDepth;
 
         layout(location = 0, index = 0) out vec4 FragColor;
         layout(location = 0, index = 1) out vec4 BlendColor;
@@ -121,6 +137,13 @@ internal static class GlShaders
         uniform float uSetMask;
         uniform int   uCheckMask;
         uniform int   uTextureSmoothing;
+        uniform int   uTextureMipmaps;
+        uniform int   uAnisotropy;
+        uniform int   uEnhancedShadows;
+        uniform int   uEnhancedParticles;
+        uniform int   uEnhancedFog;
+        uniform int   uVectorFonts;
+        uniform int   uVectorIcons;
         uniform int   uScale;
         uniform vec2  uPosBias;
 
@@ -170,6 +193,9 @@ internal static class GlShaders
             // Reconstruct the native PS1 texture page in shader rather than
             // allocating replacement assets. Pages are at most 256x256, so the
             // virtual reconstruction stays inside the requested 512x512 class.
+            // Flat UI may use the full 4x/1024 class; 3D is quantized to 2x.
+            if (vUiTexture == 0)
+                uvf = floor(uvf * 2.0) * 0.5 + 0.25;
             vec2 p = uvf - vec2(0.5);
             ivec2 uv0 = ivec2(floor(p));
             vec2 f = fract(p);
@@ -187,6 +213,34 @@ internal static class GlShaders
             }
             vec3 rgb = cubicHermite(row[0], row[1], row[2], row[3], f.y);
             return vec4(clamp(rgb, 0.0, 1.0), nearestTexel.a);
+        }
+        vec4 filteredTexture(vec2 uvf, vec4 nearestTexel) {
+            vec4 base = smoothedTexture(uvf, nearestTexel);
+            bool vectorUi = vUiTexture != 0 &&
+                ((vParticle != 0 && uVectorFonts != 0) ||
+                 (vShadow != 0 && uVectorIcons != 0));
+            if ((vUiTexture != 0 && !vectorUi) ||
+                (uTextureMipmaps == 0 && uAnisotropy <= 1))
+                return base;
+
+            // The source is an indexed PS1 VRAM page, so conventional hardware
+            // mipmaps would blend palette indices. Reconstruct the footprint
+            // after palette lookup instead. This is a bounded, shader-side
+            // mip/anisotropic filter and leaves UI texels and transparency exact.
+            vec2 dx = dFdx(uvf), dy = dFdy(uvf);
+            float lx = length(dx), ly = length(dy);
+            vec2 major = lx >= ly ? dx : dy;
+            float footprint = max(lx, ly);
+            float minor = max(min(lx, ly), 1.0);
+            float ratio = clamp(footprint / minor, 1.0, float(max(uAnisotropy, 1)));
+            float mipBlend = uTextureMipmaps != 0 ? smoothstep(1.0, 3.0, footprint) : 0.0;
+            float span = 0.35 * max(ratio - 1.0, mipBlend);
+            if (span <= 0.001) return base;
+            vec2 axis = normalize(major + vec2(1e-6)) * span;
+            vec3 rgb = base.rgb * 0.4;
+            rgb += smoothedTexture(uvf - axis, nearestTexel).rgb * 0.3;
+            rgb += smoothedTexture(uvf + axis, nearestTexel).rgb * 0.3;
+            return vec4(rgb, nearestTexel.a);
         }
         vec3 stockPaintCorrection(vec3 rgb) {
             if (vUiTexture != 0) return rgb;
@@ -217,7 +271,17 @@ internal static class GlShaders
             if (texMode == 4) {
                 vec3 corrected = stockPaintCorrection(vColor.rgb);
                 FragColor = vec4(quant5(ivec3(corrected * 255.0 + 0.5)), uSetMask);
-                BlendColor = uBlend;
+                float coverage = 1.0;
+                if (uEnhancedShadows != 0 && vShadow != 0) {
+                    // Shadow quads arrive as two triangles. Ignore each
+                    // triangle's longest edge, normally the shared diagonal,
+                    // so softening does not draw a seam through the shadow.
+                    float edge = vLongestEdge == 0 ? min(vBary.y, vBary.z) :
+                                 vLongestEdge == 1 ? min(vBary.x, vBary.z) :
+                                                     min(vBary.x, vBary.y);
+                    coverage = smoothstep(0.0, max(fwidth(edge) * 2.5, 0.001), edge) * 0.72;
+                }
+                BlendColor = vec4(uBlend.rgb * coverage, uBlend.a);
                 return;
             }
 
@@ -225,15 +289,41 @@ internal static class GlShaders
             int rawV = dFdy(vUV.y) < 0.0 ? int(ceil(vUV.y - 0.0001)) : int(floor(vUV.y + 0.0001));
             vec4 nearestTexel = textureTexel(ivec2(rawU, rawV));
             vec4 texel = uTextureSmoothing != 0 && vSmooth != 0
-                ? smoothedTexture(vUV, nearestTexel)
+                ? filteredTexture(vUV, nearestTexel)
                 : nearestTexel;
 
-            if (transparentBlack(nearestTexel)) discard;
+            if (transparentBlack(nearestTexel)) {
+                bool filteredEdge =
+                    (vUiTexture == 0 && uEnhancedParticles != 0 && vParticle != 0) ||
+                    (vUiTexture != 0 && uVectorFonts != 0 && vParticle != 0) ||
+                    (vUiTexture != 0 && uVectorIcons != 0 && vShadow != 0);
+                if (!filteredEdge) discard;
+                vec4 n0 = textureTexel(ivec2(rawU - 1, rawV));
+                vec4 n1 = textureTexel(ivec2(rawU + 1, rawV));
+                vec4 n2 = textureTexel(ivec2(rawU, rawV - 1));
+                vec4 n3 = textureTexel(ivec2(rawU, rawV + 1));
+                float cover = 0.25 * ((!transparentBlack(n0) ? 1.0 : 0.0) +
+                                      (!transparentBlack(n1) ? 1.0 : 0.0) +
+                                      (!transparentBlack(n2) ? 1.0 : 0.0) +
+                                      (!transparentBlack(n3) ? 1.0 : 0.0));
+                if (cover <= 0.0) discard;
+                texel = (n0 + n1 + n2 + n3) * 0.25;
+                nearestTexel = vec4(texel.rgb, 0.0);
+            }
             texel.rgb = stockPaintCorrection(texel.rgb);
+            if (uEnhancedFog != 0 && vUiTexture == 0 && vDepth > 1.0) {
+                float haze = smoothstep(3500.0, 7500.0, vDepth) * 0.22;
+                texel.rgb = mix(texel.rgb, vec3(0.48, 0.52, 0.56), haze);
+            }
             ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
             ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
             FragColor = vec4(quant5(ivec3(stockPaintCorrection8(c8) * 255.0 + 0.5)), max(texel.a, uSetMask));
-            BlendColor = nearestTexel.a >= 0.5 ? uBlend : uBlendOpaque;
+            bool reconstructedEdge = nearestTexel.a < 0.5 &&
+                ((vUiTexture == 0 && uEnhancedParticles != 0 && vParticle != 0) ||
+                 (vUiTexture != 0 && uVectorFonts != 0 && vParticle != 0) ||
+                 (vUiTexture != 0 && uVectorIcons != 0 && vShadow != 0));
+            float particleEdge = reconstructedEdge ? 0.35 : 1.0;
+            BlendColor = nearestTexel.a >= 0.5 ? uBlend : vec4(uBlendOpaque.rgb * particleEdge, uBlendOpaque.a);
         }
         """;
 

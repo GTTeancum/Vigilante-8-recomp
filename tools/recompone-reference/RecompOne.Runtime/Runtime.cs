@@ -17,6 +17,7 @@ public static class Runtime
     public static Gpu? Gpu;
     public static Spu? Spu;
     public static Cdrom.CdController? Cd;
+    public static string GameTitle { get; private set; } = "";
 
     public static RunMode Mode { get; private set; } = RunMode.Retail;
     public static void SetMode(RunMode mode) => Mode = mode; //devkit vs retail, devkits reads from sim and has more ram
@@ -45,6 +46,7 @@ public static class Runtime
 
     public static void Initialize(string title)
     {
+        GameTitle = title;
         Diagnostics.ConsoleMirror.Install();
         HostWindow.Initialize(title);
         Audio.Initialize();

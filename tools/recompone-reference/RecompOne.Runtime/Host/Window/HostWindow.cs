@@ -211,21 +211,36 @@ internal static class HostWindow
         _presentationRenderer = new PresentationRenderer(_gl);
         _presentationRenderer.Initialize();
 
+        string? graphicsPresetOverride =
+            Environment.GetEnvironmentVariable("RECOMPONE_GRAPHICS_PRESET");
+        if (graphicsPresetOverride is "Original" or "Enhanced")
+            ConfigManager.View.ApplyGraphicsPreset(graphicsPresetOverride);
+
         string? hleOverride = Environment.GetEnvironmentVariable("RECOMPONE_GPU_HLE");
-        bool highResolution3D = hleOverride == "1" ||
+        bool hleActive = hleOverride == "1" ||
             (hleOverride != "0" && ConfigManager.View.HighResolution3D);
-        Hle.GlVram.Scale = highResolution3D ? 4 : 1;
+        Hle.GlVram.Scale = ConfigManager.View.HighResolution3D ? 4 : 1;
         _glBackend = new Hle.GlBackend(_gl);
         _glBackend.InitGl();
-        Hle.GpuHle.Active = highResolution3D;
+        Hle.GpuHle.Active = hleActive;
         Hle.GpuHle.Backend = _glBackend;
         Hle.GpuHle.NativeResolution = false;
+        ApplyGraphicsView();
         Console.WriteLine(
             $"[Host] PS1 color dithering={(ConfigManager.View.Ps1Dithering ? "On (fidelity)" : "Off (enhanced default)")}");
         Console.WriteLine(
             $"[Host] PS1 texture smoothing={(ConfigManager.View.TextureSmoothing ? "On (enhanced default)" : "Off (fidelity)")}");
         Console.WriteLine(
             $"[Host] PS1 texture projection fix={(ConfigManager.View.PerspectiveCorrectTextures ? "On (enhanced default)" : "Off (fidelity)")}");
+        Console.WriteLine(
+            $"[Host] graphics preset={ConfigManager.View.GraphicsPreset} " +
+            $"wide={(ConfigManager.View.Widescreen ? "On" : "Off")} " +
+            $"msaa={ConfigManager.View.MsaaSamples}x aniso={ConfigManager.View.AnisotropicFiltering}x " +
+            $"mipmaps={(ConfigManager.View.TextureMipmaps ? "On" : "Off")} " +
+            $"shadows={(ConfigManager.View.EnhancedShadows ? "Enhanced" : "Stock")} " +
+            $"particles={(ConfigManager.View.EnhancedParticles ? "Enhanced" : "Stock")} " +
+            $"draw-distance={(ConfigManager.View.ExtendedDrawDistance ? "Extended" : "Stock")} " +
+            $"fog={(ConfigManager.View.EnhancedFog ? "Enhanced" : "Stock")}");
 
         _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
 
@@ -245,6 +260,8 @@ internal static class HostWindow
         SettingsRegistry.Register(new InputSettingsSection());
         SettingsRegistry.Register(new DisplaySettingsSection());
         SettingsRegistry.Register(new AudioSettingsSection());
+        if (Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal))
+            MenuRegistry.Register("Cheats", V82CheatMenu.Draw);
         MenuRegistry.Register("Guest Vehicles", GuestVehicleMenu.Draw);
 
         _discPicker = new DiscPickerPopup();
@@ -272,6 +289,7 @@ internal static class HostWindow
     static void OnRender(double dt)
     {
         var gl = _gl!;
+        ApplyGraphicsView();
         _imgui!.Update((float)dt);
     
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
@@ -401,6 +419,14 @@ internal static class HostWindow
         gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgb, (uint)w, (uint)h, 0,
             PixelFormat.Rgb, PixelType.UnsignedByte, _rgbDisplay.AsSpan(0, needed));
         PresentTexture(gl, _displayTex, w, h, 4f / 3f);
+    }
+
+    static void ApplyGraphicsView()
+    {
+        bool wide = ConfigManager.View.Widescreen;
+        Hle.GpuHle.WideAspect = wide ? 16f / 9f : 0f;
+        Hle.GpuHle.TargetAspect = wide ? 16f / 9f : Hle.GpuHle.BaseAspect;
+        Hle.GpuHle.OutputAspect = Hle.GpuHle.TargetAspect;
     }
 
     static void PresentTexture(GL gl, uint sourceTexture, int sourceWidth, int sourceHeight, float aspect)

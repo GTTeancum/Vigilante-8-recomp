@@ -65,6 +65,9 @@ public class GamepadBindings
 
 public class GameConfig
 {
+    // V8: 2nd Offense native cheat bits. DRIVE_ONLY (bit 6) and the
+    // PlayStation original-arena flag (bit 20) are the PC defaults.
+    public uint V82CheatFlags { get; set; } = (1u << 6) | (1u << 20);
     public int InputBindingsVersion { get; set; }
     public string CdPath { get; set; } = "";
     public float MasterVolume { get; set; } = 1.0f;

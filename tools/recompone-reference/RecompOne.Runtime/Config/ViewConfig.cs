@@ -82,7 +82,104 @@ public class ViewConfig
 
     public string LevelOfDetail
     {
-        get => GetString("LevelOfDetail", "Stock");
+        get => GetString("LevelOfDetail", "Maximum");
         set => SetString("LevelOfDetail", value);
+    }
+
+    public string GraphicsPreset
+    {
+        get => GetString("GraphicsPreset", "Enhanced");
+        set => SetString("GraphicsPreset", value);
+    }
+
+    public int MsaaSamples
+    {
+        get => GetInt("MsaaSamples", 4);
+        set => SetInt("MsaaSamples", value);
+    }
+
+    public int AnisotropicFiltering
+    {
+        get => GetInt("AnisotropicFiltering", 8);
+        set => SetInt("AnisotropicFiltering", value);
+    }
+
+    public bool TextureMipmaps
+    {
+        get => GetBool("TextureMipmaps", true);
+        set => SetBool("TextureMipmaps", value);
+    }
+
+    public bool Widescreen
+    {
+        get => GetBool("Widescreen", true);
+        set => SetBool("Widescreen", value);
+    }
+
+    public bool HudAnchoring
+    {
+        get => GetBool("HudAnchoring", true);
+        set => SetBool("HudAnchoring", value);
+    }
+
+    public bool EnhancedShadows
+    {
+        get => GetBool("EnhancedShadows", true);
+        set => SetBool("EnhancedShadows", value);
+    }
+
+    public bool EnhancedParticles
+    {
+        get => GetBool("EnhancedParticles", true);
+        set => SetBool("EnhancedParticles", value);
+    }
+
+    public bool VectorFonts
+    {
+        get => GetBool("VectorFonts", true);
+        set => SetBool("VectorFonts", value);
+    }
+
+    public bool VectorIcons
+    {
+        get => GetBool("VectorIcons", true);
+        set => SetBool("VectorIcons", value);
+    }
+
+    public bool ExtendedDrawDistance
+    {
+        get => GetBool("ExtendedDrawDistance", true);
+        set => SetBool("ExtendedDrawDistance", value);
+    }
+
+    public bool EnhancedFog
+    {
+        get => GetBool("EnhancedFog", true);
+        set => SetBool("EnhancedFog", value);
+    }
+
+    public void MarkGraphicsCustom() => GraphicsPreset = "Custom";
+
+    public void ApplyGraphicsPreset(string preset)
+    {
+        bool original = preset.Equals("Original", StringComparison.OrdinalIgnoreCase);
+        GraphicsPreset = original ? "Original" : "Enhanced";
+        HighResolution3D = !original;
+        Ps1Dithering = original;
+        TextureSmoothing = !original;
+        PerspectiveCorrectTextures = !original;
+        AntiAliasing = original ? "Off" : "FXAA";
+        MsaaSamples = original ? 0 : 4;
+        AnisotropicFiltering = original ? 1 : 8;
+        TextureMipmaps = !original;
+        Widescreen = !original;
+        HudAnchoring = !original;
+        EnhancedShadows = !original;
+        EnhancedParticles = !original;
+        VectorFonts = !original;
+        VectorIcons = !original;
+        ExtendedDrawDistance = !original;
+        EnhancedFog = !original;
+        LevelOfDetail = original ? "Stock" : "Maximum";
     }
 }
