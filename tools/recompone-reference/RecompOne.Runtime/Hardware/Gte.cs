@@ -10,12 +10,14 @@ public static class Gte
     static readonly short[] SY = new short[3];
     static readonly ushort[] SZ = new ushort[4];
     static readonly uint[] RGB = new uint[3];
-    const int ScreenDepthHistoryCount = 4096;
-    static readonly short[] ScreenDepthX = new short[ScreenDepthHistoryCount];
-    static readonly short[] ScreenDepthY = new short[ScreenDepthHistoryCount];
-    static readonly ushort[] ScreenDepthZ = new ushort[ScreenDepthHistoryCount];
-    static int ScreenDepthWrite;
-    static int ScreenDepthFilled;
+    // GPU packets contain only projected XY coordinates, so enhanced texture
+    // projection correlates them with the GTE's most recent screen/depth
+    // results. The former reverse scan through 4096 entries was O(vertices *
+    // 4096) and dominated frame time in busy arenas. Two generation maps
+    // preserve the required one-frame ordering-table latency and "latest
+    // projection wins" behavior with bounded O(1) lookups.
+    static Dictionary<uint, ushort> ScreenDepthCurrent = new(16384);
+    static Dictionary<uint, ushort> ScreenDepthPrevious = new(16384);
     static uint RES1;
     static int MAC0, MAC1, MAC2, MAC3;
     static uint LZCS, LZCR;
@@ -204,28 +206,56 @@ public static class Gte
 
     static void RecordScreenDepth(short x, short y, ushort z)
     {
-        ScreenDepthX[ScreenDepthWrite] = x;
-        ScreenDepthY[ScreenDepthWrite] = y;
-        ScreenDepthZ[ScreenDepthWrite] = z;
-        ScreenDepthWrite = (ScreenDepthWrite + 1) % ScreenDepthHistoryCount;
-        if (ScreenDepthFilled < ScreenDepthHistoryCount) ScreenDepthFilled++;
+        if (z != 0)
+            ScreenDepthCurrent[ScreenKey(x, y)] = z;
     }
 
     public static bool TryGetScreenDepth(int x, int y, out ushort z)
     {
-        for (int i = 0; i < ScreenDepthFilled; i++)
+        if (TryLookupScreenDepth(ScreenKey((short)x, (short)y), out z))
+            return true;
+
+        // Packet coordinates can differ by one pixel after the game's fixed-
+        // point rounding and draw offset. Recover that benign mismatch without
+        // accepting a broad nearest-neighbour depth from another surface.
+        for (int radius = 1; radius <= 1; radius++)
         {
-            int index = ScreenDepthWrite - 1 - i;
-            if (index < 0) index += ScreenDepthHistoryCount;
-            if (ScreenDepthX[index] == x && ScreenDepthY[index] == y)
+            for (int oy = -radius; oy <= radius; oy++)
             {
-                z = ScreenDepthZ[index];
-                return z != 0;
+                for (int ox = -radius; ox <= radius; ox++)
+                {
+                    if (Math.Max(Math.Abs(ox), Math.Abs(oy)) != radius)
+                        continue;
+                    if (TryLookupScreenDepth(
+                            ScreenKey((short)(x + ox), (short)(y + oy)), out z))
+                        return true;
+                }
             }
         }
 
         z = 0;
         return false;
+    }
+
+    static uint ScreenKey(short x, short y) =>
+        (ushort)x | ((uint)(ushort)y << 16);
+
+    static bool TryLookupScreenDepth(uint key, out ushort z) =>
+        ScreenDepthCurrent.TryGetValue(key, out z) ||
+        ScreenDepthPrevious.TryGetValue(key, out z);
+
+    public static int ScreenDepthCount =>
+        ScreenDepthCurrent.Count + ScreenDepthPrevious.Count;
+
+    public static void BeginFrame()
+    {
+        // The game builds one ordering table while the prior table is being
+        // presented, so GPU packets commonly trail their GTE projections by
+        // one host present. Retain that prior generation without the former
+        // 4096-entry linear scan.
+        (ScreenDepthPrevious, ScreenDepthCurrent) =
+            (ScreenDepthCurrent, ScreenDepthPrevious);
+        ScreenDepthCurrent.Clear();
     }
 
     public static void Execute(uint cmd)

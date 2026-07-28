@@ -105,12 +105,12 @@ internal sealed class DisplaySettingsSection : ISettingsSection
 
         ImGui.SeparatorText("3D rendering");
         bool highResolution3D = ConfigManager.View.HighResolution3D;
-        if (ImGui.Checkbox("High-resolution 3D (4x)", ref highResolution3D))
+        if (ImGui.Checkbox("High-resolution 3D (2x)", ref highResolution3D))
         {
             ConfigManager.View.HighResolution3D = highResolution3D;
             SaveCustom();
         }
-        ImGui.TextDisabled("Rasterizes PS1 polygons at 4x internal resolution.");
+        ImGui.TextDisabled("Rasterizes PS1 polygons at 2x internal resolution for a smooth 60 Hz target.");
         if (ConfigManager.View.HighResolution3D != Hle.GpuHle.Active)
             ImGui.TextDisabled("A restart is required.");
 
@@ -151,7 +151,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ConfigManager.View.PerspectiveCorrectTextures = perspectiveCorrectTextures;
             SaveCustom();
         }
-        ImGui.TextDisabled("Uses recovered GTE depth history for perspective-correct texture interpolation.");
+        ImGui.TextDisabled("Uses GTE depth when available and projective quad homography otherwise.");
 
         string levelOfDetail = ConfigManager.View.LevelOfDetail;
         if (!LevelOfDetailModes.Contains(levelOfDetail, StringComparer.OrdinalIgnoreCase))

@@ -74,6 +74,11 @@ public static class Runtime
             Console.WriteLine($"[GPU] display={Gpu.DisplayEnabled} area={Gpu.DisplayX},{Gpu.DisplayY} {Gpu.DisplayWidth}x{Gpu.DisplayHeight} hle={Hle.GpuHle.Active}");
         }
         HostWindow.Present(Gpu);
+        Gpu.EndProjectionFrame(Hle.GpuHle.GameplayActive);
+        // GTE-to-GPU depth correlation is needed only within the frame whose
+        // geometry was just submitted. Clearing here prevents stale screen
+        // coordinates from being associated with a later camera view.
+        Gte.BeginFrame();
         if (TraceVSync && traceFrame < 10) Console.Error.WriteLine($"[VSync] present {traceFrame}: audio");
         Audio.Attach(Spu);
         FrameClock.Throttle();

@@ -387,20 +387,35 @@ public sealed class GlBackend : IGpuBackend
         // can pull neighboring digits into the ammo counter. Larger gameplay
         // labels and menu text remain eligible for contour reconstruction.
         bool fontLike = f.Textured && !topGameplayHud && r.W <= 32 && r.H <= 32;
-        bool topHudPlate =
-            topGameplayHud && f.Textured &&
-            Math.Max(r.W, r.H) >= 24 && Math.Min(r.W, r.H) >= 16;
         bool radarPlate =
-            topGameplayHud && f.Textured &&
-            r.W >= 48 && r.H >= 48 && Math.Abs(r.W - r.H) <= 12;
+            topGameplayHud && f.Textured && r.W == 64 && r.H == 55;
+        bool mainHudPlate =
+            topGameplayHud && f.Textured && r.W == 84 && r.H == 34;
+        bool healthHudPlate =
+            topGameplayHud && f.Textured && r.W == 16 && r.H == 49;
+        bool hudBackgroundPlate =
+            radarPlate || mainHudPlate || healthHudPlate;
+        if (hudBackgroundPlate && ConfigManager.View.VectorIcons && f.SemiTrans)
+        {
+            // Enhanced HUD backings are measured, opaque analytic geometry.
+            // Start an opaque batch so the retail STP flag cannot mix the
+            // world back into the clean face and recreate the circular grain.
+            var opaqueHud = f;
+            opaqueHud.SemiTrans = false;
+            Begin(opaqueHud, 6);
+        }
         bool iconLike =
             f.Textured && !fontLike &&
             r.W <= 96 && r.H <= 96 &&
-            (!topGameplayHud || topHudPlate);
+            (!topGameplayHud || hudBackgroundPlate);
         int uiFlags = fontLike && ConfigManager.View.VectorFonts ? 0x2800 :
             iconLike && ConfigManager.View.VectorIcons ? 0x4800 : 0;
-        if (radarPlate && ConfigManager.View.VectorIcons)
-            uiFlags |= 0x10000;
+        if (ConfigManager.View.VectorIcons)
+        {
+            if (radarPlate) uiFlags |= 0x10000;
+            if (hudBackgroundPlate) uiFlags |= 0x20000;
+            if (healthHudPlate) uiFlags |= 0x40000;
+        }
         var va = V(a, f, false, false, true); va.Texpage |= uiFlags;
         var vb = V(b, f, false, false, true); vb.Texpage |= uiFlags;
         var vc = V(c, f, false, false, true); vc.Texpage |= uiFlags;

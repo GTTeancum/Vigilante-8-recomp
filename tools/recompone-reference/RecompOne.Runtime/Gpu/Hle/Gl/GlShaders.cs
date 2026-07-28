@@ -79,6 +79,8 @@ internal static class GlShaders
         flat out int   vShadow;
         flat out int   vLongestEdge;
         flat out int   vRadar;
+        flat out int   vHudPlate;
+        flat out int   vHealthPlate;
         flat out ivec4 vUvBounds;
         noperspective out vec3 vBary;
         out float vDepth;
@@ -99,6 +101,8 @@ internal static class GlShaders
             vParticle = (inTexpage >> 13) & 1;
             vShadow = (inTexpage >> 14) & 1;
             vRadar = (inTexpage >> 16) & 1;
+            vHudPlate = (inTexpage >> 17) & 1;
+            vHealthPlate = (inTexpage >> 18) & 1;
             vLongestEdge = inClut;
             vUvBounds = ivec4(round(inUvBounds));
             vBary = inBary;
@@ -129,6 +133,8 @@ internal static class GlShaders
         flat in int   vShadow;
         flat in int   vLongestEdge;
         flat in int   vRadar;
+        flat in int   vHudPlate;
+        flat in int   vHealthPlate;
         flat in ivec4 vUvBounds;
         noperspective in vec3 vBary;
         in float vDepth;
@@ -189,37 +195,31 @@ internal static class GlShaders
             return all(equal(texel.rgb, vec3(0.0))) && texel.a < 0.5;
         }
 
-        vec3 cubicHermite(vec3 a, vec3 b, vec3 c, vec3 d, float t) {
-            vec3 p = (d - c) - (a - b);
-            vec3 q = (a - b) - p;
-            vec3 r = c - a;
-            return ((p * t + q) * t + r) * t + b;
-        }
-
         vec4 smoothedTexture(vec2 uvf, vec4 nearestTexel) {
             // Reconstruct the native PS1 texture page in shader rather than
             // allocating replacement assets. Pages are at most 256x256, so the
             // virtual reconstruction stays inside the requested 512x512 class.
             // Flat UI may use the full 4x/1024 class; 3D is quantized to 2x.
+            // Four palette-resolved taps provide the desired continuous image
+            // without the previous 16-tap bicubic cost per reconstruction.
             if (vUiTexture == 0)
                 uvf = floor(uvf * 2.0) * 0.5 + 0.25;
             vec2 p = uvf - vec2(0.5);
             ivec2 uv0 = ivec2(floor(p));
             vec2 f = fract(p);
-            vec3 row[4];
-            for (int y = 0; y < 4; y++) {
-                vec4 s0 = textureTexel(uv0 + ivec2(-1, y - 1));
-                vec4 s1 = textureTexel(uv0 + ivec2( 0, y - 1));
-                vec4 s2 = textureTexel(uv0 + ivec2( 1, y - 1));
-                vec4 s3 = textureTexel(uv0 + ivec2( 2, y - 1));
-                if (transparentBlack(s0)) s0.rgb = nearestTexel.rgb;
-                if (transparentBlack(s1)) s1.rgb = nearestTexel.rgb;
-                if (transparentBlack(s2)) s2.rgb = nearestTexel.rgb;
-                if (transparentBlack(s3)) s3.rgb = nearestTexel.rgb;
-                row[y] = cubicHermite(s0.rgb, s1.rgb, s2.rgb, s3.rgb, f.x);
-            }
-            vec3 rgb = cubicHermite(row[0], row[1], row[2], row[3], f.y);
-            return vec4(clamp(rgb, 0.0, 1.0), nearestTexel.a);
+            vec4 s00 = textureTexel(uv0);
+            vec4 s10 = textureTexel(uv0 + ivec2(1, 0));
+            vec4 s01 = textureTexel(uv0 + ivec2(0, 1));
+            vec4 s11 = textureTexel(uv0 + ivec2(1, 1));
+            if (transparentBlack(s00)) s00.rgb = nearestTexel.rgb;
+            if (transparentBlack(s10)) s10.rgb = nearestTexel.rgb;
+            if (transparentBlack(s01)) s01.rgb = nearestTexel.rgb;
+            if (transparentBlack(s11)) s11.rgb = nearestTexel.rgb;
+            vec3 rgb = mix(
+                mix(s00.rgb, s10.rgb, f.x),
+                mix(s01.rgb, s11.rgb, f.x),
+                f.y);
+            return vec4(rgb, nearestTexel.a);
         }
         vec4 filteredTexture(vec2 uvf, vec4 nearestTexel) {
             vec4 base = smoothedTexture(uvf, nearestTexel);
@@ -244,9 +244,9 @@ internal static class GlShaders
             float span = 0.35 * max(ratio - 1.0, mipBlend);
             if (span <= 0.001) return base;
             vec2 axis = normalize(major + vec2(1e-6)) * span;
-            vec3 rgb = base.rgb * 0.4;
-            rgb += smoothedTexture(uvf - axis, nearestTexel).rgb * 0.3;
-            rgb += smoothedTexture(uvf + axis, nearestTexel).rgb * 0.3;
+            vec3 rgb =
+                smoothedTexture(uvf - axis, nearestTexel).rgb * 0.5 +
+                smoothedTexture(uvf + axis, nearestTexel).rgb * 0.5;
             return vec4(rgb, nearestTexel.a);
         }
         vec4 contourTexture(vec2 uvf, out float coverage, out float stp) {
@@ -286,36 +286,205 @@ internal static class GlShaders
                    s01.a * ow.z + s11.a * ow.w) / coverage;
             return vec4(rgb, stp);
         }
-        vec4 cleanRadarTexture(vec4 texel) {
-            vec2 boundsSize = max(
-                vec2(vUvBounds.zw - vUvBounds.xy + ivec2(1)),
-                vec2(1.0));
-            vec2 p = (vUV - vec2(vUvBounds.xy)) / boundsSize - vec2(0.5);
-            float radius = length(p);
-            if (radius >= 0.47)
-                return texel;
+        bool vividHudMarker(vec3 rgb) {
+            bool red = rgb.r > 0.16 &&
+                rgb.r > rgb.g * 1.20 &&
+                rgb.r > rgb.b * 1.20;
+            bool green = rgb.g > 0.16 &&
+                rgb.g > rgb.r * 1.20 &&
+                rgb.g > rgb.b * 1.20;
+            return red || green;
+        }
+        float sdBox(vec2 p, vec2 halfSize) {
+            vec2 q = abs(p) - halfSize;
+            return length(max(q, vec2(0.0))) +
+                min(max(q.x, q.y), 0.0);
+        }
+        float sdPolygon24(vec2 p, vec2 vertices[24], int count) {
+            float distanceSquared = 1e20;
+            bool inside = false;
+            int previous = count - 1;
+            for (int i = 0; i < 24; i++) {
+                if (i >= count) break;
+                vec2 a = vertices[i];
+                vec2 b = vertices[previous];
+                vec2 edge = b - a;
+                vec2 relative = p - a;
+                vec2 nearest = relative - edge * clamp(
+                    dot(relative, edge) / max(dot(edge, edge), 1e-8),
+                    0.0, 1.0);
+                distanceSquared = min(distanceSquared, dot(nearest, nearest));
+                bool crosses = (a.y > p.y) != (b.y > p.y);
+                if (crosses &&
+                    p.x < (b.x - a.x) * (p.y - a.y) /
+                        (b.y - a.y) + a.x)
+                    inside = !inside;
+                previous = i;
+            }
+            return (inside ? -1.0 : 1.0) * sqrt(distanceSquared);
+        }
+        float radarPlateDistance(vec2 p) {
+            float d = length(p - vec2(27.5)) - 27.5;
+            vec2 polygon[24];
 
-            float hi = max(texel.r, max(texel.g, texel.b));
-            float lo = min(texel.r, min(texel.g, texel.b));
-            bool liveMarker = hi > 0.38 && hi - lo > 0.18;
-            if (liveMarker)
-                return texel;
+            // Exact upper connector outline, measured from atlas rows 4-13.
+            polygon[0] = vec2(61.0, 4.0);
+            polygon[1] = vec2(64.0, 4.0);
+            polygon[2] = vec2(64.0, 14.0);
+            polygon[3] = vec2(49.0, 14.0);
+            polygon[4] = vec2(49.0, 10.0);
+            polygon[5] = vec2(57.0, 10.0);
+            d = min(d, sdPolygon24(p, polygon, 6));
 
-            // Replace the noisy neutral bitmap fill with an analytic radar
-            // face. Contacts remain source-driven above; rings and spokes are
-            // resolution-independent and anti-aliased by screen derivatives.
-            float aa = max(fwidth(p.x), fwidth(p.y)) * 1.35;
-            float axis = min(abs(p.x), abs(p.y));
-            float diagonal = min(abs(p.x - p.y), abs(p.x + p.y)) * 0.7071;
-            float spokes = 1.0 - smoothstep(0.0, aa, min(axis, diagonal));
-            float rings = max(
-                1.0 - smoothstep(0.0, aa, abs(radius - 0.235)),
-                1.0 - smoothstep(0.0, aa, abs(radius - 0.445)));
-            float hub = 1.0 - smoothstep(0.025, 0.025 + aa, radius);
-            float grid = max(max(spokes, rings), hub);
-            vec3 face = vec3(0.39, 0.40, 0.34);
-            vec3 gridColor = vec3(0.55, 0.56, 0.48);
-            return vec4(mix(face, gridColor, grid * 0.78), texel.a);
+            // Middle connector: separated rows 14-17, joined rows 18-21.
+            polygon[0] = vec2(57.0, 14.0);
+            polygon[1] = vec2(64.0, 14.0);
+            polygon[2] = vec2(64.0, 22.0);
+            polygon[3] = vec2(53.0, 22.0);
+            polygon[4] = vec2(53.0, 18.0);
+            polygon[5] = vec2(57.0, 18.0);
+            d = min(d, sdPolygon24(p, polygon, 6));
+
+            // Lower connector and the exact four-pixel health stem.
+            polygon[0] = vec2(57.0, 22.0);
+            polygon[1] = vec2(64.0, 22.0);
+            polygon[2] = vec2(64.0, 28.0);
+            polygon[3] = vec2(61.0, 28.0);
+            polygon[4] = vec2(57.0, 24.0);
+            d = min(d, sdPolygon24(p, polygon, 5));
+            d = min(d, sdBox(p - vec2(12.0, 52.0), vec2(2.0, 3.0)));
+            return d;
+        }
+        float mainHudPlateDistance(vec2 p) {
+            vec2 polygon[24];
+            polygon[0] = vec2(0.0, 0.0);
+            polygon[1] = vec2(33.0, 0.0);
+            polygon[2] = vec2(37.0, 4.0);
+            polygon[3] = vec2(37.0, 20.0);
+            polygon[4] = vec2(33.0, 24.0);
+            polygon[5] = vec2(0.0, 24.0);
+            float d = sdPolygon24(p, polygon, 6);
+
+            polygon[0] = vec2(44.0, 0.0);
+            polygon[1] = vec2(80.0, 0.0);
+            polygon[2] = vec2(84.0, 4.0);
+            polygon[3] = vec2(84.0, 20.0);
+            polygon[4] = vec2(80.0, 24.0);
+            polygon[5] = vec2(44.0, 24.0);
+            polygon[6] = vec2(40.0, 20.0);
+            polygon[7] = vec2(40.0, 4.0);
+            d = min(d, sdPolygon24(p, polygon, 8));
+            d = min(d, sdBox(p - vec2(38.5, 8.0), vec2(1.5, 2.0)));
+
+            // Ammo tail. The one-pixel steps are the measured authored
+            // boundary, represented as a continuous high-resolution path.
+            polygon[0]  = vec2(62.0, 22.0);
+            polygon[1]  = vec2(83.0, 22.0);
+            polygon[2]  = vec2(83.0, 23.0);
+            polygon[3]  = vec2(84.0, 23.0);
+            polygon[4]  = vec2(84.0, 31.0);
+            polygon[5]  = vec2(83.0, 31.0);
+            polygon[6]  = vec2(83.0, 32.0);
+            polygon[7]  = vec2(82.0, 32.0);
+            polygon[8]  = vec2(82.0, 33.0);
+            polygon[9]  = vec2(81.0, 33.0);
+            polygon[10] = vec2(81.0, 34.0);
+            polygon[11] = vec2(65.0, 34.0);
+            polygon[12] = vec2(65.0, 33.0);
+            polygon[13] = vec2(64.0, 33.0);
+            polygon[14] = vec2(64.0, 32.0);
+            polygon[15] = vec2(63.0, 32.0);
+            polygon[16] = vec2(63.0, 31.0);
+            polygon[17] = vec2(62.0, 31.0);
+            d = min(d, sdPolygon24(p, polygon, 18));
+            return d;
+        }
+        float healthHudPlateDistance(vec2 p) {
+            vec2 polygon[24];
+            polygon[0]  = vec2(2.0, 1.0);
+            polygon[1]  = vec2(14.0, 1.0);
+            polygon[2]  = vec2(14.0, 3.0);
+            polygon[3]  = vec2(15.0, 3.0);
+            polygon[4]  = vec2(15.0, 4.0);
+            polygon[5]  = vec2(16.0, 4.0);
+            polygon[6]  = vec2(16.0, 46.0);
+            polygon[7]  = vec2(15.0, 46.0);
+            polygon[8]  = vec2(15.0, 47.0);
+            polygon[9]  = vec2(14.0, 47.0);
+            polygon[10] = vec2(14.0, 48.0);
+            polygon[11] = vec2(13.0, 48.0);
+            polygon[12] = vec2(13.0, 49.0);
+            polygon[13] = vec2(3.0, 49.0);
+            polygon[14] = vec2(3.0, 48.0);
+            polygon[15] = vec2(2.0, 48.0);
+            polygon[16] = vec2(2.0, 47.0);
+            polygon[17] = vec2(1.0, 47.0);
+            polygon[18] = vec2(1.0, 46.0);
+            polygon[19] = vec2(0.0, 46.0);
+            polygon[20] = vec2(0.0, 4.0);
+            polygon[21] = vec2(1.0, 4.0);
+            polygon[22] = vec2(1.0, 3.0);
+            polygon[23] = vec2(2.0, 3.0);
+            float d = sdPolygon24(p, polygon, 24);
+            d = min(d, sdBox(p - vec2(4.0, 0.5), vec2(2.0, 0.5)));
+            d = min(d, sdBox(p - vec2(12.0, 0.5), vec2(2.0, 0.5)));
+            return d;
+        }
+        float analyticHudCoverage(vec2 p) {
+            float distance = vRadar != 0
+                ? radarPlateDistance(p)
+                : (vHealthPlate != 0
+                    ? healthHudPlateDistance(p)
+                    : mainHudPlateDistance(p));
+            float aa = max(fwidth(p.x), fwidth(p.y)) * 0.75;
+            return 1.0 - smoothstep(-aa, aa, distance);
+        }
+        vec4 analyticHudTexture(vec2 p, vec4 nearestTexel) {
+            vec3 background = vHealthPlate != 0
+                ? vec3(9.0, 6.0, 5.0) / 31.0
+                : vec3(16.0, 15.0, 12.0) / 31.0;
+
+            if (vRadar != 0 && length(p - vec2(27.5)) < 27.5) {
+                vec2 q = p - vec2(27.5);
+                float radius = length(q);
+                float aa = max(fwidth(q.x), fwidth(q.y)) * 0.75;
+                float halfLine = 0.5;
+                float axis = min(abs(q.x), abs(q.y));
+                float diagonal =
+                    min(abs(q.x - q.y), abs(q.x + q.y)) * 0.7071;
+                float spokes = 1.0 - smoothstep(
+                    halfLine - aa, halfLine + aa, min(axis, diagonal));
+                float ring = 1.0 - smoothstep(
+                    halfLine - aa, halfLine + aa, abs(radius - 13.5));
+                float hub =
+                    1.0 - smoothstep(1.5 - aa, 1.5 + aa, radius);
+                vec3 grid = vec3(19.0, 17.0, 14.0) / 31.0;
+                vec3 hubColor = vec3(21.0, 19.0, 17.0) / 31.0;
+                background = mix(background, grid, max(spokes, ring));
+                background = mix(background, hubColor, hub);
+            }
+
+            if (vRadar == 0 && vHealthPlate == 0) {
+                bool contentRegion =
+                    (p.x >= 3.0 && p.x < 35.0 &&
+                     p.y >= 2.0 && p.y < 22.0) ||
+                    (p.x >= 43.0 && p.x < 82.0 &&
+                     p.y >= 1.0 && p.y < 22.0) ||
+                    (p.x >= 62.0 && p.y >= 22.0);
+                float hi = max(
+                    nearestTexel.r,
+                    max(nearestTexel.g, nearestTexel.b));
+                float lo = min(
+                    nearestTexel.r,
+                    min(nearestTexel.g, nearestTexel.b));
+                bool foreground =
+                    contentRegion &&
+                    !transparentBlack(nearestTexel) &&
+                    (hi - lo > 0.08 || hi < 0.18 || hi > 0.72);
+                if (foreground)
+                    background = nearestTexel.rgb;
+            }
+            return vec4(background, nearestTexel.a);
         }
         vec3 stockPaintCorrection(vec3 rgb) {
             if (vUiTexture != 0) return rgb;
@@ -372,17 +541,24 @@ internal static class GlShaders
                 vUiTexture != 0 && vShadow != 0 && uVectorIcons != 0;
             bool enhancedParticle =
                 vUiTexture == 0 && vParticle != 0 && uEnhancedParticles != 0;
+            bool analyticHud = vHudPlate != 0 && uVectorIcons != 0;
+            vec2 hudLocal = vUV - vec2(vUvBounds.xy);
+            float hudCoverage = 1.0;
             float contourCoverage = 1.0;
             float contourStp = nearestTexel.a;
 
-            if (vectorFont || vectorIcon || enhancedParticle) {
+            if ((vectorFont || vectorIcon || enhancedParticle) && !analyticHud) {
                 texel = contourTexture(vUV, contourCoverage, contourStp);
+                if (vectorIcon && vHudPlate == 0)
+                    texel.rgb = nearestTexel.rgb;
                 if (vectorFont || vectorIcon) {
                     // A half-coverage contour gives the original bitmap glyph
                     // or UI plate a stable, resolution-independent high-
                     // resolution edge. Final presentation AA handles the
                     // fractional screen edge.
-                    if (contourCoverage < 0.5) discard;
+                    if (contourCoverage < 0.5) {
+                        discard;
+                    }
                 } else if (contourCoverage <= 0.01) {
                     discard;
                 }
@@ -395,10 +571,17 @@ internal static class GlShaders
                 // creates dark halos. Particle sprites are semitransparent and
                 // can safely reconstruct their edge coverage.
                 bool filteredEdge = vectorFont || vectorIcon || enhancedParticle;
-                if (!filteredEdge) discard;
+                if (!analyticHud && !filteredEdge) discard;
             }
-            if (vRadar != 0 && uVectorIcons != 0)
-                texel = cleanRadarTexture(texel);
+            if (analyticHud) {
+                hudCoverage = analyticHudCoverage(hudLocal);
+                // These primitives are placed in an opaque batch to remove
+                // the authored STP grain. Resolve the analytic path at its
+                // half-coverage contour; 4x HLE rendering plus presentation
+                // antialiasing smooths the final edge.
+                if (hudCoverage < 0.5) discard;
+                texel = analyticHudTexture(hudLocal, nearestTexel);
+            }
             texel.rgb = stockPaintCorrection(texel.rgb);
             if (uEnhancedFog != 0 && vUiTexture == 0 && vDepth > 1.0) {
                 float haze = smoothstep(3500.0, 7500.0, vDepth) * 0.22;
@@ -407,7 +590,12 @@ internal static class GlShaders
             ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
             ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
             FragColor = vec4(quant5(ivec3(stockPaintCorrection8(c8) * 255.0 + 0.5)), max(texel.a, uSetMask));
-            if (enhancedParticle && contourCoverage < 0.999) {
+            if (analyticHud) {
+                // All enhanced HUD backings are opaque measured vector paths.
+                // Fractional edge coverage is encoded with the same
+                // destination-preserving blend used by other analytic UI.
+                BlendColor = vec4(vec3(hudCoverage), 1.0 - hudCoverage);
+            } else if (enhancedParticle && contourCoverage < 0.999) {
                 if (contourStp >= 0.5) {
                     BlendColor = vec4(
                         uBlend.rgb * contourCoverage,

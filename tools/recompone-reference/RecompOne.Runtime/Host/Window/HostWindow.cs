@@ -219,7 +219,11 @@ internal static class HostWindow
         string? hleOverride = Environment.GetEnvironmentVariable("RECOMPONE_GPU_HLE");
         bool hleActive = hleOverride == "1" ||
             (hleOverride != "0" && ConfigManager.View.HighResolution3D);
-        Hle.GlVram.Scale = ConfigManager.View.HighResolution3D ? 4 : 1;
+        // A 2x native framebuffer (640x480 for normal gameplay) retains the
+        // clean Dreamcast/PS2-class geometry target while avoiding the 16x
+        // fragment load of the former 4x-per-axis path. Presentation remains
+        // at the host resolution and MSAA still resolves sub-pixel edges.
+        Hle.GlVram.Scale = ConfigManager.View.HighResolution3D ? 2 : 1;
         _glBackend = new Hle.GlBackend(_gl);
         _glBackend.InitGl();
         Hle.GpuHle.Active = hleActive;
@@ -263,6 +267,9 @@ internal static class HostWindow
         if (Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal))
             MenuRegistry.Register("Cheats", V82CheatMenu.Draw);
         MenuRegistry.Register("Guest Vehicles", GuestVehicleMenu.Draw);
+        if (Runtime.GameTitle.Equals(
+                "Vigilante 8 PC", StringComparison.Ordinal))
+            MenuRegistry.Register("Guest Arenas", GuestArenaMenu.Draw);
 
         _discPicker = new DiscPickerPopup();
         PanelManager.Register(_discPicker);

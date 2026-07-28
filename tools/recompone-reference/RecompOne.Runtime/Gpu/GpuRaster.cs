@@ -1,9 +1,21 @@
+using RecompOne.Runtime.Config;
+
 namespace RecompOne.Runtime;
 
 //old soft raster
 public sealed partial class Gpu
 {
     struct Vert { public int X, Y, R, G, B, U, V, Z; public bool HasGteZ; }
+
+    static readonly bool TraceProjection =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PROJECTION") == "1";
+    long _projectionQuadGte;
+    long _projectionQuadRecovered;
+    long _projectionQuadHomography;
+    long _projectionQuadAffine;
+    long _projectionTriGte;
+    long _projectionTriAffine;
+    int _projectionGameplayFrames;
 
     static readonly int[,] Dither =
     {
@@ -59,6 +71,48 @@ public sealed partial class Gpu
             }
         }
 
+        if (tex && quad && ConfigManager.View.PerspectiveCorrectTextures)
+        {
+            // A PS1 quad is submitted as two triangles. Applying perspective
+            // correction to only one half creates a hard diagonal UV seam.
+            // Recover a single missing planar depth from the other three
+            // vertices; otherwise keep both halves in the same affine mode.
+            int depthCount = 0;
+            for (int i = 0; i < 4; i++)
+                if (v[i].HasGteZ) depthCount++;
+            bool complete;
+            if (depthCount == 4)
+            {
+                complete = true;
+                _projectionQuadGte++;
+            }
+            else if (depthCount == 3 && TryCompleteQuadDepth(v, out _))
+            {
+                complete = true;
+                _projectionQuadRecovered++;
+            }
+            else if (TryProjectiveQuadDepth(v))
+            {
+                complete = true;
+                _projectionQuadHomography++;
+            }
+            else
+            {
+                complete = false;
+                _projectionQuadAffine++;
+            }
+            if (!complete)
+                for (int i = 0; i < 4; i++)
+                    v[i].HasGteZ = false;
+        }
+        else if (tex && !quad && ConfigManager.View.PerspectiveCorrectTextures)
+        {
+            if (v[0].HasGteZ && v[1].HasGteZ && v[2].HasGteZ)
+                _projectionTriGte++;
+            else
+                _projectionTriAffine++;
+        }
+
         if (HleOn)
         {
             HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
@@ -69,6 +123,135 @@ public sealed partial class Gpu
             RasterTriangle(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
             if (quad) RasterTriangle(v[1], v[2], v[3], tex, gouraud, semi, raw, clut);
         }
+    }
+
+    public void EndProjectionFrame(bool gameplayActive)
+    {
+        if (!TraceProjection) return;
+        if (!gameplayActive)
+        {
+            ResetProjectionCounters();
+            return;
+        }
+
+        _projectionGameplayFrames++;
+        if ((_projectionGameplayFrames % 60) != 0) return;
+        Console.Error.WriteLine(
+            $"[Projection] frames={_projectionGameplayFrames - 59}-" +
+            $"{_projectionGameplayFrames} quad-gte={_projectionQuadGte} " +
+            $"quad-recovered={_projectionQuadRecovered} " +
+            $"quad-homography={_projectionQuadHomography} " +
+            $"quad-affine={_projectionQuadAffine} tri-gte={_projectionTriGte} " +
+            $"tri-affine={_projectionTriAffine} gte-points={Gte.ScreenDepthCount}");
+        ResetProjectionCounters();
+    }
+
+    void ResetProjectionCounters()
+    {
+        _projectionQuadGte = 0;
+        _projectionQuadRecovered = 0;
+        _projectionQuadHomography = 0;
+        _projectionQuadAffine = 0;
+        _projectionTriGte = 0;
+        _projectionTriAffine = 0;
+    }
+
+    static bool TryCompleteQuadDepth(Span<Vert> v, out int completedIndex)
+    {
+        completedIndex = -1;
+        Span<int> known = stackalloc int[3];
+        int count = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            if (v[i].HasGteZ) known[count++] = i;
+            else completedIndex = i;
+        }
+        if (count != 3 || completedIndex < 0) return false;
+
+        ref Vert p0 = ref v[known[0]];
+        ref Vert p1 = ref v[known[1]];
+        ref Vert p2 = ref v[known[2]];
+        ref Vert pm = ref v[completedIndex];
+        double denominator =
+            (double)(p1.Y - p2.Y) * (p0.X - p2.X) +
+            (double)(p2.X - p1.X) * (p0.Y - p2.Y);
+        if (Math.Abs(denominator) < 0.000001) return false;
+
+        double q0 = 1.0 / p0.Z;
+        double q1 = 1.0 / p1.Z;
+        double q2 = 1.0 / p2.Z;
+        double a = ((q0 - q2) * (p1.Y - p2.Y) +
+                    (q1 - q2) * (p2.Y - p0.Y)) / denominator;
+        double b = ((q0 - q2) * (p2.X - p1.X) +
+                    (q1 - q2) * (p0.X - p2.X)) / denominator;
+        double inverseZ = q2 +
+            a * (pm.X - p2.X) +
+            b * (pm.Y - p2.Y);
+        if (!double.IsFinite(inverseZ) || inverseZ <= 0.0) return false;
+
+        double recoveredZ = 1.0 / inverseZ;
+        int minZ = Math.Min(p0.Z, Math.Min(p1.Z, p2.Z));
+        int maxZ = Math.Max(p0.Z, Math.Max(p1.Z, p2.Z));
+        if (!double.IsFinite(recoveredZ) ||
+            recoveredZ < Math.Max(1.0, minZ / 16.0) ||
+            recoveredZ > Math.Min(65535.0, maxZ * 16.0))
+            return false;
+
+        pm.Z = (int)Math.Round(recoveredZ);
+        pm.HasGteZ = true;
+        return true;
+    }
+
+    static bool TryProjectiveQuadDepth(Span<Vert> v)
+    {
+        // Four screen/UV correspondences define a projective homography even
+        // when the original ordering-table packet no longer has GTE depth.
+        // PS1 textured quads use the corner order 0,1 / 2,3. Recover the four
+        // homogeneous denominators for that unit square and pass their ratios
+        // to OpenGL as clip W. Affine parallelograms naturally produce four
+        // equal values.
+        double dx1 = v[1].X - v[3].X;
+        double dx2 = v[2].X - v[3].X;
+        double dx3 = v[0].X - v[1].X - v[2].X + v[3].X;
+        double dy1 = v[1].Y - v[3].Y;
+        double dy2 = v[2].Y - v[3].Y;
+        double dy3 = v[0].Y - v[1].Y - v[2].Y + v[3].Y;
+        double determinant = dx1 * dy2 - dx2 * dy1;
+        if (Math.Abs(determinant) < 0.000001) return false;
+
+        double g = (dx3 * dy2 - dx2 * dy3) / determinant;
+        double h = (dx1 * dy3 - dx3 * dy1) / determinant;
+        Span<double> w = stackalloc double[4]
+        {
+            1.0,
+            1.0 + g,
+            1.0 + h,
+            1.0 + g + h,
+        };
+        bool allPositive = true;
+        bool allNegative = true;
+        for (int i = 0; i < 4; i++)
+        {
+            if (!double.IsFinite(w[i]) || Math.Abs(w[i]) < 0.0001)
+                return false;
+            allPositive &= w[i] > 0.0;
+            allNegative &= w[i] < 0.0;
+        }
+        if (!allPositive && !allNegative) return false;
+        if (allNegative)
+            for (int i = 0; i < 4; i++) w[i] = -w[i];
+
+        double minW = Math.Min(Math.Min(w[0], w[1]), Math.Min(w[2], w[3]));
+        double maxW = Math.Max(Math.Max(w[0], w[1]), Math.Max(w[2], w[3]));
+        if (minW <= 0.0 || maxW / minW > 64.0) return false;
+
+        double scale = 1024.0 / minW;
+        for (int i = 0; i < 4; i++)
+        {
+            v[i].Z = Math.Clamp((int)Math.Round(w[i] * scale), 1, 65535);
+            v[i].HasGteZ = true;
+        }
+        return true;
     }
 
     void RasterTriangle(Vert a, Vert b, Vert c, bool tex, bool gouraud, bool semi, bool raw, int clut)

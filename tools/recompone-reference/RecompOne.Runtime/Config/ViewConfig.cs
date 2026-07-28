@@ -169,8 +169,10 @@ public class ViewConfig
         TextureSmoothing = !original;
         PerspectiveCorrectTextures = !original;
         AntiAliasing = original ? "Off" : "FXAA";
-        MsaaSamples = original ? 0 : 4;
-        AnisotropicFiltering = original ? 1 : 8;
+        // 2x MSAA at the enhanced 2x internal resolution resolves geometry
+        // cleanly without the fill-rate spike of the former 4x default.
+        MsaaSamples = original ? 0 : 2;
+        AnisotropicFiltering = original ? 1 : 4;
         TextureMipmaps = !original;
         Widescreen = !original;
         HudAnchoring = !original;
