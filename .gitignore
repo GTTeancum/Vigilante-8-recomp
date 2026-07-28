@@ -24,6 +24,7 @@ ghidra/
 /bin-cue/*.cue
 /BINCUE/
 /V8_2_BINCUE/
+/V8_2_LOOSE/
 /V8_2_WORK/
 /I76_ZFS/
 /I76/
@@ -42,6 +43,7 @@ ghidra/
 # audit ground truth for cleaned src/ files) and IS tracked.
 
 # Smoke-test artifacts
+/artifacts/
 *.png
 *.ppm
 *.wav
@@ -52,6 +54,7 @@ __pycache__/
 *.pyc
 
 # Compiled objects
+**/obj/
 *.o
 *.obj
 *.exe
