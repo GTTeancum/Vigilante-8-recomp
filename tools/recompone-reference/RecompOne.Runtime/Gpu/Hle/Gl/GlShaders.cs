@@ -65,6 +65,7 @@ internal static class GlShaders
         layout(location = 4) in vec2  inUV;
         layout(location = 5) in float inPerspectiveW;
         layout(location = 6) in vec3  inBary;
+        layout(location = 7) in vec4  inUvBounds;
 
         out vec4 vColor;
         out vec2 vUV;
@@ -77,6 +78,8 @@ internal static class GlShaders
         flat out int   vParticle;
         flat out int   vShadow;
         flat out int   vLongestEdge;
+        flat out int   vRadar;
+        flat out ivec4 vUvBounds;
         noperspective out vec3 vBary;
         out float vDepth;
 
@@ -95,7 +98,9 @@ internal static class GlShaders
             vUiTexture = (inTexpage >> 12) & 1;
             vParticle = (inTexpage >> 13) & 1;
             vShadow = (inTexpage >> 14) & 1;
+            vRadar = (inTexpage >> 16) & 1;
             vLongestEdge = inClut;
+            vUvBounds = ivec4(round(inUvBounds));
             vBary = inBary;
             vDepth = inPerspectiveW;
 
@@ -123,6 +128,8 @@ internal static class GlShaders
         flat in int   vParticle;
         flat in int   vShadow;
         flat in int   vLongestEdge;
+        flat in int   vRadar;
+        flat in ivec4 vUvBounds;
         noperspective in vec3 vBary;
         in float vDepth;
 
@@ -251,10 +258,12 @@ internal static class GlShaders
             vec2 p = uvf - vec2(0.5);
             ivec2 uv0 = ivec2(floor(p));
             vec2 f = fract(p);
-            vec4 s00 = textureTexel(uv0);
-            vec4 s10 = textureTexel(uv0 + ivec2(1, 0));
-            vec4 s01 = textureTexel(uv0 + ivec2(0, 1));
-            vec4 s11 = textureTexel(uv0 + ivec2(1, 1));
+            ivec2 boundMin = vUvBounds.xy;
+            ivec2 boundMax = max(vUvBounds.zw, boundMin);
+            vec4 s00 = textureTexel(clamp(uv0, boundMin, boundMax));
+            vec4 s10 = textureTexel(clamp(uv0 + ivec2(1, 0), boundMin, boundMax));
+            vec4 s01 = textureTexel(clamp(uv0 + ivec2(0, 1), boundMin, boundMax));
+            vec4 s11 = textureTexel(clamp(uv0 + ivec2(1, 1), boundMin, boundMax));
             vec4 w = vec4(
                 (1.0 - f.x) * (1.0 - f.y),
                 f.x * (1.0 - f.y),
@@ -276,6 +285,37 @@ internal static class GlShaders
             stp = (s00.a * ow.x + s10.a * ow.y +
                    s01.a * ow.z + s11.a * ow.w) / coverage;
             return vec4(rgb, stp);
+        }
+        vec4 cleanRadarTexture(vec4 texel) {
+            vec2 boundsSize = max(
+                vec2(vUvBounds.zw - vUvBounds.xy + ivec2(1)),
+                vec2(1.0));
+            vec2 p = (vUV - vec2(vUvBounds.xy)) / boundsSize - vec2(0.5);
+            float radius = length(p);
+            if (radius >= 0.47)
+                return texel;
+
+            float hi = max(texel.r, max(texel.g, texel.b));
+            float lo = min(texel.r, min(texel.g, texel.b));
+            bool liveMarker = hi > 0.38 && hi - lo > 0.18;
+            if (liveMarker)
+                return texel;
+
+            // Replace the noisy neutral bitmap fill with an analytic radar
+            // face. Contacts remain source-driven above; rings and spokes are
+            // resolution-independent and anti-aliased by screen derivatives.
+            float aa = max(fwidth(p.x), fwidth(p.y)) * 1.35;
+            float axis = min(abs(p.x), abs(p.y));
+            float diagonal = min(abs(p.x - p.y), abs(p.x + p.y)) * 0.7071;
+            float spokes = 1.0 - smoothstep(0.0, aa, min(axis, diagonal));
+            float rings = max(
+                1.0 - smoothstep(0.0, aa, abs(radius - 0.235)),
+                1.0 - smoothstep(0.0, aa, abs(radius - 0.445)));
+            float hub = 1.0 - smoothstep(0.025, 0.025 + aa, radius);
+            float grid = max(max(spokes, rings), hub);
+            vec3 face = vec3(0.39, 0.40, 0.34);
+            vec3 gridColor = vec3(0.55, 0.56, 0.48);
+            return vec4(mix(face, gridColor, grid * 0.78), texel.a);
         }
         vec3 stockPaintCorrection(vec3 rgb) {
             if (vUiTexture != 0) return rgb;
@@ -328,17 +368,20 @@ internal static class GlShaders
                 : nearestTexel;
             bool vectorFont =
                 vUiTexture != 0 && vParticle != 0 && uVectorFonts != 0;
+            bool vectorIcon =
+                vUiTexture != 0 && vShadow != 0 && uVectorIcons != 0;
             bool enhancedParticle =
                 vUiTexture == 0 && vParticle != 0 && uEnhancedParticles != 0;
             float contourCoverage = 1.0;
             float contourStp = nearestTexel.a;
 
-            if (vectorFont || enhancedParticle) {
+            if (vectorFont || vectorIcon || enhancedParticle) {
                 texel = contourTexture(vUV, contourCoverage, contourStp);
-                if (vectorFont) {
+                if (vectorFont || vectorIcon) {
                     // A half-coverage contour gives the original bitmap glyph
-                    // a stable, resolution-independent high-resolution edge.
-                    // Final presentation AA handles the fractional screen edge.
+                    // or UI plate a stable, resolution-independent high-
+                    // resolution edge. Final presentation AA handles the
+                    // fractional screen edge.
                     if (contourCoverage < 0.5) discard;
                 } else if (contourCoverage <= 0.01) {
                     discard;
@@ -351,9 +394,11 @@ internal static class GlShaders
                 // UI draws do not have a usable alpha blend and doing so
                 // creates dark halos. Particle sprites are semitransparent and
                 // can safely reconstruct their edge coverage.
-                bool filteredEdge = vectorFont || enhancedParticle;
+                bool filteredEdge = vectorFont || vectorIcon || enhancedParticle;
                 if (!filteredEdge) discard;
             }
+            if (vRadar != 0 && uVectorIcons != 0)
+                texel = cleanRadarTexture(texel);
             texel.rgb = stockPaintCorrection(texel.rgb);
             if (uEnhancedFog != 0 && vUiTexture == 0 && vDepth > 1.0) {
                 float haze = smoothstep(3500.0, 7500.0, vDepth) * 0.22;

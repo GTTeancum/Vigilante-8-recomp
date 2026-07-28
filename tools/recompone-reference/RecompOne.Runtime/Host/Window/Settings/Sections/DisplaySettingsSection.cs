@@ -211,7 +211,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             SaveCustom();
         }
         bool icons = ConfigManager.View.VectorIcons;
-        if (ImGui.Checkbox("High-resolution logo and icon contours", ref icons))
+        if (ImGui.Checkbox("Vector-style HUD, logo, and icon contours", ref icons))
         {
             ConfigManager.View.VectorIcons = icons;
             SaveCustom();

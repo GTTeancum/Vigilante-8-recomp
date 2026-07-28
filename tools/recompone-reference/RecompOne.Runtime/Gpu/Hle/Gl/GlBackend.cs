@@ -14,10 +14,10 @@ public sealed class GlBackend : IGpuBackend
         public int Clut, Texpage;
         public float U, V, PerspectiveW;
         public float BaryX, BaryY, BaryZ;
+        public float UvMinX, UvMinY, UvMaxX, UvMaxY;
     }
 
     const int MaxVerts = 0x40000;
-
     readonly GL _gl;
     readonly GlVram _vram;
     readonly GlDisplayRt?[] _rts = new GlDisplayRt?[2];
@@ -105,6 +105,7 @@ public sealed class GlBackend : IGpuBackend
         _gl.EnableVertexAttribArray(4); _gl.VertexAttribPointer(4, 2, VertexAttribPointerType.Float, false, stride, (void*)20);
         _gl.EnableVertexAttribArray(5); _gl.VertexAttribPointer(5, 1, VertexAttribPointerType.Float, false, stride, (void*)28);
         _gl.EnableVertexAttribArray(6); _gl.VertexAttribPointer(6, 3, VertexAttribPointerType.Float, false, stride, (void*)32);
+        _gl.EnableVertexAttribArray(7); _gl.VertexAttribPointer(7, 4, VertexAttribPointerType.Float, false, stride, (void*)44);
 
         // fullscreen quad for present, real vbo since gl_VertexID without arrays does not draw on mesa for some reason?? or i did it wrong?
         _presentVao = _gl.GenVertexArray();
@@ -365,7 +366,11 @@ public sealed class GlBackend : IGpuBackend
             // only when it was already authored in the left third; projected
             // names and central prompts retain their world/screen position.
             bool topHud = localTop < target.H * 0.42f;
-            bool lowerLeftHud = localCenter < target.W / 3f;
+            bool locationCaption =
+                localTop >= target.H * 0.52f &&
+                localTop < target.H * 0.9f;
+            bool lowerLeftHud =
+                localCenter < target.W / 3f || locationCaption;
             if (topHud || lowerLeftHud)
                 anchor = -target.Margin;
         }
@@ -382,15 +387,32 @@ public sealed class GlBackend : IGpuBackend
         // can pull neighboring digits into the ammo counter. Larger gameplay
         // labels and menu text remain eligible for contour reconstruction.
         bool fontLike = f.Textured && !topGameplayHud && r.W <= 32 && r.H <= 32;
+        bool topHudPlate =
+            topGameplayHud && f.Textured &&
+            Math.Max(r.W, r.H) >= 24 && Math.Min(r.W, r.H) >= 16;
+        bool radarPlate =
+            topGameplayHud && f.Textured &&
+            r.W >= 48 && r.H >= 48 && Math.Abs(r.W - r.H) <= 12;
         bool iconLike =
-            f.Textured && !topGameplayHud && !fontLike &&
-            r.W <= 96 && r.H <= 96;
+            f.Textured && !fontLike &&
+            r.W <= 96 && r.H <= 96 &&
+            (!topGameplayHud || topHudPlate);
         int uiFlags = fontLike && ConfigManager.View.VectorFonts ? 0x2800 :
             iconLike && ConfigManager.View.VectorIcons ? 0x4800 : 0;
+        if (radarPlate && ConfigManager.View.VectorIcons)
+            uiFlags |= 0x10000;
         var va = V(a, f, false, false, true); va.Texpage |= uiFlags;
         var vb = V(b, f, false, false, true); vb.Texpage |= uiFlags;
         var vc = V(c, f, false, false, true); vc.Texpage |= uiFlags;
         var vd = V(d, f, false, false, true); vd.Texpage |= uiFlags;
+        float uvMinX = Math.Min(r.U, r.U + r.W);
+        float uvMinY = Math.Min(r.V, r.V + r.H);
+        float uvMaxX = Math.Max(r.U, r.U + r.W) - 1f;
+        float uvMaxY = Math.Max(r.V, r.V + r.H) - 1f;
+        va.UvMinX = vb.UvMinX = vc.UvMinX = vd.UvMinX = uvMinX;
+        va.UvMinY = vb.UvMinY = vc.UvMinY = vd.UvMinY = uvMinY;
+        va.UvMaxX = vb.UvMaxX = vc.UvMaxX = vd.UvMaxX = uvMaxX;
+        va.UvMaxY = vb.UvMaxY = vc.UvMaxY = vd.UvMaxY = uvMaxY;
         if (topGameplayHud)
         {
             va.Texpage &= ~0x800;
