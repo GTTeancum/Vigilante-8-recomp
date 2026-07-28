@@ -1,0 +1,312 @@
+{
+  "schema_version": 2,
+  "stable_id": "example.original_guest",
+  "display_name": "Original Guest",
+  "game": "V8_2",
+  "body_kind": 0,
+  "groups": [
+    {
+      "name": "body_and_wheel",
+      "scale_shift": 8,
+      "vertices": [
+        [-96, 0, -160],
+        [96, 0, -160],
+        [96, 0, 160],
+        [-96, 0, 160],
+        [0, -72, 0]
+      ],
+      "faces": [
+        {"vertices": [0, 1, 4], "color": [48, 112, 192]},
+        {"vertices": [1, 2, 4], "color": [48, 112, 192]},
+        {"vertices": [2, 3, 4], "color": [32, 88, 160]},
+        {"vertices": [3, 0, 4], "color": [32, 88, 160]},
+        {"vertices": [0, 3, 2], "color": [24, 24, 28]},
+        {"vertices": [0, 2, 1], "color": [24, 24, 28]}
+      ]
+    }
+  ],
+  "slots": [
+    {"name": "body", "render_group": 0, "collision": 0},
+    {
+      "name": "front_left_joint",
+      "render_group": null,
+      "collision": null,
+      "key": 32768,
+      "position": [-65536, 16384, 98304],
+      "parent": 0
+    },
+    {
+      "name": "front_right_joint",
+      "render_group": null,
+      "collision": null,
+      "key": 32769,
+      "position": [65536, 16384, 98304],
+      "parent": 0
+    },
+    {
+      "name": "middle_left_joint",
+      "render_group": null,
+      "collision": null,
+      "key": 32770,
+      "position": [-65536, 16384, 0],
+      "parent": 0
+    },
+    {
+      "name": "middle_right_joint",
+      "render_group": null,
+      "collision": null,
+      "key": 32771,
+      "position": [65536, 16384, 0],
+      "parent": 0
+    },
+    {
+      "name": "rear_left_joint",
+      "render_group": null,
+      "collision": null,
+      "key": 32772,
+      "position": [-65536, 16384, -98304],
+      "parent": 0
+    },
+    {
+      "name": "rear_right_joint",
+      "render_group": null,
+      "collision": null,
+      "key": 32773,
+      "position": [65536, 16384, -98304],
+      "parent": 0
+    },
+    {
+      "name": "special_attachment",
+      "render_group": null,
+      "collision": null,
+      "key": 33024,
+      "position": [0, -65536, -65536],
+      "parent": 0
+    },
+    {"name": "normal_wheel", "render_group": 0, "collision": null},
+    {"name": "weapon_mount_0", "render_group": null, "collision": null, "key": 32784, "parent": 0},
+    {"name": "weapon_mount_1", "render_group": null, "collision": null, "key": 32785, "parent": 0},
+    {"name": "weapon_mount_2", "render_group": null, "collision": null, "key": 32786, "parent": 0},
+    {"name": "weapon_mount_3", "render_group": null, "collision": null, "key": 32787, "parent": 0},
+    {"name": "weapon_mount_4", "render_group": null, "collision": null, "key": 32788, "parent": 0},
+    {"name": "weapon_mount_5", "render_group": null, "collision": null, "key": 32789, "parent": 0},
+    {"name": "weapon_mount_6", "render_group": null, "collision": null, "key": 32790, "parent": 0},
+    {"name": "weapon_pickup_mount", "render_group": null, "collision": null, "key": 32799, "parent": 0},
+    {"name": "special_attachment_secondary", "render_group": null, "collision": null, "key": 33025, "parent": 0}
+  ],
+  "collisions": [
+    {
+      "name": "body_collision",
+      "shapes": [
+        {
+          "kind": "aabb",
+          "minimum": [-98304, -73728, -163840],
+          "maximum": [98304, 32768, 163840],
+          "override_y": -73728,
+          "flags": 0
+        }
+      ]
+    }
+  ],
+  "textures": [],
+  "animations": [],
+  "transformation_bank": {
+    "groups": [
+      {
+        "name": "transformation_wheel",
+        "scale_shift": 8,
+        "vertices": [
+          [-32, -32, 0],
+          [32, -32, 0],
+          [32, 32, 0],
+          [-32, 32, 0]
+        ],
+        "faces": [
+          {"vertices": [0, 1, 2], "color": [72, 76, 88]},
+          {"vertices": [0, 2, 3], "color": [48, 52, 64]}
+        ]
+      }
+    ],
+    "slots": [
+      {
+        "name": "hover_left",
+        "render_group": 0,
+        "collision": 0,
+        "flags": -21846
+      },
+      {
+        "name": "hover_left_mesh",
+        "render_group": 0,
+        "collision": null,
+        "flags": -21846,
+        "parent": 0
+      },
+      {
+        "name": "hover_left_instance",
+        "render_group": 0,
+        "render_flags": 49152,
+        "collision": null,
+        "parent": 0
+      },
+      {
+        "name": "hover_right",
+        "render_group": 0,
+        "collision": 0,
+        "flags": -21846
+      },
+      {
+        "name": "hover_right_mesh",
+        "render_group": 0,
+        "collision": null,
+        "flags": -21846,
+        "parent": 3
+      },
+      {
+        "name": "hover_right_instance",
+        "render_group": 0,
+        "render_flags": 49152,
+        "collision": null,
+        "parent": 3
+      },
+      {
+        "name": "ski_left",
+        "render_group": 0,
+        "collision": 0,
+        "flags": -21846
+      },
+      {
+        "name": "ski_left_mesh",
+        "render_group": 0,
+        "collision": null,
+        "flags": -21846,
+        "parent": 6
+      },
+      {
+        "name": "ski_left_instance",
+        "render_group": 0,
+        "render_flags": 49152,
+        "collision": null,
+        "parent": 6
+      },
+      {
+        "name": "ski_right",
+        "render_group": 0,
+        "collision": 0,
+        "flags": -21846
+      },
+      {
+        "name": "ski_right_mesh",
+        "render_group": 0,
+        "collision": null,
+        "flags": -21846,
+        "parent": 9
+      },
+      {
+        "name": "ski_right_instance",
+        "render_group": 0,
+        "render_flags": 49152,
+        "collision": null,
+        "parent": 9
+      },
+      {
+        "name": "hydro_left",
+        "render_group": 0,
+        "collision": 0,
+        "flags": -21846
+      },
+      {
+        "name": "hydro_left_mesh",
+        "render_group": 0,
+        "collision": null,
+        "flags": -21846,
+        "parent": 12
+      },
+      {
+        "name": "hydro_left_instance",
+        "render_group": 0,
+        "render_flags": 49152,
+        "collision": null,
+        "parent": 12
+      },
+      {
+        "name": "hydro_right",
+        "render_group": 0,
+        "collision": 0,
+        "flags": -21846
+      },
+      {
+        "name": "hydro_right_mesh",
+        "render_group": 0,
+        "collision": null,
+        "flags": -21846,
+        "parent": 15
+      },
+      {
+        "name": "hydro_right_instance",
+        "render_group": 0,
+        "render_flags": 49152,
+        "collision": null,
+        "parent": 15
+      }
+    ],
+    "collisions": [
+      {
+        "name": "transformation_wheel_collision",
+        "shapes": [
+          {
+            "kind": "aabb",
+            "minimum": [-32768, -32768, -8192],
+            "maximum": [32768, 32768, 8192],
+            "override_y": -32768,
+            "flags": 0
+          }
+        ]
+      }
+    ],
+    "textures": [],
+    "animations": []
+  },
+  "transform_modes": [
+    [0, 0, 0, 0, 0, 0],
+    [0, 3, 0, 3, 0, 3],
+    [6, 9, 6, 9, 6, 9],
+    [12, 15, 12, 15, 12, 15]
+  ],
+  "powerups": {
+    "repair_amount": 480,
+    "weapon_upgrade_duration": 840,
+    "radar_jammer_duration": 780,
+    "shield_duration": 720,
+    "transformation_duration": 540
+  },
+  "stats": {
+    "wheel_kind_front": 8,
+    "wheel_kind_rear": 8,
+    "wheel_param_a_front": 52,
+    "wheel_param_a_middle": 60,
+    "wheel_param_a_rear": 68,
+    "wheel_param_b_rear": 84,
+    "capability_mask": 63,
+    "handling_signed_a": 11,
+    "handling_signed_b": -2,
+    "handling_signed_c": 31,
+    "handling_signed_d": 49,
+    "handling_signed_e": 86,
+    "handling_signed_f": 62,
+    "handling_signed_g": 45,
+    "health": 1040,
+    "reserved_1a": 1320,
+    "physics_coefficient_a": 4096,
+    "physics_coefficient_b": 3072,
+    "motion_coefficients": 4194368,
+    "handling_a": 64,
+    "handling_b": 11200,
+    "rating_armor": 128,
+    "rating_speed": 132,
+    "rating_handling": 136,
+    "rating_special": 140
+  },
+  "quest": {},
+  "unlock": {},
+  "sounds": []
+}

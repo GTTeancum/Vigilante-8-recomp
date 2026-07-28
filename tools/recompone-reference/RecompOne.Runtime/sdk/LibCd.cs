@@ -61,8 +61,11 @@ public static class LibCd
     static byte _cdMixRl;
     static bool _cdMuted;
     static int _v8FileStartLba = -1;
+    static int _v82FileStartLba = -1;
     static readonly bool TraceAudio =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_AUDIO") == "1";
+    static readonly bool TraceCd =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_CD") == "1";
 
     internal static readonly object DiscLock = new();
     static readonly object _posGate = new();
@@ -181,19 +184,26 @@ public static class LibCd
         if (_readActive && xaMode) return;
 
         if (!_readActive || _cbData == 0) return;
+        while (_cbData != 0)
+            ServiceReadOnce();
+    }
+
+    public static void ServiceReadOnce()
+    {
+        bool xaMode = (_mode & 0x40) != 0;
+        if (!_readActive || xaMode || (_cbReady == 0 && _cbData == 0))
+            return;
+
         var c = Runtime.Cpu;
         var m = Runtime.Mem;
         if (c == null || m == null) return;
 
         var snap = c.Snapshot();
-        while (_cbData != 0)
-        {
-            _lastIntr = DataReady;
-            if (_cbReady != 0) { c.A0 = DataReady; c.A1 = 0; Dispatcher.Call(c, m, _cbReady); }
-            AdvancePos(1);
-            Dispatcher.LoadByLba(CurrentLba);
-            if (_cbData != 0) { c.A0 = DataReady; c.A1 = 0; Dispatcher.Call(c, m, _cbData); }
-        }
+        _lastIntr = DataReady;
+        if (_cbReady != 0) { c.A0 = DataReady; c.A1 = 0; Dispatcher.Call(c, m, _cbReady); }
+        AdvancePos(1);
+        Dispatcher.LoadByLba(CurrentLba);
+        if (_cbData != 0) { c.A0 = DataReady; c.A1 = 0; Dispatcher.Call(c, m, _cbData); }
         c.Restore(snap);
     }
 
@@ -359,6 +369,12 @@ public static class LibCd
         int bytes = Math.Min(data.Length, words * 4);
         for (int j = 0; j < bytes; j++)
             m.WriteU8(madr + (uint)j, data[j]);
+        if (TraceCd)
+        {
+            string prefix = Convert.ToHexString(data.AsSpan(0, Math.Min(32, data.Length)));
+            Console.Error.WriteLine(
+                $"[LibCd] CdGetSector LBA={lba} dest=0x{madr:X8} words={words} data={prefix}");
+        }
         c.V0 = 1;
     }
 
@@ -444,6 +460,7 @@ public static class LibCd
         _cdMixLl = _cdMixRr = 0x80;
         _cdMixLr = _cdMixRl = 0;
         _cdMuted = false;
+        _v8FileStartLba = _v82FileStartLba = -1;
         Array.Clear(_pos);
         Array.Clear(_lastResult);
         Dispatcher.ClearPending();
@@ -492,9 +509,10 @@ public static class LibCd
                 _xaLastTraceSecond = -1;
                 _readActive = true;
                 Dispatcher.LoadByLba(CurrentLba);
-                Console.Error.WriteLine($"[LibCd] ReadN start LBA={CurrentLba} ready=0x{_cbReady:X8} data=0x{_cbData:X8}");
+                Console.Error.WriteLine(
+                    $"[LibCd] ReadN start LBA={CurrentLba} msf={_pos[0]:X2}:{_pos[1]:X2}:{_pos[2]:X2} " +
+                    $"ready=0x{_cbReady:X8} data=0x{_cbData:X8}");
                 EnsureXaThread();
-                DeliverInitialReadyCallback(m);
                 break;
             case ReadS:
                 _cddaActive = false;
@@ -599,10 +617,14 @@ public static class LibCd
 
         var c = Runtime.Cpu;
         var snap = c.Snapshot();
+        if (TraceCd)
+            Console.Error.WriteLine($"[LibCd] DeliverInitial before callback LBA={CurrentLba}");
         _lastIntr = DataReady;
         c.A0 = DataReady;
         c.A1 = 0;
         Dispatcher.Call(c, m, _cbReady);
+        if (TraceCd)
+            Console.Error.WriteLine($"[LibCd] DeliverInitial after callback LBA={CurrentLba}");
         AdvancePos(1);
         Dispatcher.LoadByLba(CurrentLba);
         if (_cbData != 0)
@@ -632,6 +654,11 @@ public static class LibCd
         _v8FileStartLba = unchecked((int)c.A0);
     }
 
+    public static void BeginV82FileRead(CpuContext c, IMemory m)
+    {
+        _v82FileStartLba = unchecked((int)c.A0);
+    }
+
     // Vigilante 8's file reader consumes a two-sector callback ring. On the
     // original console the CD interrupt can refill that ring during a long
     // memcpy; the recompiled single-threaded path cannot reproduce that timing
@@ -639,20 +666,31 @@ public static class LibCd
     // game's byte-offset state and public reader semantics.
     public static void ReadV8FileBytes(CpuContext c, IMemory m)
     {
-        if (_v8FileStartLba < 0 || Runtime.Cd == null)
-            throw new InvalidOperationException("Vigilante 8 file read started without a disc/LBA");
+        ReadFileBytes(c, m, _v8FileStartLba, c.GP + 0x6ACu, "Vigilante 8");
+    }
+
+    public static void ReadV82FileBytes(CpuContext c, IMemory m)
+    {
+        ReadFileBytes(c, m, _v82FileStartLba, c.GP + 0xD64u, "Vigilante 8: 2nd Offense");
+    }
+
+    static void ReadFileBytes(
+        CpuContext c, IMemory m, int fileStartLba, uint offsetAddress, string game)
+    {
+        if (fileStartLba < 0 || Runtime.Cd == null)
+            throw new InvalidOperationException($"{game} file read started without a disc/LBA");
 
         m = Dispatcher.UnwrapMemory(m);
         uint destination = c.A0;
         uint length = c.A1;
-        uint offset = m.ReadU32(c.GP + 0x6ACu);
+        uint offset = m.ReadU32(offsetAddress);
 
         if (Runtime.Cd.Fs.TryReadLooseFileRange(
-                _v8FileStartLba, offset, checked((int)length), out byte[] looseData))
+                fileStartLba, offset, checked((int)length), out byte[] looseData))
         {
             for (int i = 0; i < looseData.Length; i++)
                 m.WriteU8(destination + (uint)i, looseData[i]);
-            m.WriteU32(c.GP + 0x6ACu, offset + length);
+            m.WriteU32(offsetAddress, offset + length);
             c.V0 = 1u;
             return;
         }
@@ -660,7 +698,7 @@ public static class LibCd
         uint copied = 0u;
         while (copied < length)
         {
-            int lba = _v8FileStartLba + (int)(offset >> 11);
+            int lba = fileStartLba + (int)(offset >> 11);
             int inSector = (int)(offset & 0x7FFu);
             byte[] sector;
             lock (DiscLock) sector = Runtime.Cd.ReadSectorData(lba, 2048);
@@ -674,16 +712,26 @@ public static class LibCd
             offset += (uint)take;
         }
 
-        m.WriteU32(c.GP + 0x6ACu, offset);
+        m.WriteU32(offsetAddress, offset);
         c.V0 = 1u;
     }
 
     public static void SeekV8File(CpuContext c, IMemory m)
     {
+        SeekFile(c, m, c.GP + 0x6ACu);
+    }
+
+    public static void SeekV82File(CpuContext c, IMemory m)
+    {
+        SeekFile(c, m, c.GP + 0xD64u);
+    }
+
+    static void SeekFile(CpuContext c, IMemory m, uint offsetAddress)
+    {
         m = Dispatcher.UnwrapMemory(m);
-        uint current = m.ReadU32(c.GP + 0x6ACu);
+        uint current = m.ReadU32(offsetAddress);
         uint target = c.A1 == 0u ? c.A0 : current + c.A0;
-        m.WriteU32(c.GP + 0x6ACu, target);
+        m.WriteU32(offsetAddress, target);
     }
 
     static int SyncResult(IMemory m, uint result)

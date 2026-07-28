@@ -10,10 +10,20 @@ namespace RecompOne.Runtime.Sdk;
 public static class V8Compat
 {
     readonly record struct HeapAllocation(uint Units, uint RequestedBytes, uint Caller, int Operation);
+    readonly record struct GuestVramReservation(
+        NativeVramAllocation Request,
+        uint X,
+        uint Y,
+        uint Descriptor);
 
     static bool _heapCycleLogged;
     static bool _heapExhaustedLogged;
     static int _vramAllocCount;
+    static readonly List<GuestVramReservation> GuestVramReservations = [];
+    static readonly HashSet<int> ClaimedGuestVramReservations = [];
+    static readonly HashSet<uint> SyntheticVramDescriptors = [];
+    static bool _guestVramClaimActive;
+    static int _guestVramClaimIndex;
     static int _binParseCount;
     static (uint Destination, uint Size, uint Offset, uint Source)? _largeStreamCopy;
     static int _heapOperation;
@@ -371,6 +381,7 @@ public static class V8Compat
 
     public static void Alloc(CpuContext c, IMemory m)
     {
+        V8VehicleRegistry.Initialize(c, m);
         AllocFromHead(c, m, 0x8005ED4Cu);
     }
 
@@ -2403,6 +2414,222 @@ public static class V8Compat
         for (int i = 0; i < count; i++) bytes[i] = m.ReadU8(address + (uint)i);
         return Convert.ToHexString(bytes);
     }
+
+    /// <summary>
+    /// Removes the retail preview vehicle selected on the built-in character
+    /// screen from the match bank mask when an independent guest is selected.
+    /// The guest is built from its own archive later; retaining the unused
+    /// retail bank wastes the only native gameplay texture page.
+    /// </summary>
+    public static void PrepareGuestCommonObjectMask(CpuContext c, IMemory m)
+    {
+        if (V8VehicleRegistry.SelectedType < 0 &&
+            !V8VehicleRegistry.HasDefaultReplacement)
+            return;
+
+        ReserveGuestVramForMatch(c, m);
+        int retailPreviewType = (sbyte)m.ReadU8(c.GP + 0x18u);
+        if (retailPreviewType < 0 || retailPreviewType >= 13)
+            return;
+
+        bool everyTypeZeroUsesIndependentReplacement =
+            V8VehicleRegistry.HasDefaultReplacement &&
+            retailPreviewType == 0;
+        for (uint participant = 1u;
+             !everyTypeZeroUsesIndependentReplacement && participant < 8u;
+             participant++)
+        {
+            bool active = participant < 2u ||
+                m.ReadU8(c.GP + 0x1Eu + participant) != 0u;
+            if (active &&
+                (sbyte)m.ReadU8(c.GP + 0x18u + participant) ==
+                retailPreviewType)
+            {
+                Console.Error.WriteLine(
+                    $"[V8Vehicles] retained shared retail bank {retailPreviewType} " +
+                    "for another participant");
+                return;
+            }
+        }
+
+        uint originalMask = c.A0;
+        c.A0 &= ~(1u << retailPreviewType);
+        Console.Error.WriteLine(
+            $"[V8Vehicles] released preview bank {retailPreviewType} from " +
+            $"COMMON mask 0x{originalMask:X4}->0x{c.A0:X4}");
+    }
+
+    static void ReserveGuestVramForMatch(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        var resetState = c.Snapshot();
+        c.A0 = 1u;
+        Dispatcher.Call(c, m, 0x80018080u);
+        c.Restore(resetState);
+        Console.Error.WriteLine(
+            "[V8Vehicles] reset native VRAM allocator for guest match banks");
+
+        GuestVramReservations.Clear();
+        V8VehicleRegistry.ResetRuntimeForMatch();
+        IReadOnlyList<NativeVramAllocation> requests =
+            V8VehicleRegistry.SelectedVramAllocations();
+        if (requests.Count == 0)
+            return;
+
+        var snapshot = c.Snapshot();
+        uint stack10 = m.ReadU32(c.SP + 0x10u);
+        uint stack14 = m.ReadU32(c.SP + 0x14u);
+        try
+        {
+            foreach (NativeVramAllocation request in requests)
+            {
+                c.A0 = request.Width;
+                c.A1 = request.Height;
+                c.A2 = request.AlignWidth;
+                c.A3 = request.AlignHeight;
+                m.WriteU32(c.SP + 0x10u, request.LimitWidth);
+                m.WriteU32(c.SP + 0x14u, request.LimitHeight);
+                Dispatcher.Call(c, m, 0x80018124u);
+                if (c.V0 == 0u)
+                    throw new OutOfMemoryException(
+                        $"V8 guest VRAM reservation failed for " +
+                        $"{request.Width}x{request.Height}");
+                uint x = (uint)(short)m.ReadU16(c.V0);
+                uint y = (uint)(short)m.ReadU16(c.V0 + 2u);
+                c.A0 = 0x18u;
+                Alloc(c, m);
+                uint descriptor = c.V0;
+                if (descriptor == 0u)
+                    throw new OutOfMemoryException(
+                        "V8 synthetic VRAM descriptor allocation failed");
+                m.WriteU16(descriptor, checked((ushort)x));
+                m.WriteU16(descriptor + 2u, checked((ushort)y));
+                m.WriteU16(
+                    descriptor + 4u, checked((ushort)request.Width));
+                m.WriteU16(
+                    descriptor + 6u, checked((ushort)request.Height));
+                m.WriteU32(descriptor + 8u, 1u);
+                m.WriteU32(descriptor + 0xCu, 0u);
+                m.WriteU32(descriptor + 0x10u, 0u);
+                m.WriteU32(descriptor + 0x14u, 0u);
+                SyntheticVramDescriptors.Add(descriptor);
+                GuestVramReservations.Add(new GuestVramReservation(
+                    request, x, y, descriptor));
+            }
+            Console.Error.WriteLine(
+                $"[V8Vehicles] reserved {GuestVramReservations.Count} " +
+                "native VRAM rectangles for selected guest");
+        }
+        catch
+        {
+            ReleaseGuestVramReservation(c, m);
+            throw;
+        }
+        finally
+        {
+            m.WriteU32(c.SP + 0x10u, stack10);
+            m.WriteU32(c.SP + 0x14u, stack14);
+            c.Restore(snapshot);
+        }
+    }
+
+    public static void ReleaseGuestVramReservation(CpuContext c, IMemory m)
+    {
+        if (GuestVramReservations.Count == 0)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        var snapshot = c.Snapshot();
+        try
+        {
+            for (int index = GuestVramReservations.Count - 1;
+                 index >= 0;
+                 index--)
+            {
+                c.A0 = GuestVramReservations[index].X;
+                c.A1 = GuestVramReservations[index].Y;
+                Dispatcher.Call(c, m, 0x80018530u);
+                if (c.V0 == 0u)
+                    throw new InvalidOperationException(
+                        $"reserved V8 VRAM rectangle at " +
+                        $"({GuestVramReservations[index].X}," +
+                        $"{GuestVramReservations[index].Y}) disappeared");
+            }
+            Console.Error.WriteLine(
+                $"[V8Vehicles] released {GuestVramReservations.Count} " +
+                "reserved native VRAM rectangles");
+            GuestVramReservations.Clear();
+        }
+        finally
+        {
+            c.Restore(snapshot);
+        }
+    }
+
+    public static void BeginGuestVramClaim()
+    {
+        _guestVramClaimIndex = 0;
+        ClaimedGuestVramReservations.Clear();
+        _guestVramClaimActive = GuestVramReservations.Count != 0;
+    }
+
+    public static void EndGuestVramClaim()
+    {
+        _guestVramClaimActive = false;
+        Console.Error.WriteLine(
+            $"[V8Vehicles] claimed {_guestVramClaimIndex} of " +
+            $"{GuestVramReservations.Count} reserved native VRAM rectangles; " +
+            "unused authored textures remain reserved for this match");
+        GuestVramReservations.Clear();
+        ClaimedGuestVramReservations.Clear();
+    }
+
+    public static void AbortGuestVramClaim()
+    {
+        _guestVramClaimActive = false;
+        ClaimedGuestVramReservations.Clear();
+    }
+
+    public static bool ClaimGuestVramAllocation(CpuContext c, IMemory m)
+    {
+        if (!_guestVramClaimActive)
+            return true;
+
+        var request = (
+            c.A0, c.A1, c.A2, c.A3,
+            m.ReadU32(c.SP + 0x10u), m.ReadU32(c.SP + 0x14u));
+        for (int index = 0; index < GuestVramReservations.Count; index++)
+        {
+            if (ClaimedGuestVramReservations.Contains(index))
+                continue;
+
+            GuestVramReservation reservation = GuestVramReservations[index];
+            NativeVramAllocation expected = reservation.Request;
+            if (request != (
+                    expected.Width,
+                    expected.Height,
+                    expected.AlignWidth,
+                    expected.AlignHeight,
+                    expected.LimitWidth,
+                    expected.LimitHeight))
+                continue;
+
+            c.V0 = reservation.Descriptor;
+            ClaimedGuestVramReservations.Add(index);
+            _guestVramClaimIndex++;
+            return false;
+        }
+
+        Console.Error.WriteLine(
+            $"[V8Vehicles] no reserved VRAM rectangle matches requested " +
+            $"{request.Item1}x{request.Item2} align=" +
+            $"{request.Item3}x{request.Item4} bounds=" +
+            $"{request.Item5}x{request.Item6}");
+        return true;
+    }
+
+    public static bool IgnoreSyntheticVramFree(CpuContext c, IMemory m) =>
+        !SyntheticVramDescriptors.Contains(c.A0);
 
     public static void TraceVramAlloc(CpuContext c, IMemory m)
     {

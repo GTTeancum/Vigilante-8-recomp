@@ -121,6 +121,7 @@ internal static unsafe class InputManager
         }
         ApplyScriptedInput();
         Controller.State &= (ushort)~V8Compat.GetAutomationInputMask();
+        Controller.State &= (ushort)~V82Compat.GetAutomationInputMask();
         Controller.Connected2 = _forcePad2Connected ||
             (!_disableLiveInput && (_pad1 != null || HasAnyKey(ConfigManager.Game.Keys2)));
     }

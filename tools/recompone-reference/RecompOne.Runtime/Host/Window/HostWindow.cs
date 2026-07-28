@@ -47,6 +47,12 @@ internal static class HostWindow
         int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_PRESENTATION_CAPTURE_FRAME"), out int captureFrame)
             ? Math.Max(1, captureFrame)
             : 0;
+    static readonly HashSet<int> _presentationCaptureFrames =
+        (Environment.GetEnvironmentVariable("RECOMPONE_PRESENTATION_CAPTURE_FRAMES") ?? "")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(value => int.TryParse(value, out int frame) ? frame : 0)
+        .Where(frame => frame > 0)
+        .ToHashSet();
     static int _presentationFrame;
     static readonly bool _capturePresentation =
         Environment.GetEnvironmentVariable("RECOMPONE_PRESENTATION_CAPTURE") == "1";
@@ -205,8 +211,9 @@ internal static class HostWindow
         _presentationRenderer = new PresentationRenderer(_gl);
         _presentationRenderer.Initialize();
 
-        bool highResolution3D = ConfigManager.View.HighResolution3D ||
-            Environment.GetEnvironmentVariable("RECOMPONE_GPU_HLE") == "1";
+        string? hleOverride = Environment.GetEnvironmentVariable("RECOMPONE_GPU_HLE");
+        bool highResolution3D = hleOverride == "1" ||
+            (hleOverride != "0" && ConfigManager.View.HighResolution3D);
         Hle.GlVram.Scale = highResolution3D ? 4 : 1;
         _glBackend = new Hle.GlBackend(_gl);
         _glBackend.InitGl();
@@ -215,6 +222,10 @@ internal static class HostWindow
         Hle.GpuHle.NativeResolution = false;
         Console.WriteLine(
             $"[Host] PS1 color dithering={(ConfigManager.View.Ps1Dithering ? "On (fidelity)" : "Off (enhanced default)")}");
+        Console.WriteLine(
+            $"[Host] PS1 texture smoothing={(ConfigManager.View.TextureSmoothing ? "On (enhanced default)" : "Off (fidelity)")}");
+        Console.WriteLine(
+            $"[Host] PS1 texture projection fix={(ConfigManager.View.PerspectiveCorrectTextures ? "On (enhanced default)" : "Off (fidelity)")}");
 
         _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
 
@@ -234,6 +245,7 @@ internal static class HostWindow
         SettingsRegistry.Register(new InputSettingsSection());
         SettingsRegistry.Register(new DisplaySettingsSection());
         SettingsRegistry.Register(new AudioSettingsSection());
+        MenuRegistry.Register("Guest Vehicles", GuestVehicleMenu.Draw);
 
         _discPicker = new DiscPickerPopup();
         PanelManager.Register(_discPicker);
@@ -241,7 +253,8 @@ internal static class HostWindow
         ConfigManager.ApplyViewToPanels(PanelManager.Panels);
 
         var cdPath = ConfigManager.Game.CdPath;
-        if (string.IsNullOrWhiteSpace(cdPath) || !File.Exists(cdPath))
+        if (Runtime.ResolveLoosePath() == null &&
+            (string.IsNullOrWhiteSpace(cdPath) || !File.Exists(cdPath)))
             _discPicker.Show();
     }
 
@@ -406,7 +419,10 @@ internal static class HostWindow
         {
             string? capture = _pendingPresentationCapture;
             _pendingPresentationCapture = null;
-            if (_capturePresentation && ++_presentationFrame == _presentationCaptureFrame)
+            ++_presentationFrame;
+            if (_capturePresentation &&
+                (_presentationFrame == _presentationCaptureFrame ||
+                 _presentationCaptureFrames.Contains(_presentationFrame)))
                 capture = $"frame_{_presentationFrame:000000}";
             texture = _presentationRenderer.Render(sourceTexture, sourceWidth, sourceHeight,
                 output.w, output.h, fxaa, capture);

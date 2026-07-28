@@ -33,7 +33,11 @@ public static class LibGpu
         var gpu = Runtime.Gpu;
         if (gpu == null) return;
 
-        uint addr = c.A0 & 0x1FFFFCu;
+        uint ramAddressMask =
+            (Runtime.Mode == RunMode.Devkit
+                ? MemoryMap.DevkitRamSize
+                : MemoryMap.RetailRamSize) - 4u;
+        uint addr = c.A0 & ramAddressMask;
         for (int guard = 0; guard < 0x100000; guard++)
         {
             uint header = m.ReadU32(addr);
@@ -42,7 +46,7 @@ public static class LibGpu
                 gpu.WriteGp0(m.ReadU32(addr + 4u + i * 4u));
             uint next = header & 0xFFFFFFu;
             if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
-            addr = next & 0x1FFFFCu;
+            addr = next & ramAddressMask;
         }
     }
 

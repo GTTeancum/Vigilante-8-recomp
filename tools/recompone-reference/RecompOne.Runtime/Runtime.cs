@@ -9,6 +9,9 @@ public enum RunMode { Retail, Devkit }
 public static class Runtime
 {
     static bool? _lastDisplayEnabled;
+    static int _presentTraceCount;
+    static readonly bool TraceVSync =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VSYNC") == "1";
     public static CpuContext? Cpu { get; private set; }
     public static IMemory? Mem { get; private set; }
     public static Gpu? Gpu;
@@ -45,7 +48,10 @@ public static class Runtime
         Diagnostics.ConsoleMirror.Install();
         HostWindow.Initialize(title);
         Audio.Initialize();
-        Audio.SetMasterVolume(Config.ConfigManager.Game.Muted ? 0f : Config.ConfigManager.Game.MasterVolume);
+        bool forceMute = Environment.GetEnvironmentVariable("RECOMPONE_MUTE") == "1";
+        Audio.SetMasterVolume(forceMute || Config.ConfigManager.Game.Muted
+            ? 0f
+            : Config.ConfigManager.Game.MasterVolume);
     }
 
     public static void WaitForValidDisc() => HostWindow.WaitForValidDisc();
@@ -58,17 +64,23 @@ public static class Runtime
 
     public static void PresentFrame()
     {
+        int traceFrame = _presentTraceCount++;
+        if (TraceVSync && traceFrame < 10) Console.Error.WriteLine($"[VSync] present {traceFrame}: window");
         if (Gpu != null && _lastDisplayEnabled != Gpu.DisplayEnabled)
         {
             _lastDisplayEnabled = Gpu.DisplayEnabled;
             Console.WriteLine($"[GPU] display={Gpu.DisplayEnabled} area={Gpu.DisplayX},{Gpu.DisplayY} {Gpu.DisplayWidth}x{Gpu.DisplayHeight} hle={Hle.GpuHle.Active}");
         }
         HostWindow.Present(Gpu);
+        if (TraceVSync && traceFrame < 10) Console.Error.WriteLine($"[VSync] present {traceFrame}: audio");
         Audio.Attach(Spu);
         FrameClock.Throttle();
+        if (TraceVSync && traceFrame < 10) Console.Error.WriteLine($"[VSync] present {traceFrame}: devices");
         Sdk.LibCd.Tick();
         if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); } //is this correct?
+        if (TraceVSync && traceFrame < 10) Console.Error.WriteLine($"[VSync] present {traceFrame}: irq");
         DispatchIrq(0); //using this to dispatch irqs too if necessary, probably not needed after the rest of stuff is reimplemented
+        if (TraceVSync && traceFrame < 10) Console.Error.WriteLine($"[VSync] present {traceFrame}: done");
     }
 
     public static void DispatchIrq(int irq)

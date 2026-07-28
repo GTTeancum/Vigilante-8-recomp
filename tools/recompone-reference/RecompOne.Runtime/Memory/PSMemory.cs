@@ -7,6 +7,11 @@ namespace RecompOne.Runtime.Memory;
 
 public sealed class PSMemory : IMemory
 {
+    private static readonly uint? _watchedWriteAddress = ParseWatchedWriteAddress();
+    private static readonly bool _watchDmaLinksOnly =
+        Environment.GetEnvironmentVariable("RECOMPONE_WATCH_WRITE_DMA_LINK") == "1";
+    private static int _watchedWriteCount;
+
     private readonly byte[] _ram = new byte[Runtime.Mode == RunMode.Devkit ? MemoryMap.DevkitRamSize : MemoryMap.RetailRamSize];
     private readonly byte[] _scratchpad = new byte[MemoryMap.ScratchpadSize];
     private readonly byte[] _hwregs = new byte[MemoryMap.HwRegsSize];
@@ -28,6 +33,38 @@ public sealed class PSMemory : IMemory
         Runtime.Gpu = _gpu;
         Runtime.Spu = _spu;
         Bios.KromFont.InstallInto(_bios);
+    }
+
+    private static uint? ParseWatchedWriteAddress()
+    {
+        string? text = Environment.GetEnvironmentVariable("RECOMPONE_WATCH_WRITE");
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            text = text[2..];
+
+        return uint.TryParse(
+            text,
+            System.Globalization.NumberStyles.HexNumber,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out uint address)
+            ? MemoryMap.ToPhysical(address)
+            : null;
+    }
+
+    private static void TraceWatchedWrite(uint phys, uint value)
+    {
+        if (_watchedWriteAddress != phys)
+            return;
+        if (_watchDmaLinksOnly &&
+            ((value & 0xFF000000u) != 0u || (value & 0x00F00000u) != 0x00700000u))
+            return;
+
+        int count = System.Threading.Interlocked.Increment(ref _watchedWriteCount);
+        if (count <= 64)
+            Console.Error.WriteLine(
+                $"[MemoryWatch] #{count} write32 phys=0x{phys:X8} value=0x{value:X8}{Environment.NewLine}{Environment.StackTrace}");
     }
 
     public void SetCd(CdController cd) { _cd = cd; _dma.SetCd(cd); }
@@ -147,6 +184,7 @@ public sealed class PSMemory : IMemory
     public void WriteU32(uint address, uint value)
     {
         uint phys = MemoryMap.ToPhysical(address);
+        TraceWatchedWrite(phys, value);
         TrackWrite(phys, 4);
         if (phys == 0x1F801810u) { _gpu.WriteGp0(value); return; }
         if (phys == 0x1F801814u) { _gpu.WriteGp1(value); return; }

@@ -50,9 +50,8 @@ public static class LibPad
     {
         int port = PortIndex(c.A0);
         uint ptr = c.A1;
-        uint len = c.A2;
-        if (ptr == 0 || len < 2) { c.V0 = 0; return; }
-        for (int i = 0; i < (int)len && i < 6; i++)
+        if (ptr == 0) { c.V0 = 0; return; }
+        for (int i = 0; i < 6; i++)
         {
             byte v = m.ReadU8(ptr + (uint)i);
             if (v == 0x00) _smallMotorIdx[port] = i;

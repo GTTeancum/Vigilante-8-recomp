@@ -79,6 +79,17 @@ public static class OverlayWriter
             else
             {
                 Console.WriteLine("[Recompiler] processing main executable");
+                // A raw PS-EXE still contains everything needed to resolve
+                // address tables embedded in its loaded image. Keep a
+                // synthetic FunctionInfo so the same jump-table analysis used
+                // for overlays can turn internal JR dispatches into local
+                // branches instead of recursive Dispatcher.Call chains.
+                elfInfo = new FunctionInfo
+                {
+                    LoadAddress = mainExe.Destination,
+                    TextBase = mainExe.Destination,
+                    TextData = mainExe.Code,
+                };
                 mainInstrs = MipsDisasm.Disassemble(mainExe.Code, mainExe.Destination);
                 funcs = FunctionDetector.DetectFromScan(mainInstrs, mainExe.InitialPC, "main");
             }

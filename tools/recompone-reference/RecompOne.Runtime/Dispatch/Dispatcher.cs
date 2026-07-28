@@ -10,9 +10,11 @@ public static class Dispatcher
     static readonly Dictionary<int, string> _lbaToName = [];
     static readonly List<string> _active = [];
     static readonly Dictionary<uint, Action<CpuContext, IMemory>> _funcMap = [];
+    static readonly Dictionary<uint, Action<CpuContext, IMemory>> _hostFunctions = [];
     static readonly Dictionary<uint, (IOverlay Overlay, uint Delta)> _relocatedFunctions = [];
     static readonly Dictionary<uint, uint> _relocatedAliases = [];
     static readonly Dictionary<uint, (uint Base, uint Size, uint Delta)> _objectOwners = [];
+    static readonly List<(IOverlay Overlay, uint Delta)> _relocatedImages = [];
     private static IOverlay? _pending;
     public static void Register(string name, IOverlay overlay)
     {
@@ -27,6 +29,15 @@ public static class Dispatcher
     
     public static IReadOnlyDictionary<string, IOverlay> Overlays => _registry;
 
+    public static void RegisterHostFunction(
+        uint address, Action<CpuContext, IMemory> function)
+    {
+        if (_hostFunctions.ContainsKey(address) || _funcMap.ContainsKey(address))
+            throw new InvalidOperationException(
+                $"function address 0x{address:X8} is already registered");
+        _hostFunctions[address] = function;
+    }
+
     public static IMemory UnwrapMemory(IMemory memory) =>
         memory is RelocatedMemory relocated ? relocated.Inner : memory;
 
@@ -39,6 +50,15 @@ public static class Dispatcher
             : address;
     }
 
+    public static uint ResolveLinkedAddress(IMemory memory, uint address)
+    {
+        if (memory is not RelocatedMemory relocated) return address;
+        return address >= relocated.LinkedBase &&
+               address - relocated.LinkedBase < relocated.Size
+            ? address + relocated.Delta
+            : address;
+    }
+
     public static void AssociateObjectOwner(uint address, IMemory memory)
     {
         if (address == 0u || memory is not RelocatedMemory relocated) return;
@@ -46,6 +66,58 @@ public static class Dispatcher
     }
 
     public static void ForgetObjectOwner(uint address) => _objectOwners.Remove(address);
+
+    public static uint ResolveOwnedAddress(uint objectAddress, uint address)
+    {
+        if (_objectOwners.TryGetValue(objectAddress, out var owner) &&
+            address >= owner.Base && address - owner.Base < owner.Size)
+            return address + owner.Delta;
+
+        // Static arena objects do not pass through the heap object factory and
+        // therefore have no per-object owner record. They still retain linked
+        // data pointers. Prefer the most recently registered matching image:
+        // LOAD is registered first and the arena which supersedes its linked
+        // address range is registered immediately afterward.
+        for (int pass = 0; pass < 2; pass++)
+        {
+            for (int i = _relocatedImages.Count - 1; i >= 0; i--)
+            {
+                var image = _relocatedImages[i];
+                bool arena = image.Overlay.Name.StartsWith(
+                    "LEVELS_", StringComparison.OrdinalIgnoreCase);
+                if ((pass == 0) != arena)
+                    continue;
+                if (address >= image.Overlay.Base &&
+                    address - image.Overlay.Base < image.Overlay.Size)
+                    return address + image.Delta;
+            }
+        }
+        return address;
+    }
+
+    public static uint ResolveOwnedFunction(uint objectAddress, uint address)
+    {
+        if (_objectOwners.TryGetValue(objectAddress, out var owner))
+        {
+            uint owned = address >= owner.Base &&
+                         address - owner.Base < owner.Size
+                ? address + owner.Delta
+                : address;
+            if (_funcMap.ContainsKey(owned))
+                return owned;
+        }
+
+        for (int i = _relocatedImages.Count - 1; i >= 0; i--)
+        {
+            var image = _relocatedImages[i];
+            if (!image.Overlay.Functions.ContainsKey(address))
+                continue;
+            uint actual = address + image.Delta;
+            if (_funcMap.ContainsKey(actual))
+                return actual;
+        }
+        return address;
+    }
 
     public static (uint Base, uint Size)[] LinkedAddressRanges() =>
         _registry.Values
@@ -189,13 +261,35 @@ public static class Dispatcher
     public static void Call(CpuContext c, IMemory m, uint addr)
     {
         if (BiosKernel.TryDispatch(c, m, addr)) return;
+        if (_hostFunctions.TryGetValue(addr, out var hostFunction))
+        {
+            hostFunction(c, m);
+            return;
+        }
         bool baseMemoryCall = m is not RelocatedMemory;
         (uint Base, uint Size, uint Delta) owner = default;
-        bool hasOwner = baseMemoryCall && _objectOwners.TryGetValue(c.A0, out owner);
-        if (m is RelocatedMemory linked &&
+        bool hasOwner = _objectOwners.TryGetValue(c.A0, out owner);
+        IMemory baseMemory = UnwrapMemory(m);
+        uint objectPhysical = c.A0 & 0x1FFFFFFFu;
+        uint ramSize = Runtime.Mode == RunMode.Devkit
+            ? 0x00800000u
+            : 0x00200000u;
+        bool objectCallback =
+            objectPhysical <= ramSize - 4u &&
+            baseMemory.ReadU32(c.A0) == addr;
+        if (objectCallback)
+        {
+            // A relocated arena callback can invoke a callback owned by a
+            // vehicle/shared overlay. The caller's RelocatedMemory describes
+            // the arena, not the target object; translating through it first
+            // turns legitimate shared callbacks into arena data addresses.
+            addr = ResolveOwnedFunction(c.A0, addr);
+        }
+        else if (m is RelocatedMemory linked &&
             addr >= linked.LinkedBase && addr - linked.LinkedBase < linked.Size)
             addr += linked.Delta;
-        else if (hasOwner && addr >= owner.Base && addr - owner.Base < owner.Size)
+        else if (baseMemoryCall && hasOwner &&
+                 addr >= owner.Base && addr - owner.Base < owner.Size)
         {
             uint linkedAddr = addr;
             uint ownerAddr = linkedAddr + owner.Delta;
@@ -219,7 +313,9 @@ public static class Dispatcher
                 addr = ownerAddr;
             }
         }
-        else if (!_funcMap.ContainsKey(addr) && _relocatedAliases.TryGetValue(addr, out uint aliasDelta))
+        else if ((baseMemoryCall || !_funcMap.ContainsKey(addr)) &&
+                 _relocatedAliases.TryGetValue(addr, out uint aliasDelta) &&
+                 _funcMap.ContainsKey(addr + aliasDelta))
             addr += aliasDelta;
         if (!_funcMap.ContainsKey(addr))
             TryLoadRelocatedOverlay(m, addr);
@@ -237,17 +333,15 @@ public static class Dispatcher
                     relocation.Overlay.Size, relocation.Delta);
             }
         }
-        else if (hasOwner)
-        {
-            callMemory = new RelocatedMemory(m, owner.Base, owner.Size, owner.Delta);
-        }
         fn(c, callMemory);
     }
 
     static void TryLoadRelocatedOverlay(IMemory m, uint addr)
     {
         const uint RamBase = 0x80000000u;
-        const uint RamSize = 0x00200000u;
+        uint RamSize = Runtime.Mode == RunMode.Devkit
+            ? 0x00800000u
+            : 0x00200000u;
         if (addr < RamBase || addr >= RamBase + RamSize) return;
 
         IMemory baseMemory = UnwrapMemory(m);
@@ -292,15 +386,13 @@ public static class Dispatcher
     static void RegisterRelocatedOverlay(IOverlay overlay, uint actualBase)
     {
         uint delta = actualBase - overlay.Base;
-        foreach (var (original, function) in overlay.Functions)
-        {
-            _funcMap[original + delta] = function;
-            _relocatedFunctions[original + delta] = (overlay, delta);
-            _relocatedAliases[original] = delta;
-        }
+        _relocatedImages.RemoveAll(image =>
+            ReferenceEquals(image.Overlay, overlay));
+        _relocatedImages.Add((overlay, delta));
 
         lock (_active)
             if (!_active.Contains(overlay.Name)) _active.Add(overlay.Name);
+        Rebuild();
         Runtime.OverlayLog.Record(overlay.Name, OverlayEventKind.Loaded,
             $"relocated by 0x{delta:X8}");
         Console.WriteLine($"[Dispatcher] loaded relocated overlay: {overlay.Name} base=0x{actualBase:X8} delta=0x{delta:X8}");
@@ -309,7 +401,9 @@ public static class Dispatcher
     static string DescribeOverlayImages(IMemory memory, uint target)
     {
         const uint ramBase = 0x80000000u;
-        const uint ramEnd = 0x80200000u;
+        uint ramEnd = Runtime.Mode == RunMode.Devkit
+            ? 0x80800000u
+            : 0x80200000u;
         IMemory baseMemory = UnwrapMemory(memory);
         var sizes = _registry.Values
             .Where(overlay => overlay.ImageSize != 0u)
@@ -335,7 +429,10 @@ public static class Dispatcher
     {
         IMemory baseMemory = UnwrapMemory(memory);
         uint physical = c.A0 & 0x1FFFFFFFu;
-        if (physical >= 0x00200000u || physical > 0x00200000u - 0xA0u)
+        uint ramSize = Runtime.Mode == RunMode.Devkit
+            ? 0x00800000u
+            : 0x00200000u;
+        if (physical >= ramSize || physical > ramSize - 0xA0u)
             return $"a0=0x{c.A0:X8} a1=0x{c.A1:X8} a2=0x{c.A2:X8} ra=0x{c.RA:X8}";
 
         uint[] offsets = [0x00u, 0x04u, 0x08u, 0x0Cu, 0x34u, 0x38u,
@@ -350,11 +447,32 @@ public static class Dispatcher
     static void Rebuild()
     {
         _funcMap.Clear();
+        _relocatedFunctions.Clear();
+        _relocatedAliases.Clear();
         lock (_active)
         {
             foreach (var name in _active)
                 foreach (var (addr, fn) in _registry[name].Functions)
                     _funcMap[addr] = fn;
+
+            // A relocated arena may unload another overlay after all of its
+            // functions have already been registered. Rebuild used to retain
+            // only linked addresses, leaving object-owner metadata and aliases
+            // pointing at actual addresses absent from the dispatch table.
+            // Reconstruct all three indexes from the same active image set so
+            // an indirect callback cannot fall through to an older LOAD image.
+            foreach (var (overlay, delta) in _relocatedImages)
+            {
+                if (!_active.Contains(overlay.Name))
+                    continue;
+                foreach (var (original, function) in overlay.Functions)
+                {
+                    uint actual = original + delta;
+                    _funcMap[actual] = function;
+                    _relocatedFunctions[actual] = (overlay, delta);
+                    _relocatedAliases[original] = delta;
+                }
+            }
         }
     }
 }

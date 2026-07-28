@@ -49,7 +49,7 @@ internal sealed class LooseCdda : IDisposable
         EnsureOpen(track);
         long sourceFrame = checked((long)(lba - track.StartLba) * FramesPerSector);
         if (_reader!.SamplePosition != sourceFrame)
-            _reader.SamplePosition = sourceFrame;
+            Seek(sourceFrame, track);
 
         int channels = _reader.Channels;
         int wantedSamples = FramesPerSector * channels;
@@ -95,6 +95,39 @@ internal sealed class LooseCdda : IDisposable
         _openTrack = track;
         Console.WriteLine(
             $"[CDDA] loose track={track.Number} source={track.Source} streaming");
+    }
+
+    private void Seek(long sourceFrame, V8LooseTrack track)
+    {
+        try
+        {
+            _reader!.SamplePosition = sourceFrame;
+            return;
+        }
+        catch (InvalidDataException exception)
+        {
+            // NVorbis can reject the final seek-table page produced by
+            // libvorbis even though sequential decoding remains valid. CDDA
+            // track switches commonly land in that last page, so reopen and
+            // advance without consulting the damaged granule index.
+            Console.Error.WriteLine(
+                $"[CDDA] indexed seek failed for track {track.Number} " +
+                $"frame={sourceFrame}; decoding forward: {exception.Message}");
+        }
+
+        _reader.Dispose();
+        _reader = new VorbisReader(SourcePath(track));
+        int channels = _reader.Channels;
+        float[] discard = new float[65536 / channels * channels];
+        long remaining = sourceFrame * channels;
+        while (remaining > 0)
+        {
+            int requested = (int)Math.Min(remaining, discard.Length);
+            int read = _reader.ReadSamples(discard, 0, requested);
+            if (read == 0)
+                break;
+            remaining -= read;
+        }
     }
 
     private string SourcePath(V8LooseTrack track)

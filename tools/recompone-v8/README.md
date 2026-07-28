@@ -50,3 +50,20 @@ can omit a deliberately uncontrolled field; `--allow-prefix`
 validates a clean common prefix when a capture is interrupted. The later native
 port should emit the same pointer-neutral schema when its gameplay loop is
 ready. External PS1/emulator comparison is not part of the reference goal.
+
+## Independent native vehicle runtime
+
+V8 is fully supported by the same donor-free package and stable-ID roster used
+by the V8:2 lead implementation, with sequel-only transformation and powerup
+fields rejected. Select an append-only guest entry with:
+
+```powershell
+Vigilante8PC.exe --guest-vehicle author.vehicle_id retail-disc.cue
+```
+
+Set `RECOMPONE_V8_VEHICLE_PACKAGE` to the directory containing
+`VEHICLES.V8R` and `CUSTOM.EXP`. The engine streams only the selected native
+body bank, allocates independent stats and identity state, resets the original
+match VRAM allocator, and reserves the bank's exact CLUT/image rectangles
+before COMMON loads. The original texture loader claims those reservations at
+construction; no retail character, donor bank, or opaque payload is used.

@@ -3,6 +3,22 @@
 Last updated: 2026-07-23 EDT
 Status: AUTONOMOUS WORK EXHAUSTED - AWAITING USER SIGN-OFF
 
+# User entered list
+1. Vehicles will not reverse. Brakes allow stopping, but not reversing
+2. Fix PS1 texture projection
+3. There is an option to rasterize 3D models, but this appears to do nothing
+4. Add LOD options - draw terrain at highest LOD always, same with vehicles and weapons. Also add a draw distance option
+5. Widescreen support
+6. Game froze when starting Chassey Blue's quest. Smoke quest mode with each character
+7. Support for higher resolution textures. Possibly make UI shapes runtime-drawn instead of textured
+8. Support for modded content, including V8: Second Offense and Star Wars Demolition content, and ports of Interstate 76 cars.
+   Interstate '76 `I76.ZFS` source staging is complete in ignored `I76_ZFS/`; conversion of the 34 inventoried `.vdf` vehicle candidates remains deferred.
+9. Updating of in-game menus so that options like resolution, controls, etc are not externall
+10. Windows detection of controller type (Xbox, PS, etc) and a custom model for each in controls (wishlist)
+11. "advanced" (PS2 era) lighting options. Bettter lights generally, but also shadows
+12. Game will occasionally freeze for 2-4 seconds
+13. V8: 2nd Offense movies/FMVs appeared broken on a stale/earlier deployment: screenshot showed mostly black with a gray block/partial frame. Fresh 2026-07-27 deployment decodes full MDEC frames and captured valid ACTLOGO frames 60/120/180/260; keep broader FMV audit in the sequel UI/presentation goal.
+
 ## Current goal
 
 Run a five-hour standalone loose-files crash campaign with the following hard
@@ -74,6 +90,16 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 
 ### User-found defect remediation
 
+- [ ] Fix locked-arena standalone loose-file launch for Sand Factory and Secret
+      Base. The 2026-07-28 visual-smoke pass still exits before gameplay with
+      `unmapped call: 0x00000000` from `FUN_80110c7c` during the SHELL-to-level
+      transition while eight selectable arenas pass.
+- [x] Recheck V8: 2nd Offense movie/FMV playback on the fresh deployed sequel
+      build. Screenshot evidence from 2026-07-27 originally showed the movie
+      window mostly black with a gray vertical partial frame/block; the fresh
+      build now decodes full 320x240 MDEC frames and captured valid ACTLOGO
+      presentation frames at 60, 120, 180, and 260. Broader all-FMV visual
+      audit remains part of the sequel UI/presentation polish goal.
 - [x] Recover the Aircraft Graveyard crash, translate the omitted native
       callback, and pass a sustained arena regression under movement and
       weapon load.
@@ -153,9 +179,14 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 - [x] Add a PS1 color-dithering toggle and default the enhanced presentation
       mode to undithered output so flat textures and gradients remain clean;
       retain authentic ordered dithering in the fidelity/reference mode.
-- [ ] Add optional perspective-correct texture mapping to eliminate the
+- [x] Add optional perspective-correct texture mapping to eliminate the
       PlayStation's affine texture warping/projection distortion, while
-      retaining a fidelity mode for exact reference comparisons.
+      retaining a fidelity mode for exact reference comparisons. V8:2 enhanced
+      mode now uses recovered recent GTE screen depth for textured 3D triangles
+      whose vertices can be matched safely.
+- [x] Add enhanced PS1 texture smoothing to reduce chunky texture pixelation
+      while preserving nearest-sampled transparency/STP decisions for cutouts
+      and semi-transparent primitives.
 - [ ] Add a geometry-edge anti-aliasing option (prefer MSAA or an equivalent
       edge-only pass) that preserves crisp source textures and PS1 dithering;
       retain full-frame FXAA and Off as separately selectable modes.
@@ -312,3 +343,8 @@ The retained screenshots and controller checklist are collected in
   No stale handoff logs were present, and both memory cards plus all settings
   retained their pre-deployment hashes. Autonomous work is exhausted; only the
   two subjective checks in the user sign-off queue remain.
+
+- 2026-07-27: V8:2 visual polish: Smooth PS1 textures and Fix PS1 texture
+  projection are default-on in enhanced 3D. The projection fix uses recent GTE
+  SX/SY/SZ correlation for textured 3D triangles only; sprites, menus, and
+  2D rectangles retain ordinary screen-space interpolation.

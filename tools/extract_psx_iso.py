@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Extract files from a PlayStation MODE2/2352 data track.
+"""Extract files from a raw-sector ISO9660 MODE1/2352 or MODE2/2352 track.
 
-Vigilante 8's CUE has track 01 as MODE2/2352.  ISO9660 directory records live in
-the 2048-byte Form 1 payload at sector offset 24, so this avoids relying on
-third-party GUI extraction tools.
+The 2048-byte ISO payload begins at offset 16 for MODE1 and offset 24 for
+MODE2 Form 1. The extractor detects the layout from the primary volume
+descriptor and avoids relying on third-party GUI extraction tools.
 """
 from __future__ import annotations
 
@@ -18,13 +18,15 @@ from pathlib import Path
 SECTOR_RAW = 2352
 SECTOR_DATA = 2048
 MODE2_FORM1_DATA_OFF = 24
+MODE1_DATA_OFF = 16
 
 
 class PsxIso:
-    def __init__(self, track_path: Path):
+    def __init__(self, track_path: Path, data_offset: int):
         self.track_path = track_path
         self.fp = track_path.open("rb")
         self.sectors = track_path.stat().st_size // SECTOR_RAW
+        self.data_offset = data_offset
 
     def close(self) -> None:
         self.fp.close()
@@ -32,7 +34,7 @@ class PsxIso:
     def read_sector(self, lba: int) -> bytes:
         if lba < 0 or lba >= self.sectors:
             raise ValueError(f"LBA {lba} outside track ({self.sectors} sectors)")
-        self.fp.seek(lba * SECTOR_RAW + MODE2_FORM1_DATA_OFF)
+        self.fp.seek(lba * SECTOR_RAW + self.data_offset)
         data = self.fp.read(SECTOR_DATA)
         if len(data) != SECTOR_DATA:
             raise IOError(f"short sector read at LBA {lba}")
@@ -182,18 +184,31 @@ def main() -> int:
         shutil.rmtree(args.out_dir)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    iso = PsxIso(args.track01)
+    data_offset = None
+    with args.track01.open("rb") as fp:
+        for candidate in (MODE1_DATA_OFF, MODE2_FORM1_DATA_OFF):
+            fp.seek(16 * SECTOR_RAW + candidate)
+            pvd = fp.read(SECTOR_DATA)
+            if pvd[1:6] == b"CD001":
+                data_offset = candidate
+                break
+    if data_offset is None:
+        raise SystemExit("primary volume descriptor not found at LBA 16")
+
+    iso = PsxIso(args.track01, data_offset)
     try:
         pvd = iso.read_sector(16)
-        if pvd[1:6] != b"CD001":
-            raise SystemExit("primary volume descriptor not found at LBA 16")
         root = pvd[156:156 + pvd[156]]
         root_extent = struct.unpack_from("<I", root, 2)[0]
         root_size = struct.unpack_from("<I", root, 10)[0]
         volume = pvd[40:72].decode("ascii", "replace").strip()
         files, dirs, skipped, placeholders = extract_tree(iso, root_extent, root_size, args.out_dir)
         filled = fill_cdda_placeholders(args.cue, placeholders) if args.cue else 0
-        print(f"extracted volume='{volume}' files={files} dirs={dirs} out_of_track_placeholders={skipped} cdda_filled={filled} to {args.out_dir}")
+        print(
+            f"extracted volume='{volume}' sector_data_offset={data_offset} "
+            f"files={files} dirs={dirs} out_of_track_placeholders={skipped} "
+            f"cdda_filled={filled} to {args.out_dir}"
+        )
     finally:
         iso.close()
     return 0

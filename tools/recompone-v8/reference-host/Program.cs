@@ -1,6 +1,7 @@
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Memory;
+using RecompOne.Runtime.Sdk;
 using Recompiled;
 
 string launchDirectory = Environment.CurrentDirectory;
@@ -13,8 +14,23 @@ string? explicitLoose = null;
 bool disableLoose = false;
 bool probeSource = false;
 string? probeFile = null;
+string? probeVehiclePackage = null;
+string? guestVehicle = null;
 for (int i = 0; i < args.Length; i++)
 {
+    if (args[i].Equals("--guest-vehicle", StringComparison.OrdinalIgnoreCase) &&
+        i + 1 < args.Length)
+    {
+        guestVehicle = args[++i];
+        continue;
+    }
+    if (args[i].Equals(
+            "--probe-vehicle-package", StringComparison.OrdinalIgnoreCase) &&
+        i + 1 < args.Length)
+    {
+        probeVehiclePackage = ResolveLaunchPath(args[++i]);
+        continue;
+    }
     if (args[i].Equals("--probe-source", StringComparison.OrdinalIgnoreCase))
     {
         probeSource = true;
@@ -44,11 +60,31 @@ for (int i = 0; i < args.Length; i++)
     explicitSource = ResolveLaunchPath(args[i]);
 }
 
+if (probeVehiclePackage != null)
+{
+    string validation =
+        V8VehicleRegistry.ValidatePackage(probeVehiclePackage);
+    VehicleRosterItem[] roster = V8VehicleRegistry.Roster();
+    if (roster.Length == 0)
+        throw new InvalidDataException("vehicle package has an empty guest roster");
+    V8VehicleRegistry.SelectType(roster[0].Type);
+    if (V8VehicleRegistry.SelectedType != roster[0].Type)
+        throw new InvalidOperationException("guest roster selection did not persist");
+    V8VehicleRegistry.SelectType(-1);
+    Console.WriteLine(
+        $"[VehiclePackage] {validation} roster=" +
+        $"{string.Join(',', roster.Select(item => $"{item.Type}:{item.StableId}"))}");
+    return 0;
+}
+
 if (explicitLoose != null && disableLoose)
 {
     PrintUsage();
     return 1;
 }
+
+if (guestVehicle != null)
+    V8VehicleRegistry.RequestSelection(guestVehicle);
 
 ConfigManager.Load();
 (string? cuePath, string? loosePath) = ResolveSource(
@@ -110,7 +146,8 @@ string ResolveLaunchPath(string path) => Path.GetFullPath(path, launchDirectory)
 
 static void PrintUsage() => Console.Error.WriteLine(
     "usage: Vigilante8PC [disc.cue|loose-directory] [--loose <directory>] " +
-    "[--no-loose] [--probe-source] [--probe-file <game-path>]");
+    "[--no-loose] [--probe-source] [--probe-file <game-path>] " +
+    "[--probe-vehicle-package <directory>] [--guest-vehicle <stable-id>]");
 
 static void PreloadBundledNative(string fileName)
 {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Vigilante 8's runtime-only loose-disc metadata and stream files.
+"""Build Vigilante 8's runtime-only loose-disc metadata and asset tree.
 
 The resulting JSON contains only ISO/CUE layout metadata.  STR and XA outputs
 retain each Mode 2 sector's 2336 bytes (subheader plus payload), so the PC host
@@ -12,7 +12,9 @@ import base64
 import json
 import os
 import re
+import shutil
 import struct
+import subprocess
 from pathlib import Path
 
 
@@ -60,9 +62,16 @@ def parse_cue(cue_path: Path) -> list[dict]:
         for track in grouped:
             index0 = track["indices"].get(0, track["indices"].get(1, 0))
             index1 = track["indices"].get(1, 0)
+            track["fileBaseLba"] = file_base_lba
             track["index0Lba"] = file_base_lba + index0
             track["startLba"] = file_base_lba + index1
-            track["endLba"] = file_base_lba + file_sectors
+        ordered = sorted(grouped, key=lambda item: item["index0Lba"])
+        for index, track in enumerate(ordered):
+            track["endLba"] = (
+                ordered[index + 1]["index0Lba"]
+                if index + 1 < len(ordered)
+                else file_base_lba + file_sectors
+            )
         file_base_lba += file_sectors
     return tracks
 
@@ -173,30 +182,83 @@ def add_music_sources(files: list[dict], tracks: list[dict]) -> None:
         if track["mode"] != "AUDIO":
             continue
         entry = by_lba.get(track["startLba"])
-        if entry is None or not entry["path"].upper().startswith("REDBOOK/"):
-            raise ValueError(
-                f'no REDBOOK entry maps audio track {track["number"]} '
-                f'at LBA {track["startLba"]}')
-        stem = Path(entry["path"]).stem
+        stem = (
+            Path(entry["path"]).stem
+            if entry is not None and
+            entry["path"].upper().startswith("REDBOOK/")
+            else f'track{track["number"]:02d}'
+        )
         track["source"] = f"music/{stem}.ogg"
 
 
-def write_raw_streams(track: DataTrack, files: list[dict], loose_root: Path) -> None:
+def write_loose_tree(track: DataTrack, files: list[dict], loose_root: Path) -> None:
     for entry in files:
         suffix = Path(entry["path"]).suffix.upper()
-        if suffix not in (".STR", ".XA"):
-            continue
-        sector_count = (entry["size"] + COOKED_SECTOR - 1) // COOKED_SECTOR
         target = loose_root / Path(entry["path"])
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_name(target.name + ".recompone-tmp")
-        with temporary.open("wb") as output:
-            for index in range(sector_count):
-                output.write(track.read_stream_sector(entry["lba"] + index))
+        if suffix in (".STR", ".XA"):
+            sector_count = (
+                entry["size"] + COOKED_SECTOR - 1
+            ) // COOKED_SECTOR
+            with temporary.open("wb") as output:
+                for index in range(sector_count):
+                    output.write(track.read_stream_sector(entry["lba"] + index))
+            storage = "raw stream"
+        else:
+            temporary.write_bytes(
+                track.read_extent(entry["lba"], entry["size"]))
+            sector_count = (
+                entry["size"] + COOKED_SECTOR - 1
+            ) // COOKED_SECTOR
+            storage = "cooked"
         os.replace(temporary, target)
         print(
-            f"raw stream {entry['path']} sectors={sector_count} "
+            f"{storage} {entry['path']} sectors={sector_count} "
             f"bytes={target.stat().st_size}")
+
+
+def write_music_tracks(tracks: list[dict], loose_root: Path) -> None:
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise FileNotFoundError(
+            "ffmpeg is required to prepare standalone CD-audio tracks")
+    for track in tracks:
+        source = track.get("source")
+        if not source:
+            continue
+        target = loose_root / Path(source)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(target.name + ".recompone-tmp.ogg")
+        start_sector = track["startLba"] - track["fileBaseLba"]
+        sector_count = track["endLba"] - track["startLba"]
+        command = [
+            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "s16le", "-ar", "44100", "-ac", "2", "-i", "pipe:0",
+            "-c:a", "libvorbis", "-q:a", "6", str(temporary),
+        ]
+        with track["file"].open("rb") as source_file:
+            source_file.seek(start_sector * RAW_SECTOR)
+            process = subprocess.Popen(command, stdin=subprocess.PIPE)
+            assert process.stdin is not None
+            remaining = sector_count * RAW_SECTOR
+            while remaining:
+                chunk = source_file.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    process.kill()
+                    raise IOError(
+                        f"short CD-audio read for track {track['number']}")
+                process.stdin.write(chunk)
+                remaining -= len(chunk)
+            process.stdin.close()
+            result = process.wait()
+        if result != 0:
+            temporary.unlink(missing_ok=True)
+            raise subprocess.CalledProcessError(result, command)
+        os.replace(temporary, target)
+        print(
+            f"music track={track['number']} source={source} "
+            f"sectors={sector_count} bytes={target.stat().st_size}")
 
 
 def main() -> int:
@@ -226,7 +288,9 @@ def main() -> int:
             for lba in sorted(metadata_lbas)
         }
         if args.loose_root:
-            write_raw_streams(data_track, files, args.loose_root.resolve())
+            loose_root = args.loose_root.resolve()
+            write_loose_tree(data_track, files, loose_root)
+            write_music_tracks(tracks, loose_root)
     finally:
         data_track.close()
 

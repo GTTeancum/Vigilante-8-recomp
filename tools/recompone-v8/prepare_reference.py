@@ -654,6 +654,30 @@ def main() -> int:
             },
             {
                 "overlay": "main",
+                "address": "80018124",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.ClaimGuestVramAllocation",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800183EC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.IgnoreSyntheticVramFree",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80021E5C",
+                "target": "RecompOne.Runtime.Sdk.V8VehicleRegistry.CreateVehicle",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800227A4",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.PrepareGuestCommonObjectMask",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
                 "address": "80015368",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.Fatal",
                 "mode": "replace",

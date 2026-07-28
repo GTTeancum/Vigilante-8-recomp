@@ -23,6 +23,12 @@ ghidra/
 /bin-cue/*.bin
 /bin-cue/*.cue
 /BINCUE/
+/V8_2_BINCUE/
+/V8_2_WORK/
+/I76_ZFS/
+/I76/
+/I76_NITRO_DISC/
+/I76_NITRO_ZFS/
 /*.bin
 /*.cue
 /PS1 game/
@@ -30,6 +36,8 @@ ghidra/
 /reference/assets/
 /reference/generated/
 /reference/traces/
+/reference-v8-2/generated/
+/reference-v8-2/traces/
 # Note: analysis/ contains Ghidra decomp output (derived work, used as
 # audit ground truth for cleaned src/ files) and IS tracked.
 

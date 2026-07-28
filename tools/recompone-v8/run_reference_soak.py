@@ -142,6 +142,10 @@ def parse_args() -> argparse.Namespace:
         default="default",
         help="Player vehicle to select; locked choices are unlocked in-process through retail passcodes.",
     )
+    parser.add_argument(
+        "--guest-vehicle",
+        help="select an independent vehicle by stable ID through the engine roster API",
+    )
     parser.add_argument("--seconds", type=float, default=120.0, help="Gameplay soak time per arena.")
     parser.add_argument("--entry-timeout", type=float, default=45.0)
     parser.add_argument("--heartbeat-timeout", type=float, default=15.0)
@@ -553,6 +557,7 @@ def run_one(
     require_match_completion: bool,
     whammy_matrix: bool,
     whammy_start_kind: int | None,
+    guest_vehicle: str | None,
 ) -> RunResult:
     stem = f"{cycle:02d}_{mode}_{arena.key}"
     fixture_path = output / f"{stem}.input.txt"
@@ -566,6 +571,7 @@ def run_one(
     )
 
     env = os.environ.copy()
+    env.pop("RECOMPONE_V8_PLAYER_TYPE", None)
     env["RECOMPONE_INPUT_FILE"] = str(fixture_path.resolve())
     env["RECOMPONE_DISABLE_LIVE_INPUT"] = "1"
     env["RECOMPONE_FORCE_PAD2_CONNECTED"] = "1" if mode != "arcade" else "0"
@@ -613,7 +619,15 @@ def run_one(
 
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
         process = subprocess.Popen(
-            [str(exe), *source_args],
+            [
+                str(exe),
+                *(
+                    ["--guest-vehicle", guest_vehicle]
+                    if guest_vehicle is not None
+                    else []
+                ),
+                *source_args,
+            ],
             cwd=str(exe.parent),
             env=env,
             stdout=stdout,
@@ -985,6 +999,7 @@ def main() -> int:
                 args.require_match_completion,
                 args.whammy_matrix,
                 whammy_start_kind,
+                args.guest_vehicle,
             )
             results.append(result)
             status = "PASS" if result.passed else "FAIL"

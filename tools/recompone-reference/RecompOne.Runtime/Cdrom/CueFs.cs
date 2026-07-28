@@ -42,7 +42,7 @@ public sealed class CueFs : IDisposable
         string root = Path.GetFullPath(looseRoot);
         if (!Directory.Exists(root))
             throw new DirectoryNotFoundException($"Loose asset root not found: {root}");
-        _manifest = V8LooseManifest.Load();
+        _manifest = V8LooseManifest.Load(root);
         foreach (var file in _manifest.Files)
             _manifestFiles[NormalizeDiscPath(file.Path)] = file;
         IndexLooseFiles(root);

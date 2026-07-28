@@ -151,6 +151,13 @@ public sealed class Mdec
 
     void LoadQuant()
     {
+        if (_tableBytes.Count < (_quantColor ? 128 : 64) ||
+            _tableBytes[0] != 2 ||
+            (_quantColor && _tableBytes[64] != 2))
+        {
+            Log.Mdec("ignored invalid quantization-table DMA");
+            return;
+        }
         for (int i = 0; i < 64; i++) _quantLuma[i] = _tableBytes[i];
         if (_quantColor)
             for (int i = 0; i < 64; i++) _quantChroma[i] = _tableBytes[64 + i];
@@ -159,6 +166,13 @@ public sealed class Mdec
 
     void LoadScale()
     {
+        if (_tableBytes.Count < 128 ||
+            Enumerable.Range(0, 8).Any(i =>
+                (short)(_tableBytes[i * 2] | (_tableBytes[i * 2 + 1] << 8)) != 0x5A82))
+        {
+            Log.Mdec("ignored invalid scale-table DMA");
+            return;
+        }
         for (int i = 0; i < 64; i++)
             _scale[i] = (short)(_tableBytes[i * 2] | (_tableBytes[i * 2 + 1] << 8));
         Log.Mdec($"scale={string.Join(',', _scale.Take(8))}");
