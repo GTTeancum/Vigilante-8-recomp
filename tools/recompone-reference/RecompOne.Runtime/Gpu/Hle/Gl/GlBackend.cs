@@ -356,21 +356,48 @@ public sealed class GlBackend : IGpuBackend
         if (ConfigManager.View.HudAnchoring && GpuHle.GameplayActive && _kTarget is { Margin: > 0 } target)
         {
             float localCenter = r.X + r.W * 0.5f - target.X;
-            if (localCenter < target.W / 3f) anchor = -target.Margin;
-            else if (localCenter > target.W * 2f / 3f) anchor = target.Margin;
+            float localTop = r.Y - target.Y;
+
+            // V8:2 builds the radar, armor/health panel and weapon panel from
+            // many adjacent rectangles. Classifying each tile by horizontal
+            // thirds split those widgets and opened visible gaps. Keep every
+            // top-HUD tile in one left-anchored group. Lower HUD art is moved
+            // only when it was already authored in the left third; projected
+            // names and central prompts retain their world/screen position.
+            bool topHud = localTop < target.H * 0.42f;
+            bool lowerLeftHud = localCenter < target.W / 3f;
+            if (topHud || lowerLeftHud)
+                anchor = -target.Margin;
         }
         var a = new HleVertex { X = r.X + anchor, Y = r.Y, R = r.R, G = r.G, B = r.B, U = r.U, V = r.V };
         var b = new HleVertex { X = r.X + r.W + anchor, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
         var c = new HleVertex { X = r.X + anchor, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
         var d = new HleVertex { X = r.X + r.W + anchor, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
-        bool fontLike = f.Textured && r.W <= 32 && r.H <= 32;
-        bool iconLike = f.Textured && !fontLike && r.W <= 96 && r.H <= 96;
+        bool topGameplayHud =
+            GpuHle.GameplayActive &&
+            _kTarget is { } hudTarget &&
+            r.Y - hudTarget.Y < hudTarget.H * 0.42f;
+        // The compact top HUD uses tightly packed atlas cells. Keep their
+        // authored binary silhouettes exact; sampling across a cell boundary
+        // can pull neighboring digits into the ammo counter. Larger gameplay
+        // labels and menu text remain eligible for contour reconstruction.
+        bool fontLike = f.Textured && !topGameplayHud && r.W <= 32 && r.H <= 32;
+        bool iconLike =
+            f.Textured && !topGameplayHud && !fontLike &&
+            r.W <= 96 && r.H <= 96;
         int uiFlags = fontLike && ConfigManager.View.VectorFonts ? 0x2800 :
             iconLike && ConfigManager.View.VectorIcons ? 0x4800 : 0;
         var va = V(a, f, false, false, true); va.Texpage |= uiFlags;
         var vb = V(b, f, false, false, true); vb.Texpage |= uiFlags;
         var vc = V(c, f, false, false, true); vc.Texpage |= uiFlags;
         var vd = V(d, f, false, false, true); vd.Texpage |= uiFlags;
+        if (topGameplayHud)
+        {
+            va.Texpage &= ~0x800;
+            vb.Texpage &= ~0x800;
+            vc.Texpage &= ~0x800;
+            vd.Texpage &= ~0x800;
+        }
         _verts[_count++] = va; _verts[_count++] = vb; _verts[_count++] = vc;
         _verts[_count++] = vb; _verts[_count++] = vd; _verts[_count++] = vc;
     }

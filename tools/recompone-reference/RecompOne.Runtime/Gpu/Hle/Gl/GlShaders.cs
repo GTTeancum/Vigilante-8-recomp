@@ -242,6 +242,41 @@ internal static class GlShaders
             rgb += smoothedTexture(uvf + axis, nearestTexel).rgb * 0.3;
             return vec4(rgb, nearestTexel.a);
         }
+        vec4 contourTexture(vec2 uvf, out float coverage, out float stp) {
+            // Reconstruct a continuous silhouette from the four surrounding
+            // indexed texels. This supplies sub-texel contours for small font
+            // sprites and genuine fractional coverage for translucent world
+            // effects without filtering palette indices or black transparency
+            // into the visible colour.
+            vec2 p = uvf - vec2(0.5);
+            ivec2 uv0 = ivec2(floor(p));
+            vec2 f = fract(p);
+            vec4 s00 = textureTexel(uv0);
+            vec4 s10 = textureTexel(uv0 + ivec2(1, 0));
+            vec4 s01 = textureTexel(uv0 + ivec2(0, 1));
+            vec4 s11 = textureTexel(uv0 + ivec2(1, 1));
+            vec4 w = vec4(
+                (1.0 - f.x) * (1.0 - f.y),
+                f.x * (1.0 - f.y),
+                (1.0 - f.x) * f.y,
+                f.x * f.y);
+            vec4 o = vec4(
+                transparentBlack(s00) ? 0.0 : 1.0,
+                transparentBlack(s10) ? 0.0 : 1.0,
+                transparentBlack(s01) ? 0.0 : 1.0,
+                transparentBlack(s11) ? 0.0 : 1.0);
+            vec4 ow = o * w;
+            coverage = dot(ow, vec4(1.0));
+            if (coverage <= 0.0001) {
+                stp = 0.0;
+                return vec4(0.0);
+            }
+            vec3 rgb = (s00.rgb * ow.x + s10.rgb * ow.y +
+                        s01.rgb * ow.z + s11.rgb * ow.w) / coverage;
+            stp = (s00.a * ow.x + s10.a * ow.y +
+                   s01.a * ow.z + s11.a * ow.w) / coverage;
+            return vec4(rgb, stp);
+        }
         vec3 stockPaintCorrection(vec3 rgb) {
             if (vUiTexture != 0) return rgb;
             float dominantGreen = rgb.g - max(rgb.r, rgb.b);
@@ -291,6 +326,24 @@ internal static class GlShaders
             vec4 texel = uTextureSmoothing != 0 && vSmooth != 0
                 ? filteredTexture(vUV, nearestTexel)
                 : nearestTexel;
+            bool vectorFont =
+                vUiTexture != 0 && vParticle != 0 && uVectorFonts != 0;
+            bool enhancedParticle =
+                vUiTexture == 0 && vParticle != 0 && uEnhancedParticles != 0;
+            float contourCoverage = 1.0;
+            float contourStp = nearestTexel.a;
+
+            if (vectorFont || enhancedParticle) {
+                texel = contourTexture(vUV, contourCoverage, contourStp);
+                if (vectorFont) {
+                    // A half-coverage contour gives the original bitmap glyph
+                    // a stable, resolution-independent high-resolution edge.
+                    // Final presentation AA handles the fractional screen edge.
+                    if (contourCoverage < 0.5) discard;
+                } else if (contourCoverage <= 0.01) {
+                    discard;
+                }
+            }
 
             if (transparentBlack(nearestTexel)) {
                 // UI transparency is binary in the original packets. Do not
@@ -298,20 +351,8 @@ internal static class GlShaders
                 // UI draws do not have a usable alpha blend and doing so
                 // creates dark halos. Particle sprites are semitransparent and
                 // can safely reconstruct their edge coverage.
-                bool filteredEdge =
-                    vUiTexture == 0 && uEnhancedParticles != 0 && vParticle != 0;
+                bool filteredEdge = vectorFont || enhancedParticle;
                 if (!filteredEdge) discard;
-                vec4 n0 = textureTexel(ivec2(rawU - 1, rawV));
-                vec4 n1 = textureTexel(ivec2(rawU + 1, rawV));
-                vec4 n2 = textureTexel(ivec2(rawU, rawV - 1));
-                vec4 n3 = textureTexel(ivec2(rawU, rawV + 1));
-                float cover = 0.25 * ((!transparentBlack(n0) ? 1.0 : 0.0) +
-                                      (!transparentBlack(n1) ? 1.0 : 0.0) +
-                                      (!transparentBlack(n2) ? 1.0 : 0.0) +
-                                      (!transparentBlack(n3) ? 1.0 : 0.0));
-                if (cover <= 0.0) discard;
-                texel = (n0 + n1 + n2 + n3) * 0.25;
-                nearestTexel = vec4(texel.rgb, 0.0);
             }
             texel.rgb = stockPaintCorrection(texel.rgb);
             if (uEnhancedFog != 0 && vUiTexture == 0 && vDepth > 1.0) {
@@ -321,10 +362,19 @@ internal static class GlShaders
             ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
             ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
             FragColor = vec4(quant5(ivec3(stockPaintCorrection8(c8) * 255.0 + 0.5)), max(texel.a, uSetMask));
-            bool reconstructedEdge = nearestTexel.a < 0.5 &&
-                vUiTexture == 0 && uEnhancedParticles != 0 && vParticle != 0;
-            float particleEdge = reconstructedEdge ? 0.35 : 1.0;
-            BlendColor = nearestTexel.a >= 0.5 ? uBlend : vec4(uBlendOpaque.rgb * particleEdge, uBlendOpaque.a);
+            if (enhancedParticle && contourCoverage < 0.999) {
+                if (contourStp >= 0.5) {
+                    BlendColor = vec4(
+                        uBlend.rgb * contourCoverage,
+                        mix(1.0, uBlend.a, contourCoverage));
+                } else {
+                    BlendColor = vec4(
+                        vec3(contourCoverage),
+                        1.0 - contourCoverage);
+                }
+            } else {
+                BlendColor = nearestTexel.a >= 0.5 ? uBlend : uBlendOpaque;
+            }
         }
         """;
 

@@ -69,6 +69,8 @@ public static class V82Compat
         Environment.GetEnvironmentVariable("RECOMPONE_V82_SOAK_WEAPONS") != "0";
     static readonly bool _soakTransformCaptures =
         Environment.GetEnvironmentVariable("RECOMPONE_V82_SOAK_CAPTURE_TRANSFORMS") == "1";
+    static readonly bool _graphicsShowcaseCaptures =
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_GRAPHICS_SHOWCASE") == "1";
     static bool _unlockRosterLogged;
     static uint _lastLoggedCheatFlags = uint.MaxValue;
     static readonly int _soakHeartbeatFrames =
@@ -1189,6 +1191,9 @@ public static class V82Compat
         }
         _soakAutomationInput = (ushort)(movement | action);
         _soakInputPhase = phase;
+
+        if (_graphicsShowcaseCaptures && frame is 64 or 68 or 72 or 90 or 96)
+            HostWindow.RequestDisplayCapture($"particle_{frame:0000}");
 
         if (frame == 1 || frame % _soakHeartbeatFrames == 0)
         {

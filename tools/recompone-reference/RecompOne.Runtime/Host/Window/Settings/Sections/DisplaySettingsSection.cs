@@ -205,13 +205,13 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
 
         bool fonts = ConfigManager.View.VectorFonts;
-        if (ImGui.Checkbox("MSDF-quality fonts", ref fonts))
+        if (ImGui.Checkbox("Vector-style font contours", ref fonts))
         {
             ConfigManager.View.VectorFonts = fonts;
             SaveCustom();
         }
         bool icons = ConfigManager.View.VectorIcons;
-        if (ImGui.Checkbox("Vector-capable logos and icons", ref icons))
+        if (ImGui.Checkbox("High-resolution logo and icon contours", ref icons))
         {
             ConfigManager.View.VectorIcons = icons;
             SaveCustom();
