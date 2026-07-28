@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using RecompOne.Runtime.Host;
+using RecompOne.Runtime.Serialization;
 
 namespace RecompOne.Runtime.Modding;
 
@@ -13,12 +14,6 @@ public static class ModLoader
 {
     sealed record Candidate(ModInfo Info, List<(string Path, string Text)> Sources);
     static readonly List<(ModInfo Info, IMod[] Instances)> _loaded = [];
-    static readonly JsonSerializerOptions _json = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true
-    };
     
     public static IReadOnlyList<ModInfo> LoadedMods
     {
@@ -152,7 +147,7 @@ public static class ModLoader
     {
         try
         {
-            var info = JsonSerializer.Deserialize<ModInfo>(json, _json);
+            var info = JsonSerializer.Deserialize(json, RuntimeJsonContext.Default.ModInfo);
             if (info == null || string.IsNullOrWhiteSpace(info.Id))
             {
                 Console.Error.WriteLine($"[Mods] malformed mod.json for {Path.GetFileName(sourcePath)}: missing id, skipping");

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ImGuiNET;
 using RecompOne.Runtime.Host.Window;
+using RecompOne.Runtime.Serialization;
 
 namespace RecompOne.Runtime.Config;
 
@@ -32,7 +33,7 @@ public static class ConfigManager
         bool saveGame = false;
         if (File.Exists(GameConfigPath))
         {
-            try { Game = JsonSerializer.Deserialize<GameConfig>(File.ReadAllText(GameConfigPath), _opts) ?? new(); }
+            try { Game = JsonSerializer.Deserialize(File.ReadAllText(GameConfigPath), RuntimeJsonContext.Default.GameConfig) ?? new(); }
             catch { Game = new(); saveGame = true; }
         }
         else
@@ -106,7 +107,7 @@ public static class ConfigManager
 
     public static void SaveGame()
     {
-        File.WriteAllText(GameConfigPath, JsonSerializer.Serialize(Game, _opts));
+        File.WriteAllText(GameConfigPath, JsonSerializer.Serialize(Game, RuntimeJsonContext.Default.GameConfig));
     }
 
     static (ViewConfig view, string imguiIni) ParseInterfaceFile(string content)

@@ -71,6 +71,8 @@ internal static class GlShaders
         flat out ivec2 pageBase;
         flat out int   texMode;
         flat out int   vDither;
+        flat out int   vSmooth;
+        flat out int   vUiTexture;
 
         uniform vec2 uVertexOffset;
         uniform vec2 uPosBias;
@@ -83,6 +85,8 @@ internal static class GlShaders
 
             vColor = vec4(float(inColor & 0xFFu), float((inColor >> 8) & 0xFFu), float((inColor >> 16) & 0xFFu), 0.0) / 255.0;
             vDither = (inTexpage >> 10) & 1;
+            vSmooth = (inTexpage >> 11) & 1;
+            vUiTexture = (inTexpage >> 12) & 1;
 
             if ((inTexpage & 0x8000) != 0) {
                 texMode = 4;
@@ -103,6 +107,8 @@ internal static class GlShaders
         flat in ivec2 pageBase;
         flat in int   texMode;
         flat in int   vDither;
+        flat in int   vSmooth;
+        flat in int   vUiTexture;
 
         layout(location = 0, index = 0) out vec4 FragColor;
         layout(location = 0, index = 1) out vec4 BlendColor;
@@ -149,7 +155,16 @@ internal static class GlShaders
 
             return fetch(ivec2(pageBase.x + uv.x, pageBase.y + uv.y));
         }
+        bool transparentBlack(vec4 texel) {
+            return all(equal(texel.rgb, vec3(0.0))) && texel.a < 0.5;
+        }
+
         vec4 smoothedTexture(vec2 uvf, vec4 nearestTexel) {
+            // PS1 texture pages are at most 256 texels wide/high. Quantizing
+            // sub-texel positions to two samples per texel caps enhanced
+            // texture sampling at the requested 512x512 ceiling.
+            float upscale = 2.0;
+            uvf = floor(uvf * upscale + 0.5) / upscale;
             vec2 p = uvf - vec2(0.5);
             ivec2 uv0 = ivec2(floor(p));
             vec2 f = fract(p);
@@ -157,6 +172,10 @@ internal static class GlShaders
             vec4 c10 = textureTexel(uv0 + ivec2(1, 0));
             vec4 c01 = textureTexel(uv0 + ivec2(0, 1));
             vec4 c11 = textureTexel(uv0 + ivec2(1, 1));
+            if (transparentBlack(c00)) c00.rgb = nearestTexel.rgb;
+            if (transparentBlack(c10)) c10.rgb = nearestTexel.rgb;
+            if (transparentBlack(c01)) c01.rgb = nearestTexel.rgb;
+            if (transparentBlack(c11)) c11.rgb = nearestTexel.rgb;
             vec3 top = mix(c00.rgb, c10.rgb, f.x);
             vec3 bottom = mix(c01.rgb, c11.rgb, f.x);
             return vec4(mix(top, bottom, f.y), nearestTexel.a);
@@ -181,11 +200,11 @@ internal static class GlShaders
             int rawU = dFdx(vUV.x) < 0.0 ? int(ceil(vUV.x - 0.0001)) : int(floor(vUV.x + 0.0001));
             int rawV = dFdy(vUV.y) < 0.0 ? int(ceil(vUV.y - 0.0001)) : int(floor(vUV.y + 0.0001));
             vec4 nearestTexel = textureTexel(ivec2(rawU, rawV));
-            vec4 texel = uTextureSmoothing != 0
+            vec4 texel = uTextureSmoothing != 0 && vSmooth != 0
                 ? smoothedTexture(vUV, nearestTexel)
                 : nearestTexel;
 
-            if (nearestTexel.rgb == vec3(0.0) && nearestTexel.a < 0.5) discard;
+            if (transparentBlack(nearestTexel)) discard;
             ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
             ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
             FragColor = vec4(quant5(c8), max(texel.a, uSetMask));

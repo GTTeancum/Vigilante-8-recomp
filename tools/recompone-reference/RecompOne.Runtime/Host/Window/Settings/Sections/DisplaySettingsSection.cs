@@ -74,12 +74,12 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ImGui.TextDisabled("A restart is required.");
 
         bool textureSmoothing = ConfigManager.View.TextureSmoothing;
-        if (ImGui.Checkbox("Smooth PS1 textures", ref textureSmoothing))
+        if (ImGui.Checkbox("Upscale/smooth in-game textures", ref textureSmoothing))
         {
             ConfigManager.View.TextureSmoothing = textureSmoothing;
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGui.TextDisabled("Filters texture colors in enhanced 3D without changing game state.");
+        ImGui.TextDisabled("Enhanced sampling stays within the requested 512x512 texture ceiling.");
 
         bool perspectiveCorrectTextures = ConfigManager.View.PerspectiveCorrectTextures;
         if (ImGui.Checkbox("Fix PS1 texture projection", ref perspectiveCorrectTextures))

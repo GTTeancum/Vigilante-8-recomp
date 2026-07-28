@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using RecompOne.Runtime.Serialization;
 
 namespace RecompOne.Runtime.Cdrom;
 
@@ -12,18 +13,25 @@ internal sealed class V8LooseManifest
     public List<V8LooseFile> Files { get; set; } = [];
     public List<V8LooseTrack> Tracks { get; set; } = [];
 
-    public static V8LooseManifest Load()
+    public static V8LooseManifest Load(string looseRoot)
     {
+        string systemPath = Path.Combine(looseRoot, "SYSTEM.CNF");
+        string system = File.ReadAllText(systemPath);
+        string manifestFile = system.Contains(
+            "SLUS_008.68", StringComparison.OrdinalIgnoreCase)
+            ? "V82LooseManifest.json"
+            : system.Contains("SLUS_005.10", StringComparison.OrdinalIgnoreCase)
+                ? "V8LooseManifest.json"
+                : throw new InvalidDataException(
+                    $"Unsupported loose SYSTEM.CNF: {systemPath}");
         var assembly = typeof(V8LooseManifest).Assembly;
         string resourceName = assembly.GetManifestResourceNames().Single(name =>
-            name.EndsWith("V8LooseManifest.json", StringComparison.Ordinal));
+            name.EndsWith(manifestFile, StringComparison.Ordinal));
         using Stream stream = assembly.GetManifestResourceStream(resourceName) ??
             throw new InvalidOperationException(
                 $"Embedded loose-disc manifest is missing: {resourceName}");
-        var manifest = JsonSerializer.Deserialize<V8LooseManifest>(stream, new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-        }) ?? throw new InvalidDataException("Loose-disc manifest is empty");
+        var manifest = JsonSerializer.Deserialize(stream, RuntimeJsonContext.Default.V8LooseManifest) ??
+            throw new InvalidDataException("Loose-disc manifest is empty");
         if (manifest.FormatVersion != 1 || manifest.Files.Count == 0 || manifest.Tracks.Count == 0)
             throw new InvalidDataException(
                 $"Unsupported loose-disc manifest version {manifest.FormatVersion}");

@@ -271,11 +271,19 @@ public sealed class GlBackend : IGpuBackend
 
     bool DitherOf(in PrimFlags f) => _env.Dither && (f.Gouraud || (f.Textured && !f.RawTexture));
 
-    GlVertex V(in HleVertex v, in PrimFlags f, bool dither, bool perspectiveCorrect)
+    GlVertex V(
+        in HleVertex v,
+        in PrimFlags f,
+        bool dither,
+        bool perspectiveCorrect,
+        bool uiTexture = false)
     {
         uint color = (f.Textured && f.RawTexture) ? 0x808080u : (uint)(v.R | (v.G << 8) | (v.B << 16));
         int tpage = f.Textured ? (f.TPage & 0x1FF) : 0x8000;
         if (dither) tpage |= 0x400;
+        if (ConfigManager.View.TextureSmoothing && f.Textured && !f.RawTexture)
+            tpage |= 0x800;
+        if (uiTexture) tpage |= 0x1000;
         float perspectiveW = perspectiveCorrect ? MathF.Max(1f, v.Z) : 1f;
         return new GlVertex
         {
@@ -292,11 +300,12 @@ public sealed class GlBackend : IGpuBackend
     {
         Begin(f, 3);
         bool dith = DitherOf(f);
-        bool perspectiveCorrect = ConfigManager.View.PerspectiveCorrectTextures &&
-            f.Textured && a.HasGteZ && b.HasGteZ && c.HasGteZ;
-        _verts[_count++] = V(a, f, dith, perspectiveCorrect);
-        _verts[_count++] = V(b, f, dith, perspectiveCorrect);
-        _verts[_count++] = V(c, f, dith, perspectiveCorrect);
+        bool hasDepth = f.Textured && a.HasGteZ && b.HasGteZ && c.HasGteZ;
+        bool perspectiveCorrect =
+            ConfigManager.View.PerspectiveCorrectTextures && hasDepth;
+        _verts[_count++] = V(a, f, dith, perspectiveCorrect, !hasDepth);
+        _verts[_count++] = V(b, f, dith, perspectiveCorrect, !hasDepth);
+        _verts[_count++] = V(c, f, dith, perspectiveCorrect, !hasDepth);
     }
 
     public void DrawRect(in HleRect r, in PrimFlags f)
@@ -306,8 +315,8 @@ public sealed class GlBackend : IGpuBackend
         var b = new HleVertex { X = r.X + r.W, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
         var c = new HleVertex { X = r.X, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
         var d = new HleVertex { X = r.X + r.W, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
-        _verts[_count++] = V(a, f, false, false); _verts[_count++] = V(b, f, false, false); _verts[_count++] = V(c, f, false, false);
-        _verts[_count++] = V(b, f, false, false); _verts[_count++] = V(d, f, false, false); _verts[_count++] = V(c, f, false, false);
+        _verts[_count++] = V(a, f, false, false, true); _verts[_count++] = V(b, f, false, false, true); _verts[_count++] = V(c, f, false, false, true);
+        _verts[_count++] = V(b, f, false, false, true); _verts[_count++] = V(d, f, false, false, true); _verts[_count++] = V(c, f, false, false, true);
     }
 
     public void DrawLine(in HleVertex a, in HleVertex b, in PrimFlags f)
