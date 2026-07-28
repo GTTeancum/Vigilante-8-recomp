@@ -293,10 +293,13 @@ internal static class GlShaders
                 : nearestTexel;
 
             if (transparentBlack(nearestTexel)) {
+                // UI transparency is binary in the original packets. Do not
+                // synthesize coverage outside glyph/icon silhouettes: opaque
+                // UI draws do not have a usable alpha blend and doing so
+                // creates dark halos. Particle sprites are semitransparent and
+                // can safely reconstruct their edge coverage.
                 bool filteredEdge =
-                    (vUiTexture == 0 && uEnhancedParticles != 0 && vParticle != 0) ||
-                    (vUiTexture != 0 && uVectorFonts != 0 && vParticle != 0) ||
-                    (vUiTexture != 0 && uVectorIcons != 0 && vShadow != 0);
+                    vUiTexture == 0 && uEnhancedParticles != 0 && vParticle != 0;
                 if (!filteredEdge) discard;
                 vec4 n0 = textureTexel(ivec2(rawU - 1, rawV));
                 vec4 n1 = textureTexel(ivec2(rawU + 1, rawV));
@@ -319,9 +322,7 @@ internal static class GlShaders
             ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
             FragColor = vec4(quant5(ivec3(stockPaintCorrection8(c8) * 255.0 + 0.5)), max(texel.a, uSetMask));
             bool reconstructedEdge = nearestTexel.a < 0.5 &&
-                ((vUiTexture == 0 && uEnhancedParticles != 0 && vParticle != 0) ||
-                 (vUiTexture != 0 && uVectorFonts != 0 && vParticle != 0) ||
-                 (vUiTexture != 0 && uVectorIcons != 0 && vShadow != 0));
+                vUiTexture == 0 && uEnhancedParticles != 0 && vParticle != 0;
             float particleEdge = reconstructedEdge ? 0.35 : 1.0;
             BlendColor = nearestTexel.a >= 0.5 ? uBlend : vec4(uBlendOpaque.rgb * particleEdge, uBlendOpaque.a);
         }

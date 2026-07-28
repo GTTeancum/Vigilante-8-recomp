@@ -423,7 +423,9 @@ internal static class HostWindow
 
     static void ApplyGraphicsView()
     {
-        bool wide = ConfigManager.View.Widescreen;
+        // Only gameplay owns the expanded framebuffer. SHELL menus and FMVs
+        // are authored at 4:3 and must remain pillarboxed rather than stretched.
+        bool wide = ConfigManager.View.Widescreen && Hle.GpuHle.GameplayActive;
         Hle.GpuHle.WideAspect = wide ? 16f / 9f : 0f;
         Hle.GpuHle.TargetAspect = wide ? 16f / 9f : Hle.GpuHle.BaseAspect;
         Hle.GpuHle.OutputAspect = Hle.GpuHle.TargetAspect;
