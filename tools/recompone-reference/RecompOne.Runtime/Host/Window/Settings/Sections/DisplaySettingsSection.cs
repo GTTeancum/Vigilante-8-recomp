@@ -79,7 +79,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ConfigManager.View.TextureSmoothing = textureSmoothing;
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGui.TextDisabled("Enhanced sampling stays within the requested 512x512 texture ceiling.");
+        ImGui.TextDisabled("Reconstructs in-game PS1 textures without allocating assets over 512x512.");
 
         bool perspectiveCorrectTextures = ConfigManager.View.PerspectiveCorrectTextures;
         if (ImGui.Checkbox("Fix PS1 texture projection", ref perspectiveCorrectTextures))
@@ -87,7 +87,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             ConfigManager.View.PerspectiveCorrectTextures = perspectiveCorrectTextures;
             ConfigManager.SaveView(PanelManager.Panels);
         }
-        ImGui.TextDisabled("Uses recovered GTE depth for perspective-correct texture interpolation.");
+        ImGui.TextDisabled("Uses recovered GTE depth history for perspective-correct texture interpolation.");
 
         string levelOfDetail = ConfigManager.View.LevelOfDetail;
         if (!LevelOfDetailModes.Contains(levelOfDetail, StringComparer.OrdinalIgnoreCase))

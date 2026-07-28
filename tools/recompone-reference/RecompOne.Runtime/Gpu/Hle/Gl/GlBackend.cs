@@ -281,7 +281,12 @@ public sealed class GlBackend : IGpuBackend
         uint color = (f.Textured && f.RawTexture) ? 0x808080u : (uint)(v.R | (v.G << 8) | (v.B << 16));
         int tpage = f.Textured ? (f.TPage & 0x1FF) : 0x8000;
         if (dither) tpage |= 0x400;
-        if (ConfigManager.View.TextureSmoothing && f.Textured && !f.RawTexture)
+        // "Raw texture" only disables vertex-colour modulation on the PS1;
+        // it does not identify a UI primitive. Terrain and several vehicle
+        // materials use raw-texture packets, so excluding them left the most
+        // visibly pixelated surfaces untouched.
+        if (ConfigManager.View.TextureSmoothing && f.Textured &&
+            (!f.RawTexture || !uiTexture))
             tpage |= 0x800;
         if (uiTexture) tpage |= 0x1000;
         float perspectiveW = perspectiveCorrect ? MathF.Max(1f, v.Z) : 1f;
@@ -303,9 +308,9 @@ public sealed class GlBackend : IGpuBackend
         bool hasDepth = f.Textured && a.HasGteZ && b.HasGteZ && c.HasGteZ;
         bool perspectiveCorrect =
             ConfigManager.View.PerspectiveCorrectTextures && hasDepth;
-        _verts[_count++] = V(a, f, dith, perspectiveCorrect, !hasDepth);
-        _verts[_count++] = V(b, f, dith, perspectiveCorrect, !hasDepth);
-        _verts[_count++] = V(c, f, dith, perspectiveCorrect, !hasDepth);
+        _verts[_count++] = V(a, f, dith, perspectiveCorrect);
+        _verts[_count++] = V(b, f, dith, perspectiveCorrect);
+        _verts[_count++] = V(c, f, dith, perspectiveCorrect);
     }
 
     public void DrawRect(in HleRect r, in PrimFlags f)

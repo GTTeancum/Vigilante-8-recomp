@@ -10,7 +10,7 @@ public static class Gte
     static readonly short[] SY = new short[3];
     static readonly ushort[] SZ = new ushort[4];
     static readonly uint[] RGB = new uint[3];
-    const int ScreenDepthHistoryCount = 96;
+    const int ScreenDepthHistoryCount = 4096;
     static readonly short[] ScreenDepthX = new short[ScreenDepthHistoryCount];
     static readonly short[] ScreenDepthY = new short[ScreenDepthHistoryCount];
     static readonly ushort[] ScreenDepthZ = new ushort[ScreenDepthHistoryCount];

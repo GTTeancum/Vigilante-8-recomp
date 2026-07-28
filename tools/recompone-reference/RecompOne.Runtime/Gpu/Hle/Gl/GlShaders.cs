@@ -159,26 +159,49 @@ internal static class GlShaders
             return all(equal(texel.rgb, vec3(0.0))) && texel.a < 0.5;
         }
 
+        vec3 cubicHermite(vec3 a, vec3 b, vec3 c, vec3 d, float t) {
+            vec3 p = (d - c) - (a - b);
+            vec3 q = (a - b) - p;
+            vec3 r = c - a;
+            return ((p * t + q) * t + r) * t + b;
+        }
+
         vec4 smoothedTexture(vec2 uvf, vec4 nearestTexel) {
-            // PS1 texture pages are at most 256 texels wide/high. Quantizing
-            // sub-texel positions to two samples per texel caps enhanced
-            // texture sampling at the requested 512x512 ceiling.
-            float upscale = 2.0;
-            uvf = floor(uvf * upscale + 0.5) / upscale;
+            // Reconstruct the native PS1 texture page in shader rather than
+            // allocating replacement assets. Pages are at most 256x256, so the
+            // virtual reconstruction stays inside the requested 512x512 class.
             vec2 p = uvf - vec2(0.5);
             ivec2 uv0 = ivec2(floor(p));
             vec2 f = fract(p);
-            vec4 c00 = textureTexel(uv0);
-            vec4 c10 = textureTexel(uv0 + ivec2(1, 0));
-            vec4 c01 = textureTexel(uv0 + ivec2(0, 1));
-            vec4 c11 = textureTexel(uv0 + ivec2(1, 1));
-            if (transparentBlack(c00)) c00.rgb = nearestTexel.rgb;
-            if (transparentBlack(c10)) c10.rgb = nearestTexel.rgb;
-            if (transparentBlack(c01)) c01.rgb = nearestTexel.rgb;
-            if (transparentBlack(c11)) c11.rgb = nearestTexel.rgb;
-            vec3 top = mix(c00.rgb, c10.rgb, f.x);
-            vec3 bottom = mix(c01.rgb, c11.rgb, f.x);
-            return vec4(mix(top, bottom, f.y), nearestTexel.a);
+            vec3 row[4];
+            for (int y = 0; y < 4; y++) {
+                vec4 s0 = textureTexel(uv0 + ivec2(-1, y - 1));
+                vec4 s1 = textureTexel(uv0 + ivec2( 0, y - 1));
+                vec4 s2 = textureTexel(uv0 + ivec2( 1, y - 1));
+                vec4 s3 = textureTexel(uv0 + ivec2( 2, y - 1));
+                if (transparentBlack(s0)) s0.rgb = nearestTexel.rgb;
+                if (transparentBlack(s1)) s1.rgb = nearestTexel.rgb;
+                if (transparentBlack(s2)) s2.rgb = nearestTexel.rgb;
+                if (transparentBlack(s3)) s3.rgb = nearestTexel.rgb;
+                row[y] = cubicHermite(s0.rgb, s1.rgb, s2.rgb, s3.rgb, f.x);
+            }
+            vec3 rgb = cubicHermite(row[0], row[1], row[2], row[3], f.y);
+            return vec4(clamp(rgb, 0.0, 1.0), nearestTexel.a);
+        }
+        vec3 stockPaintCorrection(vec3 rgb) {
+            if (vUiTexture != 0) return rgb;
+            float dominantGreen = rgb.g - max(rgb.r, rgb.b);
+            if (dominantGreen <= 0.08 || rgb.g <= 0.16 || rgb.r >= 0.48) return rgb;
+            float body = smoothstep(0.08, 0.28, dominantGreen) *
+                (1.0 - smoothstep(0.46, 0.60, rgb.r));
+            vec3 blue = vec3(
+                rgb.r * 0.24 + rgb.b * 0.05,
+                rgb.g * 0.24 + rgb.r * 0.08,
+                clamp(rgb.g * 1.12 + rgb.b * 0.45, 0.0, 1.0));
+            return mix(rgb, blue, body);
+        }
+        vec3 stockPaintCorrection8(ivec3 c8) {
+            return stockPaintCorrection(vec3(c8) / 255.0);
         }
         vec3 quant5(ivec3 c8) {
             if (vDither != 0) {
@@ -192,7 +215,8 @@ internal static class GlShaders
             if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
 
             if (texMode == 4) {
-                FragColor = vec4(quant5(ivec3(vColor.rgb * 255.0 + 0.5)), uSetMask);
+                vec3 corrected = stockPaintCorrection(vColor.rgb);
+                FragColor = vec4(quant5(ivec3(corrected * 255.0 + 0.5)), uSetMask);
                 BlendColor = uBlend;
                 return;
             }
@@ -205,9 +229,10 @@ internal static class GlShaders
                 : nearestTexel;
 
             if (transparentBlack(nearestTexel)) discard;
+            texel.rgb = stockPaintCorrection(texel.rgb);
             ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
             ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
-            FragColor = vec4(quant5(c8), max(texel.a, uSetMask));
+            FragColor = vec4(quant5(ivec3(stockPaintCorrection8(c8) * 255.0 + 0.5)), max(texel.a, uSetMask));
             BlendColor = nearestTexel.a >= 0.5 ? uBlend : uBlendOpaque;
         }
         """;

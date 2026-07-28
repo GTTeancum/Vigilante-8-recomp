@@ -12,6 +12,8 @@ public sealed class GlVram
     uint _tex, _fbo;
     uint _stageTex, _stageFbo;
     uint _scratchTex;
+    byte[] _uploadRgba = [];
+    byte[] _readRgba = [];
 
     public uint Texture => _tex;
     public uint Fbo => _fbo;
@@ -35,8 +37,8 @@ public sealed class GlVram
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Nearest);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
-        _gl.TexImage2D<ushort>(TextureTarget.Texture2D, 0, InternalFormat.Rgb5A1, (uint)w, (uint)h, 0,
-            PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, new ushort[w * h].AsSpan());
+        _gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgba8, (uint)w, (uint)h, 0,
+            PixelFormat.Rgba, PixelType.UnsignedByte, new byte[w * h * 4].AsSpan());
         return t;
     }
 
@@ -61,9 +63,20 @@ public sealed class GlVram
     {
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         _gl.BindTexture(TextureTarget.Texture2D, _stageTex);
-        _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 2);
-        _gl.TexSubImage2D(TextureTarget.Texture2D, 0, x, y, (uint)w, (uint)h,
-            PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, px);
+        int count = w * h;
+        if (_uploadRgba.Length < count * 4)
+            _uploadRgba = new byte[count * 4];
+        for (int i = 0, o = 0; i < count; i++, o += 4)
+        {
+            ushort p = px[i];
+            _uploadRgba[o + 0] = Expand5(p & 0x1F);
+            _uploadRgba[o + 1] = Expand5((p >> 5) & 0x1F);
+            _uploadRgba[o + 2] = Expand5((p >> 10) & 0x1F);
+            _uploadRgba[o + 3] = (byte)((p & 0x8000) != 0 ? 255 : 0);
+        }
+        _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+        _gl.TexSubImage2D<byte>(TextureTarget.Texture2D, 0, x, y, (uint)w, (uint)h,
+            PixelFormat.Rgba, PixelType.UnsignedByte, _uploadRgba.AsSpan(0, count * 4));
 
         _gl.Disable(EnableCap.ScissorTest);
         _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _stageFbo);
@@ -113,10 +126,24 @@ public sealed class GlVram
             x, y, x + w, y + h, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
 
         _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _stageFbo);
-        _gl.PixelStore(PixelStoreParameter.PackAlignment, 2);
-        _gl.ReadPixels(x, y, (uint)w, (uint)h, PixelFormat.Rgba, PixelType.UnsignedShort1555Rev, dst);
+        int count = w * h;
+        if (_readRgba.Length < count * 4)
+            _readRgba = new byte[count * 4];
+        _gl.PixelStore(PixelStoreParameter.PackAlignment, 1);
+        _gl.ReadPixels<byte>(x, y, (uint)w, (uint)h, PixelFormat.Rgba, PixelType.UnsignedByte,
+            _readRgba.AsSpan(0, count * 4));
+        for (int i = 0, o = 0; i < count; i++, o += 4)
+        {
+            int r = _readRgba[o + 0] >> 3;
+            int g = _readRgba[o + 1] >> 3;
+            int b = _readRgba[o + 2] >> 3;
+            int a = _readRgba[o + 3] >= 128 ? 0x8000 : 0;
+            dst[i] = (ushort)(r | (g << 5) | (b << 10) | a);
+        }
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
     }
+
+    static byte Expand5(int value) => (byte)((value << 3) | (value >> 2));
 
     void EnsureScratch()
     {
