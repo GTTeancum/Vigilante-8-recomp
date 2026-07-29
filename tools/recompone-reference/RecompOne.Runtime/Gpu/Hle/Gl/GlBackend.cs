@@ -20,6 +20,7 @@ public sealed class GlBackend : IGpuBackend
     const int MaxVerts = 0x40000;
     readonly GL _gl;
     readonly GlVram _vram;
+    HudSvgAtlas? _hudSvg;
     readonly GlDisplayRt?[] _rts = new GlDisplayRt?[2];
     long _rtStamp;
     long _frame;
@@ -59,6 +60,7 @@ public sealed class GlBackend : IGpuBackend
         _progPresent = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.PresentFs, "present");
         _progPresent24 = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.Present24Fs, "present24");
         if (_progPrim == 0 || _progPresent == 0 || _progPresent24 == 0) return;
+        _hudSvg = new HudSvgAtlas(_gl);
 
         _uTexWindow = _gl.GetUniformLocation(_progPrim, "uTexWindow");
         _uBlend = _gl.GetUniformLocation(_progPrim, "uBlend");
@@ -79,6 +81,7 @@ public sealed class GlBackend : IGpuBackend
         _gl.UseProgram(_progPrim);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uVram"), 0);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uDest"), 1);
+        _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uHudSvg"), 2);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uScale"), GlVram.Scale);
 
         _uPresentOrigin = _gl.GetUniformLocation(_progPresent, "uOrigin");
@@ -654,6 +657,8 @@ public sealed class GlBackend : IGpuBackend
         _gl.BindTexture(TextureTarget.Texture2D, _vram.Texture);
         _gl.ActiveTexture(TextureUnit.Texture1);
         _gl.BindTexture(TextureTarget.Texture2D, destTex);
+        _gl.ActiveTexture(TextureUnit.Texture2);
+        _gl.BindTexture(TextureTarget.Texture2D, _hudSvg?.Texture ?? 0);
         _gl.ActiveTexture(TextureUnit.Texture0);
         if (rt != null)
         {
@@ -813,6 +818,7 @@ public sealed class GlBackend : IGpuBackend
     public void Dispose()
     {
         foreach (var rt in _rts) rt?.Destroy(_gl);
+        _hudSvg?.Dispose();
         _vram.Dispose();
         if (_vbo != 0) _gl.DeleteBuffer(_vbo);
         if (_presentVbo != 0) _gl.DeleteBuffer(_presentVbo);

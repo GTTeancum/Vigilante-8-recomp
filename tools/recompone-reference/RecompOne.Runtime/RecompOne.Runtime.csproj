@@ -12,6 +12,7 @@
       <EmbeddedResource Include="Bios\Fonts\font2.raw" />
       <EmbeddedResource Include="Cdrom\V8LooseManifest.json" />
       <EmbeddedResource Include="Cdrom\V82LooseManifest.json" />
+      <EmbeddedResource Include="Gpu\Hle\Gl\Assets\*.svg" />
     </ItemGroup>
 
     <ItemGroup>

@@ -147,6 +147,7 @@ internal static class GlShaders
 
         uniform sampler2D uVram;
         uniform sampler2D uDest;
+        uniform sampler2D uHudSvg;
         uniform ivec4 uTexWindow;
         uniform vec4  uBlend;
         uniform vec4  uBlendOpaque = vec4(1.0, 1.0, 1.0, 0.0);
@@ -289,244 +290,17 @@ internal static class GlShaders
                    s01.a * ow.z + s11.a * ow.w) / coverage;
             return vec4(rgb, stp);
         }
-        bool vividHudMarker(vec3 rgb) {
-            bool red = rgb.r > 0.16 &&
-                rgb.r > rgb.g * 1.20 &&
-                rgb.r > rgb.b * 1.20;
-            bool green = rgb.g > 0.16 &&
-                rgb.g > rgb.r * 1.20 &&
-                rgb.g > rgb.b * 1.20;
-            return red || green;
-        }
-        float sdBox(vec2 p, vec2 halfSize) {
-            vec2 q = abs(p) - halfSize;
-            return length(max(q, vec2(0.0))) +
-                min(max(q.x, q.y), 0.0);
-        }
-        float sdPolygon24(vec2 p, vec2 vertices[24], int count) {
-            float distanceSquared = 1e20;
-            bool inside = false;
-            int previous = count - 1;
-            for (int i = 0; i < 24; i++) {
-                if (i >= count) break;
-                vec2 a = vertices[i];
-                vec2 b = vertices[previous];
-                vec2 edge = b - a;
-                vec2 relative = p - a;
-                vec2 nearest = relative - edge * clamp(
-                    dot(relative, edge) / max(dot(edge, edge), 1e-8),
-                    0.0, 1.0);
-                distanceSquared = min(distanceSquared, dot(nearest, nearest));
-                bool crosses = (a.y > p.y) != (b.y > p.y);
-                if (crosses &&
-                    p.x < (b.x - a.x) * (p.y - a.y) /
-                        (b.y - a.y) + a.x)
-                    inside = !inside;
-                previous = i;
-            }
-            return (inside ? -1.0 : 1.0) * sqrt(distanceSquared);
-        }
-        float radarPlateDistance(vec2 p) {
-            float d = length(p - vec2(27.5)) - 27.5;
-            vec2 polygon[24];
-
-            // Exact upper connector outline, measured from atlas rows 4-13.
-            polygon[0] = vec2(61.0, 4.0);
-            polygon[1] = vec2(64.0, 4.0);
-            polygon[2] = vec2(64.0, 14.0);
-            polygon[3] = vec2(49.0, 14.0);
-            polygon[4] = vec2(49.0, 10.0);
-            polygon[5] = vec2(57.0, 10.0);
-            d = min(d, sdPolygon24(p, polygon, 6));
-
-            // Middle connector: separated rows 14-17, joined rows 18-21.
-            polygon[0] = vec2(57.0, 14.0);
-            polygon[1] = vec2(64.0, 14.0);
-            polygon[2] = vec2(64.0, 22.0);
-            polygon[3] = vec2(53.0, 22.0);
-            polygon[4] = vec2(53.0, 18.0);
-            polygon[5] = vec2(57.0, 18.0);
-            d = min(d, sdPolygon24(p, polygon, 6));
-
-            // Lower connector and the exact four-pixel health stem.
-            polygon[0] = vec2(57.0, 22.0);
-            polygon[1] = vec2(64.0, 22.0);
-            polygon[2] = vec2(64.0, 28.0);
-            polygon[3] = vec2(61.0, 28.0);
-            polygon[4] = vec2(57.0, 24.0);
-            d = min(d, sdPolygon24(p, polygon, 5));
-            d = min(d, sdBox(p - vec2(12.0, 52.0), vec2(2.0, 3.0)));
-            return d;
-        }
-        float mainHudPlateDistance(vec2 p) {
-            vec2 polygon[24];
-            polygon[0] = vec2(0.0, 0.0);
-            polygon[1] = vec2(33.0, 0.0);
-            polygon[2] = vec2(37.0, 4.0);
-            polygon[3] = vec2(37.0, 20.0);
-            polygon[4] = vec2(33.0, 24.0);
-            polygon[5] = vec2(0.0, 24.0);
-            float d = sdPolygon24(p, polygon, 6);
-
-            polygon[0] = vec2(44.0, 0.0);
-            polygon[1] = vec2(80.0, 0.0);
-            polygon[2] = vec2(84.0, 4.0);
-            polygon[3] = vec2(84.0, 20.0);
-            polygon[4] = vec2(80.0, 24.0);
-            polygon[5] = vec2(44.0, 24.0);
-            polygon[6] = vec2(40.0, 20.0);
-            polygon[7] = vec2(40.0, 4.0);
-            d = min(d, sdPolygon24(p, polygon, 8));
-            d = min(d, sdBox(p - vec2(38.5, 8.0), vec2(1.5, 2.0)));
-
-            // Ammo tail. The one-pixel steps are the measured authored
-            // boundary, represented as a continuous high-resolution path.
-            polygon[0]  = vec2(62.0, 22.0);
-            polygon[1]  = vec2(83.0, 22.0);
-            polygon[2]  = vec2(83.0, 23.0);
-            polygon[3]  = vec2(84.0, 23.0);
-            polygon[4]  = vec2(84.0, 31.0);
-            polygon[5]  = vec2(83.0, 31.0);
-            polygon[6]  = vec2(83.0, 32.0);
-            polygon[7]  = vec2(82.0, 32.0);
-            polygon[8]  = vec2(82.0, 33.0);
-            polygon[9]  = vec2(81.0, 33.0);
-            polygon[10] = vec2(81.0, 34.0);
-            polygon[11] = vec2(65.0, 34.0);
-            polygon[12] = vec2(65.0, 33.0);
-            polygon[13] = vec2(64.0, 33.0);
-            polygon[14] = vec2(64.0, 32.0);
-            polygon[15] = vec2(63.0, 32.0);
-            polygon[16] = vec2(63.0, 31.0);
-            polygon[17] = vec2(62.0, 31.0);
-            d = min(d, sdPolygon24(p, polygon, 18));
-            return d;
-        }
-        float healthHudPlateDistance(vec2 p) {
-            vec2 polygon[24];
-            polygon[0]  = vec2(2.0, 1.0);
-            polygon[1]  = vec2(14.0, 1.0);
-            polygon[2]  = vec2(14.0, 3.0);
-            polygon[3]  = vec2(15.0, 3.0);
-            polygon[4]  = vec2(15.0, 4.0);
-            polygon[5]  = vec2(16.0, 4.0);
-            polygon[6]  = vec2(16.0, 46.0);
-            polygon[7]  = vec2(15.0, 46.0);
-            polygon[8]  = vec2(15.0, 47.0);
-            polygon[9]  = vec2(14.0, 47.0);
-            polygon[10] = vec2(14.0, 48.0);
-            polygon[11] = vec2(13.0, 48.0);
-            polygon[12] = vec2(13.0, 49.0);
-            polygon[13] = vec2(3.0, 49.0);
-            polygon[14] = vec2(3.0, 48.0);
-            polygon[15] = vec2(2.0, 48.0);
-            polygon[16] = vec2(2.0, 47.0);
-            polygon[17] = vec2(1.0, 47.0);
-            polygon[18] = vec2(1.0, 46.0);
-            polygon[19] = vec2(0.0, 46.0);
-            polygon[20] = vec2(0.0, 4.0);
-            polygon[21] = vec2(1.0, 4.0);
-            polygon[22] = vec2(1.0, 3.0);
-            polygon[23] = vec2(2.0, 3.0);
-            float d = sdPolygon24(p, polygon, 24);
-            d = min(d, sdBox(p - vec2(4.0, 0.5), vec2(2.0, 0.5)));
-            d = min(d, sdBox(p - vec2(12.0, 0.5), vec2(2.0, 0.5)));
-            return d;
-        }
-        float hudPlateDistance(vec2 p) {
-            return vRadar != 0
-                ? radarPlateDistance(p)
+        vec4 svgHudTexture(vec2 p) {
+            // The three source documents are rasterized at 8x into a 1024
+            // square atlas. Geometry and rings originate in the SVGs; this
+            // shader only maps the current HUD rectangle into its atlas tile.
+            vec2 origin = vRadar != 0
+                ? vec2(0.0, 0.0)
                 : (vHealthPlate != 0
-                    ? healthHudPlateDistance(p)
-                    : mainHudPlateDistance(p));
-        }
-        float analyticHudCoverage(vec2 p) {
-            float distance = hudPlateDistance(p);
-            float aa = max(fwidth(p.x), fwidth(p.y)) * 0.75;
-            return 1.0 - smoothstep(-aa, aa, distance);
-        }
-        vec4 filledHudSource(ivec2 uv, vec4 center) {
-            if (!transparentBlack(center))
-                return center;
-
-            ivec2 boundMin = vUvBounds.xy;
-            ivec2 boundMax = max(vUvBounds.zw, boundMin);
-            for (int radius = 1; radius <= 3; radius++) {
-                vec4 sum = vec4(0.0);
-                float count = 0.0;
-                for (int y = -3; y <= 3; y++) {
-                    for (int x = -3; x <= 3; x++) {
-                        if (max(abs(x), abs(y)) != radius)
-                            continue;
-                        ivec2 sampleUv = clamp(
-                            uv + ivec2(x, y), boundMin, boundMax);
-                        vec4 sampleTexel = textureTexel(sampleUv);
-                        if (!transparentBlack(sampleTexel)) {
-                            sum += sampleTexel;
-                            count += 1.0;
-                        }
-                    }
-                }
-                if (count > 0.0)
-                    return sum / count;
-            }
-            return center;
-        }
-        vec4 analyticHudTexture(vec2 p, vec4 nearestTexel) {
-            ivec2 sourceUv = ivec2(
-                floor(vUV + vec2(0.0001)));
-            vec4 source = filledHudSource(
-                sourceUv, nearestTexel);
-            vec3 background = source.rgb;
-            float plateDistance = hudPlateDistance(p);
-
-            if (vRadar != 0 && length(p - vec2(27.5)) < 27.5) {
-                vec2 q = p - vec2(27.5);
-                float radialDistance = length(q);
-                float aa = max(fwidth(q.x), fwidth(q.y)) * 0.75;
-                float halfLine = 0.5;
-                float axis = min(abs(q.x), abs(q.y));
-                float diagonal =
-                    min(abs(q.x - q.y), abs(q.x + q.y)) * 0.7071;
-                float spokes = 1.0 - smoothstep(
-                    halfLine - aa, halfLine + aa, min(axis, diagonal));
-                float ring = 1.0 - smoothstep(
-                    halfLine - aa, halfLine + aa,
-                    abs(radialDistance - 13.5));
-                float hub =
-                    1.0 - smoothstep(
-                        1.5 - aa, 1.5 + aa, radialDistance);
-                // Native source measurements excluding the one-pixel grid:
-                // upper face RGB5 mean (2.355,2.855,2.120), lower face
-                // (5.830,6.740,4.985). A continuous interpolation retains
-                // those authored material endpoints and removes only the
-                // unwanted concentric/radial color noise between them.
-                vec3 upperFace =
-                    vec3(2.355, 2.855, 2.120) / 31.0;
-                vec3 lowerFace =
-                    vec3(5.830, 6.740, 4.985) / 31.0;
-                float faceY = smoothstep(3.0, 52.0, p.y);
-                background = mix(upperFace, lowerFace, faceY);
-                // The line geometry is analytic, but its color remains the
-                // exact palette-resolved source texel at that location. This
-                // retains the original quadrant-dependent material while
-                // removing the circular/radial noise from the backing.
-                vec3 authoredLine = source.rgb;
-                background = mix(
-                    background, authoredLine, max(spokes, ring));
-                background = mix(background, authoredLine, hub);
-            }
-
-            // Preserve exact authored border coloration at the measured
-            // silhouette. Interior samples are bounded to the same shape.
-            if (plateDistance > -1.25)
-                background = source.rgb;
-
-            // Every non-transparent source texel in all three retail backing
-            // CLUTs has STP set and the packet uses blend mode 0. Retaining
-            // that bit gives the exact half-source/half-destination color
-            // response while the analytic path removes jagged mask edges.
-            return vec4(background, 1.0);
+                    ? vec2(672.0, 440.0)
+                    : vec2(0.0, 440.0));
+            vec2 atlasPixel = origin + p * 8.0;
+            return texture(uHudSvg, (atlasPixel + vec2(0.5)) / 1024.0);
         }
         vec3 stockPaintCorrection(vec3 rgb) {
             if (vUiTexture != 0) return rgb;
@@ -583,13 +357,13 @@ internal static class GlShaders
                 vUiTexture != 0 && vShadow != 0 && uVectorIcons != 0;
             bool enhancedParticle =
                 vUiTexture == 0 && vParticle != 0 && uEnhancedParticles != 0;
-            bool analyticHud = vHudPlate != 0 && uVectorIcons != 0;
+            bool svgHud = vHudPlate != 0 && uVectorIcons != 0;
             vec2 hudLocal = vUV - vec2(vUvBounds.xy);
             float hudCoverage = 1.0;
             float contourCoverage = 1.0;
             float contourStp = nearestTexel.a;
 
-            if ((vectorFont || vectorIcon || enhancedParticle) && !analyticHud) {
+            if ((vectorFont || vectorIcon || enhancedParticle) && !svgHud) {
                 texel = contourTexture(vUV, contourCoverage, contourStp);
                 if (vectorIcon && vHudPlate == 0)
                     texel.rgb = nearestTexel.rgb;
@@ -613,16 +387,17 @@ internal static class GlShaders
                 // creates dark halos. Particle sprites are semitransparent and
                 // can safely reconstruct their edge coverage.
                 bool filteredEdge = vectorFont || vectorIcon || enhancedParticle;
-                if (!analyticHud && !filteredEdge) discard;
+                if (!svgHud && !filteredEdge) discard;
             }
-            if (analyticHud) {
-                hudCoverage = analyticHudCoverage(hudLocal);
-                // Resolve the measured analytic silhouette while retaining
-                // the retail semitransparent material blend. The replacement
-                // fill is uniform, so it preserves authored coloration and
-                // world interaction without the source stipple/grain.
-                if (hudCoverage < 0.5) discard;
-                texel = analyticHudTexture(hudLocal, nearestTexel);
+            if (svgHud) {
+                vec4 vectorTexel = svgHudTexture(hudLocal);
+                hudCoverage = vectorTexel.a;
+                if (hudCoverage <= 0.001) discard;
+                vectorTexel.rgb /= max(hudCoverage, 0.001);
+                // Every nontransparent backing texel in the retail CLUT has
+                // STP set and uses blend mode 0. Preserve that material blend;
+                // only the authored SVG supplies color and edge coverage.
+                texel = vec4(vectorTexel.rgb, 1.0);
             }
             texel.rgb = stockPaintCorrection(texel.rgb);
             if (uEnhancedFog != 0 && vUiTexture == 0 && vDepth > 1.0) {
@@ -632,7 +407,7 @@ internal static class GlShaders
             ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
             ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
             FragColor = vec4(quant5(ivec3(stockPaintCorrection8(c8) * 255.0 + 0.5)), max(texel.a, uSetMask));
-            if (analyticHud) {
+            if (svgHud) {
                 vec4 analyticBlend =
                     texel.a >= 0.5 ? uBlend : uBlendOpaque;
                 BlendColor = vec4(

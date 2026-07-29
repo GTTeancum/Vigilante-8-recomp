@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="84" height="34" viewBox="0 0 84 34">
+  <defs>
+    <radialGradient id="vehicle" cx="18" cy="23" r="27" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#203828"/>
+      <stop offset="0.55" stop-color="#102018"/>
+      <stop offset="1" stop-color="#080808"/>
+    </radialGradient>
+    <radialGradient id="weapon" cx="62" cy="22" r="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#403040"/>
+      <stop offset="0.55" stop-color="#201820"/>
+      <stop offset="1" stop-color="#080808"/>
+    </radialGradient>
+    <radialGradient id="ammo" cx="73" cy="34" r="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#284030"/>
+      <stop offset="0.55" stop-color="#102018"/>
+      <stop offset="1" stop-color="#080808"/>
+    </radialGradient>
+    <linearGradient id="frame" x1="0" y1="0" x2="84" y2="34" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#686068"/>
+      <stop offset="0.72" stop-color="#686068"/>
+      <stop offset="1" stop-color="#181018"/>
+    </linearGradient>
+  </defs>
+
+  <polygon points="0,0 33,0 37,4 37,20 33,24 0,24" fill="url(#vehicle)" stroke="url(#frame)" stroke-width="1"/>
+  <polygon points="44,0 80,0 84,4 84,20 80,24 44,24 40,20 40,4" fill="url(#weapon)" stroke="url(#frame)" stroke-width="1"/>
+  <polygon points="62,22 83,22 83,23 84,23 84,31 83,31 83,32 82,32 82,33 81,33 81,34 65,34 65,33 64,33 64,32 63,32 63,31 62,31"
+           fill="url(#ammo)" stroke="url(#frame)" stroke-width="1"/>
+</svg>

@@ -10,6 +10,10 @@ V8_2_LOOSE/
   SLUS_008.68
   SHELL/
   SHARED/
+    HUD/
+      v82_radar.svg
+      v82_status.svg
+      v82_health.svg
   LEVELS/
   MOVIES/
   music/
@@ -25,6 +29,12 @@ Ordinary assets retain their logical file bytes. `.STR` and `.XA` files retain
 2336 bytes per Mode 2 sector so movies and streamed speech keep their sector
 subheaders. `music/track02.ogg` through `music/track17.ogg` provide the Red Book
 tracks at 44.1 kHz.
+
+Enhanced HUD backings are literal SVG assets under `SHARED/HUD`. They are
+loaded at startup and can be edited without rebuilding the executable. The
+renderer supports the circles, lines, rectangles, polygons, and linear/radial
+gradients used by these three files. If a loose SVG is absent, the executable
+uses its embedded copy.
 
 Standalone mode validates every required path at startup and never falls back
 to a CUE. Useful launch forms are:

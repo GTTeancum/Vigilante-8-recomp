@@ -11,10 +11,12 @@ PS1 framebuffer pixels.
 | Vertical health backing | `(24, 71)` | `(0, 145)` | `16 x 49` |
 
 The radar face occupies the left `55 x 55` pixels of its rectangle. Its center
-is `(27.5, 27.5)` in local atlas coordinates. The clean reconstruction uses the
-measured `27.5`-pixel outer radius, one-pixel axes and diagonals, a
-`13.5`-pixel ring, and a three-pixel center hub. Contacts remain separate
-source-driven game primitives.
+is `(27.5, 27.5)` in local atlas coordinates. Inspection of the recovered
+`hud1.bmp` source shows three interior range rings, with measured centers at
+`10.5`, `18`, and `24` pixels. The SVG reconstruction uses those three circle
+elements, a `27.5`-pixel framed outer extent, one-pixel axes and diagonals, and
+a three-pixel center hub. Contacts remain separate source-driven game
+primitives.
 
 The backing colors are not flat presentation colors. Direct decoding of the
 three gameplay CLUTs proves that every nontransparent backing texel has STP
@@ -33,13 +35,24 @@ The clean radar face uses the measured non-grid upper RGB5 mean
 vertical material transition. This removes the source's concentric/radial
 color noise without replacing its palette or blend response. Grid, hub,
 borders, connectors, status/weapon gradients, ammo tail, and health housing
-retain their exact palette-resolved source texels and mode-0 STP blending.
+use gradient stops sampled from the exact palette-resolved source colors.
+Continuous interpolation replaces native pixel steps between those authored
+anchors, while the shader requantizes to RGB5 and retains mode-0 STP blending.
 
 All three backing groups are classified by their exact authored rectangle.
-Their complete row-measured silhouettes are continuous analytic paths: the
-radar disk and connector, both status/weapon lobes and ammo tail, and the
-vertical health housing. They are left-anchored as one group. Colored status,
-weapon, ammunition, health, and live radar content remains game-driven.
+Their silhouettes, interior gradients, frames, and radar grid are authored in
+literal SVG documents: `v82_radar.svg`, `v82_status.svg`, and
+`v82_health.svg`. A dependency-free in-tree SVG subset renderer rasterizes the
+documents into a premultiplied 8x atlas and generates mipmaps, so downsampling
+retains antialiased vector coverage rather than recreating native-resolution
+steps or dark fringes. The documents are embedded as a fallback and exposed
+under `SHARED/HUD` in the loose-files build. They are left-anchored as one
+group. Colored status, weapon, ammunition, health, and live radar content
+remains game-driven.
+
+The Enhanced SVG design intentionally omits the retail connector ornaments
+between radar and status, status and weapon, and radar and health. Each widget
+retains its own closed frame with transparent negative space between groups.
 
 ## Enhanced texture projection
 

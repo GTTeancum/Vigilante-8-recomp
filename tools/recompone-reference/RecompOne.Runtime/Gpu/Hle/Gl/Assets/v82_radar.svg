@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="55" viewBox="0 0 64 55">
+  <defs>
+    <linearGradient id="face" x1="27.5" y1="2" x2="27.5" y2="53" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#131711"/>
+      <stop offset="1" stop-color="#303729"/>
+    </linearGradient>
+    <linearGradient id="frame" x1="5" y1="5" x2="51" y2="51" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#686068"/>
+      <stop offset="0.62" stop-color="#686068"/>
+      <stop offset="1" stop-color="#100810"/>
+    </linearGradient>
+    <linearGradient id="grid" x1="27.5" y1="3" x2="27.5" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#283020"/>
+      <stop offset="0.5" stop-color="#485848"/>
+      <stop offset="1" stop-color="#687060"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="27.5" cy="27.5" r="26.75" fill="url(#face)" stroke="url(#frame)" stroke-width="1.5"/>
+
+  <!-- Three authored range rings. They are circles, not traced bitmap steps. -->
+  <circle cx="27.5" cy="27.5" r="10.5" fill="none" stroke="url(#grid)" stroke-width="1"/>
+  <circle cx="27.5" cy="27.5" r="18" fill="none" stroke="url(#grid)" stroke-width="1"/>
+  <circle cx="27.5" cy="27.5" r="24" fill="none" stroke="url(#grid)" stroke-width="1"/>
+
+  <line x1="27.5" y1="3.5" x2="27.5" y2="51.5" stroke="url(#grid)" stroke-width="1"/>
+  <line x1="3.5" y1="27.5" x2="51.5" y2="27.5" stroke="url(#grid)" stroke-width="1"/>
+  <line x1="10.5" y1="10.5" x2="44.5" y2="44.5" stroke="url(#grid)" stroke-width="1"/>
+  <line x1="44.5" y1="10.5" x2="10.5" y2="44.5" stroke="url(#grid)" stroke-width="1"/>
+  <rect x="26" y="26" width="3" height="3" fill="#686068"/>
+
+</svg>
