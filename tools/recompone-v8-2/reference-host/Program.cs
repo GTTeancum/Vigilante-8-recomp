@@ -13,9 +13,21 @@ string launchDirectory = Environment.CurrentDirectory;
 Environment.CurrentDirectory = AppContext.BaseDirectory;
 
 string? guestVehicle = null;
+string? explicitLoose = null;
 var launchArguments = args.ToList();
 for (int index = 0; index < launchArguments.Count; index++)
 {
+    if (launchArguments[index].Equals(
+            "--loose", StringComparison.OrdinalIgnoreCase))
+    {
+        if (index + 1 >= launchArguments.Count)
+            throw new ArgumentException("--loose requires a directory");
+        explicitLoose = Path.GetFullPath(
+            launchArguments[index + 1], launchDirectory);
+        launchArguments.RemoveRange(index, 2);
+        index--;
+        continue;
+    }
     if (!launchArguments[index].Equals(
             "--guest-vehicle", StringComparison.OrdinalIgnoreCase))
         continue;
@@ -54,24 +66,41 @@ string? explicitSource = args.Length switch
     0 => null,
     1 => Path.GetFullPath(args[0], launchDirectory),
     _ => throw new ArgumentException(
-        "usage: Vigilante82PC [disc.cue|directory] " +
+        "usage: Vigilante82PC [disc.cue|directory] [--loose <directory>] " +
         "[--probe-vehicle-package <directory>] [--guest-vehicle <stable-id>]")
 };
 
 ConfigManager.Load();
-string cuePath = ResolveCue(explicitSource ?? AppContext.BaseDirectory);
-ConfigManager.Game.CdPath = cuePath;
-ConfigManager.SaveGame();
-Console.WriteLine($"[Host] disc={cuePath}");
+string? loosePath =
+    explicitLoose ?? ResolveLooseSource(explicitSource ?? AppContext.BaseDirectory);
+string? cuePath = loosePath == null
+    ? ResolveCue(explicitSource ?? AppContext.BaseDirectory)
+    : null;
+if (loosePath != null)
+{
+    ConfigManager.Game.CdPath = "";
+    Console.WriteLine($"[Host] standalone-loose={loosePath}");
+}
+else
+{
+    ConfigManager.Game.CdPath = cuePath!;
+    ConfigManager.SaveGame();
+    Console.WriteLine($"[Host] disc={cuePath}");
+}
 
 PreloadBundledNative("SDL2.dll");
 Runtime.SetMode(RunMode.Devkit);
-if (string.IsNullOrWhiteSpace(
-        Environment.GetEnvironmentVariable("RECOMPONE_LOOSE_DIR")))
-    Environment.SetEnvironmentVariable("RECOMPONE_LOOSE_DIR", "0");
-Entry.Run(new PSMemory(), cuePath);
+Entry.Run(new PSMemory(), cuePath, loosePath);
 Console.Error.WriteLine("[Host] emulation entry returned");
 return 0;
+
+static string? ResolveLooseSource(string source)
+{
+    if (!Directory.Exists(source) ||
+        !File.Exists(Path.Combine(source, "SYSTEM.CNF")))
+        return null;
+    return Path.GetFullPath(source);
+}
 
 static string ResolveCue(string source)
 {

@@ -5,7 +5,12 @@ namespace RecompOne.Runtime;
 //old soft raster
 public sealed partial class Gpu
 {
-    struct Vert { public int X, Y, R, G, B, U, V, Z; public bool HasGteZ; }
+    struct Vert
+    {
+        public int X, Y, R, G, B, U, V, Z;
+        public float PerspectiveW;
+        public bool HasGteZ, HasProjectiveW;
+    }
 
     static readonly bool TraceProjection =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PROJECTION") == "1";
@@ -73,44 +78,25 @@ public sealed partial class Gpu
 
         if (tex && quad && ConfigManager.View.PerspectiveCorrectTextures)
         {
-            // A PS1 quad is submitted as two triangles. Applying perspective
-            // correction to only one half creates a hard diagonal UV seam.
-            // Recover a single missing planar depth from the other three
-            // vertices; otherwise keep both halves in the same affine mode.
-            int depthCount = 0;
-            for (int i = 0; i < 4; i++)
-                if (v[i].HasGteZ) depthCount++;
-            bool complete;
-            if (depthCount == 4)
+            // GPU packets do not carry the source GTE depth. Correlating it
+            // later by screen XY is ambiguous whenever surfaces overlap and
+            // was visibly warping UVs into transparent texels, making terrain,
+            // buildings and even the player vehicle blink out. A convex quad
+            // supplies its own exact screen/UV homography, so use only that
+            // self-contained denominator. Triangles retain stable affine UVs
+            // because three screen/UV points cannot determine perspective.
+            if (TryProjectiveQuadW(v))
             {
-                complete = true;
-                _projectionQuadGte++;
-            }
-            else if (depthCount == 3 && TryCompleteQuadDepth(v, out _))
-            {
-                complete = true;
-                _projectionQuadRecovered++;
-            }
-            else if (TryProjectiveQuadDepth(v))
-            {
-                complete = true;
                 _projectionQuadHomography++;
             }
             else
             {
-                complete = false;
                 _projectionQuadAffine++;
             }
-            if (!complete)
-                for (int i = 0; i < 4; i++)
-                    v[i].HasGteZ = false;
         }
         else if (tex && !quad && ConfigManager.View.PerspectiveCorrectTextures)
         {
-            if (v[0].HasGteZ && v[1].HasGteZ && v[2].HasGteZ)
-                _projectionTriGte++;
-            else
-                _projectionTriAffine++;
+            _projectionTriAffine++;
         }
 
         if (HleOn)
@@ -156,60 +142,29 @@ public sealed partial class Gpu
         _projectionTriAffine = 0;
     }
 
-    static bool TryCompleteQuadDepth(Span<Vert> v, out int completedIndex)
-    {
-        completedIndex = -1;
-        Span<int> known = stackalloc int[3];
-        int count = 0;
-        for (int i = 0; i < 4; i++)
-        {
-            if (v[i].HasGteZ) known[count++] = i;
-            else completedIndex = i;
-        }
-        if (count != 3 || completedIndex < 0) return false;
-
-        ref Vert p0 = ref v[known[0]];
-        ref Vert p1 = ref v[known[1]];
-        ref Vert p2 = ref v[known[2]];
-        ref Vert pm = ref v[completedIndex];
-        double denominator =
-            (double)(p1.Y - p2.Y) * (p0.X - p2.X) +
-            (double)(p2.X - p1.X) * (p0.Y - p2.Y);
-        if (Math.Abs(denominator) < 0.000001) return false;
-
-        double q0 = 1.0 / p0.Z;
-        double q1 = 1.0 / p1.Z;
-        double q2 = 1.0 / p2.Z;
-        double a = ((q0 - q2) * (p1.Y - p2.Y) +
-                    (q1 - q2) * (p2.Y - p0.Y)) / denominator;
-        double b = ((q0 - q2) * (p2.X - p1.X) +
-                    (q1 - q2) * (p0.X - p2.X)) / denominator;
-        double inverseZ = q2 +
-            a * (pm.X - p2.X) +
-            b * (pm.Y - p2.Y);
-        if (!double.IsFinite(inverseZ) || inverseZ <= 0.0) return false;
-
-        double recoveredZ = 1.0 / inverseZ;
-        int minZ = Math.Min(p0.Z, Math.Min(p1.Z, p2.Z));
-        int maxZ = Math.Max(p0.Z, Math.Max(p1.Z, p2.Z));
-        if (!double.IsFinite(recoveredZ) ||
-            recoveredZ < Math.Max(1.0, minZ / 16.0) ||
-            recoveredZ > Math.Min(65535.0, maxZ * 16.0))
-            return false;
-
-        pm.Z = (int)Math.Round(recoveredZ);
-        pm.HasGteZ = true;
-        return true;
-    }
-
-    static bool TryProjectiveQuadDepth(Span<Vert> v)
+    static bool TryProjectiveQuadW(Span<Vert> v)
     {
         // Four screen/UV correspondences define a projective homography even
         // when the original ordering-table packet no longer has GTE depth.
         // PS1 textured quads use the corner order 0,1 / 2,3. Recover the four
         // homogeneous denominators for that unit square and pass their ratios
         // to OpenGL as clip W. Affine parallelograms naturally produce four
-        // equal values.
+        // equal values. Require a convex perimeter (0,1,3,2) so malformed or
+        // folded packets stay on the non-destructive affine path.
+        Span<int> perimeter = stackalloc int[4] { 0, 1, 3, 2 };
+        long winding = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            ref Vert a = ref v[perimeter[i]];
+            ref Vert b = ref v[perimeter[(i + 1) & 3]];
+            ref Vert c = ref v[perimeter[(i + 2) & 3]];
+            long cross = (long)(b.X - a.X) * (c.Y - b.Y) -
+                         (long)(b.Y - a.Y) * (c.X - b.X);
+            if (cross == 0) return false;
+            if (winding == 0) winding = Math.Sign(cross);
+            else if (Math.Sign(cross) != winding) return false;
+        }
+
         double dx1 = v[1].X - v[3].X;
         double dx2 = v[2].X - v[3].X;
         double dx3 = v[0].X - v[1].X - v[2].X + v[3].X;
@@ -248,8 +203,8 @@ public sealed partial class Gpu
         double scale = 1024.0 / minW;
         for (int i = 0; i < 4; i++)
         {
-            v[i].Z = Math.Clamp((int)Math.Round(w[i] * scale), 1, 65535);
-            v[i].HasGteZ = true;
+            v[i].PerspectiveW = (float)Math.Clamp(w[i] * scale, 1.0, 65535.0);
+            v[i].HasProjectiveW = true;
         }
         return true;
     }

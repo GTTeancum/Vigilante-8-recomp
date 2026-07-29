@@ -7,6 +7,14 @@ public sealed partial class Gpu
 {
     static bool HleOn => GpuHle.Active && GpuHle.Backend is { Ready: true };
     bool DitherEnabled => _dither && ConfigManager.View.Ps1Dithering;
+    int _currentOtDepth;
+
+    public void BeginOrderingTable() => _currentOtDepth = 0;
+
+    public void SetOrderingTableDepth(int depth) =>
+        _currentOtDepth = Math.Max(1, depth);
+
+    public void EndOrderingTable() => _currentOtDepth = 0;
 
     int CurTPage() => ((_texPageX / 64) & 0xf) | (((_texPageY / 256) & 1) << 4)
                     | ((_blendMode & 3) << 5) | ((_texDepth & 3) << 7);
@@ -22,11 +30,13 @@ public sealed partial class Gpu
     {
         X = v.X, Y = v.Y, R = (byte)v.R, G = (byte)v.G, B = (byte)v.B, U = (short)v.U, V = (short)v.V,
         Z = v.Z, HasGteZ = v.HasGteZ,
+        PerspectiveW = v.PerspectiveW, HasProjectiveW = v.HasProjectiveW,
     };
 
     PrimFlags PrimOf(bool tex, bool semi, bool raw, int clut, bool gouraud = false) => new()
     {
         Textured = tex, SemiTrans = semi, RawTexture = raw, Gouraud = gouraud, TPage = (ushort)CurTPage(), Clut = (ushort)clut,
+        OtIndex = _currentOtDepth,
     };
 
     void HleTri(in Vert a, in Vert b, in Vert c, bool tex, bool gouraud, bool semi, bool raw, int clut)

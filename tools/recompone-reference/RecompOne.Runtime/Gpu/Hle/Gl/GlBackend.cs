@@ -12,7 +12,7 @@ public sealed class GlBackend : IGpuBackend
         public float X, Y;
         public uint Color;
         public int Clut, Texpage;
-        public float U, V, PerspectiveW;
+        public float U, V, PerspectiveW, Depth, RasterDepth;
         public float BaryX, BaryY, BaryZ;
         public float UvMinX, UvMinY, UvMaxX, UvMaxY;
     }
@@ -38,6 +38,7 @@ public sealed class GlBackend : IGpuBackend
 
     GlDisplayRt? _kTarget;
     bool _kTransparent;
+    bool _kDepthTest;
     int _kBlend, _kSetMask, _kCheckMask;
     int _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY;
     int _kClipX0, _kClipY0, _kClipX1, _kClipY1, _kTextureSmoothing;
@@ -104,8 +105,10 @@ public sealed class GlBackend : IGpuBackend
         _gl.EnableVertexAttribArray(3); _gl.VertexAttribIPointer(3, 1, VertexAttribIType.Int, stride, (void*)16);
         _gl.EnableVertexAttribArray(4); _gl.VertexAttribPointer(4, 2, VertexAttribPointerType.Float, false, stride, (void*)20);
         _gl.EnableVertexAttribArray(5); _gl.VertexAttribPointer(5, 1, VertexAttribPointerType.Float, false, stride, (void*)28);
-        _gl.EnableVertexAttribArray(6); _gl.VertexAttribPointer(6, 3, VertexAttribPointerType.Float, false, stride, (void*)32);
-        _gl.EnableVertexAttribArray(7); _gl.VertexAttribPointer(7, 4, VertexAttribPointerType.Float, false, stride, (void*)44);
+        _gl.EnableVertexAttribArray(6); _gl.VertexAttribPointer(6, 3, VertexAttribPointerType.Float, false, stride, (void*)40);
+        _gl.EnableVertexAttribArray(7); _gl.VertexAttribPointer(7, 4, VertexAttribPointerType.Float, false, stride, (void*)52);
+        _gl.EnableVertexAttribArray(8); _gl.VertexAttribPointer(8, 1, VertexAttribPointerType.Float, false, stride, (void*)32);
+        _gl.EnableVertexAttribArray(9); _gl.VertexAttribPointer(9, 1, VertexAttribPointerType.Float, false, stride, (void*)36);
 
         // fullscreen quad for present, real vbo since gl_VertexID without arrays does not draw on mesa for some reason?? or i did it wrong?
         _presentVao = _gl.GenVertexArray();
@@ -260,29 +263,33 @@ public sealed class GlBackend : IGpuBackend
             }
     }
 
-    bool DesiredMatches(bool transparent, int blend)
+    bool DesiredMatches(bool transparent, int blend, bool depthTest)
     {
         int twAndX = ~(_env.TwMaskX * 8) & 0xFF, twAndY = ~(_env.TwMaskY * 8) & 0xFF;
         int twOrX = (_env.TwOffX & _env.TwMaskX) * 8, twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
-        return _kTransparent == transparent && _kBlend == blend
+        return _kTransparent == transparent && _kBlend == blend &&
+            _kDepthTest == depthTest
             && _kSetMask == (_env.SetMask ? 1 : 0) && _kCheckMask == (_env.CheckMask ? 1 : 0)
             && _kTwAndX == twAndX && _kTwAndY == twAndY && _kTwOrX == twOrX && _kTwOrY == twOrY
             && _kClipX0 == _env.ClipX0 && _kClipY0 == _env.ClipY0 && _kClipX1 == _env.ClipX1 && _kClipY1 == _env.ClipY1
             && _kTextureSmoothing == (ConfigManager.View.TextureSmoothing ? 1 : 0);
     }
 
-    void Begin(in PrimFlags f, int vertsNeeded)
+    void Begin(in PrimFlags f, int vertsNeeded, bool depthTest = false)
     {
         _readCacheValid = false;
         bool transparent = f.SemiTrans;
         int blend = f.BlendMode;
         var target = Classify();
-        if (_count > 0 && (target != _kTarget || !DesiredMatches(transparent, blend))) Flush();
+        if (_count > 0 &&
+            (target != _kTarget ||
+             !DesiredMatches(transparent, blend, depthTest))) Flush();
         if (_count + vertsNeeded > MaxVerts) Flush();
         CheckTextureFeedback(f);
 
         _kTarget = target;
         _kTransparent = transparent; _kBlend = blend;
+        _kDepthTest = depthTest;
         _kSetMask = _env.SetMask ? 1 : 0; _kCheckMask = _env.CheckMask ? 1 : 0;
         _kTwAndX = ~(_env.TwMaskX * 8) & 0xFF; _kTwAndY = ~(_env.TwMaskY * 8) & 0xFF;
         _kTwOrX = (_env.TwOffX & _env.TwMaskX) * 8; _kTwOrY = (_env.TwOffY & _env.TwMaskY) * 8;
@@ -297,7 +304,8 @@ public sealed class GlBackend : IGpuBackend
         in PrimFlags f,
         bool dither,
         bool perspectiveCorrect,
-        bool uiTexture = false)
+        bool uiTexture = false,
+        float rasterDepth = 0f)
     {
         uint color = (f.Textured && f.RawTexture) ? 0x808080u : (uint)(v.R | (v.G << 8) | (v.B << 16));
         int tpage = f.Textured ? (f.TPage & 0x1FF) : 0x8000;
@@ -310,32 +318,71 @@ public sealed class GlBackend : IGpuBackend
             (!f.RawTexture || !uiTexture))
             tpage |= 0x800;
         if (uiTexture) tpage |= 0x1000;
-        float perspectiveW = perspectiveCorrect ? MathF.Max(1f, v.Z) : 1f;
+        float perspectiveW =
+            perspectiveCorrect ? MathF.Max(1f, v.PerspectiveW) : 1f;
+        float screenX = v.X;
+        float screenY = v.Y;
+        if (!uiTexture &&
+            GpuHle.GameplayActive &&
+            _kTarget is { Margin: > 0 } wideTarget)
+        {
+            // The retail game culls world sectors for a 4:3 camera. Exposing
+            // a wider horizontal frustum reveals unsubmitted terrain edges as
+            // blinking sky wedges. Expand both axes uniformly instead: this
+            // fills 16:9 without stretching models or exposing uncullable
+            // off-map geometry (the vertical field is cropped accordingly).
+            float wideScale = wideTarget.Wide1x / (float)wideTarget.W;
+            screenX = wideTarget.X - wideTarget.Margin +
+                (v.X - wideTarget.X) * wideScale;
+            float centerY = wideTarget.Y + wideTarget.H * 0.5f;
+            screenY = centerY + (v.Y - centerY) * wideScale;
+        }
         return new GlVertex
         {
-            X = v.X, Y = v.Y,
+            X = screenX, Y = screenY,
             Color = color,
             Clut = f.Clut & 0x7FFF,
             Texpage = tpage,
             U = v.U, V = v.V,
             PerspectiveW = perspectiveW,
+            Depth = v.HasGteZ ? MathF.Max(1f, v.Z) : 1f,
+            RasterDepth = rasterDepth,
         };
     }
 
     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
-        Begin(f, 3);
+        bool depthTest =
+            GpuHle.GameplayActive &&
+            (ConfigManager.View.HighResolution3D ||
+             ConfigManager.View.PerspectiveCorrectTextures) &&
+            f.OtIndex > 0;
+        Begin(f, 3, depthTest);
         bool dith = DitherOf(f);
         bool hasDepth = f.Textured && a.HasGteZ && b.HasGteZ && c.HasGteZ;
+        bool hasProjectiveW =
+            f.Textured &&
+            a.HasProjectiveW && b.HasProjectiveW && c.HasProjectiveW;
         bool perspectiveCorrect =
-            ConfigManager.View.PerspectiveCorrectTextures && hasDepth;
+            ConfigManager.View.PerspectiveCorrectTextures && hasProjectiveW;
         bool particle = f.Textured && f.SemiTrans && hasDepth;
         bool shadow = !f.Textured && f.SemiTrans && a.HasGteZ && b.HasGteZ && c.HasGteZ &&
             a.R < 96 && a.G < 96 && a.B < 96 && b.R < 96 && b.G < 96 && b.B < 96 &&
             c.R < 96 && c.G < 96 && c.B < 96;
-        var va = V(a, f, dith, perspectiveCorrect); va.BaryX = 1f;
-        var vb = V(b, f, dith, perspectiveCorrect); vb.BaryY = 1f;
-        var vc = V(c, f, dith, perspectiveCorrect); vc.BaryZ = 1f;
+        static float DepthOf(in HleVertex v, int otDepth, bool projective)
+        {
+            float relative = projective
+                ? Math.Clamp(v.PerspectiveW / 1024f, 1f / 64f, 64f)
+                : 1f;
+            float z = MathF.Max(0.001f, otDepth * relative);
+            return z / (z + 1f);
+        }
+        var va = V(a, f, dith, perspectiveCorrect, false,
+            DepthOf(a, f.OtIndex, perspectiveCorrect)); va.BaryX = 1f;
+        var vb = V(b, f, dith, perspectiveCorrect, false,
+            DepthOf(b, f.OtIndex, perspectiveCorrect)); vb.BaryY = 1f;
+        var vc = V(c, f, dith, perspectiveCorrect, false,
+            DepthOf(c, f.OtIndex, perspectiveCorrect)); vc.BaryZ = 1f;
         if (particle) { va.Texpage |= 0x2000; vb.Texpage |= 0x2000; vc.Texpage |= 0x2000; }
         if (shadow)
         {
@@ -395,15 +442,6 @@ public sealed class GlBackend : IGpuBackend
             topGameplayHud && f.Textured && r.W == 16 && r.H == 49;
         bool hudBackgroundPlate =
             radarPlate || mainHudPlate || healthHudPlate;
-        if (hudBackgroundPlate && ConfigManager.View.VectorIcons && f.SemiTrans)
-        {
-            // Enhanced HUD backings are measured, opaque analytic geometry.
-            // Start an opaque batch so the retail STP flag cannot mix the
-            // world back into the clean face and recreate the circular grain.
-            var opaqueHud = f;
-            opaqueHud.SemiTrans = false;
-            Begin(opaqueHud, 6);
-        }
         bool iconLike =
             f.Textured && !fontLike &&
             r.W <= 96 && r.H <= 96 &&
@@ -583,7 +621,17 @@ public sealed class GlBackend : IGpuBackend
         }
         _vram.Barrier();
 
-        _gl.Disable(EnableCap.DepthTest);
+        if (_kDepthTest)
+        {
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthFunc(DepthFunction.Lequal);
+            _gl.DepthMask(!_kTransparent);
+        }
+        else
+        {
+            _gl.Disable(EnableCap.DepthTest);
+            _gl.DepthMask(false);
+        }
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.ScissorTest);
         int s = GlVram.Scale;
@@ -663,6 +711,7 @@ public sealed class GlBackend : IGpuBackend
         }
 
         _gl.Disable(EnableCap.ScissorTest);
+        _gl.DepthMask(true);
         if (rt != null)
         {
             rt.Resolve(_gl);
@@ -715,6 +764,7 @@ public sealed class GlBackend : IGpuBackend
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _presentFbo);
         _gl.Viewport(0, 0, (uint)fbW, (uint)fbH);
         _gl.Disable(EnableCap.DepthTest);
+        _gl.DepthMask(true);
         _gl.Disable(EnableCap.Blend);
         _gl.Disable(EnableCap.ScissorTest);
         _gl.Disable(EnableCap.CullFace);
@@ -742,6 +792,9 @@ public sealed class GlBackend : IGpuBackend
         }
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
 
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        foreach (var rt in _rts)
+            rt?.ClearDepth(_gl);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         return (_presentTex, fbW, fbH, aspect);
     }

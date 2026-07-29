@@ -6,7 +6,7 @@ public sealed class GlDisplayRt
 {
     public int X, Y, W, H;
     public int Margin;
-    public uint Tex, Fbo, MsaaFbo, MsaaColor;
+    public uint Tex, Fbo, Depth, MsaaFbo, MsaaColor, MsaaDepth;
     public int Samples;
     public bool Dirty;
     public long Stamp;
@@ -42,9 +42,18 @@ public sealed class GlDisplayRt
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, Fbo);
         gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
             TextureTarget.Texture2D, Tex, 0);
+        Depth = gl.GenRenderbuffer();
+        gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, Depth);
+        gl.RenderbufferStorage(
+            RenderbufferTarget.Renderbuffer, InternalFormat.DepthComponent24,
+            (uint)TexW, (uint)TexH);
+        gl.FramebufferRenderbuffer(
+            FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
+            RenderbufferTarget.Renderbuffer, Depth);
         gl.ClearColor(0f, 0f, 0f, 0f);
+        gl.ClearDepth(1.0);
         gl.Disable(EnableCap.ScissorTest);
-        gl.Clear(ClearBufferMask.ColorBufferBit);
+        gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         if (Samples > 1)
         {
@@ -56,7 +65,16 @@ public sealed class GlDisplayRt
             gl.BindFramebuffer(FramebufferTarget.Framebuffer, MsaaFbo);
             gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
                 RenderbufferTarget.Renderbuffer, MsaaColor);
-            gl.Clear(ClearBufferMask.ColorBufferBit);
+            MsaaDepth = gl.GenRenderbuffer();
+            gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, MsaaDepth);
+            gl.RenderbufferStorageMultisample(
+                RenderbufferTarget.Renderbuffer, (uint)Samples,
+                InternalFormat.DepthComponent24, (uint)TexW, (uint)TexH);
+            gl.FramebufferRenderbuffer(
+                FramebufferTarget.Framebuffer,
+                FramebufferAttachment.DepthAttachment,
+                RenderbufferTarget.Renderbuffer, MsaaDepth);
+            gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
         }
     }
 
@@ -80,12 +98,23 @@ public sealed class GlDisplayRt
             ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
     }
 
+    public void ClearDepth(GL gl)
+    {
+        gl.BindFramebuffer(FramebufferTarget.Framebuffer, DrawFbo);
+        gl.Disable(EnableCap.ScissorTest);
+        gl.DepthMask(true);
+        gl.ClearDepth(1.0);
+        gl.Clear(ClearBufferMask.DepthBufferBit);
+    }
+
     public void Destroy(GL gl)
     {
         if (Fbo != 0) gl.DeleteFramebuffer(Fbo);
         if (MsaaFbo != 0) gl.DeleteFramebuffer(MsaaFbo);
         if (MsaaColor != 0) gl.DeleteRenderbuffer(MsaaColor);
+        if (MsaaDepth != 0) gl.DeleteRenderbuffer(MsaaDepth);
+        if (Depth != 0) gl.DeleteRenderbuffer(Depth);
         if (Tex != 0) gl.DeleteTexture(Tex);
-        Fbo = Tex = MsaaFbo = MsaaColor = 0;
+        Fbo = Tex = Depth = MsaaFbo = MsaaColor = MsaaDepth = 0;
     }
 }

@@ -38,16 +38,41 @@ public static class LibGpu
                 ? MemoryMap.DevkitRamSize
                 : MemoryMap.RetailRamSize) - 4u;
         uint addr = c.A0 & ramAddressMask;
+        int bucketCount = CountOrderingTableBuckets(
+            m, addr, ramAddressMask);
+        int bucketDepth = bucketCount;
+        gpu.BeginOrderingTable();
         for (int guard = 0; guard < 0x100000; guard++)
         {
             uint header = m.ReadU32(addr);
             uint count = header >> 24;
+            if (count == 0)
+                gpu.SetOrderingTableDepth(bucketDepth--);
             for (uint i = 0; i < count; i++)
                 gpu.WriteGp0(m.ReadU32(addr + 4u + i * 4u));
             uint next = header & 0xFFFFFFu;
             if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
             addr = next & ramAddressMask;
         }
+        gpu.EndOrderingTable();
+    }
+
+    static int CountOrderingTableBuckets(
+        IMemory m, uint start, uint ramAddressMask)
+    {
+        int buckets = 0;
+        uint addr = start;
+        for (int guard = 0; guard < 0x100000; guard++)
+        {
+            uint header = m.ReadU32(addr);
+            if ((header >> 24) == 0)
+                buckets++;
+            uint next = header & 0xFFFFFFu;
+            if (next == 0xFFFFFFu || (next & 0x800000u) != 0)
+                break;
+            addr = next & ramAddressMask;
+        }
+        return Math.Max(1, buckets);
     }
 
     public static void DrawSync(CpuContext c, IMemory m) => c.V0 = 0;

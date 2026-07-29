@@ -4,9 +4,11 @@ public struct HleVertex
 {
     public float X, Y; 
     public float Z; 
+    public float PerspectiveW;
     public byte R, G, B;
     public short U, V;
     public bool HasGteZ;
+    public bool HasProjectiveW;
 }
 
 public struct PrimFlags

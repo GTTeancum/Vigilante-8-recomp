@@ -66,6 +66,8 @@ internal static class GlShaders
         layout(location = 5) in float inPerspectiveW;
         layout(location = 6) in vec3  inBary;
         layout(location = 7) in vec4  inUvBounds;
+        layout(location = 8) in float inDepth;
+        layout(location = 9) in float inRasterDepth;
 
         out vec4 vColor;
         out vec2 vUV;
@@ -92,7 +94,8 @@ internal static class GlShaders
         void main() {
             vec2 p = (inPos + uVertexOffset + uPosBias) * uFbInv - 1.0;
             float w = max(inPerspectiveW, 1.0);
-            gl_Position = vec4(p * w, 0.0, w);
+            float clipZ = (clamp(inRasterDepth, 0.0, 1.0) * 2.0 - 1.0) * w;
+            gl_Position = vec4(p * w, clipZ, w);
 
             vColor = vec4(float(inColor & 0xFFu), float((inColor >> 8) & 0xFFu), float((inColor >> 16) & 0xFFu), 0.0) / 255.0;
             vDither = (inTexpage >> 10) & 1;
@@ -106,7 +109,7 @@ internal static class GlShaders
             vLongestEdge = inClut;
             vUvBounds = ivec4(round(inUvBounds));
             vBary = inBary;
-            vDepth = inPerspectiveW;
+            vDepth = inDepth;
 
             if ((inTexpage & 0x8000) != 0) {
                 texMode = 4;
@@ -430,23 +433,56 @@ internal static class GlShaders
             d = min(d, sdBox(p - vec2(12.0, 0.5), vec2(2.0, 0.5)));
             return d;
         }
-        float analyticHudCoverage(vec2 p) {
-            float distance = vRadar != 0
+        float hudPlateDistance(vec2 p) {
+            return vRadar != 0
                 ? radarPlateDistance(p)
                 : (vHealthPlate != 0
                     ? healthHudPlateDistance(p)
                     : mainHudPlateDistance(p));
+        }
+        float analyticHudCoverage(vec2 p) {
+            float distance = hudPlateDistance(p);
             float aa = max(fwidth(p.x), fwidth(p.y)) * 0.75;
             return 1.0 - smoothstep(-aa, aa, distance);
         }
+        vec4 filledHudSource(ivec2 uv, vec4 center) {
+            if (!transparentBlack(center))
+                return center;
+
+            ivec2 boundMin = vUvBounds.xy;
+            ivec2 boundMax = max(vUvBounds.zw, boundMin);
+            for (int radius = 1; radius <= 3; radius++) {
+                vec4 sum = vec4(0.0);
+                float count = 0.0;
+                for (int y = -3; y <= 3; y++) {
+                    for (int x = -3; x <= 3; x++) {
+                        if (max(abs(x), abs(y)) != radius)
+                            continue;
+                        ivec2 sampleUv = clamp(
+                            uv + ivec2(x, y), boundMin, boundMax);
+                        vec4 sampleTexel = textureTexel(sampleUv);
+                        if (!transparentBlack(sampleTexel)) {
+                            sum += sampleTexel;
+                            count += 1.0;
+                        }
+                    }
+                }
+                if (count > 0.0)
+                    return sum / count;
+            }
+            return center;
+        }
         vec4 analyticHudTexture(vec2 p, vec4 nearestTexel) {
-            vec3 background = vHealthPlate != 0
-                ? vec3(9.0, 6.0, 5.0) / 31.0
-                : vec3(16.0, 15.0, 12.0) / 31.0;
+            ivec2 sourceUv = ivec2(
+                floor(vUV + vec2(0.0001)));
+            vec4 source = filledHudSource(
+                sourceUv, nearestTexel);
+            vec3 background = source.rgb;
+            float plateDistance = hudPlateDistance(p);
 
             if (vRadar != 0 && length(p - vec2(27.5)) < 27.5) {
                 vec2 q = p - vec2(27.5);
-                float radius = length(q);
+                float radialDistance = length(q);
                 float aa = max(fwidth(q.x), fwidth(q.y)) * 0.75;
                 float halfLine = 0.5;
                 float axis = min(abs(q.x), abs(q.y));
@@ -455,36 +491,42 @@ internal static class GlShaders
                 float spokes = 1.0 - smoothstep(
                     halfLine - aa, halfLine + aa, min(axis, diagonal));
                 float ring = 1.0 - smoothstep(
-                    halfLine - aa, halfLine + aa, abs(radius - 13.5));
+                    halfLine - aa, halfLine + aa,
+                    abs(radialDistance - 13.5));
                 float hub =
-                    1.0 - smoothstep(1.5 - aa, 1.5 + aa, radius);
-                vec3 grid = vec3(19.0, 17.0, 14.0) / 31.0;
-                vec3 hubColor = vec3(21.0, 19.0, 17.0) / 31.0;
-                background = mix(background, grid, max(spokes, ring));
-                background = mix(background, hubColor, hub);
+                    1.0 - smoothstep(
+                        1.5 - aa, 1.5 + aa, radialDistance);
+                // Native source measurements excluding the one-pixel grid:
+                // upper face RGB5 mean (2.355,2.855,2.120), lower face
+                // (5.830,6.740,4.985). A continuous interpolation retains
+                // those authored material endpoints and removes only the
+                // unwanted concentric/radial color noise between them.
+                vec3 upperFace =
+                    vec3(2.355, 2.855, 2.120) / 31.0;
+                vec3 lowerFace =
+                    vec3(5.830, 6.740, 4.985) / 31.0;
+                float faceY = smoothstep(3.0, 52.0, p.y);
+                background = mix(upperFace, lowerFace, faceY);
+                // The line geometry is analytic, but its color remains the
+                // exact palette-resolved source texel at that location. This
+                // retains the original quadrant-dependent material while
+                // removing the circular/radial noise from the backing.
+                vec3 authoredLine = source.rgb;
+                background = mix(
+                    background, authoredLine, max(spokes, ring));
+                background = mix(background, authoredLine, hub);
             }
 
-            if (vRadar == 0 && vHealthPlate == 0) {
-                bool contentRegion =
-                    (p.x >= 3.0 && p.x < 35.0 &&
-                     p.y >= 2.0 && p.y < 22.0) ||
-                    (p.x >= 43.0 && p.x < 82.0 &&
-                     p.y >= 1.0 && p.y < 22.0) ||
-                    (p.x >= 62.0 && p.y >= 22.0);
-                float hi = max(
-                    nearestTexel.r,
-                    max(nearestTexel.g, nearestTexel.b));
-                float lo = min(
-                    nearestTexel.r,
-                    min(nearestTexel.g, nearestTexel.b));
-                bool foreground =
-                    contentRegion &&
-                    !transparentBlack(nearestTexel) &&
-                    (hi - lo > 0.08 || hi < 0.18 || hi > 0.72);
-                if (foreground)
-                    background = nearestTexel.rgb;
-            }
-            return vec4(background, nearestTexel.a);
+            // Preserve exact authored border coloration at the measured
+            // silhouette. Interior samples are bounded to the same shape.
+            if (plateDistance > -1.25)
+                background = source.rgb;
+
+            // Every non-transparent source texel in all three retail backing
+            // CLUTs has STP set and the packet uses blend mode 0. Retaining
+            // that bit gives the exact half-source/half-destination color
+            // response while the analytic path removes jagged mask edges.
+            return vec4(background, 1.0);
         }
         vec3 stockPaintCorrection(vec3 rgb) {
             if (vUiTexture != 0) return rgb;
@@ -575,10 +617,10 @@ internal static class GlShaders
             }
             if (analyticHud) {
                 hudCoverage = analyticHudCoverage(hudLocal);
-                // These primitives are placed in an opaque batch to remove
-                // the authored STP grain. Resolve the analytic path at its
-                // half-coverage contour; 4x HLE rendering plus presentation
-                // antialiasing smooths the final edge.
+                // Resolve the measured analytic silhouette while retaining
+                // the retail semitransparent material blend. The replacement
+                // fill is uniform, so it preserves authored coloration and
+                // world interaction without the source stipple/grain.
                 if (hudCoverage < 0.5) discard;
                 texel = analyticHudTexture(hudLocal, nearestTexel);
             }
@@ -591,10 +633,11 @@ internal static class GlShaders
             ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
             FragColor = vec4(quant5(ivec3(stockPaintCorrection8(c8) * 255.0 + 0.5)), max(texel.a, uSetMask));
             if (analyticHud) {
-                // All enhanced HUD backings are opaque measured vector paths.
-                // Fractional edge coverage is encoded with the same
-                // destination-preserving blend used by other analytic UI.
-                BlendColor = vec4(vec3(hudCoverage), 1.0 - hudCoverage);
+                vec4 analyticBlend =
+                    texel.a >= 0.5 ? uBlend : uBlendOpaque;
+                BlendColor = vec4(
+                    analyticBlend.rgb * hudCoverage,
+                    mix(1.0, analyticBlend.a, hudCoverage));
             } else if (enhancedParticle && contourCoverage < 0.999) {
                 if (contourStp >= 0.5) {
                     BlendColor = vec4(
