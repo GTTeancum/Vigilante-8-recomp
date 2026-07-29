@@ -79,10 +79,12 @@ string? cuePath = loosePath == null
 if (loosePath != null)
 {
     ConfigManager.Game.CdPath = "";
+    Runtime.SetLoosePath(loosePath);
     Console.WriteLine($"[Host] standalone-loose={loosePath}");
 }
 else
 {
+    Runtime.SetLoosePath(null);
     ConfigManager.Game.CdPath = cuePath!;
     ConfigManager.SaveGame();
     Console.WriteLine($"[Host] disc={cuePath}");

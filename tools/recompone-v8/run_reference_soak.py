@@ -128,6 +128,15 @@ def parse_args() -> argparse.Namespace:
         help="Use a standalone extracted asset tree; no CUE/BIN is opened.",
     )
     parser.add_argument(
+        "--override-root",
+        type=Path,
+        help=(
+            "Overlay loose files on a CUE/BIN source. Files absent from the "
+            "retail ISO, such as append-only arena DLL/EXP packages, receive "
+            "private virtual extents."
+        ),
+    )
+    parser.add_argument(
         "--maps",
         default="all",
         help=(
@@ -146,9 +155,22 @@ def parse_args() -> argparse.Namespace:
         "--guest-vehicle",
         help="select an independent vehicle by stable ID through the engine roster API",
     )
+    parser.add_argument(
+        "--guest-arena",
+        help="select an independent arena by stable ID through the engine arena API",
+    )
     parser.add_argument("--seconds", type=float, default=120.0, help="Gameplay soak time per arena.")
     parser.add_argument("--entry-timeout", type=float, default=45.0)
     parser.add_argument("--heartbeat-timeout", type=float, default=15.0)
+    parser.add_argument(
+        "--capture-delay-polls",
+        type=int,
+        default=300,
+        help=(
+            "Capture the gameplay proof this many input polls after gameplay "
+            "starts (default: 300)."
+        ),
+    )
     parser.add_argument("--cycles", type=int, default=1)
     parser.add_argument(
         "--campaign-hours",
@@ -558,8 +580,15 @@ def run_one(
     whammy_matrix: bool,
     whammy_start_kind: int | None,
     guest_vehicle: str | None,
+    guest_arena: str | None,
+    capture_delay_polls: int,
 ) -> RunResult:
     stem = f"{cycle:02d}_{mode}_{arena.key}"
+    expected_overlay = (
+        "DREAMLND"
+        if guest_arena == "n64.super_dreamland_64"
+        else arena.overlay
+    )
     fixture_path = output / f"{stem}.input.txt"
     stdout_path = output / f"{stem}.stdout.log"
     stderr_path = output / f"{stem}.stderr.log"
@@ -594,7 +623,9 @@ def run_one(
     env["RECOMPONE_TRACE_RESULTS"] = "1"
     env["RECOMPONE_TRACE_ANIMATION"] = "1"
     env["RECOMPONE_VALIDATE_HEAP"] = "1"
-    env["RECOMPONE_GAMEPLAY_CAPTURE_DELAY_POLLS"] = "300"
+    env["RECOMPONE_GAMEPLAY_CAPTURE_DELAY_POLLS"] = str(
+        max(0, capture_delay_polls)
+    )
     if whammy_matrix:
         env["RECOMPONE_V8_WHAMMY_MATRIX"] = "1"
         env["RECOMPONE_TRACE_WEAPONS"] = "1"
@@ -624,6 +655,11 @@ def run_one(
                 *(
                     ["--guest-vehicle", guest_vehicle]
                     if guest_vehicle is not None
+                    else []
+                ),
+                *(
+                    ["--guest-arena", guest_arena]
+                    if guest_arena is not None
                     else []
                 ),
                 *source_args,
@@ -672,7 +708,7 @@ def run_one(
                     print(f"[{stem}] result screen reached", flush=True)
 
                 overlay_load_count = text.count(
-                    f"loaded relocated overlay: {arena.overlay}"
+                    f"loaded relocated overlay: {expected_overlay}"
                 )
                 clean_match_relaunch = (
                     result_started is not None
@@ -756,7 +792,7 @@ def run_one(
     text = combined_text(stdout_path, stderr_path)
     heartbeats = [int(value) for value in re.findall(r"\[Soak\] gameplay tick=(\d+)", text)]
     match_modes = [int(value) for value in re.findall(r"\[Soak\].*? match_mode=(\d+)", text)]
-    overlay_seen = f"loaded relocated overlay: {arena.overlay}" in text
+    overlay_seen = f"loaded relocated overlay: {expected_overlay}" in text
     audio_ready = "[Host] SDL audio ready:" in text
     framebuffer_hashes = set(
         re.findall(r"\[GPU\] framebuffer .*? hash=(0x[0-9A-Fa-f]+)", text)
@@ -779,7 +815,7 @@ def run_one(
     post_result_text = text[result_offset:] if result_offset >= 0 else ""
     clean_match_relaunch = (
         result_screen_seen
-        and text.count(f"loaded relocated overlay: {arena.overlay}") >= 2
+        and text.count(f"loaded relocated overlay: {expected_overlay}") >= 2
         and bool(re.search(r"\[Soak\] gameplay tick=\d+", post_result_text))
     )
     clean_match_teardown = (
@@ -833,7 +869,7 @@ def run_one(
 
     if passed and not overlay_seen:
         passed = False
-        reason = f"target overlay {arena.overlay} was not loaded"
+        reason = f"target overlay {expected_overlay} was not loaded"
     if passed and not character_seen:
         passed = False
         reason = f"target player {player} was not selected"
@@ -931,6 +967,8 @@ def main() -> int:
     if not exe.is_file():
         raise SystemExit(f"Vigilante8PC executable not found: {exe}")
     if args.loose_root:
+        if args.override_root:
+            raise SystemExit("--loose-root and --override-root are mutually exclusive")
         loose_root = args.loose_root.resolve()
         if not (loose_root / "SYSTEM.CNF").is_file():
             raise SystemExit(
@@ -942,6 +980,13 @@ def main() -> int:
         if not cue.is_file():
             raise SystemExit(f"Vigilante 8 CUE not found: {cue}")
         source_args = [str(cue)]
+        if args.override_root:
+            override_root = args.override_root.resolve()
+            if not override_root.is_dir():
+                raise SystemExit(
+                    f"Loose override root not found: {override_root}"
+                )
+            source_args.extend(["--overrides", str(override_root)])
     if args.seconds <= 0 or args.entry_timeout <= 0 or args.heartbeat_timeout <= 0:
         raise SystemExit("durations and timeouts must be positive")
     if args.cycles <= 0:
@@ -1000,6 +1045,8 @@ def main() -> int:
                 args.whammy_matrix,
                 whammy_start_kind,
                 args.guest_vehicle,
+                args.guest_arena,
+                args.capture_delay_polls,
             )
             results.append(result)
             status = "PASS" if result.passed else "FAIL"

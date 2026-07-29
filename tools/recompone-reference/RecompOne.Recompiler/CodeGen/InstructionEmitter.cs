@@ -157,11 +157,24 @@ public static class InstructionEmitter
     {
         uint op = ctrl.Word >> 26;
         uint fn = ctrl.Word & 0x3F;
+        if (IsBranchLikely(ctrl)) return true;
         if (op is 2 or 3) return true;
         if (op == 0 && fn is 8 or 9) return true;
         if (op == 4 && ctrl.Rs == ctrl.Rt) return true;
         if (op == 1 && (uint)ctrl.Rt is 0x10 or 0x11) return true;
         return false;
+    }
+
+    public static bool IsBranchLikely(MipsInstruction ctrl)
+    {
+        uint op = ctrl.Word >> 26;
+        uint rt = (uint)ctrl.Rt;
+        if (op is 20 or 21 or 22 or 23) return true;
+        if (op == 1 && rt is 0x02 or 0x03 or 0x12 or 0x13)
+            return true;
+        return op == 18 &&
+               ((ctrl.Word >> 21) & 0x1F) == 8 &&
+               rt is 0x02 or 0x03;
     }
 
     public static void EmitWithDelaySlot(StringBuilder sb, MipsInstruction ctrl, MipsInstruction? ds, FunctionContext ctx, string indent)
@@ -198,7 +211,7 @@ public static class InstructionEmitter
 
         bool InFunc(uint target) => target >= ctx.FuncStart && target < ctx.FuncEnd;
 
-        void Conditional(string cond, uint target)
+        void Conditional(string cond, uint target, bool likely = false)
         {
             sb.AppendLine($"{indent}if ({cond}) {{");
             DsInline();
@@ -210,9 +223,12 @@ public static class InstructionEmitter
                 sb.AppendLine($"{ind2}return;");
             }
             sb.AppendLine($"{indent}}}");
+            if (likely && ds != null && ctx.Labels.Contains(ds.Vram) &&
+                InFunc(pc + 8))
+                sb.AppendLine($"{indent}goto L{pc + 8:X8};");
         }
 
-        if (op is 4 or 5 or 6 or 7)
+        if (op is 4 or 5 or 6 or 7 or 20 or 21 or 22 or 23)
         {
             uint target = ctrl.BranchTarget;
             if (op == 4 && rs == rt)
@@ -225,12 +241,12 @@ public static class InstructionEmitter
             if (op == 5 && rs == rt) return;
             string cond = op switch
             {
-                4 => $"{RS} == {RT}",
-                5 => $"{RS} != {RT}",
-                6 => $"(int){RS} <= 0",
+                4 or 20 => $"{RS} == {RT}",
+                5 or 21 => $"{RS} != {RT}",
+                6 or 22 => $"(int){RS} <= 0",
                 _ => $"(int){RS} > 0",
             };
-            Conditional(cond, target);
+            Conditional(cond, target, IsBranchLikely(ctrl));
             return;
         }
 
@@ -238,23 +254,43 @@ public static class InstructionEmitter
         {
             uint rtField = (uint)rt;
             uint target = ctrl.BranchTarget;
-            bool link = rtField is 0x10 or 0x11;
+            bool link = rtField is 0x10 or 0x11 or 0x12 or 0x13;
+            bool likely = IsBranchLikely(ctrl);
             string cond = rtField switch
             {
-                0x00 or 0x10 => $"(int){RS} < 0",
-                0x01 or 0x11 => $"(int){RS} >= 0",
+                0x00 or 0x02 or 0x10 or 0x12 => $"(int){RS} < 0",
+                0x01 or 0x03 or 0x11 or 0x13 => $"(int){RS} >= 0",
                 _ => "false"
             };
             if (link)
             {
-                Ds();
-                sb.AppendLine($"{indent}c.RA = 0x{pc + 8:X8}u;");
-                sb.AppendLine($"{indent}if ({cond}) {{");
-                if (InFunc(target)) sb.AppendLine($"{ind2}goto L{target:X8};");
-                else CallOrDispatch(target, ind2);
-                sb.AppendLine($"{indent}}}");
+                if (likely)
+                {
+                    sb.AppendLine($"{indent}if ({cond}) {{");
+                    DsInline();
+                    sb.AppendLine($"{ind2}c.RA = 0x{pc + 8:X8}u;");
+                    if (InFunc(target))
+                        sb.AppendLine($"{ind2}goto L{target:X8};");
+                    else
+                        CallOrDispatch(target, ind2);
+                    sb.AppendLine($"{indent}}}");
+                    if (ds != null && ctx.Labels.Contains(ds.Vram) &&
+                        InFunc(pc + 8))
+                        sb.AppendLine($"{indent}goto L{pc + 8:X8};");
+                }
+                else
+                {
+                    Ds();
+                    sb.AppendLine($"{indent}c.RA = 0x{pc + 8:X8}u;");
+                    sb.AppendLine($"{indent}if ({cond}) {{");
+                    if (InFunc(target))
+                        sb.AppendLine($"{ind2}goto L{target:X8};");
+                    else
+                        CallOrDispatch(target, ind2);
+                    sb.AppendLine($"{indent}}}");
+                }
             }
-            else Conditional(cond, target);
+            else Conditional(cond, target, likely);
             return;
         }
 
@@ -307,8 +343,10 @@ public static class InstructionEmitter
         if (op == 18 && ((ctrl.Word >> 21) & 0x1F) == 8)
         {
             uint target = ctrl.BranchTarget;
-            string cond = rt == 1 ? "RecompOne.Runtime.Gte.GetCondition()" : "!RecompOne.Runtime.Gte.GetCondition()";
-            Conditional(cond, target);
+            string cond = rt is 1 or 3
+                ? "RecompOne.Runtime.Gte.GetCondition()"
+                : "!RecompOne.Runtime.Gte.GetCondition()";
+            Conditional(cond, target, IsBranchLikely(ctrl));
             return;
         }
     }

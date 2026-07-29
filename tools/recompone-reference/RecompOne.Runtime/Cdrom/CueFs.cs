@@ -19,8 +19,13 @@ public sealed class CueFs : IDisposable
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _looseFiles =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Entry> _virtualLooseEntries =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, LooseEntry> _looseByStartLba = [];
-    private readonly LooseEntry[] _looseByLba;
+    // Keep this empty while the CUE directory tree is being indexed; those
+    // metadata reads necessarily occur before the constructor assigns the
+    // completed override table.
+    private readonly LooseEntry[] _looseByLba = [];
     private readonly Dictionary<string, FileStream> _looseStreams =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly object _looseIoGate = new();
@@ -108,6 +113,18 @@ public sealed class CueFs : IDisposable
 
     public bool TryDescribeLba(int lba, out string path, out int endLba)
     {
+        foreach (var entry in _looseByLba)
+        {
+            if (!_virtualLooseEntries.ContainsKey(
+                    NormalizeDiscPath(entry.DiscPath))) continue;
+            int end = entry.Lba +
+                checked((int)((entry.LogicalSize + 2047u) >> 11));
+            if (lba < entry.Lba || lba >= end) continue;
+            path = entry.DiscPath;
+            endLba = end;
+            return true;
+        }
+
         if (_manifest != null)
         {
             foreach (var file in _manifest.Files.OrderBy(candidate => candidate.Lba))
@@ -166,11 +183,16 @@ public sealed class CueFs : IDisposable
         {
             if (_manifestFiles.TryGetValue(name, out var exact))
                 return (new Entry(exact.Lba, exact.Size, false, Path.GetFileName(exact.Path)), exact.Path);
+            if (_virtualLooseEntries.TryGetValue(name, out var virtualEntry))
+                return (virtualEntry, name);
             var unique = FindUniqueManifestPath(name);
             return unique == null
                 ? null
                 : (new Entry(unique.Lba, unique.Size, false, Path.GetFileName(unique.Path)), unique.Path);
         }
+
+        if (_virtualLooseEntries.TryGetValue(name, out var cueVirtualEntry))
+            return (cueVirtualEntry, name);
 
         try
         {
@@ -380,22 +402,59 @@ public sealed class CueFs : IDisposable
     {
         if (_looseFiles.Count == 0) return [];
         var found = new List<LooseEntry>();
-        IndexCueOverrides(Root(), "", found);
+        var discFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        IndexCueOverrides(Root(), "", found, discFiles);
+
+        // Append-only arena packages have no ISO9660 directory record to
+        // override. Give each loose DLL/EXP a private extent beyond the disc
+        // lead-out so the stock CdSearchFile/CdRead path can load it while all
+        // retail files retain their original LBAs and directory entries.
+        int virtualLba = _bin!.LeadOutLba + 0x100;
+        foreach (var pair in _looseFiles
+                     .Where(pair =>
+                         pair.Key.StartsWith(
+                             "TERRAIN/", StringComparison.OrdinalIgnoreCase) &&
+                         (pair.Key.EndsWith(
+                              ".DLL", StringComparison.OrdinalIgnoreCase) ||
+                          pair.Key.EndsWith(
+                              ".EXP", StringComparison.OrdinalIgnoreCase)) &&
+                         !discFiles.Contains(pair.Key))
+                     .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            uint size = checked((uint)new FileInfo(pair.Value).Length);
+            var entry = CreateLooseEntry(
+                virtualLba, size, pair.Key, pair.Value
+            );
+            _virtualLooseEntries[pair.Key] = new Entry(
+                virtualLba, size, false, Path.GetFileName(pair.Key)
+            );
+            found.Add(entry);
+            virtualLba += Math.Max(
+                1, checked((int)((entry.LogicalSize + 2047u) >> 11))
+            );
+        }
+
         foreach (var entry in found) _looseByStartLba[entry.Lba] = entry;
         return found.OrderBy(entry => entry.Lba).ToArray();
     }
 
-    private void IndexCueOverrides(Entry dir, string basePath, List<LooseEntry> found)
+    private void IndexCueOverrides(
+        Entry dir,
+        string basePath,
+        List<LooseEntry> found,
+        HashSet<string> discFiles)
     {
         foreach (var entry in Entries(dir))
         {
             string path = basePath.Length == 0 ? entry.Name : $"{basePath}/{entry.Name}";
             if (entry.IsDir)
             {
-                IndexCueOverrides(entry, path, found);
+                IndexCueOverrides(entry, path, found, discFiles);
                 continue;
             }
-            if (!_looseFiles.TryGetValue(NormalizeDiscPath(path), out string? hostPath)) continue;
+            string normalized = NormalizeDiscPath(path);
+            discFiles.Add(normalized);
+            if (!_looseFiles.TryGetValue(normalized, out string? hostPath)) continue;
             found.Add(CreateLooseEntry(entry.Lba, entry.Size, path, hostPath));
         }
     }
@@ -422,6 +481,36 @@ public sealed class CueFs : IDisposable
                 continue;
             }
             found.Add(entry);
+        }
+
+        // Mod arenas are real loose files but are intentionally absent from
+        // the retail LBA manifest. Assign them a private, deterministic extent
+        // after the disc lead-out so CdSearchFile/CdRead can use the original
+        // streaming API without replacing any retail directory entry.
+        int virtualLba = _manifest.LeadOutLba + 0x100;
+        foreach (var pair in _looseFiles
+                     .Where(pair =>
+                         pair.Key.StartsWith(
+                             "TERRAIN/", StringComparison.OrdinalIgnoreCase) &&
+                         (pair.Key.EndsWith(
+                              ".DLL", StringComparison.OrdinalIgnoreCase) ||
+                          pair.Key.EndsWith(
+                              ".EXP", StringComparison.OrdinalIgnoreCase)) &&
+                         !_manifestFiles.ContainsKey(pair.Key))
+                     .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            long hostSize = new FileInfo(pair.Value).Length;
+            uint size = checked((uint)hostSize);
+            var entry = CreateLooseEntry(
+                virtualLba, size, pair.Key, pair.Value
+            );
+            _virtualLooseEntries[pair.Key] = new Entry(
+                virtualLba, size, false, Path.GetFileName(pair.Key)
+            );
+            found.Add(entry);
+            virtualLba += Math.Max(
+                1, checked((int)((entry.LogicalSize + 2047u) >> 11))
+            );
         }
 
         if (missing.Count > 0)

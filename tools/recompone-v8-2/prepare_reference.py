@@ -400,6 +400,22 @@ PROVEN_PATCHES = [
         "mode": "pre",
     },
     {
+        # Maximum LOD can exceed the retail 128 KiB primitive buffers. Preserve
+        # old-buffer accounting before func_80014B3C flips packet arenas.
+        "overlay": "main",
+        "address": "80014B3C",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.PrepareExpandedPrimitiveBuffer",
+        "mode": "pre",
+    },
+    {
+        # Retain the retail OT/object retirement, then redirect the new frame's
+        # packet cursor into a reserved devkit-RAM arena.
+        "overlay": "main",
+        "address": "80014B3C",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ActivateExpandedPrimitiveBuffer",
+        "mode": "post",
+    },
+    {
         "overlay": "main",
         "address": "80015D9C",
         "target": "RecompOne.Runtime.Sdk.V82Compat.RecoverMatchVramFailure",

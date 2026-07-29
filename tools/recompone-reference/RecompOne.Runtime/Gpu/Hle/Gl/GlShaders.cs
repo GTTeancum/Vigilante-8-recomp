@@ -83,6 +83,7 @@ internal static class GlShaders
         flat out int   vRadar;
         flat out int   vHudPlate;
         flat out int   vHealthPlate;
+        flat out int   vVehicle;
         flat out ivec4 vUvBounds;
         noperspective out vec3 vBary;
         out float vDepth;
@@ -106,6 +107,7 @@ internal static class GlShaders
             vRadar = (inTexpage >> 16) & 1;
             vHudPlate = (inTexpage >> 17) & 1;
             vHealthPlate = (inTexpage >> 18) & 1;
+            vVehicle = (inTexpage >> 19) & 1;
             vLongestEdge = inClut;
             vUvBounds = ivec4(round(inUvBounds));
             vBary = inBary;
@@ -138,6 +140,7 @@ internal static class GlShaders
         flat in int   vRadar;
         flat in int   vHudPlate;
         flat in int   vHealthPlate;
+        flat in int   vVehicle;
         flat in ivec4 vUvBounds;
         noperspective in vec3 vBary;
         in float vDepth;
@@ -161,6 +164,7 @@ internal static class GlShaders
         uniform int   uEnhancedFog;
         uniform int   uVectorFonts;
         uniform int   uVectorIcons;
+        uniform int   uStockPaintCorrection;
         uniform int   uScale;
         uniform vec2  uPosBias;
 
@@ -211,10 +215,15 @@ internal static class GlShaders
             vec2 p = uvf - vec2(0.5);
             ivec2 uv0 = ivec2(floor(p));
             vec2 f = fract(p);
-            vec4 s00 = textureTexel(uv0);
-            vec4 s10 = textureTexel(uv0 + ivec2(1, 0));
-            vec4 s01 = textureTexel(uv0 + ivec2(0, 1));
-            vec4 s11 = textureTexel(uv0 + ivec2(1, 1));
+            ivec2 boundMin = vUvBounds.xy;
+            ivec2 boundMax = max(vUvBounds.zw, boundMin);
+            vec4 s00 = textureTexel(clamp(uv0, boundMin, boundMax));
+            vec4 s10 = textureTexel(clamp(
+                uv0 + ivec2(1, 0), boundMin, boundMax));
+            vec4 s01 = textureTexel(clamp(
+                uv0 + ivec2(0, 1), boundMin, boundMax));
+            vec4 s11 = textureTexel(clamp(
+                uv0 + ivec2(1, 1), boundMin, boundMax));
             if (transparentBlack(s00)) s00.rgb = nearestTexel.rgb;
             if (transparentBlack(s10)) s10.rgb = nearestTexel.rgb;
             if (transparentBlack(s01)) s01.rgb = nearestTexel.rgb;
@@ -303,7 +312,7 @@ internal static class GlShaders
             return texture(uHudSvg, (atlasPixel + vec2(0.5)) / 1024.0);
         }
         vec3 stockPaintCorrection(vec3 rgb) {
-            if (vUiTexture != 0) return rgb;
+            if (vVehicle == 0 || uStockPaintCorrection == 0) return rgb;
             float dominantGreen = rgb.g - max(rgb.r, rgb.b);
             if (dominantGreen <= 0.08 || rgb.g <= 0.16 || rgb.r >= 0.48) return rgb;
             float body = smoothstep(0.08, 0.28, dominantGreen) *
@@ -347,7 +356,13 @@ internal static class GlShaders
 
             int rawU = dFdx(vUV.x) < 0.0 ? int(ceil(vUV.x - 0.0001)) : int(floor(vUV.x + 0.0001));
             int rawV = dFdy(vUV.y) < 0.0 ? int(ceil(vUV.y - 0.0001)) : int(floor(vUV.y + 0.0001));
-            vec4 nearestTexel = textureTexel(ivec2(rawU, rawV));
+            ivec2 nearestUv = ivec2(rawU, rawV);
+            if (vUiTexture == 0) {
+                ivec2 boundMin = vUvBounds.xy;
+                ivec2 boundMax = max(vUvBounds.zw, boundMin);
+                nearestUv = clamp(nearestUv, boundMin, boundMax);
+            }
+            vec4 nearestTexel = textureTexel(nearestUv);
             vec4 texel = uTextureSmoothing != 0 && vSmooth != 0
                 ? filteredTexture(vUV, nearestTexel)
                 : nearestTexel;

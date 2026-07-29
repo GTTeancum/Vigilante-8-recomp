@@ -2,10 +2,10 @@ namespace RecompOne.Runtime;
 
 public sealed partial class Gpu
 {
-    const int LenPolyline = -1;
-    const int LenImageLoad = -2;
+    internal const int LenPolyline = -1;
+    internal const int LenImageLoad = -2;
 
-    static int CommandLength(uint word)
+    internal static int CommandLength(uint word)
     {
         uint op = word >> 24;
         switch (op)

@@ -356,6 +356,16 @@ public static class OverlayWriter
     {
         try
         {
+            if (cfg.HostFile != null)
+            {
+                byte[] full = File.ReadAllBytes(cfg.HostFile);
+                int start = cfg.Offset + cfg.Skip;
+                int length = cfg.Size ?? (full.Length - start);
+                return (
+                    Decrypt(full.AsSpan(start, length).ToArray(), cfg.Decrypt),
+                    -1
+                );
+            }
             if (cfg.Lba >= 0)
             {
                 int sz = cfg.Size ?? throw new InvalidOperationException($"'size' is required when using 'lba' for overlay '{cfg.Name}'");
@@ -374,7 +384,7 @@ public static class OverlayWriter
                 int length = cfg.Size ?? (full.Length - start);
                 return (Decrypt(full.AsSpan(start, length).ToArray(), cfg.Decrypt), absLba);
             }
-            Console.WriteLine($"[Recompiler] WARNING: overlay '{cfg.Name}' has no 'file' or 'lba' source defined");
+            Console.WriteLine($"[Recompiler] WARNING: overlay '{cfg.Name}' has no 'hostFile', 'file', or 'lba' source defined");
             return (null, -1);
         }
         catch (Exception ex)

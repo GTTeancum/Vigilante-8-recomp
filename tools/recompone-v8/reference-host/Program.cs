@@ -11,13 +11,21 @@ if (Environment.GetEnvironmentVariable("RECOMPONE_V8_GAME_VOLUME") == null)
 
 string? explicitSource = null;
 string? explicitLoose = null;
+string? explicitOverrides = null;
 bool disableLoose = false;
 bool probeSource = false;
 string? probeFile = null;
 string? probeVehiclePackage = null;
 string? guestVehicle = null;
+string? guestArena = null;
 for (int i = 0; i < args.Length; i++)
 {
+    if (args[i].Equals("--guest-arena", StringComparison.OrdinalIgnoreCase) &&
+        i + 1 < args.Length)
+    {
+        guestArena = args[++i];
+        continue;
+    }
     if (args[i].Equals("--guest-vehicle", StringComparison.OrdinalIgnoreCase) &&
         i + 1 < args.Length)
     {
@@ -45,6 +53,12 @@ for (int i = 0; i < args.Length; i++)
     if (args[i].Equals("--loose", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
     {
         explicitLoose = ResolveLaunchPath(args[++i]);
+        continue;
+    }
+    if (args[i].Equals("--overrides", StringComparison.OrdinalIgnoreCase) &&
+        i + 1 < args.Length)
+    {
+        explicitOverrides = ResolveLaunchPath(args[++i]);
         continue;
     }
     if (args[i].Equals("--no-loose", StringComparison.OrdinalIgnoreCase))
@@ -77,7 +91,7 @@ if (probeVehiclePackage != null)
     return 0;
 }
 
-if (explicitLoose != null && disableLoose)
+if ((explicitLoose != null || explicitOverrides != null) && disableLoose)
 {
     PrintUsage();
     return 1;
@@ -85,10 +99,33 @@ if (explicitLoose != null && disableLoose)
 
 if (guestVehicle != null)
     V8VehicleRegistry.RequestSelection(guestVehicle);
+if (guestArena != null)
+    V8ArenaRegistry.RequestSelection(guestArena);
 
 ConfigManager.Load();
 (string? cuePath, string? loosePath) = ResolveSource(
     explicitSource, explicitLoose, disableLoose);
+string? overridePath = null;
+if (cuePath != null && !disableLoose)
+{
+    if (explicitOverrides != null)
+    {
+        if (!Directory.Exists(explicitOverrides))
+            throw new DirectoryNotFoundException(
+                $"Loose override root not found: {explicitOverrides}");
+        overridePath = Path.GetFullPath(explicitOverrides);
+    }
+    else if (Directory.Exists(Path.Combine(AppContext.BaseDirectory, "TERRAIN")))
+    {
+        overridePath = AppContext.BaseDirectory;
+    }
+}
+else if (explicitOverrides != null)
+{
+    throw new InvalidOperationException(
+        "--overrides requires a CUE source; standalone loose mode already " +
+        "uses its complete asset root");
+}
 if (loosePath != null)
 {
     Environment.SetEnvironmentVariable("RECOMPONE_LOOSE_DIR", loosePath);
@@ -100,7 +137,9 @@ else if (cuePath != null)
     Environment.SetEnvironmentVariable("RECOMPONE_LOOSE_DIR", "0");
     ConfigManager.Game.CdPath = cuePath;
     ConfigManager.SaveGame();
-    Console.WriteLine($"[Host] disc={cuePath}");
+    Console.WriteLine(
+        $"[Host] disc={cuePath}" +
+        (overridePath == null ? "" : $" overrides={overridePath}"));
 }
 else
 {
@@ -113,7 +152,7 @@ if (probeSource)
 {
     using var source = loosePath != null
         ? CueFs.OpenLoose(loosePath)
-        : CueFs.Open(cuePath!);
+        : CueFs.Open(cuePath!, overridePath);
     byte[] system = source.ReadFile("SYSTEM.CNF");
     Console.WriteLine(
         $"[SourceProbe] mode={(source.IsStandaloneLoose ? "standalone-loose" : "cue")} " +
@@ -139,15 +178,18 @@ if (probeSource)
 }
 
 PreloadBundledNative("SDL2.dll");
-Entry.Run(new PSMemory(), cuePath, loosePath);
+V8DreamlandCompat.RegisterHostFunctions();
+Entry.Run(new PSMemory(), cuePath, loosePath, overridePath);
 return 0;
 
 string ResolveLaunchPath(string path) => Path.GetFullPath(path, launchDirectory);
 
 static void PrintUsage() => Console.Error.WriteLine(
     "usage: Vigilante8PC [disc.cue|loose-directory] [--loose <directory>] " +
+    "[--overrides <directory>] " +
     "[--no-loose] [--probe-source] [--probe-file <game-path>] " +
-    "[--probe-vehicle-package <directory>] [--guest-vehicle <stable-id>]");
+    "[--probe-vehicle-package <directory>] [--guest-vehicle <stable-id>] " +
+    "[--guest-arena <stable-id>]");
 
 static void PreloadBundledNative(string fileName)
 {

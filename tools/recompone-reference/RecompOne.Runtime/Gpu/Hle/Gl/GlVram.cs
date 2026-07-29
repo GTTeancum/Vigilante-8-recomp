@@ -61,49 +61,118 @@ public sealed class GlVram
 
     public void WriteRect(int x, int y, int w, int h, ReadOnlySpan<ushort> px)
     {
+        if (w <= 0 || h <= 0) return;
+        x &= VramShadow.Width - 1;
+        y &= VramShadow.Height - 1;
+
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         _gl.BindTexture(TextureTarget.Texture2D, _stageTex);
-        int count = w * h;
+        _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+        _gl.Disable(EnableCap.ScissorTest);
+
+        int firstW = Math.Min(w, VramShadow.Width - x);
+        int wrappedW = w - firstW;
+        int firstH = Math.Min(h, VramShadow.Height - y);
+        int wrappedH = h - firstH;
+
+        WriteSegment(px, w, 0, 0, x, y, firstW, firstH);
+        WriteSegment(px, w, firstW, 0, 0, y, wrappedW, firstH);
+        WriteSegment(px, w, 0, firstH, x, 0, firstW, wrappedH);
+        WriteSegment(px, w, firstW, firstH, 0, 0, wrappedW, wrappedH);
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+    }
+
+    void WriteSegment(
+        ReadOnlySpan<ushort> source,
+        int sourceWidth,
+        int sourceX,
+        int sourceY,
+        int destX,
+        int destY,
+        int width,
+        int height)
+    {
+        if (width <= 0 || height <= 0) return;
+        int count = width * height;
         if (_uploadRgba.Length < count * 4)
             _uploadRgba = new byte[count * 4];
-        for (int i = 0, o = 0; i < count; i++, o += 4)
+        int output = 0;
+        for (int row = 0; row < height; row++)
         {
-            ushort p = px[i];
-            _uploadRgba[o + 0] = Expand5(p & 0x1F);
-            _uploadRgba[o + 1] = Expand5((p >> 5) & 0x1F);
-            _uploadRgba[o + 2] = Expand5((p >> 10) & 0x1F);
-            _uploadRgba[o + 3] = (byte)((p & 0x8000) != 0 ? 255 : 0);
+            int input = (sourceY + row) * sourceWidth + sourceX;
+            for (int col = 0; col < width; col++, output += 4)
+            {
+                ushort p = source[input + col];
+                _uploadRgba[output + 0] = Expand5(p & 0x1F);
+                _uploadRgba[output + 1] = Expand5((p >> 5) & 0x1F);
+                _uploadRgba[output + 2] = Expand5((p >> 10) & 0x1F);
+                _uploadRgba[output + 3] =
+                    (byte)((p & 0x8000) != 0 ? 255 : 0);
+            }
         }
-        _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
-        _gl.TexSubImage2D<byte>(TextureTarget.Texture2D, 0, x, y, (uint)w, (uint)h,
+
+        _gl.BindTexture(TextureTarget.Texture2D, _stageTex);
+        _gl.TexSubImage2D<byte>(
+            TextureTarget.Texture2D, 0, destX, destY,
+            (uint)width, (uint)height,
             PixelFormat.Rgba, PixelType.UnsignedByte, _uploadRgba.AsSpan(0, count * 4));
 
-        _gl.Disable(EnableCap.ScissorTest);
         _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _stageFbo);
         _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, _fbo);
-        _gl.BlitFramebuffer(x, y, x + w, y + h,
-            x * Scale, y * Scale, (x + w) * Scale, (y + h) * Scale,
+        _gl.BlitFramebuffer(
+            destX, destY, destX + width, destY + height,
+            destX * Scale, destY * Scale,
+            (destX + width) * Scale, (destY + height) * Scale,
             ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
-        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
     }
 
     public void Fill(int x, int y, int w, int h, ushort color15)
     {
+        if (w <= 0 || h <= 0) return;
+        x &= VramShadow.Width - 1;
+        y &= VramShadow.Height - 1;
         float r = (color15 & 0x1F) / 31f, g = ((color15 >> 5) & 0x1F) / 31f, b = ((color15 >> 10) & 0x1F) / 31f;
         float a = (color15 & 0x8000) != 0 ? 1f : 0f;
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
         _gl.Enable(EnableCap.ScissorTest);
-        _gl.Scissor(x * Scale, y * Scale, (uint)Math.Max(0, w * Scale), (uint)Math.Max(0, h * Scale));
         _gl.ClearColor(r, g, b, a);
-        _gl.Clear(ClearBufferMask.ColorBufferBit);
+        int firstW = Math.Min(w, VramShadow.Width - x);
+        int wrappedW = w - firstW;
+        int firstH = Math.Min(h, VramShadow.Height - y);
+        int wrappedH = h - firstH;
+        FillSegment(x, y, firstW, firstH);
+        FillSegment(0, y, wrappedW, firstH);
+        FillSegment(x, 0, firstW, wrappedH);
+        FillSegment(0, 0, wrappedW, wrappedH);
         _gl.Disable(EnableCap.ScissorTest);
+    }
+
+    void FillSegment(int x, int y, int w, int h)
+    {
+        if (w <= 0 || h <= 0) return;
+        _gl.Scissor(
+            x * Scale, y * Scale,
+            (uint)(w * Scale), (uint)(h * Scale));
+        _gl.Clear(ClearBufferMask.ColorBufferBit);
     }
 
     public void CopyRect(int sx, int sy, int dx, int dy, int w, int h)
     {
+        if (w <= 0 || h <= 0) return;
+        sx &= VramShadow.Width - 1;
+        sy &= VramShadow.Height - 1;
+        dx &= VramShadow.Width - 1;
+        dy &= VramShadow.Height - 1;
         int sw = w * Scale, sh = h * Scale;
-        bool overlap = sx < dx + w && dx < sx + w && sy < dy + h && dy < sy + h;
-        if (!overlap)
+        bool wraps =
+            sx + w > VramShadow.Width ||
+            dx + w > VramShadow.Width ||
+            sy + h > VramShadow.Height ||
+            dy + h > VramShadow.Height;
+        bool overlap =
+            sx < dx + w && dx < sx + w &&
+            sy < dy + h && dy < sy + h;
+        if (!wraps && !overlap)
         {
             _gl.CopyImageSubData(_tex, CopyImageSubDataTarget.Texture2D, 0, sx * Scale, sy * Scale, 0,
                 _tex, CopyImageSubDataTarget.Texture2D, 0, dx * Scale, dy * Scale, 0, (uint)sw, (uint)sh, 1);
@@ -111,26 +180,83 @@ public sealed class GlVram
         }
 
         EnsureScratch();
-        _gl.CopyImageSubData(_tex, CopyImageSubDataTarget.Texture2D, 0, sx * Scale, sy * Scale, 0,
-            _scratchTex, CopyImageSubDataTarget.Texture2D, 0, 0, 0, 0, (uint)sw, (uint)sh, 1);
-        _gl.CopyImageSubData(_scratchTex, CopyImageSubDataTarget.Texture2D, 0, 0, 0, 0,
-            _tex, CopyImageSubDataTarget.Texture2D, 0, dx * Scale, dy * Scale, 0, (uint)sw, (uint)sh, 1);
+        int sourceFirstW = Math.Min(w, VramShadow.Width - sx);
+        int sourceWrappedW = w - sourceFirstW;
+        int sourceFirstH = Math.Min(h, VramShadow.Height - sy);
+        int sourceWrappedH = h - sourceFirstH;
+        CopySegment(
+            _tex, sx, sy, _scratchTex, 0, 0,
+            sourceFirstW, sourceFirstH);
+        CopySegment(
+            _tex, 0, sy, _scratchTex, sourceFirstW, 0,
+            sourceWrappedW, sourceFirstH);
+        CopySegment(
+            _tex, sx, 0, _scratchTex, 0, sourceFirstH,
+            sourceFirstW, sourceWrappedH);
+        CopySegment(
+            _tex, 0, 0, _scratchTex, sourceFirstW, sourceFirstH,
+            sourceWrappedW, sourceWrappedH);
+
+        int destFirstW = Math.Min(w, VramShadow.Width - dx);
+        int destWrappedW = w - destFirstW;
+        int destFirstH = Math.Min(h, VramShadow.Height - dy);
+        int destWrappedH = h - destFirstH;
+        CopySegment(
+            _scratchTex, 0, 0, _tex, dx, dy,
+            destFirstW, destFirstH);
+        CopySegment(
+            _scratchTex, destFirstW, 0, _tex, 0, dy,
+            destWrappedW, destFirstH);
+        CopySegment(
+            _scratchTex, 0, destFirstH, _tex, dx, 0,
+            destFirstW, destWrappedH);
+        CopySegment(
+            _scratchTex, destFirstW, destFirstH, _tex, 0, 0,
+            destWrappedW, destWrappedH);
+    }
+
+    void CopySegment(
+        uint sourceTexture,
+        int sourceX,
+        int sourceY,
+        uint destTexture,
+        int destX,
+        int destY,
+        int width,
+        int height)
+    {
+        if (width <= 0 || height <= 0) return;
+        _gl.CopyImageSubData(
+            sourceTexture, CopyImageSubDataTarget.Texture2D, 0,
+            sourceX * Scale, sourceY * Scale, 0,
+            destTexture, CopyImageSubDataTarget.Texture2D, 0,
+            destX * Scale, destY * Scale, 0,
+            (uint)(width * Scale), (uint)(height * Scale), 1);
     }
 
     public void ReadRect(int x, int y, int w, int h, Span<ushort> dst)
     {
+        if (w <= 0 || h <= 0) return;
+        x &= VramShadow.Width - 1;
+        y &= VramShadow.Height - 1;
         _gl.Disable(EnableCap.ScissorTest);
         _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _fbo);
         _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, _stageFbo);
-        _gl.BlitFramebuffer(x * Scale, y * Scale, (x + w) * Scale, (y + h) * Scale,
-            x, y, x + w, y + h, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+        int firstW = Math.Min(w, VramShadow.Width - x);
+        int wrappedW = w - firstW;
+        int firstH = Math.Min(h, VramShadow.Height - y);
+        int wrappedH = h - firstH;
+        ReadSegment(x, y, 0, 0, firstW, firstH);
+        ReadSegment(0, y, firstW, 0, wrappedW, firstH);
+        ReadSegment(x, 0, 0, firstH, firstW, wrappedH);
+        ReadSegment(0, 0, firstW, firstH, wrappedW, wrappedH);
 
         _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _stageFbo);
         int count = w * h;
         if (_readRgba.Length < count * 4)
             _readRgba = new byte[count * 4];
         _gl.PixelStore(PixelStoreParameter.PackAlignment, 1);
-        _gl.ReadPixels<byte>(x, y, (uint)w, (uint)h, PixelFormat.Rgba, PixelType.UnsignedByte,
+        _gl.ReadPixels<byte>(0, 0, (uint)w, (uint)h, PixelFormat.Rgba, PixelType.UnsignedByte,
             _readRgba.AsSpan(0, count * 4));
         for (int i = 0, o = 0; i < count; i++, o += 4)
         {
@@ -141,6 +267,23 @@ public sealed class GlVram
             dst[i] = (ushort)(r | (g << 5) | (b << 10) | a);
         }
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+    }
+
+    void ReadSegment(
+        int sourceX,
+        int sourceY,
+        int destX,
+        int destY,
+        int width,
+        int height)
+    {
+        if (width <= 0 || height <= 0) return;
+        _gl.BlitFramebuffer(
+            sourceX * Scale, sourceY * Scale,
+            (sourceX + width) * Scale, (sourceY + height) * Scale,
+            destX, destY, destX + width, destY + height,
+            ClearBufferMask.ColorBufferBit,
+            BlitFramebufferFilter.Nearest);
     }
 
     static byte Expand5(int value) => (byte)((value << 3) | (value >> 2));

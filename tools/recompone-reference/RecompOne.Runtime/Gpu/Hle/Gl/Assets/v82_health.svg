@@ -3,17 +3,17 @@
   <defs>
     <linearGradient id="body" x1="8" y1="1" x2="8" y2="49" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#080808"/>
-      <stop offset="0.42" stop-color="#201820"/>
-      <stop offset="1" stop-color="#503050"/>
+      <stop offset="0.42" stop-color="#3A293A"/>
+      <stop offset="1" stop-color="#634A63"/>
     </linearGradient>
     <linearGradient id="frame" x1="0" y1="0" x2="16" y2="49" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#786878"/>
-      <stop offset="0.7" stop-color="#786878"/>
-      <stop offset="1" stop-color="#181018"/>
+      <stop offset="0" stop-color="#73636B"/>
+      <stop offset="0.7" stop-color="#73636B"/>
+      <stop offset="1" stop-color="#100810"/>
     </linearGradient>
     <linearGradient id="grid" x1="0" y1="0" x2="16" y2="49" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#302030"/>
-      <stop offset="1" stop-color="#603060"/>
+      <stop offset="0" stop-color="#312131"/>
+      <stop offset="1" stop-color="#634A63"/>
     </linearGradient>
   </defs>
 

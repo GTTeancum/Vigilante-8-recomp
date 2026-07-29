@@ -910,6 +910,7 @@ static int g_tm_allow_gl_upload = 1;
 int    g_terrainmesh_vtx = 0;
 int    g_terrainmesh_tex_w = 0;
 int    g_terrainmesh_tex_h = 0;
+int    g_terrainmesh_has_dynamic_water = 0;
 int    g_terrainmesh_sky_w = 0;
 int    g_terrainmesh_sky_h = 0;
 static int g_terrainmesh_xbmp_w = 0;
@@ -1269,15 +1270,20 @@ static GLuint tm_upload_xbgm_texture(const uint8_t *raw, uint32_t raw_size)
     return tex;
 }
 
-static GLuint tm_upload_tim8_texture(const uint8_t *p, uint32_t size,
-                                     int semi_trans, int *out_w, int *out_h)
+static GLuint tm_upload_tim_indexed_texture(const uint8_t *p, uint32_t size,
+                                            int semi_trans,
+                                            int *out_w, int *out_h)
 {
-    (void)semi_trans;
     if (out_w) *out_w = 0;
     if (out_h) *out_h = 0;
     if (p == NULL || size < 0x20)
         return 0;
-    if (tm_rd32le(p, 0) != 0x10u || tm_rd32le(p, 4) != 0x09u)
+    if (tm_rd32le(p, 0) != 0x10u)
+        return 0;
+
+    uint32_t flags = tm_rd32le(p, 4);
+    int depth = (int)(flags & 3u);
+    if ((flags & 8u) == 0 || (depth != 0 && depth != 1))
         return 0;
 
     uint32_t clut_len = tm_rd32le(p, 8);
@@ -1297,9 +1303,10 @@ static GLuint tm_upload_tim8_texture(const uint8_t *p, uint32_t size,
 
     int image_words = tm_rds16le(p, image + 8);
     int image_h = tm_rds16le(p, image + 10);
-    int image_w = tm_pixel_width_from_words(image_words, 1);
+    int image_w = tm_pixel_width_from_words(image_words, depth);
     uint32_t pix_off = image + 12u;
-    uint32_t pix_size = (uint32_t)(image_w * image_h);
+    uint32_t packed_row_size = (uint32_t)image_words * 2u;
+    uint32_t pix_size = packed_row_size * (uint32_t)image_h;
     if (image_w <= 0 || image_h <= 0 || pix_off + pix_size > image + image_len)
         return 0;
 
@@ -1310,6 +1317,8 @@ static GLuint tm_upload_tim8_texture(const uint8_t *p, uint32_t size,
         tm_psx555_rgba(c, palette[i]);
         if ((c & 0x7fffu) == 0 && (c & 0x8000u) == 0)
             palette[i][3] = 0;
+        else if (semi_trans)
+            palette[i][3] = 128;
         else
             palette[i][3] = 255;
     }
@@ -1318,12 +1327,22 @@ static GLuint tm_upload_tim8_texture(const uint8_t *p, uint32_t size,
     if (rgba == NULL)
         return 0;
     const uint8_t *pix = p + pix_off;
-    for (int i = 0; i < image_w * image_h; i++) {
-        uint8_t idx = pix[i];
-        rgba[i * 4 + 0] = palette[idx][0];
-        rgba[i * 4 + 1] = palette[idx][1];
-        rgba[i * 4 + 2] = palette[idx][2];
-        rgba[i * 4 + 3] = palette[idx][3];
+    for (int y = 0; y < image_h; y++) {
+        const uint8_t *row = pix + (uint32_t)y * packed_row_size;
+        for (int x = 0; x < image_w; x++) {
+            uint8_t idx;
+            if (depth == 0) {
+                uint8_t packed = row[(uint32_t)x >> 1];
+                idx = (x & 1) ? (packed >> 4) : (packed & 0x0f);
+            } else {
+                idx = row[x];
+            }
+            int dst = (y * image_w + x) * 4;
+            rgba[dst + 0] = palette[idx][0];
+            rgba[dst + 1] = palette[idx][1];
+            rgba[dst + 2] = palette[idx][2];
+            rgba[dst + 3] = palette[idx][3];
+        }
     }
 
     GLuint tex = 0;
@@ -1351,9 +1370,9 @@ static void tm_upload_route_textures(TmRouteType *rtypes, int nrtypes)
         if (rt->tex_payload == NULL || rt->tex_size == 0)
             continue;
         int w = 0, h = 0;
-        GLuint tex = tm_upload_tim8_texture(rt->tex_payload, rt->tex_size,
-                                            (rt->flags & 0x100) != 0,
-                                            &w, &h);
+        GLuint tex = tm_upload_tim_indexed_texture(
+            rt->tex_payload, rt->tex_size,
+            (rt->flags & 0x100) != 0, &w, &h);
         if (tex == 0)
             continue;
         rt->tex_slot = slot;
@@ -2477,20 +2496,28 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
     for (uint16_t pi = 0; pi < pc; pi++) {
         if (po + 4 > bsz) break;
         uint8_t typ = B[po + 3];
-        int nib = typ & 0xf;
-        int sz  = TM_PKT_SIZE[nib];
-        g_tm_pkt_kind[nib]++;
+        /*
+         * XOBF stores the source packet kind in the low nibble.  The retail
+         * loader's Object_BuildFromBin pass later moves that nibble into bits
+         * 2..5 for Bone_AllocLevel and the cached renderer packets.  This
+         * routine reads the loose file before either pass, so decoding
+         * (typ >> 2) here changes a native kind-5 20-byte textured triangle
+         * into a kind-1 28-byte record and loses packet alignment.
+         */
+        int source_kind = typ & 0xf;
+        int sz  = TM_PKT_SIZE[source_kind];
+        g_tm_pkt_kind[source_kind]++;
         if (sz == 0 || po + (uint32_t)sz > bsz) {
             (*bad_io)++;
             po += 4;
             continue;
         }
-        if (nib == 10) {
+        if (source_kind == 10) {
             /* FUN_8001b49c expands kind 0xa as a run of textured tile/sprite
              * primitives from texture-slot records, not as indexed triangle
              * geometry.  The old raw reader interpreted those fields as
              * vertex indices and could emit garbage faces through props. */
-            g_tm_pkt_no_uv_kind[nib]++;
+            g_tm_pkt_no_uv_kind[source_kind]++;
             po += sz;
             continue;
         }
@@ -2499,9 +2526,9 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
         vi[0] = tm_rd16le(B, po+4);
         vi[1] = tm_rd16le(B, po+6);
         vi[2] = tm_rd16le(B, po+8);
-        vi[3] = TM_IS_QUAD[nib] ? tm_rd16le(B, po+10) : vi[2];
+        vi[3] = TM_IS_QUAD[source_kind] ? tm_rd16le(B, po+10) : vi[2];
 
-        int nv = TM_IS_QUAD[nib] ? 4 : 3;
+        int nv = TM_IS_QUAD[source_kind] ? 4 : 3;
         int ok = 1;
         for (int k = 0; k < nv; k++)
             if (vi[k] >= vc) { ok = 0; break; }
@@ -2544,9 +2571,40 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
             int has_uv = 0;
             float tex_kind = 0.0f;
 #if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
-            has_uv = V8_XobfTex_DecodePacketUv(&bank->atlas, B + po, nib,
-                                                (int)tex_base, uv);
-            tex_kind = has_uv ? (float)bank->texture_kind : 0.0f;
+            if (source_kind == 13 &&
+                (tm_rd16le(B, po + 0x12) & 0xc000u) == 0x4000u) {
+                /*
+                 * Native raw kind-13/0x4000 is the engine-owned 40x23 dynamic
+                 * reflection image used by Casino City, Hoover Dam, Valley
+                 * Farm, and Dreamland water.  It is not XOBF texture slot 0.
+                 */
+                for (int k = 0; k < 3; k++) {
+                    int uvo = 0x0c + k * 2;
+                    uv[k][0] = (float)B[po + uvo] * (1.0f / 39.0f);
+                    uv[k][1] = (float)B[po + uvo + 1] * (1.0f / 22.0f);
+                }
+                has_uv = 1;
+                tex_kind = 5.0f;
+                g_terrainmesh_has_dynamic_water = 1;
+            } else {
+                has_uv = V8_XobfTex_DecodePacketUv(
+                    &bank->atlas, B + po, source_kind, (int)tex_base, uv
+                );
+                tex_kind = has_uv ? (float)bank->texture_kind : 0.0f;
+            }
+            if (has_uv) {
+                /*
+                 * PSX polygon RGB is texture modulation with 0x80 as neutral,
+                 * not an ordinary 0..255 color.  The old /255 path halved
+                 * every texture before lighting and made props nearly black.
+                 */
+                cr = (float)B[po + 0] * (1.0f / 128.0f);
+                cg = (float)B[po + 1] * (1.0f / 128.0f);
+                cb = (float)B[po + 2] * (1.0f / 128.0f);
+                lr = cr * lit;
+                lg = cg * lit;
+                lb = cb * lit;
+            }
             if (ground0) {
                 if (has_uv) g_tm_uv_xobf++;
                 else g_tm_uv_ground_none++;
@@ -2554,8 +2612,8 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                 if (has_uv) g_tm_uv_xobf++;
                 else g_tm_uv_none++;
             }
-            if (has_uv) g_tm_pkt_uv_kind[nib]++;
-            else g_tm_pkt_no_uv_kind[nib]++;
+            if (has_uv) g_tm_pkt_uv_kind[source_kind]++;
+            else g_tm_pkt_no_uv_kind[source_kind]++;
 #else
             has_uv = tm_decode_packet_uv(B, po, nib, uv);
 #endif
@@ -2572,12 +2630,13 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                                         vx[1], vy[1], vz[1],
                                         vx[2], vy[2], vz[2], ground0)
                 && nvtx + 3 <= vcap) {
+                /* PSX Y-down to GL Y-up changes handedness. */
                 vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr,lg,lb, has_uv ? uv[0][0] : -1.0f, has_uv ? uv[0][1] : -1.0f, tex_kind};
-                vbuf[nvtx++] = (TmVert){vx[1],vy[1],vz[1],lr,lg,lb, has_uv ? uv[1][0] : -1.0f, has_uv ? uv[1][1] : -1.0f, tex_kind};
                 vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr,lg,lb, has_uv ? uv[2][0] : -1.0f, has_uv ? uv[2][1] : -1.0f, tex_kind};
+                vbuf[nvtx++] = (TmVert){vx[1],vy[1],vz[1],lr,lg,lb, has_uv ? uv[1][0] : -1.0f, has_uv ? uv[1][1] : -1.0f, tex_kind};
             }
 
-            if (TM_IS_QUAD[nib]) {
+            if (TM_IS_QUAD[source_kind]) {
                 int ground1 = tm_is_render_ground_tri(vx[0], vy[0], vz[0],
                                                       vx[2], vy[2], vz[2],
                                                       vx[3], vy[3], vz[3], tny);
@@ -2593,8 +2652,8 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                     if (has_uv1) g_tm_uv_xobf++;
                     else g_tm_uv_none++;
                 }
-                if (has_uv1) g_tm_pkt_uv_kind[nib]++;
-                else g_tm_pkt_no_uv_kind[nib]++;
+                if (has_uv1) g_tm_pkt_uv_kind[source_kind]++;
+                else g_tm_pkt_no_uv_kind[source_kind]++;
                 if (ntris < tcap) {
                     TmTri *tt = &tribuf[ntris++];
                     tt->ax=vx[0]; tt->ay=vy[0]; tt->az=vz[0];
@@ -2608,8 +2667,8 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
                                             vx[3], vy[3], vz[3], ground1)
                     && nvtx + 3 <= vcap) {
                     vbuf[nvtx++] = (TmVert){vx[0],vy[0],vz[0],lr1,lg1,lb1, has_uv1 ? uv1[0][0] : -1.0f, has_uv1 ? uv1[0][1] : -1.0f, tex_kind1};
-                    vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr1,lg1,lb1, has_uv1 ? uv1[2][0] : -1.0f, has_uv1 ? uv1[2][1] : -1.0f, tex_kind1};
                     vbuf[nvtx++] = (TmVert){vx[3],vy[3],vz[3],lr1,lg1,lb1, has_uv1 ? uv1[3][0] : -1.0f, has_uv1 ? uv1[3][1] : -1.0f, tex_kind1};
+                    vbuf[nvtx++] = (TmVert){vx[2],vy[2],vz[2],lr1,lg1,lb1, has_uv1 ? uv1[2][0] : -1.0f, has_uv1 ? uv1[2][1] : -1.0f, tex_kind1};
                 }
             }
         }
@@ -2679,8 +2738,8 @@ static void tm_emit_junc_patch_group(const TmBank *bank,
     for (uint16_t pi = 0; pi < pc; pi++) {
         if (po + 4 > bsz) break;
         uint8_t typ = B[po + 3];
-        int source_kind = (typ >> 2) & 0xf;
-        int sz = TM_SOURCE_PKT_SIZE[source_kind];
+        int source_kind = typ & 0xf;
+        int sz = TM_PKT_SIZE[source_kind];
         if (sz == 0 || po + (uint32_t)sz > bsz) {
             (*bad_io)++;
             po += 4;
@@ -4141,6 +4200,7 @@ void TerrainMesh_Load(const char *exp_path,
                       float world_x_centre, float world_z_centre)
 {
     tm_clear_obstacles();
+    g_terrainmesh_has_dynamic_water = 0;
     g_terrainmesh_tex = 0;
     g_terrainmesh_tex_bank1 = 0;
     g_terrainmesh_route_tex0 = 0;

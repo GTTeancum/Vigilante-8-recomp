@@ -18,6 +18,10 @@ public static class FunctionEmitter
         // on the functions with this edge case
         var dsIdx = new HashSet<int>();
         for (int i = 0; i < instrs.Length - 1; i++)
+            if (InstructionEmitter.IsBranchLikely(instrs[i]) &&
+                ctx.Labels.Contains(instrs[i + 1].Vram))
+                ctx.Labels.Add(instrs[i].Vram + 8);
+        for (int i = 0; i < instrs.Length - 1; i++)
             if (instrs[i].HasDelaySlot && InstructionEmitter.SkipDelaySlot(instrs[i])
                 && !ctx.Labels.Contains(instrs[i + 1].Vram))
                 dsIdx.Add(i + 1);

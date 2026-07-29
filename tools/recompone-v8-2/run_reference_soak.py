@@ -23,6 +23,7 @@ DEFAULT_EXE = (
     / "bin"
     / "Release"
     / "net10.0"
+    / "win-x64"
     / "Vigilante82PC.exe"
 )
 DEFAULT_CUE = (
@@ -104,6 +105,9 @@ class RunResult:
     stderr_log: str
     gameplay_capture: str | None
     final_capture: str | None
+    gameplay_presentation: str | None
+    final_presentation: str | None
+    presentation_frames: list[str]
     transformation_captures: list[str]
     hang_stack: str | None
 
@@ -127,6 +131,14 @@ def parse_args() -> argparse.Namespace:
         "--characters",
         default="0",
         help="comma-separated zero-based character slots, or 'all' for all 18",
+    )
+    parser.add_argument(
+        "--rotate-characters",
+        action="store_true",
+        help=(
+            "pair each selected map with a different character slot instead of "
+            "cross-producting maps and --characters"
+        ),
     )
     parser.add_argument(
         "--guest-vehicle",
@@ -163,6 +175,23 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--stop-on-failure", action="store_true")
+    parser.add_argument(
+        "--capture-presentation",
+        action="store_true",
+        help="retain full-resolution postprocessed gameplay and final captures",
+    )
+    parser.add_argument(
+        "--presentation-resolution",
+        default="1280x720",
+        help="output resolution used with --capture-presentation",
+    )
+    parser.add_argument(
+        "--presentation-frames",
+        help=(
+            "comma-separated absolute presentation frames to retain; "
+            "also enables presentation capture"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -290,8 +319,30 @@ def preserve_capture(
     return target
 
 
+def preserve_capture_glob(
+    directory: Path, output: Path, pattern: str, target_name: str, started: float
+) -> Path | None:
+    sources = []
+    for source in directory.glob(pattern):
+        try:
+            if source.stat().st_mtime >= started - 1:
+                sources.append(source)
+        except FileNotFoundError:
+            pass
+    if not sources:
+        return None
+    source = max(sources, key=lambda path: path.stat().st_mtime)
+    target = output / target_name
+    shutil.copy2(source, target)
+    return target
+
+
 def clean_capture_sources(directory: Path, started: float) -> None:
-    for pattern in ("recompone_capture_*.ppm", "recompone_vram_latest.ppm"):
+    for pattern in (
+        "recompone_capture_*.ppm",
+        "recompone_present_*.ppm",
+        "recompone_vram_latest.ppm",
+    ):
         for path in directory.glob(pattern):
             try:
                 if path.stat().st_mtime >= started - 1:
@@ -313,6 +364,9 @@ def run_one(
     character_slot: int,
     guest_vehicle: str | None,
     coverage_profile: str,
+    capture_presentation: bool,
+    presentation_resolution: str,
+    presentation_frames_spec: str | None,
 ) -> RunResult:
     expected = EXPECTED_OVERLAYS[slot]
     stem = (
@@ -332,7 +386,8 @@ def run_one(
             "RECOMPONE_INPUT_FILE": str(fixture_path.resolve()),
             "RECOMPONE_DISABLE_LIVE_INPUT": "1",
             "RECOMPONE_WINDOW_VISIBLE": "0",
-            "RECOMPONE_GPU_HLE": "1",
+            "RECOMPONE_GPU_HLE": os.environ.get(
+                "RECOMPONE_GPU_HLE", "1"),
             "RECOMPONE_V82_SOAK": "1",
             "RECOMPONE_V82_UNLOCK_ROSTER": "1",
             "RECOMPONE_SOAK_HEARTBEAT_FRAMES": "180",
@@ -359,6 +414,13 @@ def run_one(
         env["RECOMPONE_V82_PLAYER_TYPE"] = str(character_slot)
     else:
         env.pop("RECOMPONE_V82_PLAYER_TYPE", None)
+    if capture_presentation or presentation_frames_spec:
+        env["RECOMPONE_PRESENTATION_CAPTURE"] = "1"
+        env["RECOMPONE_PRESENTATION_RESOLUTION"] = presentation_resolution
+    if presentation_frames_spec:
+        env["RECOMPONE_PRESENTATION_CAPTURE_FRAMES"] = (
+            presentation_frames_spec
+        )
 
     started = time.time()
     gameplay_started: float | None = None
@@ -445,6 +507,30 @@ def run_one(
         f"{stem}.final.ppm",
         started,
     )
+    gameplay_presentation = preserve_capture_glob(
+        exe.parent,
+        output,
+        "recompone_present_gameplay_*.ppm",
+        f"{stem}.gameplay-presentation.ppm",
+        started,
+    )
+    final_presentation = preserve_capture_glob(
+        exe.parent,
+        output,
+        "recompone_present_soak_teardown_*.ppm",
+        f"{stem}.final-presentation.ppm",
+        started,
+    )
+    presentation_frames = []
+    for source in sorted(exe.parent.glob("recompone_present_frame_*.ppm")):
+        try:
+            if source.stat().st_mtime < started - 1:
+                continue
+        except FileNotFoundError:
+            continue
+        target = output / f"{stem}.{source.name}"
+        shutil.copy2(source, target)
+        presentation_frames.append(str(target))
     transformation_captures = [
         str(path)
         for mode in range(1, 4)
@@ -582,6 +668,13 @@ def run_one(
         stderr_log=str(stderr_path),
         gameplay_capture=str(gameplay_capture) if gameplay_capture else None,
         final_capture=str(final_capture) if final_capture else None,
+        gameplay_presentation=(
+            str(gameplay_presentation) if gameplay_presentation else None
+        ),
+        final_presentation=(
+            str(final_presentation) if final_presentation else None
+        ),
+        presentation_frames=presentation_frames,
         transformation_captures=transformation_captures,
         hang_stack=str(hang_stack) if hang_stack else None,
     )
@@ -664,6 +757,17 @@ def main() -> int:
 
     slots = selected_slots(args.maps)
     characters = selected_characters(args.characters)
+    if args.rotate_characters:
+        run_pairs = [
+            (slot, index % 18)
+            for index, slot in enumerate(slots)
+        ]
+    else:
+        run_pairs = [
+            (slot, character_slot)
+            for character_slot in characters
+            for slot in slots
+        ]
     output = (
         args.output.resolve()
         if args.output
@@ -682,40 +786,42 @@ def main() -> int:
     while cycle <= args.cycles or (
         deadline is not None and (cycle == 1 or time.time() < deadline)
     ):
-        for character_slot in characters:
-            for slot in slots:
-                if deadline is not None and cycle > 1 and time.time() >= deadline:
-                    break
-                print(
-                    f"[soak] cycle={cycle} character={character_slot} slot={slot} "
-                    f"expected={EXPECTED_OVERLAYS[slot]} frames={args.frames}",
-                    flush=True,
-                )
-                result = run_one(
-                    exe,
-                    source_args,
-                    output,
-                    cycle,
-                    slot,
-                    args.frames,
-                    args.entry_timeout,
-                    args.heartbeat_timeout,
-                    args.weapon_start_kind,
-                    character_slot,
-                    args.guest_vehicle,
-                    args.coverage_profile,
-                )
-                results.append(result)
-                write_summary(output, args, results, started)
-                status = "PASS" if result.passed else "FAIL"
-                print(
-                    f"[soak] {status} character={character_slot} slot={slot} "
-                    f"actual={result.actual_overlay} frame={result.last_frame} "
-                    f"weapons={result.weapon_armed} reason={result.reason}",
-                    flush=True,
-                )
-                if not result.passed and args.stop_on_failure:
-                    return 1
+        for slot, character_slot in run_pairs:
+            if deadline is not None and cycle > 1 and time.time() >= deadline:
+                break
+            print(
+                f"[soak] cycle={cycle} character={character_slot} slot={slot} "
+                f"expected={EXPECTED_OVERLAYS[slot]} frames={args.frames}",
+                flush=True,
+            )
+            result = run_one(
+                exe,
+                source_args,
+                output,
+                cycle,
+                slot,
+                args.frames,
+                args.entry_timeout,
+                args.heartbeat_timeout,
+                args.weapon_start_kind,
+                character_slot,
+                args.guest_vehicle,
+                args.coverage_profile,
+                args.capture_presentation,
+                args.presentation_resolution,
+                args.presentation_frames,
+            )
+            results.append(result)
+            write_summary(output, args, results, started)
+            status = "PASS" if result.passed else "FAIL"
+            print(
+                f"[soak] {status} character={character_slot} slot={slot} "
+                f"actual={result.actual_overlay} frame={result.last_frame} "
+                f"weapons={result.weapon_armed} reason={result.reason}",
+                flush=True,
+            )
+            if not result.passed and args.stop_on_failure:
+                return 1
         cycle += 1
         if deadline is None and cycle > args.cycles:
             break

@@ -12,6 +12,41 @@ public static class GpuHle
     public static float TargetAspect { get; set; } = 4f / 3f;
     public const float BaseAspect = 4f / 3f;
 
+    readonly record struct PacketRange(uint Start, uint End);
+    static readonly List<PacketRange> VehiclePacketRanges = [];
+    static readonly HashSet<uint> VehiclePackets = [];
+
+    static uint NormalizePacketAddress(uint address) =>
+        address & (Memory.MemoryMap.RetailRamSize - 1u);
+
+    public static void RegisterVehiclePacketRange(uint start, uint end)
+    {
+        start = NormalizePacketAddress(start);
+        end = NormalizePacketAddress(end);
+        if (end > start)
+            VehiclePacketRanges.Add(new PacketRange(start, end));
+    }
+
+    public static bool IsVehiclePacket(uint address)
+    {
+        address = NormalizePacketAddress(address);
+        if (VehiclePackets.Contains(address))
+            return true;
+        foreach (PacketRange range in VehiclePacketRanges)
+            if (address >= range.Start && address < range.End)
+                return true;
+        return false;
+    }
+
+    public static void ClearVehiclePacketRanges()
+    {
+        VehiclePacketRanges.Clear();
+        VehiclePackets.Clear();
+    }
+
+    public static void RegisterVehiclePacket(uint address) =>
+        VehiclePackets.Add(NormalizePacketAddress(address));
+
     public struct DispRect { public int X, Y, W, H; public long Stamp; public bool Valid; }
 
     static readonly DispRect[] _rects = new DispRect[2];

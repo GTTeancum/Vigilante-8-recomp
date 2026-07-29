@@ -22,9 +22,16 @@ public static class Runtime
     public static RunMode Mode { get; private set; } = RunMode.Retail;
     public static void SetMode(RunMode mode) => Mode = mode; //devkit vs retail, devkits reads from sim and has more ram
     public static string CdPath => Config.ConfigManager.Game.CdPath;
+    static string? _activeLoosePath;
+    public static void SetLoosePath(string? path) =>
+        _activeLoosePath = string.IsNullOrWhiteSpace(path)
+            ? null
+            : Path.GetFullPath(path);
 
     public static string? ResolveLoosePath()
     {
+        if (_activeLoosePath != null && Directory.Exists(_activeLoosePath))
+            return _activeLoosePath;
         string? configured = Environment.GetEnvironmentVariable("RECOMPONE_LOOSE_DIR");
         if (configured == "0") return null;
         string candidate = string.IsNullOrWhiteSpace(configured)

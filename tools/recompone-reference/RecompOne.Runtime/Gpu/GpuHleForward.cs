@@ -6,15 +6,59 @@ namespace RecompOne.Runtime;
 public sealed partial class Gpu
 {
     static bool HleOn => GpuHle.Active && GpuHle.Backend is { Ready: true };
+    static readonly bool TraceVram =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VRAM") == "1";
+    static readonly bool TraceTerrainPrims =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_TERRAIN_PRIMS") == "1";
+    static int _terrainPrimTraceCount;
+    static bool _terrainCellTraced;
     bool DitherEnabled => _dither && ConfigManager.View.Ps1Dithering;
     int _currentOtDepth;
+    bool _currentOtPacketVehicle;
+    int _traceVehiclePacketHits;
+    int _traceVehicleTriangles;
+    int _traceVramLoadSequence;
+    uint _traceVramLoadHash;
+    ushort _traceVramLoadOr;
+
+    static bool IntersectsVramRect(
+        int x, int y, int w, int h,
+        int probeX, int probeY, int probeW, int probeH) =>
+        x < probeX + probeW && x + w > probeX &&
+        y < probeY + probeH && y + h > probeY;
+
+    void TraceVramTransfer(string kind, int x, int y, int w, int h)
+    {
+        if (!TraceVram) return;
+        bool suspectClut =
+            IntersectsVramRect(x, y, w, h, 320, 256, 256, 1);
+        bool suspectPage =
+            IntersectsVramRect(x, y, w, h, 896, 0, 128, 256);
+        Console.Error.WriteLine(
+            $"[V82VramTransfer] {kind} xy={x},{y} size={w}x{h} " +
+            $"suspect-clut={suspectClut} suspect-page={suspectPage}");
+    }
 
     public void BeginOrderingTable() => _currentOtDepth = 0;
 
     public void SetOrderingTableDepth(int depth) =>
         _currentOtDepth = Math.Max(1, depth);
 
-    public void EndOrderingTable() => _currentOtDepth = 0;
+    public void SetOrderingTablePacket(uint address)
+    {
+        _currentOtPacketVehicle = GpuHle.IsVehiclePacket(address);
+        if (GpuHle.GameplayActive && _currentOtPacketVehicle &&
+            Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1" &&
+            _traceVehiclePacketHits++ < 32)
+            Console.Error.WriteLine($"[V8VehiclePacketHit] address=0x{address:X8}");
+    }
+
+    public void EndOrderingTable()
+    {
+        _currentOtDepth = 0;
+        _currentOtPacketVehicle = false;
+        GpuHle.ClearVehiclePacketRanges();
+    }
 
     int CurTPage() => ((_texPageX / 64) & 0xf) | (((_texPageY / 256) & 1) << 4)
                     | ((_blendMode & 3) << 5) | ((_texDepth & 3) << 7);
@@ -36,7 +80,7 @@ public sealed partial class Gpu
     PrimFlags PrimOf(bool tex, bool semi, bool raw, int clut, bool gouraud = false) => new()
     {
         Textured = tex, SemiTrans = semi, RawTexture = raw, Gouraud = gouraud, TPage = (ushort)CurTPage(), Clut = (ushort)clut,
-        OtIndex = _currentOtDepth,
+        OtIndex = _currentOtDepth, Vehicle = _currentOtPacketVehicle,
     };
 
     void HleTri(in Vert a, in Vert b, in Vert c, bool tex, bool gouraud, bool semi, bool raw, int clut)
@@ -44,6 +88,52 @@ public sealed partial class Gpu
         int spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
         int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
         if (spanX > 1023 || spanY > 511) return;
+
+        if (_currentOtPacketVehicle &&
+            Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1" &&
+            _traceVehicleTriangles++ < 128)
+            Console.Error.WriteLine(
+                $"[V8VehicleTriangle] xy=({a.X},{a.Y}),({b.X},{b.Y}),({c.X},{c.Y}) " +
+                $"tex={(tex ? 1 : 0)} tpage=0x{CurTPage():X4} clut=0x{clut:X4}");
+
+        if (TraceTerrainPrims && tex && _texDepth == 1 &&
+            clut is >= 0x4000 and < 0x4800 &&
+            _texPageX is >= 704 and <= 896 &&
+            _terrainPrimTraceCount++ < 256)
+        {
+            Console.Error.WriteLine(
+                $"[V8TerrainPrim] tpage=0x{CurTPage():X4} page={_texPageX},{_texPageY} " +
+                $"clut=0x{clut:X4} uv=" +
+                $"({a.U},{a.V}),({b.U},{b.V}),({c.U},{c.V}) " +
+                $"xy=({a.X},{a.Y}),({b.X},{b.Y}),({c.X},{c.Y}) " +
+                $"rgb=({a.R},{a.G},{a.B}),({b.R},{b.G},{b.B}),({c.R},{c.G},{c.B})");
+
+            int minU = Math.Min(a.U, Math.Min(b.U, c.U));
+            int maxU = Math.Max(a.U, Math.Max(b.U, c.U));
+            int minV = Math.Min(a.V, Math.Min(b.V, c.V));
+            int maxV = Math.Max(a.V, Math.Max(b.V, c.V));
+            if (!_terrainCellTraced && minU == 0 && maxU == 47 &&
+                maxV - minV == 47)
+            {
+                _terrainCellTraced = true;
+                int clutX = (clut & 0x3F) << 4;
+                int clutY = (clut >> 6) & 0x1FF;
+                ushort[] palette = new ushort[256];
+                ushort[] texels = new ushort[24 * 48];
+                GpuHle.Backend!.ReadVram(clutX, clutY, 256, 1, palette);
+                GpuHle.Backend.ReadVram(
+                    _texPageX, _texPageY + minV, 24, 48, texels);
+                byte[] paletteBytes = new byte[palette.Length * 2];
+                byte[] texelBytes = new byte[texels.Length * 2];
+                Buffer.BlockCopy(palette, 0, paletteBytes, 0, paletteBytes.Length);
+                Buffer.BlockCopy(texels, 0, texelBytes, 0, texelBytes.Length);
+                Console.Error.WriteLine(
+                    $"[V8TerrainCell] page={_texPageX},{_texPageY} " +
+                    $"uv=0,{minV},47,{maxV} clut={clutX},{clutY} " +
+                    $"palette={Convert.ToBase64String(paletteBytes)} " +
+                    $"texels={Convert.ToBase64String(texelBytes)}");
+            }
+        }
 
         var be = GpuHle.Backend!;
         be.SetDrawEnv(CurEnv());
@@ -70,10 +160,48 @@ public sealed partial class Gpu
             PrimOf(false, semi, false, 0, gouraud));
     }
 
-    void HleFill(int x, int y, int w, int h, ushort color) => GpuHle.Backend!.FillRect(x, y, w, h, color);
-    void HleCopy(int sx, int sy, int dx, int dy, int w, int h) => GpuHle.Backend!.CopyVram(sx, sy, dx, dy, w, h);
+    void HleFill(int x, int y, int w, int h, ushort color)
+    {
+        TraceVramTransfer($"fill color=0x{color:X4}", x, y, w, h);
+        GpuHle.Backend!.FillRect(x, y, w, h, color);
+    }
+
+    void HleCopy(int sx, int sy, int dx, int dy, int w, int h)
+    {
+        if (TraceVram)
+        {
+            TraceVramTransfer($"copy-src to={dx},{dy}", sx, sy, w, h);
+            TraceVramTransfer($"copy-dst from={sx},{sy}", dx, dy, w, h);
+        }
+        var backend = GpuHle.Backend!;
+        if (!_checkMask && !_setMask)
+        {
+            backend.CopyVram(sx, sy, dx, dy, w, h);
+            return;
+        }
+
+        int count = w * h;
+        if (_hleCopySource.Length < count)
+            _hleCopySource = new ushort[count];
+        if (_hleCopyDest.Length < count)
+            _hleCopyDest = new ushort[count];
+        Span<ushort> source = _hleCopySource.AsSpan(0, count);
+        Span<ushort> dest = _hleCopyDest.AsSpan(0, count);
+        backend.ReadVram(sx, sy, w, h, source);
+        backend.ReadVram(dx, dy, w, h, dest);
+        for (int i = 0; i < count; i++)
+        {
+            if (_checkMask && (dest[i] & 0x8000) != 0) continue;
+            ushort value = source[i];
+            if (_setMask) value |= 0x8000;
+            dest[i] = value;
+        }
+        backend.WriteVram(dx, dy, w, h, dest);
+    }
 
     ushort[] _readBuf = Array.Empty<ushort>();
+    ushort[] _hleCopySource = Array.Empty<ushort>();
+    ushort[] _hleCopyDest = Array.Empty<ushort>();
 
     void HleReadback(int x, int y, int w, int h)
     {
@@ -84,12 +212,20 @@ public sealed partial class Gpu
 
     //img load
     ushort[] _hleLoad = Array.Empty<ushort>();
+    ushort[] _hleLoadDest = Array.Empty<ushort>();
     bool _hleLoadActive;
     int _hleLoadPos;
 
     void HleLoadBegin()
     {
         _hleLoadActive = HleOn;
+        _traceVramLoadSequence++;
+        _traceVramLoadHash = 2166136261u;
+        _traceVramLoadOr = 0;
+        if (TraceVram)
+            TraceVramTransfer(
+                $"load-begin #{_traceVramLoadSequence}",
+                _loadX, _loadY, _loadW, _loadH);
         if (!_hleLoadActive) return;
         int n = _loadW * _loadH;
         if (_hleLoad.Length < n) _hleLoad = new ushort[n];
@@ -98,13 +234,56 @@ public sealed partial class Gpu
 
     void HleLoadPut(ushort value)
     {
+        if (TraceVram)
+        {
+            _traceVramLoadHash =
+                (_traceVramLoadHash ^ (byte)value) * 16777619u;
+            _traceVramLoadHash =
+                (_traceVramLoadHash ^ (byte)(value >> 8)) * 16777619u;
+            _traceVramLoadOr |= value;
+        }
         if (_hleLoadActive && _hleLoadPos < _hleLoad.Length) _hleLoad[_hleLoadPos++] = value;
     }
 
     void HleLoadFlush()
     {
+        if (TraceVram)
+        {
+            Console.Error.WriteLine(
+                $"[V82VramTransfer] load-end #{_traceVramLoadSequence} " +
+                $"xy={_loadX},{_loadY} size={_loadW}x{_loadH} " +
+                $"or=0x{_traceVramLoadOr:X4} fnv=0x{_traceVramLoadHash:X8} " +
+                $"hle={_hleLoadActive} set-mask={_setMask} " +
+                $"check-mask={_checkMask}");
+            if (_hleLoadActive &&
+                _loadX == 32 && _loadY is >= 482 and <= 498 &&
+                _loadW == 232 && _hleLoadPos >= 232)
+            {
+                int previewCount = _loadY == 497 ? 232 : 32;
+                Console.Error.WriteLine(
+                    $"[V82TerrainPalette] y={_loadY} " +
+                    string.Join(' ', _hleLoad.AsSpan(0, previewCount).ToArray()
+                        .Select(value => $"{value:X4}")));
+            }
+        }
         if (!_hleLoadActive) return;
-        GpuHle.Backend!.WriteVram(_loadX, _loadY, _loadW, _loadH, _hleLoad.AsSpan(0, _loadW * _loadH));
+        int count = _loadW * _loadH;
+        ReadOnlySpan<ushort> upload = _hleLoad.AsSpan(0, count);
+        if (_checkMask)
+        {
+            if (_hleLoadDest.Length < count)
+                _hleLoadDest = new ushort[count];
+            Span<ushort> dest = _hleLoadDest.AsSpan(0, count);
+            GpuHle.Backend!.ReadVram(
+                _loadX, _loadY, _loadW, _loadH, dest);
+            for (int i = 0; i < count; i++)
+                if ((dest[i] & 0x8000) == 0)
+                    dest[i] = upload[i];
+            upload = dest;
+        }
+        GpuHle.Backend!.WriteVram(
+            _loadX, _loadY, _loadW, _loadH,
+            upload);
         _hleLoadActive = false;
     }
 }

@@ -624,6 +624,30 @@ def main() -> int:
             }
         )
 
+    dreamland_map = (
+        repo / "artifacts" / "n64_arena_port" /
+        "DREAMLND_PS1_CODE.functions.json"
+    )
+    dreamland_image = (
+        repo / "artifacts" / "n64_arena_port" /
+        "DREAMLND_PS1_CODE.DLL"
+    )
+    if not dreamland_map.exists() or not dreamland_image.exists():
+        raise FileNotFoundError(
+            "run tools/translate_v8_n64_overlay_code.py before preparing "
+            "the V8 reference build"
+        )
+    counts["DREAMLND"] = len(read_json(dreamland_map)["functions"])
+    overlays.append(
+        {
+            "name": "DREAMLND",
+            "funcMap": relative_posix(dreamland_map, config_dir),
+            "base": OVERLAY_BASE,
+            "hostFile": relative_posix(dreamland_image, config_dir),
+            "v8Relocate": True,
+        }
+    )
+
     cue = (repo / args.cue).resolve()
     config = {
         "game": {
@@ -640,6 +664,12 @@ def main() -> int:
         "stubs": [],
         "ignored": [],
         "patches": [
+            {
+                "overlay": "main",
+                "address": "80011A38",
+                "target": "RecompOne.Runtime.Sdk.V8ArenaRegistry.ResolveVirtualFile",
+                "mode": "pre",
+            },
             {
                 "overlay": "main",
                 "address": "80045004",
@@ -686,6 +716,12 @@ def main() -> int:
                 "overlay": "main",
                 "address": "800159B4",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TraceStreamOpen",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800157D4",
+                "target": "RecompOne.Runtime.Sdk.V8ArenaRegistry.ResolveVirtualStreamFile",
                 "mode": "pre",
             },
             {
@@ -920,6 +956,15 @@ def main() -> int:
             },
             {
                 "overlay": "main",
+                "address": "8001FC38",
+                "target": (
+                    "RecompOne.Runtime.Sdk.V8DreamlandCompat."
+                    "UpdateAnimationSiblingChain"
+                ),
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
                 "address": "80024998",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.TraceCollisionNeighborScanPre",
                 "mode": "pre",
@@ -1058,6 +1103,7 @@ def main() -> int:
     host_output = output / "recompiled"
     host_output.mkdir(parents=True, exist_ok=True)
     (host_output / "Vigilante8Reference.csproj").unlink(missing_ok=True)
+    (host_output / "DreamlandOverlay.cs").unlink(missing_ok=True)
     for name in ("Program.cs", "Vigilante8PC.csproj"):
         shutil.copyfile(host_template / name, host_output / name)
 

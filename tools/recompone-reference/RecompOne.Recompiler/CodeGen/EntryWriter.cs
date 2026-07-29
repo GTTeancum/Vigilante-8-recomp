@@ -18,7 +18,7 @@ public static class EntryWriter
         entry.AppendLine();
         entry.AppendLine("public static class Entry");
         entry.AppendLine("{");
-        entry.AppendLine("    public static void Run(IMemory m, string? cuePath = null, string? loosePath = null)");
+        entry.AppendLine("    public static void Run(IMemory m, string? cuePath = null, string? loosePath = null, string? overridePath = null)");
         entry.AppendLine("    {");
         entry.AppendLine($"        RecompOne.Runtime.Runtime.Initialize({ToStringLiteral(windowTitle)});");
         entry.AppendLine("        loosePath ??= RecompOne.Runtime.Runtime.ResolveLoosePath();");
@@ -29,7 +29,7 @@ public static class EntryWriter
         entry.AppendLine("        }");
         entry.AppendLine("        using var fs = loosePath != null");
         entry.AppendLine("            ? CueFs.OpenLoose(loosePath)");
-        entry.AppendLine("            : CueFs.Open(cuePath!);");
+        entry.AppendLine("            : CueFs.Open(cuePath!, overridePath);");
         entry.AppendLine("        var cd = new CdController(fs, m);");
         entry.AppendLine("        m.SetCd(cd);");
         foreach (var name in overlays)

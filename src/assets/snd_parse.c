@@ -6,8 +6,9 @@
  *
  *   u16  nSamples         -- count of entries
  *   u16  sizeIn8b         -- total sample data length in 8-byte units
- *   u32  sampleOffsets[nSamples]  -- offsets within the bank's SPU
- *                                    region (in 8-byte units)
+ *   struct SampleEntry samples[nSamples]:
+ *     u16 offsetIn8b             -- offset within the bank's SPU region
+ *     u16 pitch                  -- SPU pitch (0x1000 = source rate)
  *   u8   sampleData[sizeIn8b * 8] -- VAG/ADPCM-encoded sample payload
  *
  * The parser:
@@ -17,10 +18,11 @@
  *   3. Heap-allocates a small in-RAM handle of (nSamples*4 + 4) bytes:
  *        u16  nSamples;
  *        u16  spuBaseIn8b;
- *        u32  sampleAbsOffsets[nSamples];  -- 8-byte units, post-add-base
- *   4. Reads the offset table (nSamples u32s).
- *   5. Adds spuBaseIn8b to each offset to convert per-sample relative
- *      offsets into absolute SPU 8b-unit positions.
+ *        SampleEntry samples[nSamples];
+ *   4. Reads the sample table (nSamples four-byte entries).
+ *   5. Adds spuBaseIn8b only to each entry's offset field, converting it
+ *      from a bank-relative to an absolute SPU 8-byte-unit position. The
+ *      adjacent pitch field is preserved unchanged.
  *   6. Streams sample data into SPU RAM 1 KiB at a time via SpuWrite,
  *      waiting on SpuIsTransferCompleted between chunks.
  *
@@ -44,9 +46,14 @@ extern void Stream_FatalOom(const char *msg);            /* FUN_80015368 trap */
 extern void *Heap_AllocOrRetry(uint32_t n);
 
 typedef struct {
+    uint16_t offsetIn8b;
+    uint16_t pitch;
+} SndSampleEntry;
+
+typedef struct {
     uint16_t nSamples;
     uint16_t spuBaseIn8b;
-    uint32_t sampleOff[1];   /* nSamples entries */
+    SndSampleEntry samples[1];   /* nSamples entries */
 } SndBank;
 
 void *Audio_ParseSND(void)
@@ -64,10 +71,10 @@ void *Audio_ParseSND(void)
     bank->nSamples    = hdr.nSamples;
     bank->spuBaseIn8b = (uint16_t)(addr >> 3);
 
-    /* Offset table. */
-    Stream_Read(bank->sampleOff, (uint32_t)hdr.nSamples * 4);
+    /* Sample table: relative SPU address plus playback pitch. */
+    Stream_Read(bank->samples, (uint32_t)hdr.nSamples * 4);
     for (int i = 0; i < hdr.nSamples; i++) {
-        bank->sampleOff[i] += bank->spuBaseIn8b;
+        bank->samples[i].offsetIn8b += bank->spuBaseIn8b;
     }
 
     /* Sample payload -> SPU RAM in 1 KiB chunks. */

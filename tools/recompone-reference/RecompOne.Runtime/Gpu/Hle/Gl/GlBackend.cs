@@ -18,12 +18,85 @@ public sealed class GlBackend : IGpuBackend
     }
 
     const int MaxVerts = 0x40000;
+    static readonly bool TraceDepth =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_DEPTH") == "1";
+    static readonly bool TraceTerrainVram =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VRAM") == "1";
+    static readonly bool DisableRasterDepth =
+        Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_RASTER_DEPTH") == "1";
+    static readonly bool DisableProjectiveTextures =
+        Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_PROJECTIVE_TEXTURES") == "1";
+    static readonly bool DisableStockPaintCorrection =
+        Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_STOCK_PAINT_CORRECTION") == "1";
+    static readonly bool TraceRectangles =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_RECTANGLES") == "1";
+    static readonly (float X, float Y)? TriangleProbe =
+        ParseTriangleProbe(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_TRACE_TRIANGLE_PROBE"));
     readonly GL _gl;
     readonly GlVram _vram;
     HudSvgAtlas? _hudSvg;
     readonly GlDisplayRt?[] _rts = new GlDisplayRt?[2];
     long _rtStamp;
     long _frame;
+    long _terrainVramTraceFrame = long.MinValue / 2;
+    long _traceOpaqueTriangles;
+    long _traceTransparentTriangles;
+    long _traceDepthTestedTriangles;
+    long _traceProjectiveTriangles;
+    long _traceMissingOtTriangles;
+    int _traceMinOt = int.MaxValue;
+    int _traceMaxOt;
+    readonly HashSet<string> _traceRectangleShapes = [];
+    readonly HashSet<string> _traceProbeTriangles = [];
+
+    static (float X, float Y)? ParseTriangleProbe(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        string[] parts = value.Split(',');
+        return parts.Length == 2 &&
+            float.TryParse(
+                parts[0],
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out float x) &&
+            float.TryParse(
+                parts[1],
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out float y)
+            ? (x, y)
+            : null;
+    }
+
+    static uint Fnv1a16(ReadOnlySpan<ushort> values)
+    {
+        uint hash = 2166136261u;
+        foreach (ushort value in values)
+        {
+            hash = (hash ^ (byte)value) * 16777619u;
+            hash = (hash ^ (byte)(value >> 8)) * 16777619u;
+        }
+        return hash;
+    }
+
+    static bool ContainsPoint(
+        in HleVertex a,
+        in HleVertex b,
+        in HleVertex c,
+        float x,
+        float y)
+    {
+        static float Edge(
+            float ax, float ay, float bx, float by, float px, float py) =>
+            (px - ax) * (by - ay) - (py - ay) * (bx - ax);
+        float e0 = Edge(a.X, a.Y, b.X, b.Y, x, y);
+        float e1 = Edge(b.X, b.Y, c.X, c.Y, x, y);
+        float e2 = Edge(c.X, c.Y, a.X, a.Y, x, y);
+        return (e0 >= 0f && e1 >= 0f && e2 >= 0f) ||
+            (e0 <= 0f && e1 <= 0f && e2 <= 0f);
+    }
 
     uint _vao, _vbo, _presentVao, _presentVbo, _progPrim, _progPresent, _progPresent24;
     uint _presentFbo, _presentTex;
@@ -83,6 +156,13 @@ public sealed class GlBackend : IGpuBackend
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uDest"), 1);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uHudSvg"), 2);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uScale"), GlVram.Scale);
+        bool stockPaintCorrection =
+            !DisableStockPaintCorrection &&
+            !Runtime.GameTitle.Contains(
+                "2nd Offense", StringComparison.Ordinal);
+        _gl.Uniform1(
+            _gl.GetUniformLocation(_progPrim, "uStockPaintCorrection"),
+            stockPaintCorrection ? 1 : 0);
 
         _uPresentOrigin = _gl.GetUniformLocation(_progPresent, "uOrigin");
         _uPresentSize = _gl.GetUniformLocation(_progPresent, "uSize");
@@ -206,6 +286,12 @@ public sealed class GlBackend : IGpuBackend
         fresh.Create(_gl);
         _rts[slot] = fresh;
         SyncRtFromVram(fresh, fbX, fbY, fbW, fbH);
+        if (TraceTerrainVram)
+            Console.Error.WriteLine(
+                $"[V82GlRt] create frame={_frame} slot={slot} " +
+                $"xy={fbX},{fbY} size={fbW}x{fbH} " +
+                $"clip={_env.ClipX0},{_env.ClipY0}-" +
+                $"{_env.ClipX1},{_env.ClipY1}");
         return fresh;
     }
 
@@ -245,10 +331,40 @@ public sealed class GlBackend : IGpuBackend
             if (rt is { Dirty: true } && rt.Intersects(x, y, w, h)) Writeback(rt);
     }
 
+    void WritebackDirtyWrappedIntersecting(int x, int y, int w, int h)
+    {
+        if (w <= 0 || h <= 0) return;
+        x &= VramShadow.Width - 1;
+        y &= VramShadow.Height - 1;
+        int firstW = Math.Min(w, VramShadow.Width - x);
+        int wrappedW = w - firstW;
+        int firstH = Math.Min(h, VramShadow.Height - y);
+        int wrappedH = h - firstH;
+        WritebackDirtyIntersecting(x, y, firstW, firstH);
+        WritebackDirtyIntersecting(0, y, wrappedW, firstH);
+        WritebackDirtyIntersecting(x, 0, firstW, wrappedH);
+        WritebackDirtyIntersecting(0, 0, wrappedW, wrappedH);
+    }
+
     void SyncRtsFromVram(int x, int y, int w, int h)
     {
         foreach (var rt in _rts)
             if (rt != null && rt.Intersects(x, y, w, h)) SyncRtFromVram(rt, x, y, w, h);
+    }
+
+    void SyncWrappedRtsFromVram(int x, int y, int w, int h)
+    {
+        if (w <= 0 || h <= 0) return;
+        x &= VramShadow.Width - 1;
+        y &= VramShadow.Height - 1;
+        int firstW = Math.Min(w, VramShadow.Width - x);
+        int wrappedW = w - firstW;
+        int firstH = Math.Min(h, VramShadow.Height - y);
+        int wrappedH = h - firstH;
+        SyncRtsFromVram(x, y, firstW, firstH);
+        SyncRtsFromVram(0, y, wrappedW, firstH);
+        SyncRtsFromVram(x, 0, firstW, wrappedH);
+        SyncRtsFromVram(0, 0, wrappedW, wrappedH);
     }
 
     void CheckTextureFeedback(in PrimFlags f)
@@ -321,6 +437,7 @@ public sealed class GlBackend : IGpuBackend
             (!f.RawTexture || !uiTexture))
             tpage |= 0x800;
         if (uiTexture) tpage |= 0x1000;
+        if (f.Vehicle) tpage |= 0x80000;
         float perspectiveW =
             perspectiveCorrect ? MathF.Max(1f, v.PerspectiveW) : 1f;
         float screenX = v.X;
@@ -355,10 +472,34 @@ public sealed class GlBackend : IGpuBackend
 
     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
+        if (TriangleProbe is { } probe &&
+            GpuHle.GameplayActive &&
+            _traceProbeTriangles.Count < 512)
+        {
+            bool firstBuffer =
+                ContainsPoint(a, b, c, probe.X, probe.Y);
+            bool secondBuffer =
+                ContainsPoint(a, b, c, probe.X, probe.Y + 240f);
+            if (firstBuffer || secondBuffer)
+            {
+                string triangle =
+                    $"ot={f.OtIndex} tex={(f.Textured ? 1 : 0)} " +
+                    $"semi={(f.SemiTrans ? 1 : 0)} raw={(f.RawTexture ? 1 : 0)} " +
+                    $"tpage=0x{f.TPage:X3} clut=0x{f.Clut:X4} " +
+                    $"xy=({a.X},{a.Y})({b.X},{b.Y})({c.X},{c.Y}) " +
+                    $"uv=({a.U},{a.V})({b.U},{b.V})({c.U},{c.V}) " +
+                    $"rgb=({a.R},{a.G},{a.B})({b.R},{b.G},{b.B})" +
+                    $"({c.R},{c.G},{c.B})";
+                if (_traceProbeTriangles.Add(triangle))
+                    Console.WriteLine($"[V82Probe] {triangle}");
+            }
+        }
         bool depthTest =
+            !DisableRasterDepth &&
             GpuHle.GameplayActive &&
             (ConfigManager.View.HighResolution3D ||
              ConfigManager.View.PerspectiveCorrectTextures) &&
+            !f.SemiTrans &&
             f.OtIndex > 0;
         Begin(f, 3, depthTest);
         bool dith = DitherOf(f);
@@ -367,25 +508,50 @@ public sealed class GlBackend : IGpuBackend
             f.Textured &&
             a.HasProjectiveW && b.HasProjectiveW && c.HasProjectiveW;
         bool perspectiveCorrect =
+            !DisableProjectiveTextures &&
             ConfigManager.View.PerspectiveCorrectTextures && hasProjectiveW;
+        if (TraceDepth && GpuHle.GameplayActive)
+        {
+            if (f.SemiTrans) _traceTransparentTriangles++;
+            else _traceOpaqueTriangles++;
+            if (depthTest) _traceDepthTestedTriangles++;
+            if (perspectiveCorrect) _traceProjectiveTriangles++;
+            if (f.OtIndex <= 0) _traceMissingOtTriangles++;
+            else
+            {
+                _traceMinOt = Math.Min(_traceMinOt, f.OtIndex);
+                _traceMaxOt = Math.Max(_traceMaxOt, f.OtIndex);
+            }
+        }
         bool particle = f.Textured && f.SemiTrans && hasDepth;
         bool shadow = !f.Textured && f.SemiTrans && a.HasGteZ && b.HasGteZ && c.HasGteZ &&
             a.R < 96 && a.G < 96 && a.B < 96 && b.R < 96 && b.G < 96 && b.B < 96 &&
             c.R < 96 && c.G < 96 && c.B < 96;
-        static float DepthOf(in HleVertex v, int otDepth, bool projective)
+        static float DepthOf(int otDepth)
         {
-            float relative = projective
-                ? Math.Clamp(v.PerspectiveW / 1024f, 1f / 64f, 64f)
-                : 1f;
-            float z = MathF.Max(0.001f, otDepth * relative);
+            // The ordering-table bucket is the only depth value carried by
+            // the submitted GPU packet. Projective W controls texture
+            // interpolation only; multiplying the bucket by W made vertices
+            // of one polygon cross unrelated terrain/vehicle geometry as the
+            // inferred denominator changed, producing severe frame-to-frame
+            // flicker. Keep one stable depth for the complete primitive.
+            float z = MathF.Max(0.001f, otDepth);
             return z / (z + 1f);
         }
         var va = V(a, f, dith, perspectiveCorrect, false,
-            DepthOf(a, f.OtIndex, perspectiveCorrect)); va.BaryX = 1f;
+            DepthOf(f.OtIndex)); va.BaryX = 1f;
         var vb = V(b, f, dith, perspectiveCorrect, false,
-            DepthOf(b, f.OtIndex, perspectiveCorrect)); vb.BaryY = 1f;
+            DepthOf(f.OtIndex)); vb.BaryY = 1f;
         var vc = V(c, f, dith, perspectiveCorrect, false,
-            DepthOf(c, f.OtIndex, perspectiveCorrect)); vc.BaryZ = 1f;
+            DepthOf(f.OtIndex)); vc.BaryZ = 1f;
+        float uvMinX = MathF.Min(a.U, MathF.Min(b.U, c.U));
+        float uvMinY = MathF.Min(a.V, MathF.Min(b.V, c.V));
+        float uvMaxX = MathF.Max(a.U, MathF.Max(b.U, c.U));
+        float uvMaxY = MathF.Max(a.V, MathF.Max(b.V, c.V));
+        va.UvMinX = vb.UvMinX = vc.UvMinX = uvMinX;
+        va.UvMinY = vb.UvMinY = vc.UvMinY = uvMinY;
+        va.UvMaxX = vb.UvMaxX = vc.UvMaxX = uvMaxX;
+        va.UvMaxY = vb.UvMaxY = vc.UvMaxY = uvMaxY;
         if (particle) { va.Texpage |= 0x2000; vb.Texpage |= 0x2000; vc.Texpage |= 0x2000; }
         if (shadow)
         {
@@ -403,10 +569,42 @@ public sealed class GlBackend : IGpuBackend
     public void DrawRect(in HleRect r, in PrimFlags f)
     {
         Begin(f, 6);
+        if (TraceRectangles && GpuHle.GameplayActive &&
+            _traceRectangleShapes.Count < 256)
+        {
+            string shape =
+                $"ot={f.OtIndex} xy={r.X},{r.Y} wh={r.W}x{r.H} " +
+                $"uv={r.U},{r.V} tex={(f.Textured ? 1 : 0)} " +
+                $"semi={(f.SemiTrans ? 1 : 0)} raw={(f.RawTexture ? 1 : 0)} " +
+                $"tpage=0x{f.TPage:X3} clut=0x{f.Clut:X4}";
+            if (_traceRectangleShapes.Add(shape))
+                Console.WriteLine($"[V82Rect] {shape}");
+        }
+        bool topGameplayHud =
+            GpuHle.GameplayActive &&
+            _kTarget is { } hudTarget &&
+            r.Y - hudTarget.Y < hudTarget.H * 0.42f;
+        float drawX = r.X;
+        int drawW = r.W;
+        short drawU = r.U;
+        // The live vehicle-status sprite is authored four pixels left of its
+        // own 84-pixel backing so it covers the retail radar/status connector.
+        // In the detached SVG layout those pixels float in the deliberate gap;
+        // clip only that exact sprite to the status element's restored border.
+        if (ConfigManager.View.VectorIcons &&
+            topGameplayHud &&
+            f.Textured && f.RawTexture && f.SemiTrans &&
+            r.W == 40 && r.H == 16 &&
+            r.U == 120 && r.V == 78)
+        {
+            drawX += 4f;
+            drawW -= 4;
+            drawU += 4;
+        }
         float anchor = 0f;
         if (ConfigManager.View.HudAnchoring && GpuHle.GameplayActive && _kTarget is { Margin: > 0 } target)
         {
-            float localCenter = r.X + r.W * 0.5f - target.X;
+            float localCenter = drawX + drawW * 0.5f - target.X;
             float localTop = r.Y - target.Y;
 
             // V8:2 builds the radar, armor/health panel and weapon panel from
@@ -424,14 +622,10 @@ public sealed class GlBackend : IGpuBackend
             if (topHud || lowerLeftHud)
                 anchor = -target.Margin;
         }
-        var a = new HleVertex { X = r.X + anchor, Y = r.Y, R = r.R, G = r.G, B = r.B, U = r.U, V = r.V };
-        var b = new HleVertex { X = r.X + r.W + anchor, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
-        var c = new HleVertex { X = r.X + anchor, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
-        var d = new HleVertex { X = r.X + r.W + anchor, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
-        bool topGameplayHud =
-            GpuHle.GameplayActive &&
-            _kTarget is { } hudTarget &&
-            r.Y - hudTarget.Y < hudTarget.H * 0.42f;
+        var a = new HleVertex { X = drawX + anchor, Y = r.Y, R = r.R, G = r.G, B = r.B, U = drawU, V = r.V };
+        var b = new HleVertex { X = drawX + drawW + anchor, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(drawU + drawW), V = r.V };
+        var c = new HleVertex { X = drawX + anchor, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = drawU, V = (short)(r.V + r.H) };
+        var d = new HleVertex { X = drawX + drawW + anchor, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(drawU + drawW), V = (short)(r.V + r.H) };
         // The compact top HUD uses tightly packed atlas cells. Keep their
         // authored binary silhouettes exact; sampling across a cell boundary
         // can pull neighboring digits into the ammo counter. Larger gameplay
@@ -461,9 +655,9 @@ public sealed class GlBackend : IGpuBackend
         var vb = V(b, f, false, false, true); vb.Texpage |= uiFlags;
         var vc = V(c, f, false, false, true); vc.Texpage |= uiFlags;
         var vd = V(d, f, false, false, true); vd.Texpage |= uiFlags;
-        float uvMinX = Math.Min(r.U, r.U + r.W);
+        float uvMinX = Math.Min(drawU, drawU + drawW);
         float uvMinY = Math.Min(r.V, r.V + r.H);
-        float uvMaxX = Math.Max(r.U, r.U + r.W) - 1f;
+        float uvMaxX = Math.Max(drawU, drawU + drawW) - 1f;
         float uvMaxY = Math.Max(r.V, r.V + r.H) - 1f;
         va.UvMinX = vb.UvMinX = vc.UvMinX = vd.UvMinX = uvMinX;
         va.UvMinY = vb.UvMinY = vc.UvMinY = vd.UvMinY = uvMinY;
@@ -514,6 +708,12 @@ public sealed class GlBackend : IGpuBackend
         _readCacheValid = false;
         Flush();
         _vram.Fill(x, y, w, h, color15);
+        if (x + w > VramShadow.Width ||
+            y + h > VramShadow.Height)
+        {
+            SyncWrappedRtsFromVram(x, y, w, h);
+            return;
+        }
         foreach (var rt in _rts)
         {
             if (rt == null || !rt.Intersects(x, y, w, h)) continue;
@@ -543,9 +743,9 @@ public sealed class GlBackend : IGpuBackend
     {
         _readCacheValid = false;
         Flush();
-        WritebackDirtyIntersecting(sx, sy, w, h);
+        WritebackDirtyWrappedIntersecting(sx, sy, w, h);
         _vram.CopyRect(sx, sy, dx, dy, w, h);
-        SyncRtsFromVram(dx, dy, w, h);
+        SyncWrappedRtsFromVram(dx, dy, w, h);
     }
 
     public void WriteVram(int x, int y, int w, int h, ReadOnlySpan<ushort> px)
@@ -553,7 +753,7 @@ public sealed class GlBackend : IGpuBackend
         _readCacheValid = false;
         Flush();
         _vram.WriteRect(x, y, w, h, px);
-        SyncRtsFromVram(x, y, w, h);
+        SyncWrappedRtsFromVram(x, y, w, h);
     }
 
     public void ReadVram(int x, int y, int w, int h, Span<ushort> px)
@@ -561,7 +761,7 @@ public sealed class GlBackend : IGpuBackend
         Flush();
         if (!_readCacheValid && (long)w * h > 64)
         {
-            WritebackDirtyIntersecting(x, y, w, h);
+            WritebackDirtyWrappedIntersecting(x, y, w, h);
             _vram.ReadRect(x, y, w, h, px);
             return;
         }
@@ -678,7 +878,9 @@ public sealed class GlBackend : IGpuBackend
             _gl.Uniform1(_uTextureMipmaps, ConfigManager.View.TextureMipmaps ? 1 : 0);
             _gl.Uniform1(_uAnisotropy, Math.Clamp(ConfigManager.View.AnisotropicFiltering, 1, 16));
             _gl.Uniform1(_uEnhancedShadows, ConfigManager.View.EnhancedShadows ? 1 : 0);
-            _gl.Uniform1(_uEnhancedParticles, ConfigManager.View.EnhancedParticles ? 1 : 0);
+            _gl.Uniform1(
+                _uEnhancedParticles,
+                ConfigManager.View.EnhancedParticles ? 1 : 0);
             _gl.Uniform1(_uEnhancedFog, ConfigManager.View.EnhancedFog ? 1 : 0);
             _gl.Uniform1(_uVectorFonts, ConfigManager.View.VectorFonts ? 1 : 0);
             _gl.Uniform1(_uVectorIcons, ConfigManager.View.VectorIcons ? 1 : 0);
@@ -735,6 +937,43 @@ public sealed class GlBackend : IGpuBackend
         if (!Ready || w <= 0 || h <= 0) return (0, 0, 0, GpuHle.OutputAspect);
         _frame++;
         Flush();
+        if (TraceTerrainVram && GpuHle.GameplayActive &&
+            _frame - _terrainVramTraceFrame >= 120)
+        {
+            ushort[] atlas = new ushort[240 * 192];
+            ushort[] palettes = new ushort[232 * 30];
+            _vram.ReadRect(640, 0, 240, 192, atlas);
+            _vram.ReadRect(32, 482, 232, 30, palettes);
+            string paletteHashes = string.Join(
+                ' ',
+                Enumerable.Range(0, 30).Select(row =>
+                    $"{482 + row}:" +
+                    $"{Fnv1a16(palettes.AsSpan(row * 232, 232)):X8}"));
+            Console.Error.WriteLine(
+                $"[V82GlVramFinal] atlas=640,0 240x192 " +
+                $"fnv=0x{Fnv1a16(atlas):X8} " +
+                $"palette-rows={paletteHashes}");
+            _terrainVramTraceFrame = _frame;
+        }
+        if (TraceDepth && (_frame % 60) == 0)
+        {
+            int minOt = _traceMinOt == int.MaxValue ? 0 : _traceMinOt;
+            Console.Error.WriteLine(
+                $"[Depth] frames={_frame - 59}-{_frame} " +
+                $"opaque-tris={_traceOpaqueTriangles} " +
+                $"transparent-tris={_traceTransparentTriangles} " +
+                $"depth-tested={_traceDepthTestedTriangles} " +
+                $"projective={_traceProjectiveTriangles} " +
+                $"missing-ot={_traceMissingOtTriangles} " +
+                $"ot-range={minOt}..{_traceMaxOt}");
+            _traceOpaqueTriangles = 0;
+            _traceTransparentTriangles = 0;
+            _traceDepthTestedTriangles = 0;
+            _traceProjectiveTriangles = 0;
+            _traceMissingOtTriangles = 0;
+            _traceMinOt = int.MaxValue;
+            _traceMaxOt = 0;
+        }
 
         for (int i = 0; i < _rts.Length; i++)
         {

@@ -43,6 +43,8 @@ public static class V8Compat
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OPTIONS") == "1";
     static readonly bool _traceAnimation =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_ANIMATION") == "1";
+    static readonly bool _traceMeshes =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1";
     static readonly bool _validateHeap =
         Environment.GetEnvironmentVariable("RECOMPONE_VALIDATE_HEAP") == "1";
     static readonly bool _victoryAutopilot =
@@ -67,6 +69,10 @@ public static class V8Compat
             out int gameplayCaptureDelay)
             ? Math.Max(0, gameplayCaptureDelay)
             : 0;
+    static readonly string? _proofVehicleFacing =
+        Environment.GetEnvironmentVariable("RECOMPONE_V8_PROOF_FACING");
+    static readonly string? _proofVehiclePosition =
+        Environment.GetEnvironmentVariable("RECOMPONE_V8_PROOF_POSITION");
     static readonly int _soakTeardownTick =
         int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_SOAK_TEARDOWN_TICKS"),
             out int soakTeardownTick)
@@ -160,6 +166,16 @@ public static class V8Compat
     static int _lastScreenY = int.MinValue;
     static bool _zeroGameVolumeLogged;
     static string _lastHeapOperation = "heap initialization";
+    static string _activeMeshRender = "none";
+    static bool _activeMeshIsVehicle;
+    static readonly Dictionary<(uint Mesh, uint Object), int> _meshRenderCounts = new();
+    static readonly Dictionary<(uint Mesh, uint Object), uint> _meshRenderLastSpatialNode = new();
+    static readonly Dictionary<(uint Mesh, uint Object), string> _meshRenderLastSpatialPath = new();
+    static readonly Dictionary<(uint Mesh, uint Object), uint> _meshRenderLastFrame = new();
+    static readonly HashSet<uint> _loggedMeshObjects = new();
+    static readonly HashSet<uint> _loggedStaticObjects = new();
+    static uint _dreamlandCastleObject;
+    static readonly List<uint> _spatialTraversalPath = new();
     static string? _lastMenuStage;
     static readonly Dictionary<uint, HeapAllocation> _liveHeapAllocations = new();
     static readonly Dictionary<uint, List<string>> _objectHistory = new();
@@ -199,6 +215,7 @@ public static class V8Compat
 
     public static void TraceAnimationObject(CpuContext c, IMemory m)
     {
+        V8DreamlandCompat.BeginAnimationObject();
         if (!_traceAnimation) return;
         m = Dispatcher.UnwrapMemory(m);
         _animationWatchContext = c;
@@ -226,6 +243,7 @@ public static class V8Compat
 
     public static void TraceAnimationObjectPost(CpuContext c, IMemory m)
     {
+        V8DreamlandCompat.EndAnimationObject(c);
         if (!_traceAnimation) return;
         _animationWatchdog?.Change(Timeout.Infinite, Timeout.Infinite);
         _animationWatchContext = null;
@@ -531,6 +549,13 @@ public static class V8Compat
     public static void TraceObjectRetire(CpuContext c, IMemory m)
     {
         m = Dispatcher.UnwrapMemory(m);
+        if (_traceMeshes && c.A0 == _dreamlandCastleObject)
+            Console.Error.WriteLine(
+                $"[V8CastleRetire] object=0x{c.A0:X8} " +
+                $"flags=0x{m.ReadU32(c.A0):X8} " +
+                $"pos={ReadVec3(m, c.A0 + 0x48u)} " +
+                $"callback=0x{m.ReadU32(c.A0 + 0x64u):X8} " +
+                $"caller=0x{c.RA:X8}");
         _matrixWeaponKinds.Remove(c.A0);
         RecordObjectEvent(c.A0,
             $"retire flags=0x{m.ReadU32(c.A0):X8} cb=0x{m.ReadU32(c.A0 + 0x64u):X8} caller=0x{c.RA:X8}");
@@ -813,16 +838,212 @@ public static class V8Compat
 
     public static void TraceLevelLoadEntry(CpuContext c, IMemory m)
     {
+        V8ArenaRegistry.RewriteRequestedPath(c, m);
         if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_LEVEL_LOAD") != "1") return;
         Console.WriteLine($"[LevelLoad] entry path=0x{c.A0:X8} '{ReadAscii(m, c.A0)}' " +
             $"label=0x{c.A1:X8} kind={c.A2}");
     }
 
-    public static void TraceStreamOpen(CpuContext c, IMemory m)
+    public static bool TraceStreamOpen(CpuContext c, IMemory m)
     {
-        if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_LEVEL_LOAD") != "1") return;
-        Console.WriteLine($"[LevelLoad] stream-open path=0x{c.A0:X8} '{ReadAscii(m, c.A0)}' " +
-            $"sp=0x{c.SP:X8} s3=0x{c.S3:X8}");
+        if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_LEVEL_LOAD") == "1")
+            Console.WriteLine($"[LevelLoad] stream-open path=0x{c.A0:X8} '{ReadAscii(m, c.A0)}' " +
+                $"sp=0x{c.SP:X8} s3=0x{c.S3:X8}");
+        // This hook observes the stream-opening wrapper.  Returning false here
+        // would skip the wrapper's buffer allocation, CD-read setup, and
+        // cleanup bookkeeping.  The virtual loose-file descriptor is supplied
+        // by the descriptor lookup hook at FUN_800157D4 instead.
+        return true;
+    }
+
+    public static bool TraceAddPrim(CpuContext c, IMemory m)
+    {
+        if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OT") != "1")
+            return true;
+
+        const uint addressMask = 0x00FFFFFFu;
+        uint oldHead = m.ReadU32(c.A0) & addressMask;
+        uint primitive = c.A1 & addressMask;
+        if (oldHead == primitive)
+        {
+            uint header = m.ReadU32(c.A1);
+            Console.Error.WriteLine(
+                $"duplicate AddPrim would self-link packet: " +
+                $"ot=0x{c.A0:X8} primitive=0x{c.A1:X8} " +
+                $"header=0x{header:X8} caller=0x{c.RA:X8}");
+        }
+        return true;
+    }
+
+    public static bool TraceSpatialTraversalPre(CpuContext c, IMemory m)
+    {
+        if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OT") == "1")
+            _spatialTraversalPath.Add(c.A0);
+        return true;
+    }
+
+    public static void TraceSpatialTraversalPost(CpuContext c, IMemory m)
+    {
+        if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OT") == "1" &&
+            _spatialTraversalPath.Count != 0)
+            _spatialTraversalPath.RemoveAt(_spatialTraversalPath.Count - 1);
+    }
+
+    public static void TraceMeshRenderPre(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        uint objectAddress = c.S0;
+        bool vehicleMesh = false;
+        var visitedParents = new HashSet<uint>();
+        while (IsRetailRamRange(objectAddress, 0x40u) &&
+               visitedParents.Add(objectAddress))
+        {
+            if (m.ReadU8(objectAddress + 4u) == 2u)
+            {
+                vehicleMesh = true;
+                break;
+            }
+            objectAddress = m.ReadU32(objectAddress + 0x3Cu);
+        }
+        _activeMeshIsVehicle = vehicleMesh;
+
+        bool traceOt =
+            Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OT") == "1";
+        if (!traceOt && !_traceMeshes)
+            return;
+        if (_traceMeshes && _loggedMeshObjects.Add(c.S0))
+        {
+            Console.Error.WriteLine(
+                $"[V8Mesh] object=0x{c.S0:X8} mesh=0x{c.A0:X8} " +
+                $"flags=0x{m.ReadU32(c.S0):X8} " +
+                $"kind={m.ReadU8(c.S0 + 4u)} " +
+                $"pos={ReadVec3(m, c.S0 + 0x48u)} " +
+                $"model=0x{m.ReadU32(c.S0 + 0x30u):X8} " +
+                $"parent=0x{m.ReadU32(c.S0 + 0x3Cu):X8} " +
+                $"callback=0x{m.ReadU32(c.S0 + 0x64u):X8}");
+        }
+        if (!traceOt)
+            return;
+        var renderKey = (c.A0, c.S0);
+        _meshRenderCounts.TryGetValue(renderKey, out int renderCount);
+        _meshRenderCounts[renderKey] = ++renderCount;
+        uint spatialListNode = m.ReadU32(c.SP + 0x50u);
+        _meshRenderLastSpatialNode.TryGetValue(renderKey, out uint previousSpatialListNode);
+        _meshRenderLastSpatialNode[renderKey] = spatialListNode;
+        string spatialPath = string.Join(">",
+            _spatialTraversalPath.Select(node =>
+                $"{node:X8}:{m.ReadU32(node)}:{m.ReadU32(node + 4u):X8}:" +
+                $"{m.ReadU32(node + 8u):X8}/{m.ReadU32(node + 0xCu):X8}"));
+        _meshRenderLastSpatialPath.TryGetValue(renderKey, out string? previousSpatialPath);
+        _meshRenderLastSpatialPath[renderKey] = spatialPath;
+        uint frame = m.ReadU32(c.GP + 0x0Cu);
+        _meshRenderLastFrame.TryGetValue(renderKey, out uint previousFrame);
+        _meshRenderLastFrame[renderKey] = frame;
+        _activeMeshRender =
+            $"mesh=0x{c.A0:X8} matrix=0x{c.A1:X8} " +
+            $"renderCount={renderCount} " +
+            $"spatialListNode=0x{spatialListNode:X8} " +
+            $"previousSpatialListNode=0x{previousSpatialListNode:X8} " +
+            $"spatialPath={spatialPath} " +
+            $"previousSpatialPath={previousSpatialPath ?? "none"} " +
+            $"frame={frame} previousFrame={previousFrame} " +
+            $"caller=0x{c.RA:X8} flags=0x{m.ReadU16(c.A0):X4} " +
+            $"packetBuffer=0x{m.ReadU32(c.A0 + 0x1Cu):X8} " +
+            $"primitiveData=0x{m.ReadU32(c.A0 + 0x30u):X8} " +
+            $"object=0x{c.S0:X8} objectFlags=0x{m.ReadU32(c.S0):X8} " +
+            $"objectModel=0x{m.ReadU32(c.S0 + 0x30u):X8} " +
+            $"objectParent=0x{m.ReadU32(c.S0 + 0x3Cu):X8} " +
+            $"objectCallback=0x{m.ReadU32(c.S0 + 0x64u):X8}";
+    }
+
+    public static void TraceMeshRenderPost(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        if (_activeMeshIsVehicle)
+        {
+            uint bufferIndex = m.ReadU32(0x80065308u);
+            uint packetStart = IsRetailRamRange(c.S0, 0x24u)
+                ? m.ReadU32(c.S0 + (bufferIndex << 2) + 0x1Cu)
+                : 0u;
+            uint packetEnd = c.S2;
+            RecompOne.Runtime.Hle.GpuHle.RegisterVehiclePacketRange(
+                packetStart,
+                packetEnd);
+            if (_traceMeshes)
+                Console.Error.WriteLine(
+                    $"[V8VehiclePackets] start=0x{packetStart:X8} " +
+                    $"end=0x{packetEnd:X8}");
+        }
+        _activeMeshIsVehicle = false;
+        if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OT") == "1")
+            _activeMeshRender = "none";
+    }
+
+    public static void RegisterMeshPrimitive(CpuContext c, IMemory m)
+    {
+        if (_activeMeshIsVehicle)
+            RecompOne.Runtime.Hle.GpuHle.RegisterVehiclePacket(c.A2);
+    }
+
+    public static string DescribeActiveMeshRender() => _activeMeshRender;
+
+    public static void TraceStaticBspInsert(CpuContext c, IMemory m)
+    {
+        if (!_traceMeshes)
+            return;
+        m = Dispatcher.UnwrapMemory(m);
+        uint listNode = c.A1;
+        if (!IsRetailRamRange(listNode, 12u))
+            return;
+        uint obj = m.ReadU32(listNode + 8u);
+        if (!IsRetailRamRange(obj, 0x68u) ||
+            !_loggedStaticObjects.Add(obj))
+            return;
+        int x = unchecked((int)m.ReadU32(obj + 0x48u));
+        int z = unchecked((int)m.ReadU32(obj + 0x50u));
+        if (x == 58720256 && z == 88079360)
+            _dreamlandCastleObject = obj;
+        Console.Error.WriteLine(
+            $"[V8StaticInsert] object=0x{obj:X8} node=0x{c.A0:X8} " +
+            $"flags=0x{m.ReadU32(obj):X8} kind={m.ReadU8(obj + 4u)} " +
+            $"pos=({x},{unchecked((int)m.ReadU32(obj + 0x4Cu))},{z}) " +
+            $"model=0x{m.ReadU32(obj + 0x30u):X8} " +
+            $"child=0x{m.ReadU32(obj + 0x38u):X8} " +
+            $"callback=0x{m.ReadU32(obj + 0x64u):X8}");
+    }
+
+    public static void TraceTerrainMaterials(CpuContext c, IMemory m)
+    {
+        if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_TERRAIN_MATERIALS") != "1")
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint descriptor = m.ReadU32(0x80065AFCu);
+        Console.Error.WriteLine(
+            $"[V8TerrainMaterial] textureCount={m.ReadU8(0x80065B30u)} " +
+            $"descriptor=0x{descriptor:X8} " +
+            $"descriptorWords=" +
+            $"{m.ReadU32(descriptor):X8}," +
+            $"{m.ReadU32(descriptor + 4u):X8}," +
+            $"{m.ReadU32(descriptor + 8u):X8}," +
+            $"{m.ReadU32(descriptor + 12u):X8}");
+        Console.Error.WriteLine(
+            $"[V8TerrainMaterial] tileOffsets=" +
+            string.Join(",", Enumerable.Range(0, 64)
+                .Select(index => m.ReadU8(0x80106DBCu + (uint)index).ToString("X2"))));
+
+        foreach (int material in new[] {
+            0, 1, 12, 32, 33, 41, 48, 49, 77, 80, 81,
+            120, 121, 128, 142, 160, 177, 198, 214, 232, 240, 241
+        })
+        {
+            uint address = 0x8008F020u + (uint)material * 0x20u;
+            Console.Error.WriteLine(
+                $"[V8TerrainMaterial] material={material} " +
+                $"words=" +
+                string.Join(",", Enumerable.Range(0, 16)
+                    .Select(index => m.ReadU16(address + (uint)index * 2u).ToString("X4"))));
+        }
     }
 
     public static void TraceLevelFactoryPre(CpuContext c, IMemory m)
@@ -832,11 +1053,31 @@ public static class V8Compat
             $"kind={c.A2} caller-s3=0x{c.S3:X8} sp=0x{c.SP:X8}");
     }
 
+    public static void TraceDreamOverlayLoaded(CpuContext c, IMemory m)
+    {
+        if (V8ArenaRegistry.SelectedStableId == null) return;
+        uint address = c.V0;
+        Console.WriteLine(
+            $"[V8Arena] overlay image=0x{address:X8} " +
+            $"words={m.ReadU32(address):X8},{m.ReadU32(address + 4u):X8}," +
+            $"{m.ReadU32(address + 8u):X8},{m.ReadU32(address + 12u):X8}"
+        );
+    }
+
     public static void TraceLevelFactoryPost(CpuContext c, IMemory m)
     {
         if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_LEVEL_LOAD") != "1") return;
+        m = Dispatcher.UnwrapMemory(m);
+        string detail = IsRetailRamRange(c.V0, 0x68u)
+            ? $" flags=0x{m.ReadU32(c.V0):X8} kind={m.ReadU8(c.V0 + 4u)}" +
+              $" pos={ReadVec3(m, c.V0 + 0x48u)}" +
+              $" model=0x{m.ReadU32(c.V0 + 0x30u):X8}" +
+              $" sibling=0x{m.ReadU32(c.V0 + 0x34u):X8}" +
+              $" child=0x{m.ReadU32(c.V0 + 0x38u):X8}" +
+              $" callback=0x{m.ReadU32(c.V0 + 0x64u):X8}"
+            : "";
         Console.WriteLine($"[LevelLoad] factory-exit result=0x{c.V0:X8} caller-s3=0x{c.S3:X8} " +
-            $"sp=0x{c.SP:X8}");
+            $"sp=0x{c.SP:X8}{detail}");
     }
 
     static string ReadAscii(IMemory m, uint address)
@@ -941,7 +1182,7 @@ public static class V8Compat
     public static bool DrawMaxTerrainLod(CpuContext c, IMemory m)
     {
         if (!MaxLevelOfDetailEnabled())
-            return false;
+            return true;
 
         m = Dispatcher.UnwrapMemory(m);
         uint root = m.ReadU32(c.GP + 0x6FCu);
@@ -951,7 +1192,7 @@ public static class V8Compat
             DrawAllTerrainLeaves(c, m, root, new HashSet<uint>());
             c.Restore(saved);
         }
-        return true;
+        return false;
     }
 
     static void DrawAllTerrainLeaves(
@@ -1061,6 +1302,22 @@ public static class V8Compat
 
         int tick = ++_gameplayHeartbeatTick;
         _vehiclePhysicsTick = tick;
+        if (tick == 1 && _proofVehiclePosition != null)
+            ApplyProofVehiclePosition(c, m, player, _proofVehiclePosition);
+        if (tick == 1 && _proofVehicleFacing != null)
+            ApplyProofVehicleFacing(m, player, _proofVehicleFacing);
+        if (tick == 1 && _traceMeshes)
+        {
+            TraceDreamlandCastleObjects(m);
+            if (_dreamlandCastleObject != 0u)
+                Console.Error.WriteLine(
+                    $"[V8CastleTick] object=0x{_dreamlandCastleObject:X8} " +
+                    $"flags=0x{m.ReadU32(_dreamlandCastleObject):X8} " +
+                    $"kind={m.ReadU8(_dreamlandCastleObject + 4u)} " +
+                    $"pos={ReadVec3(m, _dreamlandCastleObject + 0x48u)} " +
+                    $"model=0x{m.ReadU32(_dreamlandCastleObject + 0x30u):X8} " +
+                    $"callback=0x{m.ReadU32(_dreamlandCastleObject + 0x64u):X8}");
+        }
         if (_whammyMatrix)
         {
             uint lockedTarget = m.ReadU32(player + 0xE4u);
@@ -2102,6 +2359,86 @@ public static class V8Compat
         $"{unchecked((short)m.ReadU16(address + 10u))};" +
         $"{unchecked((short)m.ReadU16(address + 12u))},{unchecked((short)m.ReadU16(address + 14u))}," +
         $"{unchecked((short)m.ReadU16(address + 16u))}]";
+
+    static void ApplyProofVehicleFacing(IMemory m, uint player, string facing)
+    {
+        short[] matrix = facing.ToLowerInvariant() switch
+        {
+            "positive_z" => [4096, 0, 0, 0, 4096, 0, 0, 0, 4096],
+            "negative_z" => [-4096, 0, 0, 0, 4096, 0, 0, 0, -4096],
+            "positive_x" => [0, 0, 4096, 0, 4096, 0, -4096, 0, 0],
+            "negative_x" => [0, 0, -4096, 0, 4096, 0, 4096, 0, 0],
+            _ => throw new InvalidOperationException(
+                $"Unknown proof vehicle facing '{facing}'")
+        };
+        for (int index = 0; index < matrix.Length; index++)
+            m.WriteU16(player + 0x10u + (uint)(index * 2),
+                unchecked((ushort)matrix[index]));
+        m.WriteU32(player + 0x90u, 0u);
+        m.WriteU32(player + 0x94u, 0u);
+        m.WriteU32(player + 0x98u, 0u);
+        Console.Error.WriteLine(
+            $"[V8Proof] facing={facing} player=0x{player:X8} " +
+            $"matrix={ReadMatrix(m, player + 0x10u)}");
+    }
+
+    static void ApplyProofVehiclePosition(
+        CpuContext c, IMemory m, uint player, string position)
+    {
+        string[] fields = position.Split(',');
+        if (fields.Length != 2 ||
+            !double.TryParse(fields[0],
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out double x) ||
+            !double.TryParse(fields[1],
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out double z))
+            throw new InvalidOperationException(
+                $"Invalid proof vehicle position '{position}'");
+        int rawX = checked((int)Math.Round(x * 65536.0));
+        int rawZ = checked((int)Math.Round(z * 65536.0));
+        var snapshot = c.Snapshot();
+        c.A0 = unchecked((uint)rawX);
+        c.A1 = unchecked((uint)rawZ);
+        Dispatcher.Call(c, m, 0x80025400u);
+        int rawY = unchecked((int)c.V0);
+        c.Restore(snapshot);
+        foreach (uint offset in new uint[] { 0x24u, 0x48u })
+            m.WriteU32(player + offset, unchecked((uint)rawX));
+        foreach (uint offset in new uint[] { 0x28u, 0x4Cu })
+            m.WriteU32(player + offset, unchecked((uint)rawY));
+        foreach (uint offset in new uint[] { 0x2Cu, 0x50u })
+            m.WriteU32(player + offset, unchecked((uint)rawZ));
+        m.WriteU32(player + 0x80u, 0u);
+        m.WriteU32(player + 0x84u, 0u);
+        m.WriteU32(player + 0x88u, 0u);
+        Console.Error.WriteLine(
+            $"[V8Proof] position={position} player=0x{player:X8} " +
+            $"pos={ReadVec3(m, player + 0x24u)}");
+    }
+
+    static void TraceDreamlandCastleObjects(IMemory m)
+    {
+        const uint castleX = 58720256u;
+        const uint castleZ = 88079360u;
+        for (uint address = 0x80000000u; address < 0x801FFFF8u; address += 4u)
+        {
+            if (m.ReadU32(address) != castleX ||
+                m.ReadU32(address + 8u) != castleZ)
+                continue;
+            uint obj = address >= 0x48u ? address - 0x48u : 0u;
+            Console.Error.WriteLine(
+                $"[V8CastleObject] vector=0x{address:X8} object=0x{obj:X8} " +
+                $"flags=0x{m.ReadU32(obj):X8} kind={m.ReadU8(obj + 4u)} " +
+                $"model=0x{m.ReadU32(obj + 0x30u):X8} " +
+                $"sibling=0x{m.ReadU32(obj + 0x34u):X8} " +
+                $"child=0x{m.ReadU32(obj + 0x38u):X8} " +
+                $"parent=0x{m.ReadU32(obj + 0x3Cu):X8} " +
+                $"callback=0x{m.ReadU32(obj + 0x64u):X8}");
+        }
+    }
 
     public static void TraceMenuText(CpuContext c, IMemory m)
     {

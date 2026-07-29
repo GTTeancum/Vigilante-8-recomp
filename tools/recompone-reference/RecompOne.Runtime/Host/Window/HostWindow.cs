@@ -215,6 +215,14 @@ internal static class HostWindow
             Environment.GetEnvironmentVariable("RECOMPONE_GRAPHICS_PRESET");
         if (graphicsPresetOverride is "Original" or "Enhanced")
             ConfigManager.View.ApplyGraphicsPreset(graphicsPresetOverride);
+        string? widescreenOverride =
+            Environment.GetEnvironmentVariable("RECOMPONE_WIDESCREEN");
+        if (widescreenOverride is "0" or "1")
+            ConfigManager.View.Widescreen = widescreenOverride == "1";
+        string? smoothingOverride =
+            Environment.GetEnvironmentVariable("RECOMPONE_TEXTURE_SMOOTHING");
+        if (smoothingOverride is "0" or "1")
+            ConfigManager.View.TextureSmoothing = smoothingOverride == "1";
 
         string? hleOverride = Environment.GetEnvironmentVariable("RECOMPONE_GPU_HLE");
         bool hleActive = hleOverride == "1" ||

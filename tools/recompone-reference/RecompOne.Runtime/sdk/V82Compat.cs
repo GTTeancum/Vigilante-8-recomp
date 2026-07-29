@@ -19,7 +19,14 @@ public static class V82Compat
     const uint HeapHeadAddress = 0x8006B3F8u;
     const uint ShellLinkedBase = 0x80100000u;
     const uint ShellSectorAllocation = 0x0001B000u;
-    const uint PcHeapBase = 0x80200000u;
+    // Maximum LOD can exceed either retail 128 KiB GPU packet arena, most
+    // visibly in Air Grave's arena callback. Reserve two host-only 512 KiB
+    // arenas below the loose-file heap so high-detail packets cannot overwrite
+    // gameplay allocations before the scheduler validates the cursor.
+    const uint ExpandedPrimitiveBufferBase = 0x80200000u;
+    const uint ExpandedPrimitiveBufferSize = 0x00080000u;
+    const uint PcHeapBase =
+        ExpandedPrimitiveBufferBase + ExpandedPrimitiveBufferSize * 2u;
     const uint PcHeapEnd = 0x80800000u;
     static bool _shellPinnedAtLinkedBase;
     static bool _extendedHeapInstalled;
@@ -39,6 +46,8 @@ public static class V82Compat
     static bool _matchVramActive;
     static int _matchVramSuccesses;
     static int _matchVramFailures;
+    static readonly bool _traceVram =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VRAM") == "1";
     static int _objectFactoryTraceCount;
     static readonly Stack<uint> ObjectFactorySources = new();
     static int _objectSchedulerPass;
@@ -102,6 +111,10 @@ public static class V82Compat
     static readonly Dictionary<uint, (uint HighMesh, uint LowMesh, uint Threshold)> LodThresholds = new();
     static bool _maximumLodLogged;
     static bool _stockLodRestoreLogged;
+    static bool _expandedPrimitiveBuffersLogged;
+    static bool _expandedPrimitiveBuffersActive;
+    static uint _previousPrimitiveHighWaterWords;
+    static uint _previousPrimitiveUsedWords;
     static readonly uint[] SoakDamageZoneOffsets = [0xF8u, 0xFCu, 0x100u];
     static bool _soakRepairWrenchCovered;
     static string? _lastSoakPowerState;
@@ -140,7 +153,9 @@ public static class V82Compat
         _extendedHeapInstalled = true;
         V82VehicleRegistry.Initialize(c, m);
         Console.Error.WriteLine(
-            "[V82Compat] initialized isolated 6 MiB PC heap at 0x80200000-0x80800000");
+            $"[V82Compat] initialized isolated {(PcHeapEnd - PcHeapBase) >> 20} MiB " +
+            $"PC heap at 0x{PcHeapBase:X8}-0x{PcHeapEnd:X8}; reserved " +
+            $"0x{ExpandedPrimitiveBufferBase:X8}-0x{PcHeapBase:X8} for Maximum-LOD packets");
     }
 
     public static void PcMalloc(CpuContext c, IMemory m)
@@ -686,18 +701,7 @@ public static class V82Compat
         uint highMesh = m.ReadU32(objectAddress + 0x40u);
         uint lowMesh = m.ReadU32(objectAddress + 0x68u);
         uint threshold = m.ReadU32(objectAddress + 0x6Cu);
-        bool maximum = ConfigManager.View.LevelOfDetail.Equals(
-            "Maximum", StringComparison.OrdinalIgnoreCase);
-        string? environmentMode =
-            Environment.GetEnvironmentVariable("RECOMPONE_V82_LOD") ??
-            Environment.GetEnvironmentVariable("RECOMPONE_LOD_MODE");
-        if (!string.IsNullOrWhiteSpace(environmentMode))
-        {
-            maximum = environmentMode.Equals("maximum", StringComparison.OrdinalIgnoreCase) ||
-                      environmentMode.Equals("max", StringComparison.OrdinalIgnoreCase) ||
-                      environmentMode.Equals("1", StringComparison.OrdinalIgnoreCase) ||
-                      environmentMode.Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
+        bool maximum = IsMaximumLevelOfDetail();
 
         if (maximum)
         {
@@ -728,6 +732,82 @@ public static class V82Compat
                 Console.Error.WriteLine(
                     "[V82LOD] Stock active; restored distance-based geometry thresholds");
             }
+        }
+    }
+
+    static bool IsMaximumLevelOfDetail()
+    {
+        bool maximum = ConfigManager.View.LevelOfDetail.Equals(
+            "Maximum", StringComparison.OrdinalIgnoreCase);
+        string? environmentMode =
+            Environment.GetEnvironmentVariable("RECOMPONE_V82_LOD") ??
+            Environment.GetEnvironmentVariable("RECOMPONE_LOD_MODE");
+        if (!string.IsNullOrWhiteSpace(environmentMode))
+        {
+            maximum = environmentMode.Equals("maximum", StringComparison.OrdinalIgnoreCase) ||
+                      environmentMode.Equals("max", StringComparison.OrdinalIgnoreCase) ||
+                      environmentMode.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                      environmentMode.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+        return maximum;
+    }
+
+    static uint ExpandedPrimitiveBase(uint buffer) =>
+        ExpandedPrimitiveBufferBase +
+        (buffer & 1u) * ExpandedPrimitiveBufferSize;
+
+    // func_80014B3C derives a packet high-water mark from the retail arena
+    // before flipping buffers. Preserve the equivalent host-arena count so its
+    // bookkeeping remains meaningful when the post-hook redirects the cursor.
+    public static void PrepareExpandedPrimitiveBuffer(CpuContext c, IMemory m)
+    {
+        if (Runtime.Mode != RunMode.Devkit ||
+            !GpuHle.GameplayActive ||
+            !IsMaximumLevelOfDetail())
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint buffer = m.ReadU32(c.GP + 0x20u) & 1u;
+        uint cursor = m.ReadU32(c.GP + 0x610u);
+        uint expandedBase = ExpandedPrimitiveBase(buffer);
+        uint nativeBase = 0x80074A68u + (buffer << 17);
+        _previousPrimitiveHighWaterWords = m.ReadU32(c.GP + 0xCE4u);
+        _previousPrimitiveUsedWords =
+            cursor >= expandedBase &&
+            cursor <= expandedBase + ExpandedPrimitiveBufferSize
+                ? (cursor - expandedBase) >> 2
+                : cursor >= nativeBase && cursor <= nativeBase + 0x20000u
+                    ? (cursor - nativeBase) >> 2
+                    : 0u;
+    }
+
+    // Redirect both the packet cursor and its end pointer after the retail
+    // buffer-flip function clears the ordering table and retires objects tied
+    // to the buffer being reused.
+    public static void ActivateExpandedPrimitiveBuffer(CpuContext c, IMemory m)
+    {
+        if (Runtime.Mode != RunMode.Devkit ||
+            !GpuHle.GameplayActive ||
+            !IsMaximumLevelOfDetail())
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint buffer = m.ReadU32(c.GP + 0x20u) & 1u;
+        uint expandedBase = ExpandedPrimitiveBase(buffer);
+        m.WriteU32(c.GP + 0x610u, expandedBase);
+        m.WriteU32(c.GP + 0xCDCu, expandedBase + ExpandedPrimitiveBufferSize);
+        m.WriteU32(
+            c.GP + 0xCE4u,
+            Math.Max(_previousPrimitiveHighWaterWords, _previousPrimitiveUsedWords));
+        _expandedPrimitiveBuffersActive = true;
+
+        if (!_expandedPrimitiveBuffersLogged)
+        {
+            _expandedPrimitiveBuffersLogged = true;
+            Console.Error.WriteLine(
+                $"[V82LOD] Maximum packet arenas active: " +
+                $"0x{ExpandedPrimitiveBufferBase:X8}-0x{PcHeapBase:X8} " +
+                $"({ExpandedPrimitiveBufferSize >> 10} KiB each)");
         }
     }
 
@@ -1051,20 +1131,30 @@ public static class V82Compat
                     c.S6 = callbackS6;
                     c.S7 = callbackS7;
                     uint primitiveAfter = m.ReadU32(c.GP + 0x610u);
-                    uint primitiveBuffer = m.ReadU32(c.GP + 0x20u);
-                    uint primitiveBase = 0x80074A68u + (primitiveBuffer << 17);
+                    uint primitiveBuffer = m.ReadU32(c.GP + 0x20u) & 1u;
+                    bool expandedPrimitives =
+                        Runtime.Mode == RunMode.Devkit &&
+                        GpuHle.GameplayActive &&
+                        _expandedPrimitiveBuffersActive &&
+                        IsMaximumLevelOfDetail();
+                    uint primitiveBase = expandedPrimitives
+                        ? ExpandedPrimitiveBase(primitiveBuffer)
+                        : 0x80074A68u + (primitiveBuffer << 17);
+                    uint primitiveSize = expandedPrimitives
+                        ? ExpandedPrimitiveBufferSize
+                        : 0x20000u;
                     if (primitiveAfter < primitiveBase ||
-                        primitiveAfter >= primitiveBase + 0x20000u)
+                        primitiveAfter >= primitiveBase + primitiveSize)
                     {
                         uint restored = primitiveBefore >= primitiveBase &&
-                            primitiveBefore < primitiveBase + 0x20000u
+                            primitiveBefore < primitiveBase + primitiveSize
                             ? primitiveBefore
                             : primitiveBase;
                         Console.Error.WriteLine(
                             $"[V82Render] rejected primitive cursor 0x{primitiveAfter:X8} " +
                             $"from callback=0x{callback:X8} object=0x{objectAddress:X8}; " +
                             $"restored 0x{restored:X8} range=0x{primitiveBase:X8}-" +
-                            $"0x{primitiveBase + 0x20000u:X8}");
+                            $"0x{primitiveBase + primitiveSize:X8}");
                         m.WriteU32(c.GP + 0x610u, restored);
                     }
                 }
@@ -2051,7 +2141,7 @@ public static class V82Compat
         if (c.V0 != 0u)
         {
             int success = ++_matchVramSuccesses;
-            if (success <= 24)
+            if (_traceVram || success <= 24)
             {
                 Console.Error.WriteLine(
                     $"[V82VRAM] #{success} {request.Width}x{request.Height} " +
@@ -2064,7 +2154,7 @@ public static class V82Compat
         else
         {
             int failure = ++_matchVramFailures;
-            if (failure <= 24 || failure % 100 == 0)
+            if (_traceVram || failure <= 24 || failure % 100 == 0)
             {
                 Console.Error.WriteLine(
                     $"[V82VRAM] failure #{failure}: {request.Width}x{request.Height}, " +

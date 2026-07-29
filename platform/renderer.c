@@ -29,8 +29,12 @@ static GLint  g_loc_tex2   = -1;
 static GLint  g_loc_tex3   = -1;
 static GLint  g_loc_tex4   = -1;
 static GLint  g_loc_tex5   = -1;
+static GLint  g_loc_tex6   = -1;
 static GLuint g_sky_vao    = 0, g_sky_vbo = 0;
 static GLuint g_coll_dbg_vao = 0, g_coll_dbg_vbo = 0;
+static GLuint g_water_reflection_tex = 0;
+static int    g_water_reflection_w = 0;
+static int    g_water_reflection_h = 0;
 /* Vehicle mesh VAOs (loaded from VEHICLES.EXP by MeshLoader_Init). */
 extern GLuint g_mesh_vao[14];
 extern int    g_mesh_vtx[14];
@@ -88,9 +92,10 @@ static const char *FS_SRC =
     "uniform sampler2D uTex3;\n"
     "uniform sampler2D uTex4;\n"
     "uniform sampler2D uTex5;\n"
+    "uniform sampler2D uTex6;\n"
     "uniform int uUseTex;\n"
     "out vec4 oCol;\n"
-    "void main(){ vec3 c = vCol; float a = 1.0; if (uUseTex != 0 && vTex.x >= 0.0) { vec4 t = (vTexKind > 3.5) ? texture(uTex5, vTex) : ((vTexKind > 2.5) ? texture(uTex4, vTex) : ((vTexKind > 1.5) ? texture(uTex3, vTex) : ((vTexKind > 0.5) ? texture(uTex2, vTex) : texture(uTex, vTex)))); if (t.a < 0.10) discard; c *= t.rgb; a = (vTexKind > 2.5) ? 0.45 : t.a; } oCol = vec4(c * uTint, a); }\n";
+    "void main(){ vec3 c = vCol; float a = 1.0; if (uUseTex != 0 && vTex.x >= 0.0) { vec4 t; if (vTexKind > 4.5) { vec2 q = (floor(clamp(vTex,0.0,1.0)*vec2(39.0,22.0))+0.5)/vec2(40.0,23.0); t = texture(uTex6, vec2(q.x,1.0-q.y)); t.rgb = mix(t.rgb,vec3(0.08,0.34,0.48),0.32); a = 0.56; } else { t = (vTexKind > 3.5) ? texture(uTex5, vTex) : ((vTexKind > 2.5) ? texture(uTex4, vTex) : ((vTexKind > 1.5) ? texture(uTex3, vTex) : ((vTexKind > 0.5) ? texture(uTex2, vTex) : texture(uTex, vTex)))); if (t.a < 0.10) discard; a = (vTexKind > 2.5) ? 0.45 : t.a; } c *= t.rgb; } oCol = vec4(c * uTint, a); }\n";
 
 static GLuint compile(GLenum kind, const char *src) {
     GLuint s = glCreateShader(kind);
@@ -118,6 +123,7 @@ extern GLuint g_terrainmesh_sky_tex;
 extern GLuint g_terrainmesh_route_tex0;
 extern GLuint g_terrainmesh_route_tex1;
 extern int    g_terrainmesh_vtx;
+extern int    g_terrainmesh_has_dynamic_water;
 extern int    g_terrainmesh_sky_w, g_terrainmesh_sky_h;
 extern int TerrainMesh_DebugCollisionLines(int32_t player_x, int32_t player_y, int32_t player_z,
                                            float *out_vertices, int max_vertices);
@@ -665,6 +671,7 @@ static void init_once(void) {
     g_loc_tex3 = glGetUniformLocation(g_prog, "uTex3");
     g_loc_tex4 = glGetUniformLocation(g_prog, "uTex4");
     g_loc_tex5 = glGetUniformLocation(g_prog, "uTex5");
+    g_loc_tex6 = glGetUniformLocation(g_prog, "uTex6");
     glDeleteShader(vs); glDeleteShader(fs);
     {
         static const float sky[] = {
@@ -708,6 +715,37 @@ static void init_once(void) {
                          + ((float)g_terrain_tile_z_max + 1.0f) * 64.0f) * 0.5f;
     TerrainMesh_Load(g_v8_level_exp_path, mesh_origin_x, mesh_origin_z);
     g_initialized = 1;
+}
+
+static void capture_dynamic_water_source(int w, int h)
+{
+    if (!g_terrainmesh_has_dynamic_water || w <= 0 || h <= 0)
+        return;
+    glActiveTexture(GL_TEXTURE5);
+    if (g_water_reflection_tex == 0) {
+        glGenTextures(1, &g_water_reflection_tex);
+        glBindTexture(GL_TEXTURE_2D, g_water_reflection_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    } else {
+        glBindTexture(GL_TEXTURE_2D, g_water_reflection_tex);
+    }
+    if (g_water_reflection_w != w || g_water_reflection_h != h) {
+        glTexImage2D(
+            GL_TEXTURE_2D, 0, GL_RGB8, w, h, 0,
+            GL_RGB, GL_UNSIGNED_BYTE, NULL
+        );
+        g_water_reflection_w = w;
+        g_water_reflection_h = h;
+    }
+    /*
+     * Family-7/0x4000 is backed by an engine-owned 40x23 copy of the current
+     * scene.  Retain the modern framebuffer here; the shader quantizes the
+     * lookup to the source 40x23 grid before applying it to the water mesh.
+     */
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
 }
 
 static void cross3(const float a[3], const float b[3], float out[3]) {
@@ -1276,11 +1314,12 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
 
     /* Draw the placed level visual mesh (XOBF BIN: terrain patches, props,
      * buildings, and occluders).  Vertices are already in world space. */
+    capture_dynamic_water_source(w, h);
     if (V8_RENDER_XOBF_VISUALS && g_terrainmesh_vao && g_terrainmesh_vtx > 0) {
         glUniform3f(g_loc_tint, 1.0f, 1.0f, 1.0f);
         if (g_terrainmesh_tex || g_terrainmesh_xbmp_tex ||
             g_terrainmesh_tex_bank1 || g_terrainmesh_route_tex0 ||
-            g_terrainmesh_route_tex1) {
+            g_terrainmesh_route_tex1 || g_terrainmesh_has_dynamic_water) {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, g_terrainmesh_tex);
             glUniform1i(g_loc_tex, 0);
@@ -1296,6 +1335,9 @@ void Renderer_DrawFrame(int w, int h, int frame_idx)
             glActiveTexture(GL_TEXTURE4);
             glBindTexture(GL_TEXTURE_2D, g_terrainmesh_route_tex1);
             glUniform1i(g_loc_tex5, 4);
+            glActiveTexture(GL_TEXTURE5);
+            glBindTexture(GL_TEXTURE_2D, g_water_reflection_tex);
+            glUniform1i(g_loc_tex6, 5);
             glUniform1i(g_loc_useTex, 1);
         }
         mat4_mul(VP, I, MVP);

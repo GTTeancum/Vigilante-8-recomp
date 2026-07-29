@@ -45,6 +45,7 @@ public sealed class OverlayConfig
     [JsonPropertyName("funcMap")] public string? FuncMap { get; set; }
     [JsonPropertyName("base")] public string? Base { get; set; }
     [JsonPropertyName("file")] public string? File { get; set; }
+    [JsonPropertyName("hostFile")] public string? HostFile { get; set; }
     [JsonPropertyName("offset")] public int Offset { get; set; } = 0;
     [JsonPropertyName("skip")] public int Skip { get; set; } = 0;
     [JsonPropertyName("lba")] public int Lba { get; set; } = -1;

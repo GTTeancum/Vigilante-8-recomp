@@ -11,11 +11,22 @@ internal sealed class PresentationRenderer : IDisposable
         in vec2 vUv;
         uniform sampler2D uSource;
         uniform vec2 uSourceSize;
+        uniform vec3 uDreamlandFeedback;
         out vec4 oColor;
         void main() {
             ivec2 size = ivec2(uSourceSize);
             ivec2 p = clamp(ivec2(vUv * uSourceSize), ivec2(0), size - 1);
-            oColor = vec4(texelFetch(uSource, p, 0).rgb, 1.0);
+            vec3 base = texelFetch(uSource, p, 0).rgb;
+            float alpha = uDreamlandFeedback.z;
+            if (alpha > 0.0) {
+                int animation = int(uDreamlandFeedback.x) - 0x23;
+                int displacement = int(uDreamlandFeedback.y) + animation;
+                ivec2 q = clamp(
+                    p + ivec2(0, displacement), ivec2(0), size - 1);
+                vec3 shifted = texelFetch(uSource, q, 0).rgb;
+                base = mix(base, shifted, alpha);
+            }
+            oColor = vec4(base, 1.0);
         }
         """;
 
@@ -77,7 +88,8 @@ internal sealed class PresentationRenderer : IDisposable
     int _width, _height;
     int _lastSourceWidth, _lastSourceHeight, _lastOutputWidth, _lastOutputHeight;
     bool _lastFxaa;
-    int _upscaleSourceSize, _fxaaSourceSize, _fxaaInvResolution;
+    int _upscaleSourceSize, _upscaleDreamlandFeedback;
+    int _fxaaSourceSize, _fxaaInvResolution;
 
     public bool Ready { get; private set; }
 
@@ -92,6 +104,8 @@ internal sealed class PresentationRenderer : IDisposable
         _gl.UseProgram(_upscaleProgram);
         _gl.Uniform1(_gl.GetUniformLocation(_upscaleProgram, "uSource"), 0);
         _upscaleSourceSize = _gl.GetUniformLocation(_upscaleProgram, "uSourceSize");
+        _upscaleDreamlandFeedback = _gl.GetUniformLocation(
+            _upscaleProgram, "uDreamlandFeedback");
         _gl.UseProgram(_fxaaProgram);
         _gl.Uniform1(_gl.GetUniformLocation(_fxaaProgram, "uSource"), 0);
         _fxaaSourceSize = _gl.GetUniformLocation(_fxaaProgram, "uSourceSize");
@@ -164,6 +178,19 @@ internal sealed class PresentationRenderer : IDisposable
 
         PreparePass(_upscaleFbo, _upscaleProgram, sourceTexture);
         _gl.Uniform2(_upscaleSourceSize, (float)sourceWidth, sourceHeight);
+        if (Sdk.V8DreamlandCompat.TryGetScreenFeedback(
+                out int phase, out int offset, out int alpha))
+        {
+            _gl.Uniform3(
+                _upscaleDreamlandFeedback,
+                (float)phase,
+                (float)offset,
+                Math.Clamp(alpha / 255f, 0f, 1f));
+        }
+        else
+        {
+            _gl.Uniform3(_upscaleDreamlandFeedback, 0f, 0f, 0f);
+        }
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
 
         uint finalTexture = _upscaleTexture;

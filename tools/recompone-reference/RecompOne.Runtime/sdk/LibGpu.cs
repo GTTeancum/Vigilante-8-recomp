@@ -6,6 +6,7 @@ namespace RecompOne.Runtime.Sdk;
 
 public static class LibGpu
 {
+    static int _rejectedGameplayOtPackets;
 
     public static void MoveImage(CpuContext c, IMemory m)
     {
@@ -48,13 +49,83 @@ public static class LibGpu
             uint count = header >> 24;
             if (count == 0)
                 gpu.SetOrderingTableDepth(bucketDepth--);
-            for (uint i = 0; i < count; i++)
-                gpu.WriteGp0(m.ReadU32(addr + 4u + i * 4u));
+            gpu.SetOrderingTablePacket(addr);
+            if (!GpuHle.GameplayActive ||
+                IsSafeGameplayOrderingTablePacket(
+                    m, addr, count, out string reason))
+            {
+                for (uint i = 0; i < count; i++)
+                    gpu.WriteGp0(m.ReadU32(addr + 4u + i * 4u));
+            }
+            else if (_rejectedGameplayOtPackets++ < 32)
+            {
+                uint command = count > 0 ? m.ReadU32(addr + 4u) : 0u;
+                string words = string.Join(
+                    ',',
+                    Enumerable.Range(0, (int)Math.Min(count, 16u))
+                        .Select(i => $"{m.ReadU32(addr + 4u + (uint)i * 4u):X8}"));
+                Console.Error.WriteLine(
+                    $"[V82GpuPacket] rejected malformed gameplay OT packet " +
+                    $"address=0x{addr:X6} words={count} " +
+                    $"command=0x{command:X8} reason={reason} data={words}");
+            }
             uint next = header & 0xFFFFFFu;
             if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
             addr = next & ramAddressMask;
         }
         gpu.EndOrderingTable();
+    }
+
+    static bool IsSafeGameplayOrderingTablePacket(
+        IMemory m,
+        uint address,
+        uint wordCount,
+        out string reason)
+    {
+        uint offset = 0;
+        while (offset < wordCount)
+        {
+            uint command = m.ReadU32(address + 4u + offset * 4u);
+            uint opcode = command >> 24;
+            if (opcode is >= 0xA0 and <= 0xDF)
+            {
+                reason = $"VRAM transfer opcode 0x{opcode:X2}";
+                return false;
+            }
+
+            int length = Gpu.CommandLength(command);
+            if (length == Gpu.LenImageLoad)
+            {
+                reason = "image upload embedded in draw list";
+                return false;
+            }
+            if (length == Gpu.LenPolyline)
+            {
+                bool terminated = false;
+                for (uint i = offset + 1; i < wordCount; i++)
+                {
+                    uint word = m.ReadU32(address + 4u + i * 4u);
+                    if ((word & 0xF000F000u) != 0x50005000u) continue;
+                    offset = i + 1;
+                    terminated = true;
+                    break;
+                }
+                if (terminated) continue;
+                reason = "unterminated polyline";
+                return false;
+            }
+            if (length <= 0 || offset + (uint)length > wordCount)
+            {
+                reason =
+                    $"truncated opcode 0x{opcode:X2} needs={length} " +
+                    $"remaining={wordCount - offset}";
+                return false;
+            }
+            offset += (uint)length;
+        }
+
+        reason = "";
+        return offset == wordCount;
     }
 
     static int CountOrderingTableBuckets(

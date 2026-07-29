@@ -334,6 +334,8 @@ public static class Dispatcher
             }
         }
         fn(c, callMemory);
+        RecompOne.Runtime.Sdk.V8DreamlandCompat
+            .CaptureAnimationCallbackReturn(c);
     }
 
     static void TryLoadRelocatedOverlay(IMemory m, uint addr)

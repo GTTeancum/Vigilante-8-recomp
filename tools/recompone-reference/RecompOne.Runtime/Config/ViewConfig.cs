@@ -9,6 +9,9 @@ public class PanelState
 
 public class ViewConfig
 {
+    static bool IsV82 =>
+        Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal);
+
     public Dictionary<string, string> Values { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, PanelState> Panels { get; set; } = [];
 
@@ -82,7 +85,10 @@ public class ViewConfig
 
     public string LevelOfDetail
     {
-        get => GetString("LevelOfDetail", "Maximum");
+        // V8's "Maximum" terrain mode deliberately traverses every terrain
+        // leaf and is an opt-in diagnostic/view-distance mode.  It is not a
+        // suitable default for the original game's much denser terrain tree.
+        get => GetString("LevelOfDetail", IsV82 ? "Maximum" : "Stock");
         set => SetString("LevelOfDetail", value);
     }
 
@@ -94,13 +100,13 @@ public class ViewConfig
 
     public int MsaaSamples
     {
-        get => GetInt("MsaaSamples", 4);
+        get => GetInt("MsaaSamples", 2);
         set => SetInt("MsaaSamples", value);
     }
 
     public int AnisotropicFiltering
     {
-        get => GetInt("AnisotropicFiltering", 8);
+        get => GetInt("AnisotropicFiltering", 4);
         set => SetInt("AnisotropicFiltering", value);
     }
 
@@ -182,6 +188,6 @@ public class ViewConfig
         VectorIcons = !original;
         ExtendedDrawDistance = !original;
         EnhancedFog = !original;
-        LevelOfDetail = original ? "Stock" : "Maximum";
+        LevelOfDetail = original || !IsV82 ? "Stock" : "Maximum";
     }
 }

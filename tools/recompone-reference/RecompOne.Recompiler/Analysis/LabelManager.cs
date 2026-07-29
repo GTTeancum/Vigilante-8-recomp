@@ -14,7 +14,13 @@ public static class LabelManager
 
             uint op = instr.Word >> 26;
 
-            if (op is 1 or 4 or 5 or 6 or 7) //these: REGIMM, BEQ, BNE, BLEZ, BGTZ
+            if (op is 1 or 4 or 5 or 6 or 7 or 20 or 21 or 22 or 23)
+                // REGIMM and ordinary/likely BEQ, BNE, BLEZ and BGTZ.
+            {
+                uint t = instr.BranchTarget;
+                if (t >= func.Start && t < func.End) labels.Add(t);
+            }
+            else if (op == 18 && ((instr.Word >> 21) & 0x1F) == 8)
             {
                 uint t = instr.BranchTarget;
                 if (t >= func.Start && t < func.End) labels.Add(t);
