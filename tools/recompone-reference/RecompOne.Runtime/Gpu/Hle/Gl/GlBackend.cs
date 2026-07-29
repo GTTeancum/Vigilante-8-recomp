@@ -34,6 +34,10 @@ public sealed class GlBackend : IGpuBackend
         ParseTriangleProbe(
             Environment.GetEnvironmentVariable(
                 "RECOMPONE_TRACE_TRIANGLE_PROBE"));
+    static readonly HashSet<string> TriangleProbeLabels =
+        (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_TRIANGLE_LABELS") ?? "")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
     readonly GL _gl;
     readonly GlVram _vram;
     HudSvgAtlas? _hudSvg;
@@ -49,7 +53,8 @@ public sealed class GlBackend : IGpuBackend
     int _traceMinOt = int.MaxValue;
     int _traceMaxOt;
     readonly HashSet<string> _traceRectangleShapes = [];
-    readonly HashSet<string> _traceProbeTriangles = [];
+    readonly HashSet<string> _pendingProbeTriangles = [];
+    readonly Queue<(long Frame, string[] Triangles)> _probeTriangleHistory = [];
 
     static (float X, float Y)? ParseTriangleProbe(string? value)
     {
@@ -85,6 +90,23 @@ public sealed class GlBackend : IGpuBackend
         in HleVertex a,
         in HleVertex b,
         in HleVertex c,
+        float x,
+        float y)
+    {
+        static float Edge(
+            float ax, float ay, float bx, float by, float px, float py) =>
+            (px - ax) * (by - ay) - (py - ay) * (bx - ax);
+        float e0 = Edge(a.X, a.Y, b.X, b.Y, x, y);
+        float e1 = Edge(b.X, b.Y, c.X, c.Y, x, y);
+        float e2 = Edge(c.X, c.Y, a.X, a.Y, x, y);
+        return (e0 >= 0f && e1 >= 0f && e2 >= 0f) ||
+             (e0 <= 0f && e1 <= 0f && e2 <= 0f);
+    }
+
+    static bool ContainsPoint(
+        in GlVertex a,
+        in GlVertex b,
+        in GlVertex c,
         float x,
         float y)
     {
@@ -472,34 +494,31 @@ public sealed class GlBackend : IGpuBackend
 
     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
-        if (TriangleProbe is { } probe &&
-            GpuHle.GameplayActive &&
-            _traceProbeTriangles.Count < 512)
-        {
-            bool firstBuffer =
-                ContainsPoint(a, b, c, probe.X, probe.Y);
-            bool secondBuffer =
-                ContainsPoint(a, b, c, probe.X, probe.Y + 240f);
-            if (firstBuffer || secondBuffer)
-            {
-                string triangle =
-                    $"ot={f.OtIndex} tex={(f.Textured ? 1 : 0)} " +
-                    $"semi={(f.SemiTrans ? 1 : 0)} raw={(f.RawTexture ? 1 : 0)} " +
-                    $"tpage=0x{f.TPage:X3} clut=0x{f.Clut:X4} " +
-                    $"xy=({a.X},{a.Y})({b.X},{b.Y})({c.X},{c.Y}) " +
-                    $"uv=({a.U},{a.V})({b.U},{b.V})({c.U},{c.V}) " +
-                    $"rgb=({a.R},{a.G},{a.B})({b.R},{b.G},{b.B})" +
-                    $"({c.R},{c.G},{c.B})";
-                if (_traceProbeTriangles.Add(triangle))
-                    Console.WriteLine($"[V82Probe] {triangle}");
-            }
-        }
+        float spanX =
+            Math.Max(a.X, Math.Max(b.X, c.X)) -
+            Math.Min(a.X, Math.Min(b.X, c.X));
+        float spanY =
+            Math.Max(a.Y, Math.Max(b.Y, c.Y)) -
+            Math.Min(a.Y, Math.Min(b.Y, c.Y));
+        // Match RasterTriangle and the native PS1 polygon limits. Vertices
+        // projected across/behind the camera can wrap into enormous screen
+        // spans; the hardware drops those primitives instead of clipping them
+        // into the long terrain-like wedges OpenGL would otherwise draw.
+        if (spanX > 1023 || spanY > 511)
+            return;
+
+        // World-space transparent triangles must still test against opaque
+        // terrain. Begin/Flush leaves depth writes disabled for transparency,
+        // preserving the PS1 ordering/blend behavior between transparent faces.
+        bool worldTransparent =
+            f.SemiTrans &&
+            (a.HasGteZ || b.HasGteZ || c.HasGteZ);
         bool depthTest =
             !DisableRasterDepth &&
             GpuHle.GameplayActive &&
             (ConfigManager.View.HighResolution3D ||
              ConfigManager.View.PerspectiveCorrectTextures) &&
-            !f.SemiTrans &&
+            (!f.SemiTrans || worldTransparent) &&
             f.OtIndex > 0;
         Begin(f, 3, depthTest);
         bool dith = DitherOf(f);
@@ -527,23 +546,63 @@ public sealed class GlBackend : IGpuBackend
         bool shadow = !f.Textured && f.SemiTrans && a.HasGteZ && b.HasGteZ && c.HasGteZ &&
             a.R < 96 && a.G < 96 && a.B < 96 && b.R < 96 && b.G < 96 && b.B < 96 &&
             c.R < 96 && c.G < 96 && c.B < 96;
-        static float DepthOf(int otDepth)
+        static float DepthOf(in HleVertex vertex, int otDepth)
         {
-            // The ordering-table bucket is the only depth value carried by
-            // the submitted GPU packet. Projective W controls texture
-            // interpolation only; multiplying the bucket by W made vertices
-            // of one polygon cross unrelated terrain/vehicle geometry as the
-            // inferred denominator changed, producing severe frame-to-frame
-            // flicker. Keep one stable depth for the complete primitive.
-            float z = MathF.Max(0.001f, otDepth);
-            return z / (z + 1f);
+            // GTE projection recovery gives each world vertex its native
+            // camera-space SZ value. Preserve that value through OpenGL so
+            // transparent world planes are clipped fragment-by-fragment by
+            // opaque terrain instead of comparing one OT bucket for the
+            // complete primitive. The latter made Dreamland water cross hills
+            // as the bucket changed while the camera turned.
+            if (vertex.HasGteZ)
+                return Math.Clamp(vertex.Z, 1f, ushort.MaxValue) /
+                    ushort.MaxValue;
+
+            // V8 bins camera-space GTE SZ at approximately SZ/8. Recover the
+            // same normalized depth for vertices whose exact projection could
+            // not be correlated, instead of placing them twice as far away.
+            return Math.Clamp(otDepth, 1, 0x1FFF) / 8192f;
         }
         var va = V(a, f, dith, perspectiveCorrect, false,
-            DepthOf(f.OtIndex)); va.BaryX = 1f;
+            DepthOf(a, f.OtIndex)); va.BaryX = 1f;
         var vb = V(b, f, dith, perspectiveCorrect, false,
-            DepthOf(f.OtIndex)); vb.BaryY = 1f;
+            DepthOf(b, f.OtIndex)); vb.BaryY = 1f;
         var vc = V(c, f, dith, perspectiveCorrect, false,
-            DepthOf(f.OtIndex)); vc.BaryZ = 1f;
+            DepthOf(c, f.OtIndex)); vc.BaryZ = 1f;
+        if (TriangleProbe is { } probe &&
+            GpuHle.GameplayActive &&
+            _pendingProbeTriangles.Count < 1024)
+        {
+            float targetProbeX = (_kTarget?.X ?? 0) + probe.X;
+            float targetProbeY = (_kTarget?.Y ?? 0) + probe.Y;
+            float area2 = MathF.Abs(
+                (vb.X - va.X) * (vc.Y - va.Y) -
+                (vb.Y - va.Y) * (vc.X - va.X));
+            bool largeTexturedTriangle = f.Textured;
+            bool coversProbe = ContainsPoint(
+                va, vb, vc,
+                targetProbeX,
+                targetProbeY);
+            if (coversProbe || largeTexturedTriangle)
+            {
+                string triangle =
+                    $"packet=0x{f.PacketAddress:X8} ot={f.OtIndex} " +
+                    $"tex={(f.Textured ? 1 : 0)} " +
+                    $"semi={(f.SemiTrans ? 1 : 0)} raw={(f.RawTexture ? 1 : 0)} " +
+                    $"tpage=0x{f.TPage:X3} clut=0x{f.Clut:X4} " +
+                    $"source-xy=({a.X},{a.Y})({b.X},{b.Y})({c.X},{c.Y}) " +
+                    $"draw-xy=({va.X},{va.Y})({vb.X},{vb.Y})({vc.X},{vc.Y}) " +
+                    $"uv=({a.U},{a.V})({b.U},{b.V})({c.U},{c.V}) " +
+                    $"rgb=({a.R},{a.G},{a.B})({b.R},{b.G},{b.B})" +
+                    $"({c.R},{c.G},{c.B}) " +
+                    $"area2={area2} probe={(coversProbe ? 1 : 0)} " +
+                    $"target={_kTarget?.X ?? -1},{_kTarget?.Y ?? -1} " +
+                    $"z=({a.Z},{b.Z},{c.Z}) " +
+                    $"gte=({(a.HasGteZ ? 1 : 0)},{(b.HasGteZ ? 1 : 0)}," +
+                    $"{(c.HasGteZ ? 1 : 0)})";
+                _pendingProbeTriangles.Add(triangle);
+            }
+        }
         float uvMinX = MathF.Min(a.U, MathF.Min(b.U, c.U));
         float uvMinY = MathF.Min(a.V, MathF.Min(b.V, c.V));
         float uvMaxX = MathF.Max(a.U, MathF.Max(b.U, c.U));
@@ -938,6 +997,24 @@ public sealed class GlBackend : IGpuBackend
     {
         if (!Ready || w <= 0 || h <= 0) return (0, 0, 0, GpuHle.OutputAspect);
         _frame++;
+        string? captureLabel = GpuHle.DebugCaptureLabel;
+        _probeTriangleHistory.Enqueue(
+            (_frame, _pendingProbeTriangles.ToArray()));
+        while (_probeTriangleHistory.Count > 4)
+            _probeTriangleHistory.Dequeue();
+        if (TriangleProbe is not null && !string.IsNullOrEmpty(captureLabel))
+            Console.Error.WriteLine(
+                $"[V8TriangleProbeFrame] label={captureLabel} frame={_frame} " +
+                $"candidates={_probeTriangleHistory.Sum(entry => entry.Triangles.Length)}");
+        if (!string.IsNullOrEmpty(captureLabel) &&
+            (TriangleProbeLabels.Count == 0 ||
+             TriangleProbeLabels.Contains(captureLabel)))
+            foreach (var entry in _probeTriangleHistory)
+                foreach (string triangle in entry.Triangles)
+                    Console.Error.WriteLine(
+                        $"[V8TriangleProbe] label={captureLabel} " +
+                        $"capture-frame={_frame} draw-frame={entry.Frame} {triangle}");
+        _pendingProbeTriangles.Clear();
         Flush();
         if (TraceTerrainVram && GpuHle.GameplayActive &&
             _frame - _terrainVramTraceFrame >= 120)
@@ -1042,6 +1119,7 @@ public sealed class GlBackend : IGpuBackend
         foreach (var rt in _rts)
             rt?.ClearDepth(_gl);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        GpuHle.DebugCaptureLabel = null;
         return (_presentTex, fbW, fbH, aspect);
     }
 

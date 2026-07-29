@@ -67,6 +67,8 @@ public sealed class CueFs : IDisposable
 
     public int LooseOverrideCount => _looseByLba.Length;
     public bool IsStandaloneLoose => _manifest != null;
+    public bool IsVirtualLoosePath(string path) =>
+        _virtualLooseEntries.ContainsKey(NormalizeDiscPath(path));
 
     public byte[] ReadFile(string path)
     {
@@ -181,10 +183,10 @@ public sealed class CueFs : IDisposable
         name = NormalizeDiscPath(name);
         if (_manifest != null)
         {
-            if (_manifestFiles.TryGetValue(name, out var exact))
-                return (new Entry(exact.Lba, exact.Size, false, Path.GetFileName(exact.Path)), exact.Path);
             if (_virtualLooseEntries.TryGetValue(name, out var virtualEntry))
                 return (virtualEntry, name);
+            if (_manifestFiles.TryGetValue(name, out var exact))
+                return (new Entry(exact.Lba, exact.Size, false, Path.GetFileName(exact.Path)), exact.Path);
             var unique = FindUniqueManifestPath(name);
             return unique == null
                 ? null
@@ -410,6 +412,32 @@ public sealed class CueFs : IDisposable
         // lead-out so the stock CdSearchFile/CdRead path can load it while all
         // retail files retain their original LBAs and directory entries.
         int virtualLba = _bin!.LeadOutLba + 0x100;
+        for (int index = 0; index < found.Count; index++)
+        {
+            LooseEntry entry = found[index];
+            if (entry.LogicalSize <= entry.DiscSize) continue;
+            var relocated = entry with
+            {
+                Lba = virtualLba,
+                DiscSize = entry.LogicalSize,
+            };
+            found[index] = relocated;
+            string path = NormalizeDiscPath(entry.DiscPath);
+            _virtualLooseEntries[path] = new Entry(
+                virtualLba,
+                entry.LogicalSize,
+                false,
+                Path.GetFileName(entry.DiscPath)
+            );
+            Console.WriteLine(
+                $"[CD] relocated expanded override {entry.DiscPath} " +
+                $"retail={entry.DiscSize} loose={entry.LogicalSize} " +
+                $"lba={virtualLba}"
+            );
+            virtualLba += Math.Max(
+                1, checked((int)((entry.LogicalSize + 2047u) >> 11))
+            );
+        }
         foreach (var pair in _looseFiles
                      .Where(pair =>
                          pair.Key.StartsWith(
@@ -464,6 +492,7 @@ public sealed class CueFs : IDisposable
         var found = new List<LooseEntry>();
         var missing = new List<string>();
         var malformedStreams = new List<string>();
+        int virtualLba = _manifest!.LeadOutLba + 0x100;
         foreach (var file in _manifest!.Files)
         {
             string discPath = NormalizeDiscPath(file.Path);
@@ -480,6 +509,28 @@ public sealed class CueFs : IDisposable
                 malformedStreams.Add(file.Path);
                 continue;
             }
+            if (entry.LogicalSize > file.Size)
+            {
+                entry = entry with
+                {
+                    Lba = virtualLba,
+                    DiscSize = entry.LogicalSize,
+                };
+                _virtualLooseEntries[discPath] = new Entry(
+                    virtualLba,
+                    entry.LogicalSize,
+                    false,
+                    Path.GetFileName(file.Path)
+                );
+                Console.WriteLine(
+                    $"[CD] relocated expanded loose file {file.Path} " +
+                    $"retail={file.Size} loose={entry.LogicalSize} " +
+                    $"lba={virtualLba}"
+                );
+                virtualLba += Math.Max(
+                    1, checked((int)((entry.LogicalSize + 2047u) >> 11))
+                );
+            }
             found.Add(entry);
         }
 
@@ -487,7 +538,6 @@ public sealed class CueFs : IDisposable
         // the retail LBA manifest. Assign them a private, deterministic extent
         // after the disc lead-out so CdSearchFile/CdRead can use the original
         // streaming API without replacing any retail directory entry.
-        int virtualLba = _manifest.LeadOutLba + 0x100;
         foreach (var pair in _looseFiles
                      .Where(pair =>
                          pair.Key.StartsWith(

@@ -17,6 +17,7 @@ public struct PrimFlags
     public ushort TPage; 
     public ushort Clut; 
     public int OtIndex;
+    public uint PacketAddress;
 
     public readonly int BlendMode => (TPage >> 5) & 3;
 }

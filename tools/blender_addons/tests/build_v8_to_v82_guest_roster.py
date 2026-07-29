@@ -7,6 +7,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+import struct
 import sys
 
 
@@ -25,26 +26,77 @@ from vigilante8_vehicle_tools import (  # noqa: E402
 
 
 V8_COMMON = (
-    ROOT / "artifacts" / "dual_game_default_roundtrip"
-    / "V8_COMMON_ORIGINAL.EXP"
+    ROOT / "PS1 game" / "COMMON.EXP"
+)
+V8_SELECTOR_VEHICLES = (
+    ROOT / "PS1 game" / "SHELL" / "VEHICLES.EXP"
 )
 V82_COMMON = (
-    ROOT / "artifacts" / "dual_game_default_roundtrip"
-    / "V82_COMMON_ORIGINAL.EXP"
+    ROOT / "V8_2_LOOSE" / "SHARED" / "COMMON.EXP"
 )
 V8_EXE = ROOT / "PS1 game" / "SLUS_005.10"
 V82_EXE = ROOT / "V8_2_LOOSE" / "SLUS_008.68"
 OUTPUT = ROOT / "artifacts" / "v8_to_v82_guest_roster"
 
 VEHICLES = (
-    (0, "guest.v8.chassey_blue", "Chassey Blue — V8 Guest"),
-    (1, "guest.v8.slick_clyde", "Slick Clyde — V8 Guest"),
-    (2, "guest.v8.sheila", "Sheila — V8 Guest"),
+    (0, "guest.v8.chassey_blue", "Chassey Blue"),
+    (1, "guest.v8.slick_clyde", "Slick Clyde"),
+    (2, "guest.v8.sheila", "Sheila"),
 )
+
+SELECTOR_REFERENCES = (
+    ROOT
+    / "artifacts"
+    / "v8_native_selector_reference_fresh"
+    / "v8_choose_player.bmp",
+    ROOT
+    / "artifacts"
+    / "v8_native_selector_first_three"
+    / "slick_clyde"
+    / "slick_0025.bmp",
+    ROOT
+    / "artifacts"
+    / "v8_native_selector_first_three"
+    / "sheila"
+    / "sheila_0045.bmp",
+)
+SELECTOR_CROP = (0, 0, 260, 422)
 
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest().upper()
+
+
+def crop_bmp_to_ppm(path: Path, crop: tuple[int, int, int, int]) -> bytes:
+    """Extract the exact top-left native pixels from a 24-bit BMP capture."""
+    data = path.read_bytes()
+    if data[:2] != b"BM" or len(data) < 54:
+        raise ValueError(f"selector reference is not a BMP: {path}")
+    pixel_offset = struct.unpack_from("<I", data, 10)[0]
+    dib_size = struct.unpack_from("<I", data, 14)[0]
+    width = struct.unpack_from("<i", data, 18)[0]
+    height = struct.unpack_from("<i", data, 22)[0]
+    planes, bits = struct.unpack_from("<HH", data, 26)
+    compression = struct.unpack_from("<I", data, 30)[0]
+    if dib_size < 40 or width <= 0 or height == 0 or planes != 1:
+        raise ValueError(f"unsupported selector BMP header: {path}")
+    if bits != 24 or compression != 0:
+        raise ValueError(f"selector BMP must be uncompressed 24-bit RGB: {path}")
+
+    x, y, crop_width, crop_height = crop
+    image_height = abs(height)
+    if x < 0 or y < 0 or x + crop_width > width or y + crop_height > image_height:
+        raise ValueError(f"selector crop is outside {width}x{image_height}: {path}")
+    stride = (width * 3 + 3) & ~3
+    rgb = bytearray()
+    bottom_up = height > 0
+    for output_y in range(y, y + crop_height):
+        source_y = image_height - 1 - output_y if bottom_up else output_y
+        row = pixel_offset + source_y * stride + x * 3
+        for output_x in range(crop_width):
+            blue, green, red = data[row + output_x * 3 : row + output_x * 3 + 3]
+            rgb.extend((red, green, blue))
+    return f"P6\n{crop_width} {crop_height}\n255\n".encode("ascii") + rgb
 
 
 def decode_bank(path: Path, game: str, index: int) -> project.ObjectBank:
@@ -87,6 +139,9 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
             decode_bank(V8_COMMON, "V8", source_index)
         )
         body = conversion.add_v82_flamethrower_mount(body, 0)
+        selector_preview = conversion.v8_bank_to_v82(
+            decode_bank(V8_SELECTOR_VEHICLES, "V8", source_index)
+        )
 
         matched_front_wheel = conversion.closest_wheel_root(
             v8_wheel_library,
@@ -135,6 +190,8 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
             stats=converted_stats,
             body_kind=0,
             transformation_bank=transform,
+            selector_preview_bank=selector_preview,
+            selector_preview_body_kind=0,
             transform_modes=mapped_modes,
             powerups=v82_stats.powerup_values(),
         )
@@ -165,6 +222,25 @@ def main() -> None:
     pre_blender.mkdir(parents=True, exist_ok=True)
     (pre_blender / "CUSTOM.EXP").write_bytes(package.archive)
     (pre_blender / "VEHICLES.V8R").write_bytes(package.registry)
+    selector_assets = []
+    for index, reference in enumerate(SELECTOR_REFERENCES):
+        banner = crop_bmp_to_ppm(reference, SELECTOR_CROP)
+        name = f"SELECTOR_{index:02}.PPM"
+        (pre_blender / name).write_bytes(banner)
+        selector_assets.append(
+            {
+                "name": name,
+                "source": str(reference.relative_to(ROOT)),
+                "source_sha256": digest(reference.read_bytes()),
+                "crop": {
+                    "x": SELECTOR_CROP[0],
+                    "y": SELECTOR_CROP[1],
+                    "width": SELECTOR_CROP[2],
+                    "height": SELECTOR_CROP[3],
+                },
+                "sha256": digest(banner),
+            }
+        )
 
     manifest = {
         "source_game": "V8",
@@ -173,6 +249,9 @@ def main() -> None:
         "entries": [],
         "source_files": {
             str(V8_COMMON.relative_to(ROOT)): digest(V8_COMMON.read_bytes()),
+            str(V8_SELECTOR_VEHICLES.relative_to(ROOT)): digest(
+                V8_SELECTOR_VEHICLES.read_bytes()
+            ),
             str(V8_EXE.relative_to(ROOT)): digest(V8_EXE.read_bytes()),
             str(V82_COMMON.relative_to(ROOT)): digest(V82_COMMON.read_bytes()),
             str(V82_EXE.relative_to(ROOT)): digest(V82_EXE.read_bytes()),
@@ -181,6 +260,7 @@ def main() -> None:
             "CUSTOM.EXP": digest(package.archive),
             "VEHICLES.V8R": digest(package.registry),
         },
+        "native_selector_banners": selector_assets,
     }
     for source_record, vehicle in zip(VEHICLES, projects):
         body_usage = project.bank_memory_usage(vehicle)
@@ -192,6 +272,18 @@ def main() -> None:
                 "source_form_and_stat_index": source_record[0],
                 "stable_id": vehicle.stable_id,
                 "display_name": vehicle.display_name,
+                "menu_stats": {
+                    "armor": vehicle.stats["rating_armor"],
+                    "speed": vehicle.stats["rating_speed"],
+                    "handling": vehicle.stats["rating_handling"],
+                    "special": vehicle.stats["rating_special"],
+                    "shared_v8_fields": "exact source values scaled by 10",
+                    "special_provenance": (
+                        "sequel-only compatibility value: rounded mean of "
+                        "the three authored V8 menu ratings"
+                    ),
+                },
+                "supports_hot_rod": False,
                 "body_slots": len(vehicle.slots),
                 "body_groups": len(vehicle.groups),
                 "body_textures": len(vehicle.textures),

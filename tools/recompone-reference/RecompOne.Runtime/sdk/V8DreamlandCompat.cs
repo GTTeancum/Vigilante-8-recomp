@@ -19,9 +19,6 @@ public static class V8DreamlandCompat
     public const uint PlaySpatialSoundAltAddress = 0x8FFF0114u;
     public const uint StartSpatialSoundAddress = 0x8FFF0118u;
     public const uint ContactEffectUpdateAddress = 0x8FFF011Cu;
-    private static volatile int _screenFeedbackOffset;
-    private static volatile int _screenFeedbackAlpha;
-    private static volatile int _screenFeedbackPhase;
     [ThreadStatic]
     private static int _animationAbortResult;
 
@@ -286,16 +283,14 @@ public static class V8DreamlandCompat
     }
 
     /// <summary>
-    /// Capture the parameters of N64 main-code function 0x80159900. It draws a
-    /// translucent copy of each viewport with a vertical displacement. The
-    /// rewritten host renderer consumes these values during presentation.
+    /// Dreamland calls N64 main-code function 0x80159900 once per frame to
+    /// draw its RECT water surface. The arena converter now emits that surface
+    /// as a native PS1 XOBF model and ANM texture cycle, so the translated
+    /// overlay call has no remaining runtime work.
     /// </summary>
     private static void ScreenFeedback(CpuContext c, IMemory m)
     {
         _ = m;
-        _screenFeedbackPhase = (int)c.A0;
-        _screenFeedbackOffset = unchecked((short)c.A1);
-        _screenFeedbackAlpha = (int)(c.A2 & 0xFFu);
         c.V0 = 0u;
     }
 
@@ -438,17 +433,4 @@ public static class V8DreamlandCompat
         c.RA = savedReturnAddress;
     }
 
-    public static bool TryGetScreenFeedback(
-        out int phase, out int offset, out int alpha)
-    {
-        if (V8ArenaRegistry.SelectedStableId != "n64.super_dreamland_64")
-        {
-            phase = offset = alpha = 0;
-            return false;
-        }
-        phase = _screenFeedbackPhase;
-        offset = _screenFeedbackOffset;
-        alpha = _screenFeedbackAlpha;
-        return alpha > 0;
-    }
 }

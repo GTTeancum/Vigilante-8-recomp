@@ -11,13 +11,16 @@ from . import compiler, iff, project, stats, xobf
 
 MAGIC = b"V8VR"
 LEGACY_VERSION = 2
-VERSION = 3
+PREVIEWLESS_VERSION = 3
+VERSION = 4
 GAME_IDS = {"V8": 1, "V8_2": 2}
 HEADER_FORMAT = "<4sHBBHHII"
 LEGACY_ENTRY_FORMAT = "<IIHHIHHHHIII"
-ENTRY_FORMAT = "<IIHHIHHHHIIIHH"
+PREVIEWLESS_ENTRY_FORMAT = "<IIHHIHHHHIIIHH"
+ENTRY_FORMAT = "<IIHHIHHHHIIIHHHH"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 LEGACY_ENTRY_SIZE = struct.calcsize(LEGACY_ENTRY_FORMAT)
+PREVIEWLESS_ENTRY_SIZE = struct.calcsize(PREVIEWLESS_ENTRY_FORMAT)
 ENTRY_SIZE = struct.calcsize(ENTRY_FORMAT)
 NO_ARCHIVE_INDEX = 0xFFFF
 
@@ -28,9 +31,11 @@ class RegistryEntry:
     display_name: str
     archive_index: int
     transformation_archive_index: int | None
+    selector_preview_archive_index: int | None
     flags: int
     stats_record: bytes
     body_kind: int
+    selector_preview_body_kind: int
     selection_order: int
     rear_suspension_damping: int | None
     transform_modes: tuple[tuple[int, ...], ...]
@@ -93,7 +98,11 @@ def compile_registry(vehicles: Iterable[project.VehicleProject]) -> bytes:
         if vehicle.transformation_bank is not None:
             transform_index = next_archive_index
             next_archive_index += 1
-        archive_indices.append((body_index, transform_index))
+        preview_index = NO_ARCHIVE_INDEX
+        if vehicle.selector_preview_bank is not None:
+            preview_index = next_archive_index
+            next_archive_index += 1
+        archive_indices.append((body_index, transform_index, preview_index))
     stat_offsets = []
     stat_records = []
     # Types are resolved to final global IDs by the engine after the retail
@@ -137,7 +146,11 @@ def compile_registry(vehicles: Iterable[project.VehicleProject]) -> bytes:
     for index, vehicle in enumerate(projects):
         stable_offset = add_string(vehicle.stable_id)
         display_offset = add_string(vehicle.display_name)
-        body_archive_index, transform_archive_index = archive_indices[index]
+        (
+            body_archive_index,
+            transform_archive_index,
+            selector_preview_archive_index,
+        ) = archive_indices[index]
         entries.append(
             (
                 stable_offset,
@@ -158,6 +171,8 @@ def compile_registry(vehicles: Iterable[project.VehicleProject]) -> bytes:
                     else 0
                 ),
                 0,
+                selector_preview_archive_index,
+                vehicle.selector_preview_body_kind,
             )
         )
     struct.pack_into(
@@ -193,11 +208,17 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
         table_offset,
         string_offset,
     ) = struct.unpack_from(HEADER_FORMAT, data)
-    if magic != MAGIC or version not in {LEGACY_VERSION, VERSION} or reserved != 0:
+    if (
+        magic != MAGIC
+        or version not in {LEGACY_VERSION, PREVIEWLESS_VERSION, VERSION}
+        or reserved != 0
+    ):
         raise ValueError("vehicle registry header is invalid")
-    expected_entry_size = (
-        LEGACY_ENTRY_SIZE if version == LEGACY_VERSION else ENTRY_SIZE
-    )
+    expected_entry_size = {
+        LEGACY_VERSION: LEGACY_ENTRY_SIZE,
+        PREVIEWLESS_VERSION: PREVIEWLESS_ENTRY_SIZE,
+        VERSION: ENTRY_SIZE,
+    }[version]
     if entry_size != expected_entry_size:
         raise ValueError("vehicle registry entry size is unsupported")
     games = {value: name for name, value in GAME_IDS.items()}
@@ -218,10 +239,13 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
 
     entries = []
     for index in range(count):
+        entry_format = {
+            LEGACY_VERSION: LEGACY_ENTRY_FORMAT,
+            PREVIEWLESS_VERSION: PREVIEWLESS_ENTRY_FORMAT,
+            VERSION: ENTRY_FORMAT,
+        }[version]
         entry_values = struct.unpack_from(
-            LEGACY_ENTRY_FORMAT if version == LEGACY_VERSION else ENTRY_FORMAT,
-            data,
-            table_offset + index * entry_size,
+            entry_format, data, table_offset + index * entry_size
         )
         (
             stable_offset,
@@ -241,6 +265,12 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
             None if version == LEGACY_VERSION else entry_values[12]
         )
         extension_reserved = 0 if version == LEGACY_VERSION else entry_values[13]
+        selector_preview_archive_index = (
+            NO_ARCHIVE_INDEX if version != VERSION else entry_values[14]
+        )
+        selector_preview_body_kind = (
+            0 if version != VERSION else entry_values[15]
+        )
         if entry_reserved != 0:
             raise ValueError("vehicle registry entry reserved field is nonzero")
         if extension_reserved != 0:
@@ -302,9 +332,15 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
                     if transform_archive_index == NO_ARCHIVE_INDEX
                     else transform_archive_index
                 ),
+                selector_preview_archive_index=(
+                    None
+                    if selector_preview_archive_index == NO_ARCHIVE_INDEX
+                    else selector_preview_archive_index
+                ),
                 flags=flags,
                 stats_record=data[stat_offset : stat_offset + stat_size],
                 body_kind=body_kind,
+                selector_preview_body_kind=selector_preview_body_kind,
                 selection_order=selection_order,
                 rear_suspension_damping=rear_suspension_damping,
                 transform_modes=transform_modes,
@@ -631,6 +667,8 @@ def _decode_bank(form: iff.IffChunk, game: str) -> project.ObjectBank:
                 direct_pixels_bgr555=(
                     native_texture.direct_pixels_bgr555
                 ),
+                palette_origin=native_texture.palette_origin,
+                image_origin=native_texture.image_origin,
             )
         )
 
@@ -664,6 +702,8 @@ def decompile_package(
         bank_indices = [entry.archive_index]
         if entry.transformation_archive_index is not None:
             bank_indices.append(entry.transformation_archive_index)
+        if entry.selector_preview_archive_index is not None:
+            bank_indices.append(entry.selector_preview_archive_index)
         if any(bank < 0 or bank >= len(forms) for bank in bank_indices):
             raise ValueError("vehicle registry references a missing XOBF bank")
         if any(bank in referenced for bank in bank_indices):
@@ -676,6 +716,12 @@ def decompile_package(
             if entry.transformation_archive_index is None
             else _decode_bank(
                 forms[entry.transformation_archive_index], game)
+        )
+        selector_preview = (
+            None
+            if entry.selector_preview_archive_index is None
+            else _decode_bank(
+                forms[entry.selector_preview_archive_index], game)
         )
         stat_values = {
             field.name: struct.unpack_from(
@@ -703,6 +749,8 @@ def decompile_package(
             stats=stat_values,
             body_kind=entry.body_kind,
             transformation_bank=transformation,
+            selector_preview_bank=selector_preview,
+            selector_preview_body_kind=entry.selector_preview_body_kind,
             transform_modes=entry.transform_modes,
             powerups=entry.powerups,
         )

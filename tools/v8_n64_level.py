@@ -395,19 +395,25 @@ def parse_n64_texture(
 def _decode_n64_texture_rows(
     packed: bytes, row_bytes: int, row_stride: int, height: int
 ) -> bytes:
-    """Remove archive scanline padding.
+    """Undo the archive's TMEM scanline layout and remove row padding.
 
-    The texture records contain source image rows, not a dump of RDP TMEM.
-    Consequently odd rows remain in ordinary byte order.  Applying the TMEM
-    LoadBlock odd-line word swap here corrupts every other scanline into
-    four-byte bands (most visibly on Dreamland's doors, roofs, and foliage).
+    Each source row occupies 64-bit units. On odd rows, the N64 swaps the two
+    32-bit halves of every unit; reading those bytes linearly produces the
+    alternating four-byte bands that obscured Dreamland's doors, roofs,
+    masonry, and foliage. Restore ordinary left-to-right texel order before
+    trimming the row to its authored width.
     """
 
     output = bytearray()
     for row in range(height):
-        output.extend(
-            packed[row * row_stride:row * row_stride + row_bytes]
-        )
+        source = packed[row * row_stride:(row + 1) * row_stride]
+        if row & 1:
+            source = b"".join(
+                source[offset + 4:offset + 8]
+                + source[offset:offset + 4]
+                for offset in range(0, row_stride, 8)
+            )
+        output.extend(source[:row_bytes])
     return bytes(output)
 
 
@@ -415,7 +421,7 @@ def _encode_psx_indexed(
     width: int,
     height: int,
     palette: Iterable[int],
-    pixels: bytes,
+    indices: bytes,
     *,
     ci8: bool,
     alpha_zero_transparent: bool = False,
@@ -427,6 +433,31 @@ def _encode_psx_indexed(
             f"{'CI8' if ci8 else 'CI4'} palette has "
             f"{len(converted_palette)} colors"
         )
+    if len(indices) != width * height:
+        raise FormatError(
+            f"{'CI8' if ci8 else 'CI4'} texture has {len(indices)} indices "
+            f"for {width}x{height}"
+        )
+    words = (width + 1) // 2 if ci8 else (width + 3) // 4
+    row_stride = words * 2
+    pixels = bytearray(row_stride * height)
+    for row in range(height):
+        source = row * width
+        destination = row * row_stride
+        if ci8:
+            pixels[destination:destination + width] = (
+                indices[source:source + width]
+            )
+            continue
+        for column in range(width):
+            value = indices[source + column]
+            if value >= 16:
+                raise FormatError(
+                    f"CI4 texture index {value} exceeds its palette"
+                )
+            pixels[destination + column // 2] |= (
+                value << (4 if column & 1 else 0)
+            )
     image_offset = 0x0C + count * 2
     pixel_offset = image_offset + 0x14
     result = bytearray(pixel_offset + len(pixels))
@@ -441,7 +472,6 @@ def _encode_psx_indexed(
                 color, alpha_zero_transparent=alpha_zero_transparent
             ),
         )
-    words = (width + 1) // 2 if ci8 else (width + 3) // 4
     struct.pack_into("<hhhh", result, image_offset + 0x0C,
                      0, 0, words, height)
     struct.pack_into("<I", result, image_offset + 0x08,
@@ -463,15 +493,21 @@ def encode_psx_texture(
             raise FormatError(
                 f"texture {texture.index} has no CI4 palette bank {palette_bank}"
             )
-        swapped = bytes(
-            ((value & 0x0F) << 4) | (value >> 4)
-            for value in texture.pixels
+        row_bytes = (texture.width + 1) // 2
+        indices = bytes(
+            (
+                texture.pixels[
+                    row * row_bytes + column // 2
+                ] >> (0 if column & 1 else 4)
+            ) & 0x0F
+            for row in range(texture.height)
+            for column in range(texture.width)
         )
         return _encode_psx_indexed(
             texture.width,
             texture.height,
             palette,
-            swapped,
+            indices,
             ci8=False,
             alpha_zero_transparent=alpha_zero_transparent,
         )
@@ -543,6 +579,70 @@ def encode_psx_texture(
         ci8=True,
         alpha_zero_transparent=alpha_zero_transparent,
     )
+
+
+def texture_has_nonblack_alpha_cutout(
+    texture: N64Texture, palette_bank: int = 0
+) -> bool:
+    """Return whether authored texels require PSX color-zero transparency.
+
+    N64 RGBA5551 can retain RGB in a texel whose one-bit alpha is clear.
+    PSX indexed textures instead express a fully transparent texel with
+    palette word zero.  Dreamland uses the former convention for foliage,
+    fences, vegetable leaves, sprites, and other cutout materials.  Opaque
+    terrain imagery also contains alpha-clear palette entries, so this test
+    is deliberately based on *used* texels and requires both visible alpha
+    values plus at least one non-black alpha-clear texel.
+    """
+
+    colors: list[int] = []
+    if texture.format == 2 and texture.size == 0:
+        first = palette_bank * 16
+        palette = texture.palette_rgba5551[first:first + 16]
+        if not palette:
+            return False
+        row_bytes = (texture.width + 1) // 2
+        for row in range(texture.height):
+            for column in range(texture.width):
+                index = (
+                    texture.pixels[row * row_bytes + column // 2]
+                    >> (0 if column & 1 else 4)
+                ) & 0x0F
+                if index < len(palette):
+                    colors.append(palette[index])
+    elif (
+        texture.format == 2
+        and texture.size == 1
+        and texture.palette_rgba5551
+    ):
+        colors = [
+            texture.palette_rgba5551[index]
+            for index in texture.pixels
+            if index < len(texture.palette_rgba5551)
+        ]
+    elif texture.format == 0 and texture.size == 2:
+        colors = [
+            be16(texture.pixels, offset)
+            for offset in range(0, len(texture.pixels), 2)
+        ]
+    elif texture.format == 0 and texture.size == 3:
+        colors = [
+            (
+                ((texture.pixels[offset] >> 3) << 11)
+                | ((texture.pixels[offset + 1] >> 3) << 6)
+                | ((texture.pixels[offset + 2] >> 3) << 1)
+                | (1 if texture.pixels[offset + 3] else 0)
+            )
+            for offset in range(0, len(texture.pixels), 4)
+        ]
+    if not colors:
+        return False
+    has_visible = any(color & 1 for color in colors)
+    has_nonblack_transparent = any(
+        not (color & 1) and (color & 0xFFFE) != 0
+        for color in colors
+    )
+    return has_visible and has_nonblack_transparent
 
 
 def encode_psx_ci8(
@@ -857,10 +957,9 @@ def parse_group_faces(
             if opcode == 0xFD:
                 if word1 >> 24 == 3 and (word1 & 0xFFFFFF) >= 8:
                     # Segment three is engine-owned dynamic imagery, not the
-                    # XOBF texture table.  Retail N64 water points at
-                    # 0x03000008; the corresponding PS1 maps encode this as
-                    # raw packet kind 13 with native dynamic texture word
-                    # 0x4000.
+                    # XOBF texture table.  Preserve the distinction so the
+                    # PS1 packet encoder can target an engine-global texture
+                    # rather than an ordinary converted texture slot.
                     texture_index = None
                     dynamic_texture = True
                 else:
@@ -1047,6 +1146,17 @@ def encode_psx_group(
     normal_indices: dict[tuple[int, int, int], int] = {}
     polygon_count = 0
 
+    def packet_type(kind: int, *, textured: bool, semi_transparent: bool) -> int:
+        """Encode the on-disk discriminator consumed by FUN_8001a640."""
+
+        # The loose XOBF stores the packet family in the low nibble.
+        # FUN_8001a640 expands that nibble into bits 2..5 in-place before
+        # FUN_8001b49c builds the cached renderer packets.  Bit 0x10 is the
+        # native source semitransparency flag; texturing is determined by the
+        # packet family itself.
+        _ = textured
+        return kind | (0x10 if semi_transparent else 0)
+
     def normal_index(value: tuple[int, int, int]) -> int:
         index = normal_indices.get(value)
         if index is not None:
@@ -1067,26 +1177,30 @@ def encode_psx_group(
         # water planes back-face culled.
         psx_order = (2, 1, 0)
         if face.dynamic_texture:
-            # This is the exact native representation used by the matching
-            # Casino City, Hoover Dam, and Valley Farm PS1 water groups:
-            # raw kind 13 with the native 0x10 render flag (type byte 29),
-            # neutral modulation, and engine-global dynamic texture word
-            # 0x4000.  Object_BuildFromBin moves the raw low nibble into the
-            # runtime packet-family field.
+            # Preserve the N64 engine-global texture reference in the native
+            # PS1 kind-13 source layout.  FUN_8001b49c treats texture id
+            # 0xffff as the engine-owned descriptor at DAT_80065a28; the
+            # upper 0x4000 bits on an ordinary texture id are only PS1
+            # tpage/CLUT mode flags and do not select dynamic imagery.
             uvs = face.uv
 
             def dynamic_packet(order: tuple[int, int, int]) -> bytes:
                 return (
                     struct.pack(
                         "<BBBBHHHH",
-                        128, 128, 128, 29,
+                        128, 128, 128,
+                        packet_type(
+                            13,
+                            textured=True,
+                            semi_transparent=face.semi_transparent,
+                        ),
                         indices[order[0]], indices[order[1]], indices[order[2]],
                         0,
                     )
                     + bytes(uvs[order[0]])
                     + bytes(uvs[order[1]])
                     + bytes(uvs[order[2]])
-                    + struct.pack("<H", 0x4000)
+                    + struct.pack("<H", 0xFFFF)
                 )
 
             packets += dynamic_packet(psx_order)
@@ -1107,7 +1221,10 @@ def encode_psx_group(
                 return (
                     struct.pack(
                         "<BBBBHHHH",
-                        128, 128, 128, 29,
+                        128, 128, 128,
+                        packet_type(
+                            13, textured=True, semi_transparent=True
+                        ),
                         indices[order[0]],
                         indices[order[1]],
                         indices[order[2]],
@@ -1138,7 +1255,11 @@ def encode_psx_group(
                         packets += struct.pack(
                             "<BBBBHHHH",
                             color[0], color[1], color[2],
-                            4 | (0x10 if face.semi_transparent else 0),
+                            packet_type(
+                                4,
+                                textured=False,
+                                semi_transparent=face.semi_transparent,
+                            ),
                             ordered_indices[0],
                             ordered_indices[1],
                             ordered_indices[2],
@@ -1151,7 +1272,11 @@ def encode_psx_group(
                         packets += struct.pack(
                             "<BBBBHHHHHH",
                             color[0], color[1], color[2],
-                            8 | (0x10 if face.semi_transparent else 0),
+                            packet_type(
+                                8,
+                                textured=False,
+                                semi_transparent=face.semi_transparent,
+                            ),
                             ordered_indices[0],
                             ordered_indices[1],
                             ordered_indices[2],
@@ -1168,7 +1293,11 @@ def encode_psx_group(
                         else color[1],
                         255 if debug_untextured and face.texture is not None
                         else color[2],
-                        0 | (0x10 if face.semi_transparent else 0),
+                        packet_type(
+                            0,
+                            textured=False,
+                            semi_transparent=face.semi_transparent,
+                        ),
                         ordered_indices[0],
                         ordered_indices[1],
                         ordered_indices[2],
@@ -1186,7 +1315,11 @@ def encode_psx_group(
                     struct.pack(
                         "<BBBBHHHHHH",
                         color[0], color[1], color[2],
-                        9 | (0x10 if face.semi_transparent else 0),
+                        packet_type(
+                            9,
+                            textured=True,
+                            semi_transparent=face.semi_transparent,
+                        ),
                         ordered_indices[0],
                         ordered_indices[1],
                         ordered_indices[2],
@@ -1212,8 +1345,11 @@ def encode_psx_group(
                     struct.pack(
                         "<BBBBHHHH",
                         color[0], color[1], color[2],
-                        packet_kind
-                        | (0x10 if face.semi_transparent else 0),
+                        packet_type(
+                            packet_kind,
+                            textured=True,
+                            semi_transparent=face.semi_transparent,
+                        ),
                         ordered_indices[0],
                         ordered_indices[1],
                         ordered_indices[2],
@@ -1343,17 +1479,22 @@ class XobfReport:
     slots: int
 
 
-def convert_xobf_bin(data: bytes) -> tuple[bytes, XobfReport]:
+def convert_xobf_bin(
+    data: bytes,
+) -> tuple[
+    bytes,
+    XobfReport,
+    list[tuple[tuple[int, int, int, int], ...] | None],
+]:
     if len(data) < 0x1C:
         raise FormatError("N64 XOBF is truncated")
     group_count = be32(data, 0)
     group_table = be32(data, 4)
-    # XOBF stores the highest collision-stream index, not the number of
-    # streams.  Both retail engines iterate inclusively.  Treating this as a
-    # count drops the final stream and leaves the PS1 loader reading the first
-    # texture-table word as a collision offset.
-    collision_count_minus_one = be32(data, 8)
-    collision_count = collision_count_minus_one + 1
+    # XOBF +0x08 is the collision-stream count. The N64 source places one
+    # additional boundary offset after those entries, pointing at the first
+    # byte after the collision region. It is not another stream. The PS1
+    # loader relocates exactly count entries with `index < count`.
+    collision_count = be32(data, 8)
     collision_table = be32(data, 12)
     texture_count = be32(data, 16)
     texture_table = be32(data, 20)
@@ -1403,11 +1544,17 @@ def convert_xobf_bin(data: bytes) -> tuple[bytes, XobfReport]:
             )
         )
 
+    base_alpha_zero = {
+        texture.index: texture_has_nonblack_alpha_cutout(texture)
+        for texture in textures
+    }
     variant_indices = {
-        (texture.index, 0, False): texture.index for texture in textures
+        (texture.index, 0, base_alpha_zero[texture.index]): texture.index
+        for texture in textures
     }
     texture_variants: list[tuple[N64Texture, int, bool]] = [
-        (texture, 0, False) for texture in textures
+        (texture, 0, base_alpha_zero[texture.index])
+        for texture in textures
     ]
     for _vertices, faces, _scale, _auxiliary_count, _extent in parsed_groups:
         for face in faces:
@@ -1421,11 +1568,15 @@ def convert_xobf_bin(data: bytes) -> tuple[bytes, XobfReport]:
                 and face.palette_bank * 16 < texture.palette_count
                 else 0
             )
-            key = (face.texture, bank, face.semi_transparent)
+            alpha_zero_transparent = (
+                face.semi_transparent
+                or texture_has_nonblack_alpha_cutout(texture, bank)
+            )
+            key = (face.texture, bank, alpha_zero_transparent)
             if key not in variant_indices:
                 variant_indices[key] = len(texture_variants)
                 texture_variants.append(
-                    (texture, bank, face.semi_transparent)
+                    (texture, bank, alpha_zero_transparent)
                 )
 
     groups: list[bytes] = []
@@ -1449,11 +1600,15 @@ def convert_xobf_bin(data: bytes) -> tuple[bytes, XobfReport]:
                 and face.palette_bank * 16 < texture.palette_count
                 else 0
             )
+            alpha_zero_transparent = (
+                face.semi_transparent
+                or texture_has_nonblack_alpha_cutout(texture, bank)
+            )
             remapped.append(
                 Face(
                     vertices=face.vertices,
                     texture=variant_indices[
-                        (face.texture, bank, face.semi_transparent)
+                        (face.texture, bank, alpha_zero_transparent)
                     ],
                     palette_bank=0,
                     color=face.color,
@@ -1515,13 +1670,25 @@ def convert_xobf_bin(data: bytes) -> tuple[bytes, XobfReport]:
     struct.pack_into(
         "<IIIIIII", output, 0,
         group_count, group_table_out,
-        collision_count_minus_one, collision_table_out,
+        collision_count, collision_table_out,
         len(texture_blobs), texture_table_out,
         slot_count,
     )
+    slot_vertex_defaults: list[
+        tuple[tuple[int, int, int, int], ...] | None
+    ] = []
+    for index in range(slot_count):
+        render_key = be16(data, 0x1C + index * 0x1C) & 0x07FF
+        if render_key >= group_count:
+            slot_vertex_defaults.append(None)
+            continue
+        vertices = parsed_groups[render_key][0]
+        slot_vertex_defaults.append(
+            tuple((vertex.x, vertex.y, vertex.z, 0) for vertex in vertices)
+        )
     return bytes(output), XobfReport(
         group_count, face_count, len(texture_blobs), collision_count, slot_count
-    )
+    ), slot_vertex_defaults
 
 
 def convert_aimp(payload: bytes) -> bytes:
@@ -1540,75 +1707,676 @@ def convert_xrtp(payload: bytes) -> bytes:
     return payload[:12] + encode_psx_texture(texture)
 
 
-def convert_animation(payload: bytes, slot_count: int) -> bytes:
-    """Convert the shared semantic ANM stream from BE fields to LE fields."""
+def convert_animation(
+    payload: bytes,
+    slot_count: int,
+    slot_vertex_defaults: list[
+        tuple[tuple[int, int, int, int], ...] | None
+    ] | None = None,
+) -> bytes:
+    """Convert N64 ANM streams and adapt partial vertex morph tables.
+
+    N64 flag-0x40 keyframes may contain only the leading vertices that change;
+    its renderer retains the static tail. The PS1 animation path replaces the
+    mesh vertex pointer outright, so those keyframes must be expanded with the
+    untouched source vertices. Stream-relative loop offsets are rebuilt after
+    expansion.
+    """
 
     table_size = 4 + slot_count * 4
     if len(payload) < table_size:
         raise FormatError("N64 ANM table is truncated")
     offsets = [be32(payload, 4 + index * 4) for index in range(slot_count)]
-    output = bytearray(payload)
-    struct.pack_into("<I", output, 0, be32(payload, 0))
     for index, offset in enumerate(offsets):
-        struct.pack_into("<I", output, 4 + index * 4, offset)
         if offset and not (table_size <= offset < len(payload)):
             raise FormatError(f"N64 ANM slot {index} has invalid offset 0x{offset:X}")
-    for slot, start in enumerate(offsets):
-        if start == 0:
-            continue
-        end = min((value for value in offsets if value > start), default=len(payload))
+    if slot_vertex_defaults is None:
+        slot_vertex_defaults = [None] * slot_count
+    if len(slot_vertex_defaults) != slot_count:
+        raise FormatError("animation vertex-default table has the wrong size")
+
+    unique_starts = sorted(set(offsets) - {0})
+    streams: dict[int, bytes] = {}
+    for start_index, start in enumerate(unique_starts):
+        end = (
+            unique_starts[start_index + 1]
+            if start_index + 1 < len(unique_starts)
+            else len(payload)
+        )
+        defaults = next(
+            (
+                slot_vertex_defaults[slot]
+                for slot, offset in enumerate(offsets)
+                if offset == start and slot_vertex_defaults[slot] is not None
+            ),
+            None,
+        )
         cursor = start
+        stream = bytearray()
+        record_offsets: dict[int, int] = {}
+        loop_patches: list[tuple[int, int, int]] = []
         while cursor + 4 <= end:
+            record_start = cursor
+            record_offsets[record_start] = len(stream)
             frame_delta = be16(payload, cursor, signed=True)
             flags = be16(payload, cursor + 2, signed=True)
-            struct.pack_into("<hh", output, cursor, frame_delta, flags)
             cursor += 4
+            stream += struct.pack("<hh", frame_delta, 0 if flags < 0 else flags)
             if flags < 0:
+                loop_patches.append(
+                    (len(stream) - 2, record_start, record_start + flags)
+                )
                 continue
             if flags & ~0x7B:
                 raise FormatError(
-                    f"N64 ANM slot {slot} uses unsupported flags 0x{flags:04X}"
+                    f"N64 ANM stream 0x{start:X} uses unsupported "
+                    f"flags 0x{flags:04X}"
                 )
             if flags & 0x01:
-                values = [be16(payload, cursor + item * 2, signed=True)
-                          for item in range(4)]
-                struct.pack_into("<hhhh", output, cursor, *values)
+                values = [
+                    be16(payload, cursor + item * 2, signed=True)
+                    for item in range(4)
+                ]
+                stream += struct.pack("<hhhh", *values)
                 cursor += 8
             if flags & 0x02:
-                values = [be32(payload, cursor + item * 4, signed=True)
-                          for item in range(3)]
-                struct.pack_into("<iii", output, cursor, *values)
+                values = [
+                    be32(payload, cursor + item * 4, signed=True)
+                    for item in range(3)
+                ]
+                stream += struct.pack("<iii", *values)
                 cursor += 12
             if flags & 0x08:
-                values = [be16(payload, cursor + item * 2, signed=True)
-                          for item in range(4)]
-                struct.pack_into("<hhhh", output, cursor, *values)
+                values = [
+                    be16(payload, cursor + item * 2, signed=True)
+                    for item in range(4)
+                ]
+                stream += struct.pack("<hhhh", *values)
                 cursor += 8
             if flags & 0x10:
                 while True:
                     target = be16(payload, cursor)
                     texture = be16(payload, cursor + 2)
-                    struct.pack_into("<HH", output, cursor, target, texture)
+                    stream += struct.pack("<HH", target, texture)
                     cursor += 4
                     if target & 0x8000:
                         break
             if flags & 0x20:
-                values = [be16(payload, cursor + item * 2, signed=True)
-                          for item in range(4)]
-                struct.pack_into("<hhhh", output, cursor, *values)
+                values = [
+                    be16(payload, cursor + item * 2, signed=True)
+                    for item in range(4)
+                ]
+                stream += struct.pack("<hhhh", *values)
                 cursor += 8
             if flags & 0x40:
                 count = be32(payload, cursor)
-                struct.pack_into("<I", output, cursor, count)
                 cursor += 4
-                for _ in range(count):
-                    values = [be16(payload, cursor + item * 2, signed=True)
-                              for item in range(4)]
-                    struct.pack_into("<hhhh", output, cursor, *values)
-                    cursor += 8
+                values = [
+                    tuple(
+                        be16(
+                            payload,
+                            cursor + record * 8 + item * 2,
+                            signed=True,
+                        )
+                        for item in range(4)
+                    )
+                    for record in range(count)
+                ]
+                cursor += count * 8
+                if defaults is not None:
+                    if count > len(defaults):
+                        raise FormatError(
+                            f"N64 ANM morph has {count} vertices but its "
+                            f"model has only {len(defaults)}"
+                        )
+                    values.extend(defaults[count:])
+                stream += struct.pack("<I", len(values))
+                stream += b"".join(
+                    struct.pack("<hhhh", *vertex) for vertex in values
+                )
             if cursor > end:
-                raise FormatError(f"N64 ANM slot {slot} crosses its stream boundary")
+                raise FormatError(
+                    f"N64 ANM stream 0x{start:X} crosses its boundary"
+                )
+
+        for patch, source_record, source_target in loop_patches:
+            if source_target not in record_offsets:
+                raise FormatError(
+                    f"N64 ANM loop at 0x{source_record:X} targets "
+                    f"non-record 0x{source_target:X}"
+                )
+            relative = (
+                record_offsets[source_target] - record_offsets[source_record]
+            )
+            if not -32768 <= relative <= 32767:
+                raise FormatError("expanded ANM loop exceeds signed 16-bit range")
+            struct.pack_into("<h", stream, patch, relative)
+        streams[start] = bytes(stream)
+
+    output = bytearray(b"\0" * table_size)
+    struct.pack_into("<I", output, 0, be32(payload, 0))
+    relocated: dict[int, int] = {}
+    for start in unique_starts:
+        while len(output) < align(len(output), 4):
+            output.append(0)
+        relocated[start] = len(output)
+        output += streams[start]
+    for slot, offset in enumerate(offsets):
+        struct.pack_into(
+            "<I", output, 4 + slot * 4,
+            0 if offset == 0 else relocated[offset],
+        )
     return bytes(output)
+
+
+def _terrain_height_from_source(
+    x: int, z: int, zmap: bytes, zones: list[bytes]
+) -> int:
+    """Evaluate the PS1 terrain sampler directly from semantic N64 chunks."""
+
+    def sample(cell_x: int, cell_z: int) -> int:
+        map_offset = (((cell_z >> 6) * 32) + (cell_x >> 6)) * 2
+        if map_offset + 2 > len(zmap):
+            return 0
+        zone_index = be16(zmap, map_offset)
+        if zone_index == 0:
+            return 0
+        if zone_index > len(zones):
+            raise FormatError(
+                f"ZMAP refers to missing ZONE {zone_index} "
+                f"(available={len(zones)})"
+            )
+        zone = zones[zone_index - 1]
+        offset = (((cell_x & 0x3F) * 64) + (cell_z & 0x3F)) * 4
+        if offset + 4 > len(zone):
+            raise FormatError("ZONE cell crosses its payload")
+        # LOAD 801057f0 performs this exact source-to-runtime conversion.
+        value = (
+            (be16(zone, offset) - 0x0200)
+            | ((zone[offset + 2] >> 3) << 11)
+        )
+        return value & 0x07FF
+
+    fraction_x = x & 0xFFFF
+    fraction_z = z & 0xFFFF
+    cell_x = x >> 16
+    cell_z = z >> 16
+    h00 = sample(cell_x, cell_z)
+    if fraction_x + fraction_z < 0x10000:
+        h10 = sample(cell_x + 1, cell_z)
+        h01 = sample(cell_x, cell_z + 1)
+        accum = (
+            h00 * 0x10000
+            + fraction_x * (h10 - h00)
+            + fraction_z * (h01 - h00)
+        )
+    else:
+        h11 = sample(cell_x + 1, cell_z + 1)
+        h10 = sample(cell_x + 1, cell_z)
+        h01 = sample(cell_x, cell_z + 1)
+        accum = (
+            h11 * 0x10000
+            + (0x10000 - fraction_x) * (h01 - h11)
+            + (0x10000 - fraction_z) * (h10 - h11)
+        )
+    if accum < 0:
+        accum += 0x1F
+    return accum >> 5
+
+
+def _dreamland_water_texture(
+    atlas: N64Texture, tile_index: int
+) -> N64Texture:
+    """Extract one authored 32x32 Dreamland water frame from XBMP."""
+
+    tile_width = 32
+    tile_height = 32
+    columns = atlas.width // tile_width
+    rows = atlas.height // tile_height
+    if (
+        atlas.format != 2
+        or atlas.size != 1
+        or atlas.width % tile_width
+        or atlas.height % tile_height
+        or tile_index < 0
+        or tile_index >= columns * rows
+    ):
+        raise FormatError(
+            f"Dreamland water tile 0x{tile_index:X} is outside "
+            f"{atlas.width}x{atlas.height} CI8 XBMP"
+        )
+    tile_x = (tile_index % columns) * tile_width
+    tile_y = (tile_index // columns) * tile_height
+    pixels = bytearray()
+    for row in range(tile_height):
+        source = (tile_y + row) * atlas.width + tile_x
+        pixels += atlas.pixels[source:source + tile_width]
+    return N64Texture(
+        index=tile_index,
+        source_offset=atlas.source_offset,
+        format=atlas.format,
+        size=atlas.size,
+        palette_count=atlas.palette_count,
+        width=tile_width,
+        height=tile_height,
+        palette_rgba5551=atlas.palette_rgba5551,
+        pixels=bytes(pixels),
+    )
+
+
+def _encode_dreamland_water_ci4(
+    frames: list[N64Texture],
+    *,
+    half_coverage: bool = False,
+) -> list[bytes]:
+    """Quantize each authored water frame independently to native PS1 CI4.
+
+    A CI8 CLUT needs a contiguous 256-word VRAM row which Dreamland cannot
+    reserve after its terrain/model textures are loaded. Per-frame weighted
+    median cut retains each phase's own hue distribution and is materially
+    closer to the N64 source than reducing all five phases into one palette.
+    """
+
+    def components(color: int) -> tuple[int, int, int]:
+        return (color >> 11) & 31, (color >> 6) & 31, (color >> 1) & 31
+
+    encoded: list[bytes] = []
+    for texture in frames:
+        if (
+            texture.format != 2
+            or texture.size != 1
+            or len(texture.pixels) != texture.width * texture.height
+        ):
+            raise FormatError("Dreamland water frame is not tightly packed CI8")
+
+        color_weights: dict[int, int] = {}
+        for palette_index in texture.pixels:
+            if palette_index >= len(texture.palette_rgba5551):
+                raise FormatError(
+                    f"Dreamland water palette index {palette_index} is missing"
+                )
+            color = texture.palette_rgba5551[palette_index]
+            color_weights[color] = color_weights.get(color, 0) + 1
+
+        color_limit = 15 if half_coverage else 16
+        boxes: list[list[int]] = [sorted(color_weights)]
+        while len(boxes) < color_limit:
+            candidates = [
+                (
+                    max(
+                        max(components(color)[channel] for color in box)
+                        - min(components(color)[channel] for color in box)
+                        for channel in range(3)
+                    )
+                    * sum(color_weights[color] for color in box),
+                    index,
+                )
+                for index, box in enumerate(boxes)
+                if len(box) > 1
+            ]
+            if not candidates:
+                break
+            _score, box_index = max(candidates)
+            box = boxes.pop(box_index)
+            ranges = [
+                max(components(color)[channel] for color in box)
+                - min(components(color)[channel] for color in box)
+                for channel in range(3)
+            ]
+            channel = max(range(3), key=lambda item: (ranges[item], -item))
+            ordered = sorted(
+                box, key=lambda color: (components(color)[channel], color)
+            )
+            half = sum(color_weights[color] for color in ordered) / 2
+            running = 0
+            split = 1
+            for split, color in enumerate(ordered, 1):
+                running += color_weights[color]
+                if running >= half:
+                    break
+            split = min(max(1, split), len(ordered) - 1)
+            boxes.extend((ordered[:split], ordered[split:]))
+
+        # PS1 semi-transparency has no variable source alpha. Dreamland uses
+        # alpha 160/255 on N64, while PS1 ABR=0 is fixed at 1/2. A second pass
+        # covering exactly half the texels raises the spatially averaged
+        # source contribution to 5/8, matching 160/255 within 0.25%. Palette
+        # entry zero is the native transparent texel for that coverage pass.
+        palette: list[int] = [0] if half_coverage else []
+        palette_rgb: list[tuple[int, int, int]] = []
+        for box in boxes:
+            total = sum(color_weights[color] for color in box)
+            rgb = tuple(
+                _round_half_away(
+                    sum(
+                        components(color)[channel] * color_weights[color]
+                        for color in box
+                    )
+                    / total
+                )
+                for channel in range(3)
+            )
+            palette_rgb.append(rgb)  # type: ignore[arg-type]
+            palette.append(
+                (rgb[0] << 11) | (rgb[1] << 6) | (rgb[2] << 1) | 1
+            )
+
+        def nearest(color: int) -> int:
+            red, green, blue = components(color)
+            return min(
+                range(len(palette_rgb)),
+                key=lambda index: (
+                    3 * (red - palette_rgb[index][0]) ** 2
+                    + 4 * (green - palette_rgb[index][1]) ** 2
+                    + 2 * (blue - palette_rgb[index][2]) ** 2,
+                    index,
+                ),
+            )
+
+        if half_coverage:
+            indices = bytes(
+                0 if (column + row) & 1 else
+                nearest(texture.palette_rgba5551[
+                    texture.pixels[row * texture.width + column]
+                ]) + 1
+                for row in range(texture.height)
+                for column in range(texture.width)
+            )
+        else:
+            indices = bytes(
+                nearest(texture.palette_rgba5551[pixel])
+                for pixel in texture.pixels
+            )
+        encoded.append(
+            _encode_psx_indexed(
+                texture.width,
+                texture.height,
+                palette,
+                indices,
+                ci8=False,
+            )
+        )
+    return encoded
+
+
+def _dreamland_water_group(
+    width: int,
+    height: int,
+    texture_targets: tuple[int, ...],
+) -> tuple[bytes, int]:
+    """Build one native PS1 water patch from authored 32x32 repeats.
+
+    Dreamland advances eight texels per terrain cell. Split patches at four
+    cells so every quad uses the complete 0..31 N64 tile without requiring a
+    duplicated 64x64 image in VRAM.
+    """
+
+    vertices: list[tuple[int, int, int]] = []
+    quads: list[tuple[tuple[int, int, int, int], int, int]] = []
+    for z0 in range(0, height, 4):
+        z1 = min(z0 + 4, height)
+        for x0 in range(0, width, 4):
+            x1 = min(x0 + 4, width)
+            first = len(vertices)
+            vertices.extend(
+                (
+                    ((x0 * 2 - width) << 7, 0, (z0 * 2 - height) << 7),
+                    ((x1 * 2 - width) << 7, 0, (z0 * 2 - height) << 7),
+                    ((x1 * 2 - width) << 7, 0, (z1 * 2 - height) << 7),
+                    ((x0 * 2 - width) << 7, 0, (z1 * 2 - height) << 7),
+                )
+            )
+            quads.append(
+                ((first, first + 1, first + 2, first + 3), x1 - x0, z1 - z0)
+            )
+    for vertex in vertices:
+        if any(value < -32768 or value > 32767 for value in vertex):
+            raise FormatError("Dreamland water patch exceeds scale-8 XOBF")
+
+    packets = bytearray()
+    polygon_count = 0
+    for indices, quad_width, quad_height in quads:
+        u1 = quad_width * 8 - 1
+        v1 = quad_height * 8 - 1
+        uv = ((0, 0), (u1, 0), (u1, v1), (0, v1))
+        for triangle in (
+            (indices[0], indices[3], indices[2]),
+            (indices[2], indices[1], indices[0]),
+        ):
+            reverse_triangle = (
+                triangle[2],
+                triangle[1],
+                triangle[0],
+            )
+            for texture_target in texture_targets:
+                # Casino City's water stores every forward/reverse pair
+                # adjacently under one texture descriptor. Preserve that
+                # native ordering rather than separating all front and back
+                # faces around the additional alpha-coverage pass.
+                for oriented_triangle in (triangle, reverse_triangle):
+                    packets += struct.pack(
+                        "<BBBBHHHH",
+                        128, 128, 128, 0x1F,
+                        oriented_triangle[0],
+                        oriented_triangle[1],
+                        oriented_triangle[2],
+                        0,
+                    )
+                    for vertex_index in oriented_triangle:
+                        packets += bytes(uv[vertex_index - indices[0]])
+                    # Object_PreTickRecurse replaces this descriptor through
+                    # native ANM flag-0x10 animation. No upper texture bits
+                    # select PS1 blend mode zero (average), matching shipped
+                    # PS1 water.
+                    packets += struct.pack("<H", texture_target)
+                    polygon_count += 1
+
+    encoded_vertices = b"".join(
+        struct.pack("<hhhh", x, y, z, 0) for x, y, z in vertices
+    )
+    extent = math.ceil(
+        max(math.sqrt(x * x + y * y + z * z) for x, y, z in vertices)
+    )
+    polygon_relative = 0x1C
+    vertex_relative = polygon_relative + len(packets)
+    normal_relative = vertex_relative + len(encoded_vertices)
+    return (
+        struct.pack(
+            "<IIIIHhIBBH",
+            len(vertices), vertex_relative,
+            0, normal_relative,
+            polygon_count, 0,
+            # +0x19 is the number of consecutive texture descriptors cached
+            # at group construction. The animated packets can resolve any of
+            # the ten phase/pass slots, so declaring only slot zero makes the
+            # renderer index beyond its descriptor pointer array.
+            polygon_relative, 8, 10, extent,
+        )
+        + packets
+        + encoded_vertices
+    ), polygon_count
+
+
+def _dreamland_water_tiles(
+    x0: int, z0: int, x1: int, z1: int
+) -> list[tuple[int, int, int, int]]:
+    tiles: list[tuple[int, int, int, int]] = []
+    z = z0
+    while z < z1:
+        next_z = min(z + 8, z1)
+        x = x0
+        while x < x1:
+            next_x = min(x + 8, x1)
+            tiles.append((x, z, next_x, next_z))
+            x = next_x
+        z = next_z
+    return tiles
+
+
+def _dreamland_water_xobf(
+    rect: bytes, xbmp: bytes, zmap: bytes, zones: list[bytes]
+) -> tuple[bytes, XobfReport, int, int, int]:
+    """Generate Dreamland's RECT effect as independent native PS1 data."""
+
+    if len(rect) != 14:
+        raise FormatError(f"Dreamland RECT has unexpected size {len(rect)}")
+    x0 = be16(rect, 0)
+    z0 = be16(rect, 2)
+    x1 = be16(rect, 4)
+    z1 = be16(rect, 6)
+    selector = be16(rect, 12, signed=True)
+    if selector != -1 or x1 <= x0 or z1 <= z0:
+        raise FormatError(
+            "Dreamland RECT does not match the authored water surface"
+        )
+
+    center_x = (x0 + x1) << 15
+    center_z = (z0 + z1) << 15
+    terrain_y = _terrain_height_from_source(
+        center_x, center_z, zmap, zones
+    )
+    # N64 80159900 writes Terrain_HeightAt(center) - 16 height samples.
+    object_y = terrain_y - (16 << 11)
+
+    atlas = parse_n64_texture(xbmp, 0, 0, len(xbmp))
+    phase_tiles = (0x23, 0x24, 0x25, 0x26, 0x27)
+    source_frames = [
+        _dreamland_water_texture(atlas, tile) for tile in phase_tiles
+    ]
+    textures = _encode_dreamland_water_ci4(source_frames)
+    textures += _encode_dreamland_water_ci4(
+        source_frames, half_coverage=True
+    )
+
+    tiles = _dreamland_water_tiles(x0, z0, x1, z1)
+    dimensions: list[tuple[int, int]] = []
+    for tile_x0, tile_z0, tile_x1, tile_z1 in tiles:
+        size = (tile_x1 - tile_x0, tile_z1 - tile_z0)
+        if size not in dimensions:
+            dimensions.append(size)
+    encoded_groups = [
+        _dreamland_water_group(width, height, (0, 5))
+        for width, height in dimensions
+    ]
+    groups = [group for group, _face_count in encoded_groups]
+    water_face_count = sum(
+        face_count for _group, face_count in encoded_groups
+    )
+    # Slot zero is a model-free hierarchy root at the exact RECT center.
+    # Each water patch is a direct child/sibling with its own native culling
+    # bounds. Making the first corner patch the root caused the complete
+    # 61x60-cell surface to disappear when that one small patch left view.
+    slots = bytearray(
+        struct.pack(
+            "<hhiiihhhhhh",
+            -1, 0,
+            0, 0, 0,
+            0, 0, 0,
+            -21846, -1, 1,
+        )
+    )
+    for index, (tile_x0, tile_z0, tile_x1, tile_z1) in enumerate(tiles):
+        tile_center_x = (tile_x0 + tile_x1) << 15
+        tile_center_z = (tile_z0 + tile_z1) << 15
+        group_index = dimensions.index(
+            (tile_x1 - tile_x0, tile_z1 - tile_z0)
+        )
+        slot_index = index + 1
+        next_sibling = slot_index + 1 if index + 1 < len(tiles) else -1
+        slots += struct.pack(
+            "<hhiiihhhhhh",
+            group_index, 0,
+            tile_center_x - center_x,
+            0,
+            tile_center_z - center_z,
+            0, 0, 0,
+            -21846, next_sibling, -1,
+        )
+
+    output = bytearray(b"\0" * 0x1C)
+    output += slots
+    while len(output) < align(len(output), 4):
+        output.append(0)
+    group_table, _ = _layout_table(output, groups)
+    while len(output) < align(len(output), 4):
+        output.append(0)
+    collision_table, _ = _layout_table(output, [struct.pack("<h", 0)])
+    while len(output) < align(len(output), 4):
+        output.append(0)
+    texture_table, _ = _layout_table(output, textures)
+    struct.pack_into(
+        "<IIIIIII", output, 0,
+        len(groups), group_table,
+        1, collision_table,
+        len(textures), texture_table,
+        len(tiles) + 1,
+    )
+
+    # Exact source phase order: 23,24,25,26,27,26,25,24, six ticks each.
+    stream_offset = 4 + (len(tiles) + 1) * 4
+    animation = bytearray(struct.pack("<I", 48))
+    animation += struct.pack("<I", 0)
+    animation += b"".join(
+        struct.pack("<I", stream_offset) for _tile in tiles
+    )
+    for frame, texture in zip(
+        range(0, 48, 6), (0, 1, 2, 3, 4, 3, 2, 1)
+    ):
+        animation += struct.pack(
+            "<hhHHHH",
+            frame, 0x10,
+            0, texture,
+            0x8005, texture + 5,
+        )
+    animation += struct.pack("<hh", 48, -96)
+    xobf_children = [iff_chunk(b"BIN ", bytes(output))]
+    xobf_children.append(iff_chunk(b"ANM ", bytes(animation)))
+    xobf = iff_form(b"XOBF", xobf_children)
+    return (
+        xobf,
+        XobfReport(
+            len(groups),
+            water_face_count,
+            len(textures),
+            1,
+            len(tiles) + 1,
+        ),
+        center_x,
+        object_y,
+        center_z,
+    )
+
+
+def _dreamland_water_object(
+    children: list[Chunk], center_x: int, object_y: int, center_z: int
+) -> bytes:
+    object_ids: list[int] = []
+    for child in children:
+        if not child.is_form or child.form_type != b"OBJ ":
+            continue
+        nested = form_children(iff_form(b"OBJ ", [child.payload]), b"OBJ ")
+        head = next((item.payload for item in nested if item.tag == b"HEAD"), None)
+        if head is not None and len(head) >= 34:
+            object_ids.append(be16(head, 2))
+    # 0xfffc..0xffff are source control/sentinel ids, not allocatable object
+    # identities. Dreamland's ordinary authored ids occupy 0..306.
+    ordinary_ids = [value for value in object_ids if value < 0xFF00]
+    object_id = max(ordinary_ids, default=-1) + 1
+    if object_id >= 0xFF00:
+        raise FormatError("Dreamland has no free 16-bit object id")
+
+    head = struct.pack(
+        ">BBHIiiihhhhhhh",
+        0, 0, object_id,
+        # Exact persistent animated-water flags used by Casino City's native
+        # PS1 water_1 objects.
+        0x00018005,
+        center_x, object_y + 0x100000, center_z,
+        0, 0, 0,
+        2, 0,
+        0, 0,
+    ) + b"DreamlandWater"
+    return iff_form(b"OBJ ", [iff_chunk(b"HEAD", head)])
 
 
 @dataclass(frozen=True)
@@ -1629,6 +2397,19 @@ def convert_arena(exp: bytes, name: str) -> tuple[bytes, ArenaReport]:
         1 for _off, tag, _payload, _parent in iter_chunks(exp) if tag == b"OBJ "
     )
     converted_tags: list[str] = []
+    dreamland_water: tuple[bytes, XobfReport, int, int, int] | None = None
+    if name.upper() == "DREAMLND":
+        rects = [child.payload for child in children if child.tag == b"RECT"]
+        xbmps = [child.payload for child in children if child.tag == b"XBMP"]
+        zmaps = [child.payload for child in children if child.tag == b"ZMAP"]
+        zones = [child.payload for child in children if child.tag == b"ZONE"]
+        if len(rects) != 1 or len(xbmps) != 1 or len(zmaps) != 1 or not zones:
+            raise FormatError(
+                "Dreamland water requires exactly one RECT/XBMP/ZMAP and ZONE data"
+            )
+        dreamland_water = _dreamland_water_xobf(
+            rects[0], xbmps[0], zmaps[0], zones
+        )
     for child in children:
         tag = child.form_type if child.is_form else child.tag
         if tag == b"TITL":
@@ -1649,7 +2430,9 @@ def convert_arena(exp: bytes, name: str) -> tuple[bytes, ArenaReport]:
         if child.is_form and tag == b"XOBF":
             nested = form_children(iff_form(b"XOBF", [child.payload]), b"XOBF")
             bin_chunk = next(item for item in nested if item.tag == b"BIN ")
-            model, report = convert_xobf_bin(bin_chunk.payload)
+            model, report, slot_vertex_defaults = convert_xobf_bin(
+                bin_chunk.payload
+            )
             reports.append(report)
             out_children = [iff_chunk(b"BIN ", model)]
             anm = next((item for item in nested if item.tag == b"ANM "), None)
@@ -1657,7 +2440,11 @@ def convert_arena(exp: bytes, name: str) -> tuple[bytes, ArenaReport]:
                 out_children.append(
                     iff_chunk(
                         b"ANM ",
-                        convert_animation(anm.payload, report.slots),
+                        convert_animation(
+                            anm.payload,
+                            report.slots,
+                            slot_vertex_defaults,
+                        ),
                     )
                 )
             converted.append(iff_form(b"XOBF", out_children))
@@ -1708,6 +2495,18 @@ def convert_arena(exp: bytes, name: str) -> tuple[bytes, ArenaReport]:
             converted_tags.append(tag.decode("ascii"))
             continue
         raise FormatError(f"unresolved root chunk {tag!r}")
+    if dreamland_water is not None:
+        water_xobf, water_report, center_x, object_y, center_z = dreamland_water
+        converted.append(water_xobf)
+        converted_tags.append("XOBF")
+        reports.append(water_report)
+        converted.append(
+            _dreamland_water_object(
+                children, center_x, object_y, center_z
+            )
+        )
+        converted_tags.append("OBJ ")
+        object_count += 1
     result = iff_form(b"TERR", converted)
     return result, ArenaReport(
         name=name,

@@ -69,20 +69,22 @@ typedef struct {
 
 HostTerrainMaterialRender g_terrain_material_render[256];
 
-/* LOAD.DLL data at 0x80106dbc after FUN_80105550 normalizes the nonzero
- * sentinels to the terrain tile edge.  The source writes these as byte UVs
- * into GT3 packets, so the host expands each TINF material over the same
- * 32x32 texture cell instead of stretching across the whole XBMP page. */
-static const uint8_t g_tinf_uv_corners[8][8] = {
-    { 0,31, 31,31,  0, 0, 31, 0 },
-    {31,31,  0,31, 31, 0,  0, 0 },
-    { 0, 0,  0,31, 31, 0, 31,31 },
-    { 0,31,  0, 0, 31,31, 31, 0 },
-    {31, 0,  0, 0, 31,31,  0,31 },
-    { 0, 0, 31, 0,  0,31, 31,31 },
-    {31,31, 31, 0,  0,31,  0, 0 },
-    {31, 0, 31,31,  0, 0,  0,31 },
+/* LOAD.DLL data at 0x80106dbc is an orientation table whose entries are
+ * either zero or a nonzero corner sentinel.  FUN_80105550 replaces every
+ * nonzero byte with DAT_80065b30 - 1 before it builds the GT3 UV words.
+ * DAT_80065b30 comes from TERR/HEAD word zero: 48 in every retail PS1 arena
+ * and in converted Dreamland, versus 32 in the N64 source. */
+static const uint8_t g_tinf_uv_corner_flags[8][8] = {
+    {0,1, 1,1, 0,0, 1,0},
+    {1,1, 0,1, 1,0, 0,0},
+    {0,0, 0,1, 1,0, 1,1},
+    {0,1, 0,0, 1,1, 1,0},
+    {1,0, 0,0, 1,1, 0,1},
+    {0,0, 1,0, 0,1, 1,1},
+    {1,1, 1,0, 0,1, 0,0},
+    {1,0, 1,1, 0,0, 0,1},
 };
+static uint16_t g_terrain_material_tile_size = 48;
 
 /* Original LOAD.DLL calls Terrain_InitFlatWorld before it loads any ZONE
  * chunks. That routine fills every DAT_800911a0 slot with a valid 0x3000-byte
@@ -226,8 +228,15 @@ static void load_tinf_materials(const uint8_t *tinf, uint32_t tinf_size)
         *(uint16_t *)(dst + 0x1eu) = flip;
 
         for (uint32_t j = 0; j < 4; j++) {
-            uint16_t local_u = (uint16_t)((base_u + g_tinf_uv_corners[tile][j * 2u + 0u]) & 0xffu);
-            uint16_t local_v = (uint16_t)((base_v + g_tinf_uv_corners[tile][j * 2u + 1u]) & 0xffu);
+            uint16_t edge = (uint16_t)(g_terrain_material_tile_size - 1u);
+            uint16_t corner_u =
+                g_tinf_uv_corner_flags[tile][j * 2u + 0u] ? edge : 0u;
+            uint16_t corner_v =
+                g_tinf_uv_corner_flags[tile][j * 2u + 1u] ? edge : 0u;
+            uint16_t local_u =
+                (uint16_t)((base_u + corner_u) & 0xffu);
+            uint16_t local_v =
+                (uint16_t)((base_v + corner_v) & 0xffu);
             uint16_t uv_word = (uint16_t)(local_u | (uint16_t)(local_v << 8));
             uint16_t render_u = (uint16_t)(page_step * (64u << (uint32_t)g_terrain_xbmp_depth) + local_u);
             uint32_t dst_off = j * 4u;
@@ -328,6 +337,26 @@ int Host_TerrainLoad(const char *exp_path)
     uint32_t form_size = be32(data + 4);
     const uint8_t *form_body = data + 8 + 4;       /* skip "FORM",size,4cc */
     uint32_t form_inner_size = form_size - 4;
+
+    /* TERR/HEAD word zero is DAT_80065b30 in the original LOAD path.  It is
+     * the texture-cell edge used to expand the nonzero UV corner sentinels. */
+    {
+        uint32_t head_size = 0;
+        const uint8_t *head =
+            find_chunk(form_body, form_inner_size, "HEAD", &head_size);
+        uint16_t tile_size = head_size >= 2 ? be16(head) : 0;
+        if (tile_size == 0 || tile_size > 256) {
+            fprintf(stderr,
+                    "v8: TERR/HEAD has invalid terrain material tile size %u\n",
+                    (unsigned)tile_size);
+            return -1;
+        }
+        g_terrain_material_tile_size = tile_size;
+        fprintf(stderr,
+                "v8: TERR/HEAD terrain material tile size=%u edge=%u\n",
+                (unsigned)g_terrain_material_tile_size,
+                (unsigned)(g_terrain_material_tile_size - 1u));
+    }
 
     /* Find ZMAP (32x32 u16 chunk-index table). */
     uint32_t zmap_size = 0;

@@ -68,6 +68,9 @@ public class GameConfig
     // V8: 2nd Offense native cheat bits. DRIVE_ONLY (bit 6) and the
     // PlayStation original-arena flag (bit 20) are the PC defaults.
     public uint V82CheatFlags { get; set; } = (1u << 6) | (1u << 20);
+    // Optional test package selected from the wrapper. An empty value keeps
+    // loose-files mods discovery as the source of truth.
+    public string V82VehiclePackagePath { get; set; } = "";
     public int InputBindingsVersion { get; set; }
     public string CdPath { get; set; } = "";
     public float MasterVolume { get; set; } = 1.0f;

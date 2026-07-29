@@ -583,6 +583,73 @@ PROVEN_PATCHES = [
         "mode": "pre",
     },
     {
+        # Selector text/preview probes are completely dormant unless
+        # RECOMPONE_TRACE_V82_SELECTOR=1. Keeping the hooks scoped to the
+        # native SHELL selector lets us identify the exact retail draw calls
+        # without a wrapper UI or framebuffer guesswork.
+        "overlay": "main",
+        "address": "8001A3B0",
+        "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.OverrideNativeSelectorText",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8001ADF8",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceNativeSelectorCall",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "80019564",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceNativeSelectorCall",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "80019614",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceNativeSelectorCall",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8001EF34",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceNativeSelectorCall",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8003C464",
+        "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.BuildNativeSelectorPreview",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8003C464",
+        "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.FinalizeNativeSelectorPreview",
+        "mode": "post",
+    },
+    {
+        "overlay": "main",
+        "address": "8002CC08",
+        "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.ReleaseVehicleMapping",
+        "mode": "pre",
+    },
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "8010536C",
+        "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.ZoomNativeSelectorPreview",
+        "mode": "pre",
+    },
+    {
+        # The native selector calls this once per inner-frame update. Guest
+        # proof capture waits here until the rotating model and stat bars have
+        # settled, so an interpolation frame cannot be mistaken for a result.
+        "overlay": "main",
+        "address": "800149AC",
+        "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.TickNativeSelector",
+        "mode": "pre",
+    },
+    {
         "overlay": "main",
         "address": "80018148",
         "target": "RecompOne.Runtime.Sdk.LibCd.BeginV82FileRead",
@@ -671,6 +738,30 @@ PROVEN_PATCHES = [
         "address": "80111330",
         "target": "RecompOne.Runtime.Sdk.LibCdStream.StFreeRing",
         "mode": "replace",
+    },
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "8010669C",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginNativeGuestSelector",
+        "mode": "pre",
+    },
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "8010669C",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndNativeGuestSelector",
+        "mode": "post",
+    },
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "80107AD4",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginNativeGuestSelector",
+        "mode": "pre",
+    },
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "80107AD4",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndNativeGuestSelector",
+        "mode": "post",
     },
     {
         "overlay": "SHELL_SHELL",

@@ -1,0 +1,7 @@
+<Project>
+  <ItemGroup Condition="'$(PublishTrimmed)' == 'true'">
+    <!-- Silk discovers input backends through assembly attributes. Keep that
+         metadata and its internal platform type in trimmed desktop builds. -->
+    <TrimmerRootAssembly Include="Silk.NET.Input.Glfw" />
+  </ItemGroup>
+</Project>

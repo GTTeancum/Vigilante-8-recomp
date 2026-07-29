@@ -338,8 +338,8 @@ def _compile_texture(texture: project.Texture) -> bytes:
                 0x10,
                 flags,
                 0x10,
-                0,
-                0,
+                texture.image_origin[0],
+                texture.image_origin[1],
                 texture.width,
                 texture.height,
             )
@@ -355,8 +355,8 @@ def _compile_texture(texture: project.Texture) -> bytes:
             0x10,
             flags,
             0,
-            0,
-            0,
+            texture.palette_origin[0],
+            texture.palette_origin[1],
             len(texture.palette_bgr555),
             1,
         )
@@ -373,7 +373,13 @@ def _compile_texture(texture: project.Texture) -> bytes:
             f"texture {texture.name!r} width is not aligned to its PS1 depth"
         )
     data += b"\0" * 12
-    data += struct.pack("<hhhh", 0, 0, words, texture.height)
+    data += struct.pack(
+        "<hhhh",
+        texture.image_origin[0],
+        texture.image_origin[1],
+        words,
+        texture.height,
+    )
     data += encoded
     struct.pack_into("<I", data, 8, image_offset)
     _align(data)
@@ -381,10 +387,12 @@ def _compile_texture(texture: project.Texture) -> bytes:
 
 
 def _slot_links(slots: Sequence[project.Slot]) -> tuple[tuple[int, int], ...]:
-    children: dict[int, list[int]] = {}
+    children: dict[int | None, list[int]] = {}
     for index, slot in enumerate(slots):
-        if slot.parent is not None:
-            children.setdefault(slot.parent, []).append(index)
+        # Top-level roots are siblings too. Location banks in particular are
+        # one native root chain; omitting those links makes only the first
+        # wheel object reachable even though every slot reparses in isolation.
+        children.setdefault(slot.parent, []).append(index)
     result = []
     for index in range(len(slots)):
         siblings = children.get(slots[index].parent, [])
@@ -583,5 +591,7 @@ def compile_archive(vehicles: Iterable[project.VehicleProject]) -> bytes:
         chunks.append(compile_xobf(vehicle))
         if vehicle.transformation_bank is not None:
             chunks.append(compile_xobf(vehicle, vehicle.transformation_bank))
+        if vehicle.selector_preview_bank is not None:
+            chunks.append(compile_xobf(vehicle, vehicle.selector_preview_bank))
     document = iff.IffDocument(chunks=chunks)
     return document.to_bytes()

@@ -183,7 +183,10 @@ All terrain XOBF BINs audited so far share this header:
 
 - `+0x00 u32`: render group count
 - `+0x04 u32`: render group pointer-table offset
-- `+0x08 u32`: obstacle table count minus one
+- `+0x08 u32`: obstacle stream count. N64 banks carry one additional
+  boundary offset after these entries; it marks the end of the collision
+  region and is not a stream. The PS1 loader relocates exactly `count`
+  entries.
 - `+0x0c u32`: obstacle table offset
 - `+0x10 u32`: secondary table/count, still texture/animation-adjacent
 - `+0x14 u32`: first offset after the obstacle table region
@@ -193,14 +196,122 @@ All terrain XOBF BINs audited so far share this header:
 The older derived slot count `(group_table - 0x1c) / 0x1c` happens to match
 the audited files, but `+0x18` is the field the format actually carries.
 
+## N64 XOBF Texture Scanlines
+
+The N64 archive stores texture rows in 64-bit TMEM units, padded independently
+to an eight-byte boundary. Every odd row swaps the two 32-bit halves within
+each unit. A linear decode without that odd-row swap creates alternating
+four-byte horizontal bands; on Dreamland this visibly corrupts doors, roofs,
+castle masonry, foliage, and effect sprites.
+
+`parse_n64_texture` restores ordinary left-to-right texel order before CI or
+RGBA conversion. The source-to-native audit decodes the resulting PS1 TIMs
+independently, crops only native row padding, and compares every visible RGB5
+texel. It also compares every converted packet's vertex order, UV triplets,
+and final texture-slot assignment, including palette and translucency
+variants.
+
 ## XOBF Polygon Packets
 
 `FUN_8001b49c` builds cached PSX draw packets from raw BIN polygon packets.
-The source packet kind is `(type_byte >> 2) & 0x0f`; the low two bits are
-preserved into the PSX primitive code. The current host renderer still reads
-raw BIN packets directly for display, so the exact renderer-facing fix is to
-decode the cached packets emitted by `FUN_8001b49c`, not to substitute the
-source packet kind into the raw-packet reader.
+The loose-file source packet kind is `type_byte & 0x0f`. Before cached packets
+are built, `FUN_8001a640` rewrites that byte in place: it shifts the source
+kind into bits 2..5 and maps the source flag bits into the runtime low bits.
+`FUN_8001b49c` therefore decodes `(expanded_type_byte >> 2) & 0x0f`, but a
+tool or host path reading the unexpanded loose bytes must use the low nibble.
+
+For source kind 13, texture id `0xffff` is the explicit engine-owned dynamic
+image descriptor at `DAT_80065a28`. Values with upper bits `0x4000` or
+`0x8000` are still ordinary XOBF texture references: the loader masks with
+`0x3fff` for the table index and transfers the upper bits into PSX texture-page
+state. Treating `0x4000` as the dynamic-image sentinel corrupts ordinary
+materials and is not source behavior.
+
+## Super Dreamland 64 RECT Water
+
+Dreamland's sole N64 `RECT` payload is
+`0354052c0391056800000043ffff`. Its authored cell rectangle is therefore
+X `[852,913)`, Z `[1324,1384)`, and selector `-1`. The overlay function at
+N64 `0x80159900` draws this as a world surface at
+`Terrain_HeightAt(center) - 16` height samples and advances XBMP cells
+`0x23,0x24,0x25,0x26,0x27,0x26,0x25,0x24`, six ticks per cell.
+The records consumed by that routine are authored world rectangles, not
+screen-clipped spans: the complete 61-by-60 surface exists in world space and
+ordinary scene occlusion determines which parts are visible.
+
+The original V8 PS1 port represents the effect with an append-only third XOBF
+bank rather than a presentation overlay or borrowed retail object:
+
+- One model-free root plus 64 hierarchy patches covers the exact 61 by 60 cell
+  rectangle with native 8-by-8 patches and smaller source-boundary patches.
+- Four render groups cover the four patch dimensions. Casino City's shipped
+  `water_1` group 113 is the structural reference: its 50 geometric triangles
+  are stored as 100 kind-15 packets, one of each winding. Dreamland stores
+  each forward/reverse pair adjacently under the same texture descriptor, so
+  looking through the surface from below does not make it disappear.
+- The five CI8 source frames are independently quantized to five CI4 TIMs.
+  Their converted mean luminance differs from source by at most 0.89/255 and
+  RGB RMSE is 4.58-5.22/255; the conversion does not brighten the palette.
+- N64 function `0x80159900` supplies neutral white RGB and alpha `0xa0`
+  (160/255). PS1's shipped water uses neutral packet RGB and fixed ABR mode
+  zero (1/2 source plus 1/2 destination). A second set of five CI4 frames
+  reserves transparent index zero and covers exactly half the texels. Drawing
+  that coverage pass with the base pass gives a spatially averaged 5/8 source
+  contribution (0.625), within 0.25% of the N64 alpha, without guessed color
+  correction or a host-only blend mode.
+- A native `ANM ` stream applies both flag-`0x10` texture bindings to all 64
+  patch slots. The decoded phase sequence and the base/coverage passes remain
+  synchronized in one stream and retain the original 65-node hierarchy. Every
+  water group sets BIN `+0x19` to ten, causing `FUN_8001b49c` to cache all ten
+  possible animated descriptors at `cached_group+0x2c`. Declaring only one
+  descriptor while packets reference the coverage slot at index five makes
+  the native renderer read beyond that pointer array; this was the cause of
+  the earlier build's inconsistent water rendering.
+- The new `DreamlandWater` HEAD uses the next free ordinary object id and does
+  not replace, alias, or borrow any source object.
+
+A rendered Casino City control placed the camera below the native water plane:
+the water polygon remains visible, while the world and HUD retain their normal
+map colors. Original V8 therefore provides no separate underwater full-screen
+tint to copy into Dreamland; adding one would be a new effect.
+
+A non-deployed Dreamland sidedness control changes only the
+`DreamlandWater` HEAD Y field, raising the unchanged converted surface above
+the normal gameplay camera. The rendered game shows its animated texture
+overhead from below. This verifies that the reverse packets reach and pass the
+native renderer, while the shipped loose-files asset retains the authored
+`22.6640625` world-unit plane height.
+
+The enhanced renderer depth-tests semitransparent triangles carrying GTE depth
+against the opaque world while leaving depth writes disabled for them. This
+keeps transparent ordering and blending intact but prevents the valid full
+water plane from painting over nearer terrain. Timed capture sequences showed
+the old failure only while the camera was inside the authored RECT footprint;
+the same route no longer shows terrain takeover after this correction.
+
+The reported terrain-colored wedges were not a heightfield or clipping defect.
+N64 flag-`0x40` morph records for `mushroom_bad` contain 26 changing vertices
+for a 36-vertex render group; the N64 path retains the ten static tail
+vertices, while the PS1 path replaces the vertex-table pointer. Reading beyond
+the short converted keyframe interpreted animation metadata as coordinates and
+created the spikes. Conversion now expands every partial morph record with its
+own source group's static tail and rebuilds relative loop offsets. Rendered
+regressions through ticks 1740, 2220, and 4620 show no wedges with the authored
+faces and animation retained.
+
+`tools/audit_v8_n64_model_conversion.py` is the source-to-native structural
+gate for Dreamland. It verifies every original OBJ/HEAD payload and hierarchy
+slot, exact group vertex triplets, expanded PS1 polygon counts, scale fields,
+every N64 display-list texture address, every base texture texel, and every
+packet's UV/texture binding. The current 150-group audit has no conversion
+failures, texel mismatches, packet-mapping mismatches, or unresolved texture
+addresses.
+
+N64 RGBA5551 texels whose authored alpha bit is clear are emitted as PS1
+palette index/color zero even on otherwise opaque materials. This is derived
+directly from the source texture data and restores cutout transparency for
+foliage and billboards without object-name heuristics or borrowed material
+metadata.
 
 ## XOBF Slot Record
 
@@ -319,9 +430,10 @@ For Wild West it currently reports:
 
 - XOBF banks: 2. Bank 0 has 223 render groups, 699 slots, and 131 texture
   slots; bank 1 has 15 render groups, 15 slots, and 16 texture slots.
-- Raw XOBF packet iteration must use `FUN_8001b49c` source kind
-  `(packet[3] >> 2) & 0x0f`, not the low nibble. Low-nibble decoding is only a
-  diagnostic column in the audit because it aliases unrelated packet fields.
+- Raw loose-file XOBF packet iteration must use the source kind
+  `packet[3] & 0x0f`. `FUN_8001a640` expands that low nibble into bits 2..5
+  in-place before `FUN_8001b49c` builds cached renderer packets; applying the
+  runtime shift directly to the loose bytes loses packet alignment.
 - The eight JUNC visual patches are not flat route polygons. They resolve to
   bank 0 groups 215 (`JUNCTION_TSection`) and 216 (`JUNCTION_Ending`), and both
   groups contain only source kind `5` textured triangle packets with valid

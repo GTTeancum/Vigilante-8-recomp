@@ -665,6 +665,33 @@ def main() -> int:
         "ignored": [],
         "patches": [
             {
+                "overlay": "SHELL",
+                "address": "80102BDC",
+                "target": (
+                    "RecompOne.Runtime.Sdk.V8ArenaRegistry."
+                    "BeginNativeLocationSelector"
+                ),
+                "mode": "pre",
+            },
+            {
+                "overlay": "SHELL",
+                "address": "80102BDC",
+                "target": (
+                    "RecompOne.Runtime.Sdk.V8ArenaRegistry."
+                    "EndNativeLocationSelector"
+                ),
+                "mode": "post",
+            },
+            {
+                "overlay": "SHELL",
+                "address": "8010C784",
+                "target": (
+                    "RecompOne.Runtime.Sdk.V8ArenaRegistry."
+                    "FinishNativeLocationLaunch"
+                ),
+                "mode": "post",
+            },
+            {
                 "overlay": "main",
                 "address": "80011A38",
                 "target": "RecompOne.Runtime.Sdk.V8ArenaRegistry.ResolveVirtualFile",

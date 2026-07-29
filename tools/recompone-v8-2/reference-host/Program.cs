@@ -10,7 +10,6 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         $"[Host] process exit requested (code={Environment.ExitCode})");
 
 string launchDirectory = Environment.CurrentDirectory;
-Environment.CurrentDirectory = AppContext.BaseDirectory;
 
 string? guestVehicle = null;
 string? explicitLoose = null;
@@ -72,9 +71,9 @@ string? explicitSource = args.Length switch
 
 ConfigManager.Load();
 string? loosePath =
-    explicitLoose ?? ResolveLooseSource(explicitSource ?? AppContext.BaseDirectory);
+    explicitLoose ?? ResolveLooseSource(explicitSource ?? launchDirectory);
 string? cuePath = loosePath == null
-    ? ResolveCue(explicitSource ?? AppContext.BaseDirectory)
+    ? ResolveCue(explicitSource ?? launchDirectory)
     : null;
 if (loosePath != null)
 {

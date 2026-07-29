@@ -28,34 +28,41 @@ was highlighted.
   and player-two exclusion state are separate concerns. Merely increasing a
   roster-count constant would index beyond several retail tables.
 
-## Recommended integration
+## Required integration
 
-Implement a host-owned roster carousel layered over the native player-select
-screen:
+The rejected desktop/ImGui roster prototype is not a product path. Guest
+vehicles must extend `SHELL`'s existing player-select state machine and use its
+native layout, text, arrows, three-dimensional preview, stat rows, animation,
+sound, one-player flow, and two-player flow.
 
 1. Preserve all 18 native slots and their exact navigation.
-2. Add an explicit `Guest Vehicles` page reached from the end of each faction
-   row (or with shoulder buttons). Do not renumber retail identities.
-3. Draw guest portrait, vehicle/name text, faction, and four stat bars from
-   package metadata in a host overlay. Extend the V8VR entry with stable
-   portrait and faction metadata rather than embedding UI art in executable
-   code.
-4. On confirmation, retain the native shell slot for menu/state-machine
-   continuity but record the selected guest type in `V82VehicleRegistry`.
-   The existing pre-load override then supplies type 64+ to gameplay.
-5. Maintain independent P1/P2 guest selections and enforce the native
-   duplicate-selection rule unless `MIXED_CARS` is active.
-6. Add keyboard/gamepad navigation, cancel, idle-demo safety, memory-card
-   status isolation, and package-removal fallback to the built-in roster.
+2. Add an explicit native legacy page reached from the existing selector.
+   Do not renumber or replace retail identities.
+3. Feed guest names, native stats records, preview banks, and authentic
+   first-game driver-banner assets through the same native rendering calls
+   used by the retail selector. Host-rendered substitute panels are forbidden.
+4. Confirm a guest as its append-only type 64+ identity. The match loader and
+   independent gameplay constructor already accept that identity.
+5. Maintain independent P1/P2 guest selections and the native duplicate rule.
+6. V8 legacy entries expose only their one canonical standard body. The
+   selector must hide/disable V8:2's Stock/Hot Rod control for those entries;
+   no retail Hot Rod bank may be borrowed or implied.
+7. Keep the wrapper `Guest Vehicles` item solely for installing or changing a
+   test package.
 
 ## Reusing first-game art
 
 The first game's `SHELL/CHARSEL1.TBL` and `CHARSEL2.TBL` are available in the
-loose tree and are suitable sources for original-driver portraits and panels.
-Reuse must be by decoded texture/table entry, not by copying the whole first
-game table over the sequel table: the layouts and sizes differ substantially.
-The package should identify a source portrait by stable asset key and may
-optionally provide independently authored replacement art.
+loose tree and contain the authentic left-side driver banners. Reuse must be
+by the matching decoded entry, not by copying an entire table over the sequel
+table: the layouts and sizes differ substantially.
+
+The first three V8 menu categories are compatible with V8:2. Their authored
+armor, speed, and handling values are reused exactly with the format's exact
+10x scale conversion (V8 0..20 to V8:2 0..200). V8's selector presents only
+three categories and every retail fourth byte is zero. V8:2's mandatory
+fourth/special row is therefore a documented sequel-only compatibility value,
+not claimed as original V8 data.
 
 ## Risk and test matrix
 

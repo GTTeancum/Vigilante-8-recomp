@@ -625,8 +625,8 @@ class DonorFreeCompilerTests(unittest.TestCase):
         self.assertEqual(1, entries[0].transformation_archive_index)
         self.assertEqual(authored.transform_modes, entries[0].transform_modes)
         self.assertEqual(dict(authored.powerups), entries[0].powerups)
-        self.assertEqual(3, struct.unpack_from("<H", package.registry, 4)[0])
-        self.assertEqual(40, struct.unpack_from("<H", package.registry, 10)[0])
+        self.assertEqual(4, struct.unpack_from("<H", package.registry, 4)[0])
+        self.assertEqual(44, struct.unpack_from("<H", package.registry, 10)[0])
         self.assertEqual(137, entries[0].rear_suspension_damping)
         self.assertEqual(
             137,

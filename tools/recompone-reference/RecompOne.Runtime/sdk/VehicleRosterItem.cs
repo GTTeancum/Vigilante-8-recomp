@@ -9,4 +9,10 @@ public readonly record struct VehicleRosterItem(
     int Type,
     string StableId,
     string DisplayName,
-    int SelectionOrder);
+    int SelectionOrder,
+    string Faction = "GUEST",
+    byte Armor = 0,
+    byte Speed = 0,
+    byte Handling = 0,
+    byte Special = 0,
+    bool SupportsHotRod = false);

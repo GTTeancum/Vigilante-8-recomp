@@ -16,8 +16,63 @@ public static class Gte
     // 4096) and dominated frame time in busy arenas. Two generation maps
     // preserve the required one-frame ordering-table latency and "latest
     // projection wins" behavior with bounded O(1) lookups.
-    static Dictionary<uint, ushort> ScreenDepthCurrent = new(16384);
-    static Dictionary<uint, ushort> ScreenDepthPrevious = new(16384);
+    readonly struct ScreenDepthSamples
+    {
+        public readonly ushort A, B, C, D;
+        public readonly byte Count;
+
+        ScreenDepthSamples(
+            ushort a, ushort b, ushort c, ushort d, byte count)
+        {
+            A = a; B = b; C = c; D = d; Count = count;
+        }
+
+        public ScreenDepthSamples Add(ushort value)
+        {
+            if ((Count > 0 && A == value) ||
+                (Count > 1 && B == value) ||
+                (Count > 2 && C == value) ||
+                (Count > 3 && D == value))
+                return this;
+
+            return Count switch
+            {
+                0 => new(value, 0, 0, 0, 1),
+                1 => new(A, value, 0, 0, 2),
+                2 => new(A, B, value, 0, 3),
+                3 => new(A, B, C, value, 4),
+                // Retain recent projections when more than four surfaces
+                // quantize to the same screen pixel.
+                _ => new(B, C, D, value, 4),
+            };
+        }
+
+        public void FindClosest(
+            int expectedDepth,
+            ref ushort closest,
+            ref int closestError)
+        {
+            for (int index = 0; index < Count; index++)
+            {
+                ushort sample = index switch
+                {
+                    0 => A,
+                    1 => B,
+                    2 => C,
+                    _ => D,
+                };
+                int error = Math.Abs(sample - expectedDepth);
+                if (error >= closestError) continue;
+                closest = sample;
+                closestError = error;
+            }
+        }
+    }
+
+    static Dictionary<uint, ScreenDepthSamples> ScreenDepthCurrent =
+        new(16384);
+    static Dictionary<uint, ScreenDepthSamples> ScreenDepthPrevious =
+        new(16384);
     static uint RES1;
     static int MAC0, MAC1, MAC2, MAC3;
     static uint LZCS, LZCR;
@@ -206,13 +261,18 @@ public static class Gte
 
     static void RecordScreenDepth(short x, short y, ushort z)
     {
-        if (z != 0)
-            ScreenDepthCurrent[ScreenKey(x, y)] = z;
+        if (z == 0) return;
+        uint key = ScreenKey(x, y);
+        ScreenDepthCurrent.TryGetValue(key, out ScreenDepthSamples samples);
+        ScreenDepthCurrent[key] = samples.Add(z);
     }
 
-    public static bool TryGetScreenDepth(int x, int y, out ushort z)
+    public static bool TryGetScreenDepth(
+        int x, int y, int orderingTableDepth, out ushort z)
     {
-        if (TryLookupScreenDepth(ScreenKey((short)x, (short)y), out z))
+        int expectedDepth = Math.Clamp(orderingTableDepth * 8, 1, 0xFFFF);
+        if (TryLookupScreenDepth(
+                ScreenKey((short)x, (short)y), expectedDepth, out z))
             return true;
 
         // Packet coordinates can differ by one pixel after the game's fixed-
@@ -227,7 +287,9 @@ public static class Gte
                     if (Math.Max(Math.Abs(ox), Math.Abs(oy)) != radius)
                         continue;
                     if (TryLookupScreenDepth(
-                            ScreenKey((short)(x + ox), (short)(y + oy)), out z))
+                            ScreenKey((short)(x + ox), (short)(y + oy)),
+                            expectedDepth,
+                            out z))
                         return true;
                 }
             }
@@ -240,9 +302,27 @@ public static class Gte
     static uint ScreenKey(short x, short y) =>
         (ushort)x | ((uint)(ushort)y << 16);
 
-    static bool TryLookupScreenDepth(uint key, out ushort z) =>
-        ScreenDepthCurrent.TryGetValue(key, out z) ||
-        ScreenDepthPrevious.TryGetValue(key, out z);
+    static bool TryLookupScreenDepth(
+        uint key, int expectedDepth, out ushort z)
+    {
+        z = 0;
+        int closestError = int.MaxValue;
+        if (ScreenDepthCurrent.TryGetValue(
+                key, out ScreenDepthSamples current))
+            current.FindClosest(expectedDepth, ref z, ref closestError);
+        if (ScreenDepthPrevious.TryGetValue(
+                key, out ScreenDepthSamples previous))
+            previous.FindClosest(expectedDepth, ref z, ref closestError);
+
+        // V8 bins projected geometry at roughly SZ/8. A screen coordinate
+        // shared by unrelated surfaces is common; accepting a depth from a
+        // different OT range creates edge wedges and lets transparent planes
+        // cross terrain. Keep a generous half-range for sloped polygons and
+        // fall back to the primitive's OT depth when no correlated projection
+        // is credible.
+        int maximumError = Math.Max(512, expectedDepth / 2);
+        return closestError <= maximumError;
+    }
 
     public static int ScreenDepthCount =>
         ScreenDepthCurrent.Count + ScreenDepthPrevious.Count;

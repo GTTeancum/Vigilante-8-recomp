@@ -312,9 +312,21 @@ def v8_bank_to_v82(source: project.ObjectBank) -> project.ObjectBank:
             # V8:2 sentinel is 0x07FF; emitting generic -1 would accidentally
             # add V8:2 render-class bits and prevent root construction.
             key=(
-                0x07FF
-                if slot.render_group is None and slot.key is None
-                else slot.key
+                # V8's vehicle constructor takes the first immediate child
+                # of a wheel anchor as its authored suspension-travel marker.
+                # V8:2 performs the same lookup by the explicit 0x8000 key.
+                # Retag only that exact semantic child so the sequel's
+                # unchanged constructor consumes the original marker value.
+                0x8000
+                if slot.parent is not None
+                and source.slots[slot.parent].key in range(0x8000, 0x8006)
+                and slot.render_group is None
+                and slot.key is None
+                else (
+                    0x07FF
+                    if slot.render_group is None and slot.key is None
+                    else slot.key
+                )
             ),
         )
         for slot in source.slots
@@ -404,7 +416,15 @@ def v8_stats_to_v82(
     front_wheel_kind: int,
     rear_wheel_kind: int,
 ) -> dict[str, int]:
-    """Translate V8 handling values and derive sequel-only upgrade values."""
+    """Translate V8 values without relabeling sequel-only data as original.
+
+    The three menu categories shared by both games use the same ordering
+    semantics; V8 stores them on a 0..20 scale and V8:2 on a 0..200 scale.
+    Multiplication by ten is therefore exact and preserves every authored
+    source value. Retail V8 leaves its fourth byte at zero and does not show
+    that category in the selector. V8:2 requires the fourth row, so only that
+    row is a documented compatibility value.
+    """
 
     drive = int(source["maximum_drive_force"])
     health = int(source["health"])
@@ -447,6 +467,9 @@ def v8_stats_to_v82(
         "rating_armor": min(255, ratings[0] * 10),
         "rating_speed": min(255, ratings[1] * 10),
         "rating_handling": min(255, ratings[2] * 10),
+        # V8's selector has three rows and every retail record leaves its
+        # fourth rating byte at zero. The sequel's fourth row cannot be copied;
+        # use a neutral rounded mean and keep its provenance explicit.
         "rating_special": min(255, (sum(ratings) * 10 + 1) // 3),
         "rear_suspension_damping": int(
             source["rear_suspension_damping"]

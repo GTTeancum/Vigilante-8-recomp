@@ -1,7 +1,9 @@
 using System.Buffers.Binary;
 using System.Text;
+using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Dispatch;
+using RecompOne.Runtime.Host;
 using RecompOne.Runtime.Memory;
 
 namespace RecompOne.Runtime.Sdk;
@@ -25,13 +27,22 @@ public static class V82VehicleRegistry
     const int HeaderSize = 20;
     const int LegacyEntrySize = 36;
     const int EntrySize = 40;
+    const int PreviewEntrySize = 44;
     const int StatsSize = 0x30;
     const int TransformModeCount = 4;
     const int TransformWheelCount = 6;
     const int TransformTableSize = TransformModeCount * TransformWheelCount * 2;
     const int PowerupCount = 5;
     const int PowerupTableSize = PowerupCount * 4;
+    const int PlayerSelectionCount = 2;
     const ushort NoArchiveIndex = 0xFFFF;
+    const uint SelectorInputAddress = 0x8006B508u;
+    const uint SelectorTextAddress = 0x807FE000u;
+    const uint SelectorVehiclePreviewReturn = 0x80106C1Cu;
+    const uint SelectorScaleReturn = 0x80106CD4u;
+    const uint SelectorGuestZoom = 0x015Au;
+    const uint SelectorDriverNameReturn = 0x80106A7Cu;
+    const uint SelectorVehicleNameReturn = 0x80106B14u;
 
     static readonly UTF8Encoding StrictUtf8 =
         new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -41,20 +52,67 @@ public static class V82VehicleRegistry
     static readonly Dictionary<uint, uint> ObjectUpgradeStatus = [];
     static bool _initialized;
     static bool _dispatchRegistered;
-    static int _selectedType = -1;
+    static readonly int[] SelectedTypes = [-1, -1];
     static string? _requestedStableId;
+    static string? _loadedPackageRoot;
     static VehicleEntry? _constructingEntry;
+    static bool _constructingSelectorPreview;
     static VehicleEntry? _defaultReplacementEntry;
+    static int _selectorGuestIndex = -1;
+    static int _selectorFirstRetailSlot;
+    static int _selectorLastRetailSlot;
+    static int _selectorPreviousSlot = -1;
+    static int _selectorPlayer;
+    static int _selectorStableFrames;
+    static int _selectorStableGuest = -1;
+    static uint _selectorPreviewObject;
+    static readonly bool[] SelectorProofCaptured = new bool[3];
+    static readonly string[] SelectorVehicleNames =
+    [
+        "'67 Rattler",
+        "'70 Clydesdale",
+        "'74 Strider",
+    ];
     static readonly string? DefaultReplacementStableId =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_V82_DEFAULT_REPLACEMENT");
+    static readonly bool CaptureNativeSelectorProof =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_CAPTURE_NATIVE_GUEST_SELECTOR") == "1";
+    static readonly bool CaptureNativeSelectorSettle =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_CAPTURE_V82_SELECTOR_SETTLE") == "1";
+    static readonly bool TraceNativeSelectorInput =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_V82_SELECTOR") == "1";
+    static readonly bool TraceNativeSelectorPhysics =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_V82_SELECTOR_PHYSICS") == "1";
 
     public static int Count => Entries.Count;
     public static int TotalVehicleCount => RetailVehicleCount + Entries.Count;
     public static bool HasPackage => Entries.Count != 0;
     public static bool HasDefaultReplacement =>
         _defaultReplacementEntry != null;
-    public static int SelectedType => Volatile.Read(ref _selectedType);
+    public static string? LoadedPackageRoot => _loadedPackageRoot;
+    public static int SelectedType => SelectedTypeForPlayer(0);
+    public static int NativeSelectorGuestIndex =>
+        Volatile.Read(ref _selectorGuestIndex);
+    public static string? NativeSelectorBannerPath
+    {
+        get
+        {
+            int index = NativeSelectorGuestIndex;
+            if (index < 0 || index >= Math.Min(3, Entries.Count) ||
+                string.IsNullOrEmpty(_loadedPackageRoot))
+                return null;
+            return Path.Combine(
+                _loadedPackageRoot, $"SELECTOR_{index:00}.PPM");
+        }
+    }
+    public static bool HasAnySelection =>
+        Enumerable.Range(0, PlayerSelectionCount)
+            .Any(player => SelectedTypeForPlayer(player) >= 0);
 
     public static VehicleRosterItem[] Roster()
     {
@@ -65,20 +123,365 @@ public static class V82VehicleRegistry
                 entry.Type,
                 entry.StableId,
                 entry.DisplayName,
-                entry.SelectionOrder))
+                entry.SelectionOrder,
+                FactionFor(entry.StableId),
+                entry.Stats[0x2C],
+                entry.Stats[0x2D],
+                entry.Stats[0x2E],
+                entry.Stats[0x2F],
+                SupportsHotRod: false))
             .ToArray();
     }
 
-    public static void SelectType(int type)
+    public static int SelectedTypeForPlayer(int player)
     {
+        if ((uint)player >= PlayerSelectionCount)
+            throw new ArgumentOutOfRangeException(nameof(player));
+        return Volatile.Read(ref SelectedTypes[player]);
+    }
+
+    public static void SelectType(int type) => SelectTypeForPlayer(0, type);
+
+    public static void SelectTypeForPlayer(int player, int type)
+    {
+        if ((uint)player >= PlayerSelectionCount)
+            throw new ArgumentOutOfRangeException(nameof(player));
         if (type >= 0 && !IsCustomType((uint)type))
             throw new ArgumentOutOfRangeException(
                 nameof(type), type, "vehicle type is not in the V8:2 guest roster");
-        Volatile.Write(ref _selectedType, type);
+        Volatile.Write(ref SelectedTypes[player], type);
         Console.Error.WriteLine(
             type < 0
-                ? "[V82Vehicles] using the built-in roster selection"
-                : $"[V82Vehicles] selected guest type={type} name={NameForType(type)}");
+                ? $"[V82Vehicles] player={player + 1} using the built-in roster selection"
+                : $"[V82Vehicles] player={player + 1} selected guest " +
+                  $"type={type} name={NameForType(type)}");
+    }
+
+    public static void ClearSelections()
+    {
+        for (int player = 0; player < PlayerSelectionCount; player++)
+            Volatile.Write(ref SelectedTypes[player], -1);
+    }
+
+    public static void BeginNativeSelector(CpuContext c, IMemory m)
+    {
+        _selectorGuestIndex = -1;
+        _selectorPreviousSlot = -1;
+        _selectorFirstRetailSlot = 0;
+        _selectorLastRetailSlot = RetailVehicleCount - 1;
+        _selectorPlayer = c.A1 == 0u ? 0 : 1;
+        _selectorStableFrames = 0;
+        _selectorStableGuest = -1;
+        _selectorPreviewObject = 0u;
+        Array.Fill(SelectorProofCaptured, false);
+        InputManager.SignalScriptStage("choose_player");
+    }
+
+    public static void EndNativeSelector(CpuContext c, IMemory m)
+    {
+        int guest = NativeSelectorGuestIndex;
+        if (guest >= 0 && guest < Math.Min(3, Entries.Count) &&
+            c.V0 == (uint)guest)
+        {
+            VehicleEntry entry = Entries[guest];
+            c.V0 = checked((uint)entry.Type);
+            SelectTypeForPlayer(_selectorPlayer, entry.Type);
+        }
+        _selectorGuestIndex = -1;
+        _selectorPreviousSlot = -1;
+        _selectorPreviewObject = 0u;
+    }
+
+    /// <summary>
+    /// Extends the native 18-entry carousel without replacing it. The retail
+    /// selector still performs all input repeat, transition, and availability
+    /// handling; this seam inserts the three V8 entries only at the wrap.
+    /// </summary>
+    public static uint ResolveNativeSelectorSlot(uint slot, IMemory m)
+    {
+        if (Entries.Count == 0)
+            return slot;
+
+        int current = checked((int)slot);
+        uint input = m.ReadU32(SelectorInputAddress);
+        bool left = (input & 0x80000000u) != 0u;
+        bool right = (input & 0x20000000u) != 0u;
+        int guest = NativeSelectorGuestIndex;
+
+        if (_selectorPreviousSlot < 0)
+        {
+            _selectorFirstRetailSlot = current;
+            _selectorLastRetailSlot = current;
+            _selectorPreviousSlot = current;
+            return slot;
+        }
+
+        if (guest < 0)
+        {
+            if (right && current < _selectorPreviousSlot)
+            {
+                _selectorLastRetailSlot = _selectorPreviousSlot;
+                guest = 0;
+                current = 0;
+            }
+            else if (left && current > _selectorPreviousSlot)
+            {
+                _selectorFirstRetailSlot = _selectorPreviousSlot;
+                _selectorLastRetailSlot = current;
+                guest = Math.Min(3, Entries.Count) - 1;
+                current = guest;
+            }
+            else
+            {
+                _selectorPreviousSlot = current;
+                return slot;
+            }
+        }
+        else if (right && current != guest)
+        {
+            if (guest + 1 < Math.Min(3, Entries.Count))
+            {
+                guest++;
+                current = guest;
+            }
+            else
+            {
+                _selectorGuestIndex = -1;
+                _selectorPreviousSlot = _selectorFirstRetailSlot;
+                return checked((uint)_selectorFirstRetailSlot);
+            }
+        }
+        else if (left && current != guest)
+        {
+            if (guest > 0)
+            {
+                guest--;
+                current = guest;
+            }
+            else
+            {
+                _selectorGuestIndex = -1;
+                _selectorPreviousSlot = _selectorLastRetailSlot;
+                return checked((uint)_selectorLastRetailSlot);
+            }
+        }
+        else
+        {
+            current = guest;
+        }
+
+        _selectorGuestIndex = guest;
+        _selectorPreviousSlot = current;
+        if (_selectorStableGuest != guest)
+        {
+            _selectorStableGuest = guest;
+            _selectorStableFrames = 0;
+        }
+        // Circle is the native Hot Rod/custom modifier. Guest entries own one
+        // canonical bank, so consume it before the selector can enter the
+        // retail variant editor.
+        m.WriteU32(SelectorInputAddress, input & ~0x00200000u);
+        return checked((uint)current);
+    }
+
+    public static bool TickNativeSelector(CpuContext c, IMemory m)
+    {
+        int guest = NativeSelectorGuestIndex;
+        if (TraceNativeSelectorInput && guest >= 0)
+        {
+            uint input = m.ReadU32(SelectorInputAddress);
+            if (input != 0u)
+                Console.Error.WriteLine(
+                    $"[V82Selector] guest={guest} input=0x{input:X8}");
+        }
+        if (!CaptureNativeSelectorProof ||
+            guest < 0 || guest >= Math.Min(3, Entries.Count) ||
+            SelectorProofCaptured[guest])
+            return true;
+
+        int frame = ++_selectorStableFrames;
+        if (TraceNativeSelectorPhysics && _selectorPreviewObject != 0u &&
+            frame <= 220)
+            TraceSelectorPhysics(m, guest, frame, _selectorPreviewObject);
+        if (CaptureNativeSelectorSettle && frame <= 64 && frame % 2 == 0)
+            HostWindow.RequestDisplayCapture(
+                $"native_guest_{guest:00}_settle_{frame:000}");
+        if (frame == 80)
+            HostWindow.RequestDisplayCapture($"native_guest_{guest:00}");
+        else if (frame > 80 && frame <= 200 && (frame - 80) % 4 == 0)
+            HostWindow.RequestDisplayCapture(
+                $"native_guest_{guest:00}_turn_{(frame - 80) / 4:000}");
+        if (frame == 200)
+            SelectorProofCaptured[guest] = true;
+        return true;
+    }
+
+    public static uint NativeSelectorVariant(uint retailVariant) =>
+        NativeSelectorGuestIndex >= 0 ? 0u : retailVariant;
+
+    public static uint NativeSelectorStatsPointer(
+        CpuContext c, IMemory m, uint retailPointer, uint field)
+    {
+        if (!TrySelectorEntry(out VehicleEntry? entry) || entry == null)
+            return retailPointer;
+        EnsureRuntime(entry, c, Dispatcher.UnwrapMemory(m));
+        return entry.StatsRuntime + field;
+    }
+
+    public static bool OverrideNativeSelectorText(CpuContext c, IMemory m)
+    {
+        V82Compat.TraceNativeSelectorCall(c, m);
+        if (!TrySelectorEntry(out VehicleEntry? entry) || entry == null)
+            return true;
+
+        string? text = c.RA switch
+        {
+            SelectorDriverNameReturn => entry.DisplayName,
+            SelectorVehicleNameReturn => SelectorVehicleNames[
+                NativeSelectorGuestIndex],
+            _ => null,
+        };
+        if (text == null)
+            return true;
+
+        m = Dispatcher.UnwrapMemory(m);
+        byte[] bytes = Encoding.ASCII.GetBytes(text);
+        for (int index = 0; index < bytes.Length; index++)
+            m.WriteU8(SelectorTextAddress + (uint)index, bytes[index]);
+        m.WriteU8(SelectorTextAddress + (uint)bytes.Length, 0);
+        c.A1 = SelectorTextAddress;
+        return true;
+    }
+
+    /// <summary>
+    /// Substitutes the guest's dedicated selector bank and native stats, then
+    /// allows the original V8:2 selector vehicle constructor to run unchanged.
+    /// That preserves the retail wheel creation, suspension initialization,
+    /// ground placement, camera, continuous rotation, lighting, and framing.
+    /// </summary>
+    public static bool BuildNativeSelectorPreview(CpuContext c, IMemory m)
+    {
+        V82Compat.TraceNativeSelectorCall(c, m);
+        if (c.RA != SelectorVehiclePreviewReturn ||
+            !TrySelectorEntry(out VehicleEntry? entry) || entry == null)
+            return true;
+
+        m = Dispatcher.UnwrapMemory(m);
+        EnsureRuntime(entry, c, m);
+        c.A0 = entry.SelectorPreviewRuntime;
+        c.A1 = checked((uint)entry.SelectorPreviewBodyKind);
+        c.A2 = entry.StatsRuntime;
+        _constructingSelectorPreview = true;
+        _constructingEntry = entry;
+        V82Compat.BeginGuestVramClaim();
+        return true;
+    }
+
+    /// <summary>
+    /// Records the vehicle produced by the unchanged retail selector
+    /// constructor. No preview transform, suspension, or camera state is
+    /// synthesized here.
+    /// </summary>
+    public static void FinalizeNativeSelectorPreview(CpuContext c, IMemory m)
+    {
+        if (!_constructingSelectorPreview)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        VehicleEntry? entry = _constructingEntry;
+        try
+        {
+            V82Compat.EndGuestVramClaim(c, m);
+            uint vehicle = c.V0;
+            if (vehicle != 0u && entry != null)
+            {
+                ObjectEntries[vehicle] = entry.Type - FirstCustomType;
+                m.WriteU8(vehicle + 0xDCu, checked((byte)entry.Type));
+                _selectorPreviewObject = vehicle;
+                Console.Error.WriteLine(
+                    $"[V82Vehicles] created {entry.StableId} " +
+                    $"native-selector object=0x{vehicle:X8}");
+            }
+        }
+        finally
+        {
+            _constructingEntry = null;
+            _constructingSelectorPreview = false;
+        }
+    }
+
+    /// <summary>
+    /// Uses V8:2's native selector projection-scale input as a modest,
+    /// uniform camera zoom-out for the imported roster. Asset coordinates,
+    /// model scale, projection code, and gameplay transforms are unchanged.
+    /// </summary>
+    public static bool ZoomNativeSelectorPreview(CpuContext c, IMemory m)
+    {
+        if (c.RA == SelectorScaleReturn &&
+            NativeSelectorGuestIndex >= 0)
+            c.A1 = SelectorGuestZoom;
+        return true;
+    }
+
+    /// <summary>
+    /// Object storage is recycled immediately by the retail allocator. Drop
+    /// host-side custom identity before teardown so a later retail object at
+    /// the same address cannot inherit guest banks or stats.
+    /// </summary>
+    public static bool ReleaseVehicleMapping(CpuContext c, IMemory m)
+    {
+        if (_selectorPreviewObject == c.A0)
+            _selectorPreviewObject = 0u;
+        ObjectEntries.Remove(c.A0);
+        ObjectUpgradeStatus.Remove(c.A0);
+        return true;
+    }
+
+    static void TraceSelectorPhysics(
+        IMemory m, int guest, int frame, uint vehicle)
+    {
+        static int S32(uint value) => unchecked((int)value);
+
+        var line = new StringBuilder()
+            .Append("[V82SelectorPhysics] guest=").Append(guest)
+            .Append(" frame=").Append(frame)
+            .Append(" vehicle=0x").Append(vehicle.ToString("X8"))
+            .Append(" pos=(")
+            .Append(S32(m.ReadU32(vehicle + 0x20u))).Append(',')
+            .Append(S32(m.ReadU32(vehicle + 0x24u))).Append(',')
+            .Append(S32(m.ReadU32(vehicle + 0x28u))).Append(')');
+        for (int index = 0; index < TransformWheelCount; index++)
+        {
+            uint wheel = m.ReadU32(
+                vehicle + 0x104u + checked((uint)(index * 4)));
+            if (wheel == 0u)
+                continue;
+            line.Append(" w").Append(index).Append("=0x")
+                .Append(wheel.ToString("X8")).Append("{xyz=(")
+                .Append(S32(m.ReadU32(wheel + 0x4Cu))).Append(',')
+                .Append(S32(m.ReadU32(wheel + 0x50u))).Append(',')
+                .Append(S32(m.ReadU32(wheel + 0x54u))).Append("),limit=")
+                .Append(S32(m.ReadU32(wheel + 0x80u))).Append('/')
+                .Append(S32(m.ReadU32(wheel + 0x84u))).Append('/')
+                .Append(S32(m.ReadU32(wheel + 0x88u))).Append(",rest=")
+                .Append(S32(m.ReadU32(wheel + 0x90u))).Append(",vel=")
+                .Append(S32(m.ReadU32(wheel + 0x98u))).Append(",sd=")
+                .Append((short)m.ReadU16(wheel + 0x8Cu)).Append('/')
+                .Append((short)m.ReadU16(wheel + 0x8Eu)).Append('}');
+        }
+        Console.Error.WriteLine(line);
+    }
+
+    static bool TrySelectorEntry(out VehicleEntry? entry)
+    {
+        int guest = NativeSelectorGuestIndex;
+        if (guest >= 0 && guest < Math.Min(3, Entries.Count))
+        {
+            entry = Entries[guest];
+            return true;
+        }
+        entry = null;
+        return false;
     }
 
     public static void RequestSelection(string stableId)
@@ -100,6 +503,7 @@ public static class V82VehicleRegistry
             return;
 
         LoadAndValidate(registryPath, archivePath);
+        _loadedPackageRoot = Path.GetDirectoryName(registryPath);
         if (!_dispatchRegistered)
         {
             Dispatcher.RegisterHostFunction(
@@ -132,7 +536,7 @@ public static class V82VehicleRegistry
         ObjectEntries.Clear();
         ObjectUpgradeStatus.Clear();
         _defaultReplacementEntry = null;
-        Volatile.Write(ref _selectedType, -1);
+        ClearSelections();
         byte[] registry = File.ReadAllBytes(registryPath);
         ParseArchive(archivePath);
         ParseRegistry(registry);
@@ -183,35 +587,38 @@ public static class V82VehicleRegistry
         return local < (uint)Entries.Count;
     }
 
+    /// <summary>
+    /// Guest packages currently own one canonical body bank per entry. They
+    /// never inherit an unrelated retail Hot Rod bank.
+    /// </summary>
+    public static bool SupportsHotRod(int type) =>
+        !IsCustomType(unchecked((uint)type));
+
     public static void PrepareSelectedRuntime(CpuContext c, IMemory m)
     {
-        int selected = SelectedType;
-        VehicleEntry? entry = null;
-        if (selected >= 0)
-            TryEntryForType((uint)selected, out entry);
-        entry ??= _defaultReplacementEntry;
-        if (entry == null)
-            return;
-        EnsureRuntime(entry, c, Dispatcher.UnwrapMemory(m));
+        m = Dispatcher.UnwrapMemory(m);
+        foreach (VehicleEntry entry in ActiveEntries())
+            EnsureRuntime(entry, c, m);
     }
 
     internal static IReadOnlyList<NativeVramAllocation>
         SelectedVramAllocations()
     {
-        int selected = SelectedType;
-        VehicleEntry? entry = null;
-        if (selected >= 0)
-            TryEntryForType((uint)selected, out entry);
-        entry ??= _defaultReplacementEntry;
-        if (entry == null)
-            return Array.Empty<NativeVramAllocation>();
         var result = new List<NativeVramAllocation>();
-        result.AddRange(
-            Banks[entry.BodyArchiveIndex].ReadVramAllocations(
-                palettesFirst: true));
-        result.AddRange(
-            Banks[entry.TransformArchiveIndex].ReadVramAllocations(
-                palettesFirst: true));
+        foreach (VehicleEntry entry in ActiveEntries())
+        {
+            int bodyArchiveIndex =
+                _constructingSelectorPreview &&
+                entry.SelectorPreviewArchiveIndex != NoArchiveIndex
+                    ? entry.SelectorPreviewArchiveIndex
+                    : entry.BodyArchiveIndex;
+            result.AddRange(
+                Banks[bodyArchiveIndex].ReadVramAllocations(
+                    palettesFirst: true));
+            result.AddRange(
+                Banks[entry.TransformArchiveIndex].ReadVramAllocations(
+                    palettesFirst: true));
+        }
         return result;
     }
 
@@ -220,25 +627,63 @@ public static class V82VehicleRegistry
         IMemory m,
         bool palette)
     {
-        int selected = SelectedType;
-        VehicleEntry? entry = null;
-        if (selected >= 0)
-            TryEntryForType((uint)selected, out entry);
-        entry ??= _defaultReplacementEntry;
-        if (entry == null)
-            return false;
-
         uint source = m.ReadU32(c.GP + (palette ? 0xE6Cu : 0xE74u));
-        return PointerInBank(
-                   m,
-                   entry.BodyRuntime,
-                   Banks[entry.BodyArchiveIndex].BinLength,
-                   source) ||
-               PointerInBank(
-                   m,
-                   entry.TransformRuntime,
-                   Banks[entry.TransformArchiveIndex].BinLength,
-                   source);
+        foreach (VehicleEntry entry in ActiveEntries())
+        {
+            if (PointerInBank(
+                    m,
+                    entry.BodyRuntime,
+                    Banks[entry.BodyArchiveIndex].BinLength,
+                    source) ||
+                PointerInBank(
+                    m,
+                    entry.TransformRuntime,
+                    Banks[entry.TransformArchiveIndex].BinLength,
+                    source) ||
+                (
+                    entry.SelectorPreviewArchiveIndex != NoArchiveIndex &&
+                    PointerInBank(
+                        m,
+                        entry.SelectorPreviewRuntime,
+                        Banks[entry.SelectorPreviewArchiveIndex].BinLength,
+                        source)
+                ))
+                return true;
+        }
+        return false;
+    }
+
+    static VehicleEntry[] ActiveEntries()
+    {
+        var active = new List<VehicleEntry>(PlayerSelectionCount + 1);
+        for (int player = 0; player < PlayerSelectionCount; player++)
+        {
+            int selected = SelectedTypeForPlayer(player);
+            if (selected >= 0 &&
+                TryEntryForType((uint)selected, out VehicleEntry? entry) &&
+                entry != null &&
+                !active.Contains(entry))
+                active.Add(entry);
+        }
+        if (_defaultReplacementEntry != null &&
+            !active.Contains(_defaultReplacementEntry))
+            active.Add(_defaultReplacementEntry);
+        if (_constructingSelectorPreview &&
+            TrySelectorEntry(out VehicleEntry? selectorEntry) &&
+            selectorEntry != null &&
+            !active.Contains(selectorEntry))
+            active.Add(selectorEntry);
+        return active.ToArray();
+    }
+
+    static string FactionFor(string stableId)
+    {
+        if (stableId.StartsWith("guest.v8.", StringComparison.Ordinal))
+            return "V8 LEGACY";
+        int separator = stableId.IndexOf('.');
+        return separator > 0
+            ? stableId[..separator].Replace('_', ' ').ToUpperInvariant()
+            : "GUEST";
     }
 
     static bool PointerInBank(
@@ -259,10 +704,12 @@ public static class V82VehicleRegistry
         ObjectEntries.Clear();
         ObjectUpgradeStatus.Clear();
         _constructingEntry = null;
+        _constructingSelectorPreview = false;
         foreach (VehicleEntry entry in Entries)
         {
             entry.BodyRuntime = 0u;
             entry.TransformRuntime = 0u;
+            entry.SelectorPreviewRuntime = 0u;
             entry.StatsRuntime = 0u;
             entry.TransformTableRuntime = 0u;
             entry.PowerupTableRuntime = 0u;
@@ -309,9 +756,21 @@ public static class V82VehicleRegistry
         }
 
         EnsureRuntime(entry, c, m);
+        bool selectorPreview =
+            _constructingSelectorPreview &&
+            entry.SelectorPreviewRuntime != 0u;
         m.WriteU32(source, CustomDispatchAddress);
-        m.WriteU16(source + 0x1Au, checked((ushort)entry.BodyKind));
-        m.WriteU32(source + 0x5Cu, entry.BodyRuntime);
+        m.WriteU16(
+            source + 0x1Au,
+            checked((ushort)(
+                selectorPreview
+                    ? entry.SelectorPreviewBodyKind
+                    : entry.BodyKind)));
+        m.WriteU32(
+            source + 0x5Cu,
+            selectorPreview
+                ? entry.SelectorPreviewRuntime
+                : entry.BodyRuntime);
 
         uint callerRa = c.RA;
         uint vehicle;
@@ -363,6 +822,7 @@ public static class V82VehicleRegistry
         c.V0 = vehicle;
         Console.Error.WriteLine(
             $"[V82Vehicles] created {entry.StableId} " +
+            $"{(selectorPreview ? "selector-preview " : "")}" +
             $"identity={(replacingDefault ? 0 : entry.Type)} " +
             $"object=0x{vehicle:X8}");
         return false;
@@ -538,9 +998,19 @@ public static class V82VehicleRegistry
                 BuildNativeBank(c, m, Banks[entry.BodyArchiveIndex]);
             entry.TransformRuntime =
                 BuildNativeBank(c, m, Banks[entry.TransformArchiveIndex]);
+            if (entry.SelectorPreviewArchiveIndex != NoArchiveIndex)
+            {
+                entry.SelectorPreviewRuntime = BuildNativeBank(
+                    c, m, Banks[entry.SelectorPreviewArchiveIndex]);
+            }
             Console.Error.WriteLine(
                 $"[V82Vehicles] built {entry.StableId} body=0x{entry.BodyRuntime:X8} " +
-                $"transform=0x{entry.TransformRuntime:X8}");
+                $"transform=0x{entry.TransformRuntime:X8}" +
+                (
+                    entry.SelectorPreviewRuntime == 0u
+                        ? ""
+                        : $" selector=0x{entry.SelectorPreviewRuntime:X8}"
+                ));
         }
         finally
         {
@@ -608,13 +1078,29 @@ public static class V82VehicleRegistry
             Environment.GetEnvironmentVariable("RECOMPONE_V82_VEHICLE_PACKAGE");
         if (!string.IsNullOrWhiteSpace(package))
             roots.Add(Path.GetFullPath(package));
-        string? loose = Environment.GetEnvironmentVariable("RECOMPONE_LOOSE_DIR");
-        if (!string.IsNullOrWhiteSpace(loose) && loose != "0")
+        if (!string.IsNullOrWhiteSpace(
+                ConfigManager.Game.V82VehiclePackagePath))
+            roots.Add(Path.GetFullPath(
+                ConfigManager.Game.V82VehiclePackagePath));
+        string? loose = Runtime.ResolveLoosePath();
+        if (!string.IsNullOrWhiteSpace(loose))
             roots.Add(Path.GetFullPath(loose));
         roots.Add(AppContext.BaseDirectory);
         roots.Add(Environment.CurrentDirectory);
 
+        var candidates = new List<string>();
         foreach (string root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            candidates.Add(root);
+            string mods = Path.Combine(root, "mods");
+            if (!Directory.Exists(mods))
+                continue;
+            candidates.AddRange(
+                Directory.EnumerateDirectories(mods)
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
+        }
+
+        foreach (string root in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             string candidateRegistry = Path.Combine(root, "VEHICLES.V8R");
             string candidateArchive = Path.Combine(root, "CUSTOM.EXP");
@@ -650,7 +1136,10 @@ public static class V82VehicleRegistry
         uint stringOffset = U32(data, 16);
         bool legacy = version == 2 && entrySize == LegacyEntrySize;
         bool current = version == 3 && entrySize == EntrySize;
-        if ((!legacy && !current) || game != 2 || reserved != 0)
+        bool previewCurrent =
+            version == 4 && entrySize == PreviewEntrySize;
+        if ((!legacy && !current && !previewCurrent) ||
+            game != 2 || reserved != 0)
             throw new InvalidDataException(
                 "VEHICLES.V8R is not a supported V8:2 registry");
         RequireRange(data, tableOffset, checked((uint)count * entrySize),
@@ -677,11 +1166,17 @@ public static class V82VehicleRegistry
             uint statOffset = U32(data, record + 24);
             uint transformOffset = U32(data, record + 28);
             uint powerupOffset = U32(data, record + 32);
-            ushort rearSuspensionDamping = current
+            ushort rearSuspensionDamping = current || previewCurrent
                 ? U16(data, record + 36)
                 : (ushort)0;
-            ushort extensionReserved = current
+            ushort extensionReserved = current || previewCurrent
                 ? U16(data, record + 38)
+                : (ushort)0;
+            ushort selectorPreviewArchiveIndex = previewCurrent
+                ? U16(data, record + 40)
+                : NoArchiveIndex;
+            ushort selectorPreviewBodyKind = previewCurrent
+                ? U16(data, record + 42)
                 : (ushort)0;
             if (flags != 0 || statSize != StatsSize ||
                 transformArchiveIndex == NoArchiveIndex ||
@@ -740,7 +1235,9 @@ public static class V82VehicleRegistry
                 displayName,
                 bodyArchiveIndex,
                 transformArchiveIndex,
+                selectorPreviewArchiveIndex,
                 bodyKind,
+                selectorPreviewBodyKind,
                 selectionOrder,
                 rearSuspensionDamping,
                 stats,
@@ -764,6 +1261,13 @@ public static class V82VehicleRegistry
                 !referenced.Add(entry.TransformArchiveIndex))
                 throw new InvalidDataException(
                     $"vehicle {entry.StableId} has invalid or shared archive ownership");
+            if (entry.SelectorPreviewArchiveIndex != NoArchiveIndex &&
+                (
+                    entry.SelectorPreviewArchiveIndex >= Banks.Count ||
+                    !referenced.Add(entry.SelectorPreviewArchiveIndex)
+                ))
+                throw new InvalidDataException(
+                    $"vehicle {entry.StableId} has invalid or shared selector preview ownership");
 
             byte[] transform = Banks[entry.TransformArchiveIndex].ReadBin();
             byte[] body = Banks[entry.BodyArchiveIndex].ReadBin();
@@ -772,6 +1276,18 @@ public static class V82VehicleRegistry
                 !BinSlotIsTopLevel(body, entry.BodyKind))
                 throw new InvalidDataException(
                     $"vehicle {entry.StableId} body kind does not own a top-level object");
+            if (entry.SelectorPreviewArchiveIndex != NoArchiveIndex)
+            {
+                byte[] selector =
+                    Banks[entry.SelectorPreviewArchiveIndex].ReadBin();
+                int selectorSlotCount = BinSlotCount(selector);
+                if (entry.SelectorPreviewBodyKind >= selectorSlotCount ||
+                    !BinSlotIsTopLevel(
+                        selector, entry.SelectorPreviewBodyKind))
+                    throw new InvalidDataException(
+                        $"vehicle {entry.StableId} selector preview kind " +
+                        "does not own a top-level object");
+            }
             int slotCount = BinSlotCount(transform);
             for (int mode = 1; mode < TransformModeCount; mode++)
             {
@@ -901,7 +1417,9 @@ public static class V82VehicleRegistry
         string displayName,
         int bodyArchiveIndex,
         int transformArchiveIndex,
+        int selectorPreviewArchiveIndex,
         int bodyKind,
+        int selectorPreviewBodyKind,
         int selectionOrder,
         ushort rearSuspensionDamping,
         byte[] stats,
@@ -913,7 +1431,11 @@ public static class V82VehicleRegistry
         public string DisplayName { get; } = displayName;
         public int BodyArchiveIndex { get; } = bodyArchiveIndex;
         public int TransformArchiveIndex { get; } = transformArchiveIndex;
+        public int SelectorPreviewArchiveIndex { get; } =
+            selectorPreviewArchiveIndex;
         public int BodyKind { get; } = bodyKind;
+        public int SelectorPreviewBodyKind { get; } =
+            selectorPreviewBodyKind;
         public int SelectionOrder { get; } = selectionOrder;
         public ushort RearSuspensionDamping { get; } = rearSuspensionDamping;
         public byte[] Stats { get; } = stats;
@@ -921,6 +1443,7 @@ public static class V82VehicleRegistry
         public uint[] Powerups { get; } = powerups;
         public uint BodyRuntime { get; set; }
         public uint TransformRuntime { get; set; }
+        public uint SelectorPreviewRuntime { get; set; }
         public uint StatsRuntime { get; set; }
         public uint TransformTableRuntime { get; set; }
         public uint PowerupTableRuntime { get; set; }

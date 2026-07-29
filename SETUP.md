@@ -98,3 +98,19 @@ Proceed to the CLASSIFY phase per `CLAUDE.md`.
 - Network access required for steps 2 and 3. Both GitHub. If network is restricted, log and stop.
 - Ghidra analysis is single-threaded for some phases and can take 10-60 minutes on a PS1-sized binary. This is normal. Do not interrupt.
 - If the EXE has overlays loaded at the same VA, treat each as a separate Ghidra program and analyze independently. Track which functions belong to which overlay in `analysis/overlay_map.json`.
+
+## Repository Cleanup
+
+Builds, publishes, crash dumps, and visual-regression captures can consume many
+gigabytes. From the repository root, run:
+
+```powershell
+.\clean.cmd
+```
+
+The cleanup preserves source files, original disc/loose inputs, generated
+recompiler C# sources/configuration, and the current runnable handoffs in
+`PS1 game/` and `V8_2_LOOSE/`. It removes ignored historical artifacts,
+compiler `bin`/`obj` trees, CMake build directories, transient logs, and stale
+Git objects. Use `.\clean.cmd -WhatIf` to preview it or `-KeepArtifacts` when historical
+capture evidence is temporarily needed.

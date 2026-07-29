@@ -5,6 +5,7 @@ using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
+using Silk.NET.Windowing.Glfw;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Hardware;
 using RecompOne.Runtime.Host.Window;
@@ -74,6 +75,10 @@ internal static class HostWindow
 
         try
         {
+            // Explicit registration keeps the GLFW backend reachable in
+            // trimmed single-file releases; relying on assembly discovery
+            // leaves Window.Create with no registered platform.
+            GlfwWindowing.Use();
             var options = WindowOptions.Default with
             {
                 Size = new Vector2D<int>(outputSize.width, outputSize.height),
@@ -173,6 +178,7 @@ internal static class HostWindow
         string sanitized = new string(
             label.Where(ch => char.IsAsciiLetterOrDigit(ch) || ch == '_').ToArray());
         _requestedDisplayCapture = sanitized;
+        Hle.GpuHle.DebugCaptureLabel = sanitized;
         if (_capturePresentation && Hle.GpuHle.Active)
             _pendingPresentationCapture = sanitized;
     }
@@ -268,6 +274,7 @@ internal static class HostWindow
         PanelManager.Register(new SettingsPopup());
         PanelManager.Register(new Modding.ModsPopup());
         PanelManager.Register(new AboutPopup());
+        PanelManager.Register(GuestVehicleMenu.PackagePanel);
 
         SettingsRegistry.Register(new InputSettingsSection());
         SettingsRegistry.Register(new DisplaySettingsSection());
@@ -275,10 +282,6 @@ internal static class HostWindow
         if (Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal))
             MenuRegistry.Register("Cheats", V82CheatMenu.Draw);
         MenuRegistry.Register("Guest Vehicles", GuestVehicleMenu.Draw);
-        if (Runtime.GameTitle.Equals(
-                "Vigilante 8 PC", StringComparison.Ordinal))
-            MenuRegistry.Register("Guest Arenas", GuestArenaMenu.Draw);
-
         _discPicker = new DiscPickerPopup();
         PanelManager.Register(_discPicker);
 

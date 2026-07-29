@@ -1,0 +1,21 @@
+# ReXGlue v0.8.0 manifest for the extracted Vigilante 8 Arcade XEX.
+#
+# Run from this directory after extracting the STFS package into
+# V8_ARCADE_WORK/extracted:
+#   rexglue codegen v8_arcade_manifest.toml
+
+[project]
+name = "v8_arcade"
+sdk_version = "0.8.0"
+game_root = "../../../V8_ARCADE_WORK/extracted"
+
+[entrypoint]
+file_path = "../../../V8_ARCADE_WORK/extracted/default.xex"
+out_directory_path = "../../../V8_ARCADE_WORK/rexglue/generated/default"
+includes = []
+
+# Auto-analysis finds a direct branch to this aligned address but does not
+# initially register it as a function entry. A minimal seed lets normal
+# control-flow discovery determine the remaining extent.
+[entrypoint.functions."0x82173508"]
+size = 0x4

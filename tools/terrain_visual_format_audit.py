@@ -204,8 +204,8 @@ def iter_group_packets(bin_data: bytes, group: int):
             yield {"error": "short_header", "pi": pi, "offset": p}
             break
         typ = bin_data[p + 3]
-        source_kind = (typ >> 2) & 0x0f
-        low_kind = typ & 0x0f
+        source_kind = typ & 0x0f
+        runtime_kind_if_unexpanded = (typ >> 2) & 0x0f
         s_stride = SOURCE_STRIDE[source_kind]
         c_stride = CACHED_STRIDE[source_kind]
         rec = {
@@ -213,7 +213,7 @@ def iter_group_packets(bin_data: bytes, group: int):
             "offset": p,
             "type": typ,
             "source_kind": source_kind,
-            "low_kind": low_kind,
+            "runtime_kind_if_unexpanded": runtime_kind_if_unexpanded,
             "source_stride": s_stride,
             "cached_stride": c_stride,
             "tex_base": tex_base,
@@ -248,7 +248,7 @@ def audit_xobf(payload: bytes, bank_index: int):
         "texture_slot_count": texture_slot_count,
         "groups": {},
         "kind_counts": Counter(),
-        "low_counts": Counter(),
+        "runtime_kind_counts": Counter(),
         "texture_refs": Counter(),
         "invalid_texture_refs": 0,
         "tile_runs": 0,
@@ -258,7 +258,7 @@ def audit_xobf(payload: bytes, bank_index: int):
     for group in range(group_count):
         g = {
             "kind_counts": Counter(),
-            "low_counts": Counter(),
+            "runtime_kind_counts": Counter(),
             "texture_refs": Counter(),
             "tile_runs": 0,
             "tile_packets": 0,
@@ -270,11 +270,11 @@ def audit_xobf(payload: bytes, bank_index: int):
                 out["errors"][pkt["error"]] += 1
                 continue
             sk = pkt["source_kind"]
-            lk = pkt["low_kind"]
+            rk = pkt["runtime_kind_if_unexpanded"]
             g["kind_counts"][sk] += 1
-            g["low_counts"][lk] += 1
+            g["runtime_kind_counts"][rk] += 1
             out["kind_counts"][sk] += 1
-            out["low_counts"][lk] += 1
+            out["runtime_kind_counts"][rk] += 1
             raw_slot = pkt.get("raw_slot")
             if raw_slot is not None and raw_slot != 0xffff:
                 slot = pkt["tex_base"] + (raw_slot & 0x3fff)
@@ -336,7 +336,10 @@ def main() -> int:
             f"slots={b['slot_count']} textures={b['texture_slot_count']}"
         )
         lines.append(f"  source kinds: {fmt_counter(b['kind_counts'])}")
-        lines.append(f"  low-nibble kinds if decoded wrongly: {fmt_counter(b['low_counts'])}")
+        lines.append(
+            "  shifted runtime kinds if source expansion is skipped: "
+            f"{fmt_counter(b['runtime_kind_counts'])}"
+        )
         lines.append(
             f"  texture refs={sum(b['texture_refs'].values())} unique={len(b['texture_refs'])} "
             f"invalid={b['invalid_texture_refs']} tile_runs={b['tile_runs']} tile_packets={b['tile_packets']} "
@@ -366,7 +369,8 @@ def main() -> int:
         else:
             lines.append(
                 f"bank={bank} group={group} nodes={len(nodes)} "
-                f"kinds={fmt_counter(g['kind_counts'])} low={fmt_counter(g['low_counts'])} "
+                f"kinds={fmt_counter(g['kind_counts'])} "
+                f"shifted_if_unexpanded={fmt_counter(g['runtime_kind_counts'])} "
                 f"texrefs={sum(g['texture_refs'].values())}/{len(g['texture_refs'])} "
                 f"tiles={g['tile_runs']}/{g['tile_packets']} errors={fmt_counter(g['errors'])} "
                 f"names={name_text}"

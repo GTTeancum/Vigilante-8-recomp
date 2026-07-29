@@ -33,18 +33,22 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.vehicles = build_projects()
 
-    def test_three_entries_own_six_exclusive_native_banks(self) -> None:
+    def test_three_entries_own_nine_exclusive_native_banks(self) -> None:
         package = registry.compile_package(self.vehicles)
         game, entries = registry.parse_registry(package.registry)
         forms = tuple(iff.parse(package.archive).forms(b"XOBF"))
 
         self.assertEqual("V8_2", game)
         self.assertEqual(EXPECTED_IDS, tuple(v.stable_id for v in self.vehicles))
-        self.assertEqual(6, len(forms))
+        self.assertEqual(9, len(forms))
         self.assertEqual(
-            ((0, 1), (2, 3), (4, 5)),
+            ((0, 1, 2), (3, 4, 5), (6, 7, 8)),
             tuple(
-                (entry.archive_index, entry.transformation_archive_index)
+                (
+                    entry.archive_index,
+                    entry.transformation_archive_index,
+                    entry.selector_preview_archive_index,
+                )
                 for entry in entries
             ),
         )
@@ -54,9 +58,10 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
             for index in (
                 entry.archive_index,
                 entry.transformation_archive_index,
+                entry.selector_preview_archive_index,
             )
         }
-        self.assertEqual(set(range(6)), referenced)
+        self.assertEqual(set(range(9)), referenced)
 
         decoded = registry.decompile_package(package.archive, package.registry)
         rebuilt = registry.compile_package(decoded)
@@ -80,6 +85,35 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
                 direct_keys & set(range(0x8010, 0x8017)),
                 vehicle.stable_id,
             )
+
+    def test_clyde_suspension_travel_markers_use_native_v82_key(self) -> None:
+        clyde = self.vehicles[1]
+        for bank in (
+            project.ObjectBank(
+                groups=clyde.groups,
+                slots=clyde.slots,
+                collisions=clyde.collisions,
+                textures=clyde.textures,
+                animations=clyde.animations,
+            ),
+            clyde.selector_preview_bank,
+        ):
+            self.assertIsNotNone(bank)
+            markers = []
+            for index, anchor in enumerate(bank.slots):
+                if (
+                    anchor.parent != clyde.body_kind
+                    or anchor.key not in range(0x8000, 0x8004)
+                ):
+                    continue
+                children = [
+                    slot
+                    for slot in bank.slots
+                    if slot.parent == index and slot.key == 0x8000
+                ]
+                self.assertEqual(1, len(children), anchor.key)
+                markers.append(children[0].position[1])
+            self.assertEqual([-3285, -3285, -3285, -3285], markers)
 
     def test_every_transformation_selector_is_an_owned_valid_root(self) -> None:
         for vehicle in self.vehicles:
@@ -140,6 +174,39 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
                     vehicle.stats[target],
                     f"{vehicle.stable_id}: {field}",
                 )
+
+    def test_compatible_v8_menu_stats_are_reused_exactly(self) -> None:
+        source = stats.StatsFile(
+            (ROOT / "PS1 game" / "SLUS_005.10").read_bytes(),
+            "V8",
+        )
+        shared = (
+            "rating_armor",
+            "rating_speed",
+            "rating_handling",
+        )
+        for index, vehicle in enumerate(self.vehicles):
+            source_values = source.record(index).values()
+            for field in shared:
+                self.assertEqual(
+                    source_values[field] * 10,
+                    vehicle.stats[field],
+                    f"{vehicle.stable_id}: {field}",
+                )
+
+            # Retail V8 leaves this byte zero and its selector presents only
+            # three categories. V8:2 requires a fourth row, so this one value
+            # is explicitly synthesized instead of being mislabeled as
+            # original menu data.
+            self.assertEqual(0, source_values["rating_special"])
+            expected_special = (
+                sum(source_values[field] for field in shared) * 10 + 1
+            ) // 3
+            self.assertEqual(
+                expected_special,
+                vehicle.stats["rating_special"],
+                f"{vehicle.stable_id}: sequel-only special",
+            )
 
 
 if __name__ == "__main__":

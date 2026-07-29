@@ -2572,11 +2572,13 @@ static void tm_emit_group(const TmBank *bank, uint32_t group,
             float tex_kind = 0.0f;
 #if defined(V8_HAVE_SDL) && defined(V8_HAVE_GL)
             if (source_kind == 13 &&
-                (tm_rd16le(B, po + 0x12) & 0xc000u) == 0x4000u) {
+                tm_rd16le(B, po + 0x12) == 0xffffu) {
                 /*
-                 * Native raw kind-13/0x4000 is the engine-owned 40x23 dynamic
-                 * reflection image used by Casino City, Hoover Dam, Valley
-                 * Farm, and Dreamland water.  It is not XOBF texture slot 0.
+                 * Native raw kind-13/0xffff selects the engine-owned dynamic
+                 * image descriptor at DAT_80065a28.  Ordinary texture ids
+                 * may carry 0x4000/0x8000 mode bits; FUN_8001b49c masks those
+                 * before indexing the XOBF texture table, so they must not be
+                 * mistaken for dynamic imagery.
                  */
                 for (int k = 0; k < 3; k++) {
                     int uvo = 0x0c + k * 2;

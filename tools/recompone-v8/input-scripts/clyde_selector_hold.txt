@@ -1,0 +1,17 @@
+10+2=START
+
+[press_start]
+1+2=START
+
+[main_menu]
+1+2=DOWN
+10+2=CROSS
+
+[player_count]
+5+2=CROSS
+
+[location_oilfield]
+1+2=CROSS
+
+[choose_player]
+5+2=RIGHT

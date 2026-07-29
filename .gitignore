@@ -26,12 +26,17 @@ ghidra/
 /V8_2_BINCUE/
 /V8_2_LOOSE/
 /V8_2_WORK/
+/V8_ARCADE_WORK/
 /I76_ZFS/
 /I76/
 /I76_NITRO_DISC/
 /I76_NITRO_ZFS/
 /*.bin
 /*.cue
+/*.n64
+/*.rar
+/.sentry-native/
+/.tmp/
 /PS1 game/
 /input/
 /reference/assets/

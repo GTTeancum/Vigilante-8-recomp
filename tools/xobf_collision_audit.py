@@ -131,7 +131,7 @@ def decode_banks(raw: bytes):
             "size": size,
             "group_count": le32(data, 0x00),
             "group_table": le32(data, 0x04),
-            "obstacle_count_minus1": le32(data, 0x08),
+            "obstacle_count": le32(data, 0x08),
             "obstacle_table": le32(data, 0x0c),
             "secondary_table": le32(data, 0x10),
             "obstacle_end": le32(data, 0x14),
@@ -144,7 +144,7 @@ def decode_banks(raw: bytes):
 def parse_obstacle_stream(bank, index: int):
     data = bank["data"]
     table = bank["obstacle_table"]
-    count = bank["obstacle_count_minus1"] + 1
+    count = bank["obstacle_count"]
     if index < 0 or index >= count or table + index * 4 + 4 > len(data):
         return None, ["bad-index"]
     rel = le32(data, table + index * 4)
@@ -262,7 +262,7 @@ def audit_file(path: str, out):
         derived_slots = (bank["group_table"] - 0x1c) // 0x1c if bank["group_table"] >= 0x1c else 0
         print(
             f"  BIN[{bi}] groups={bank['group_count']} slots={bank['slot_count']} "
-            f"derived_slots={derived_slots} obstacle_count={bank['obstacle_count_minus1'] + 1} "
+            f"derived_slots={derived_slots} obstacle_count={bank['obstacle_count']} "
             f"group_table=0x{bank['group_table']:x} obstacle_table=0x{bank['obstacle_table']:x} "
             f"secondary=0x{bank['secondary_table']:x} obstacle_end=0x{bank['obstacle_end']:x}",
             file=out,

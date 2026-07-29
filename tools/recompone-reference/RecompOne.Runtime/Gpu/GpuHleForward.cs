@@ -10,16 +10,34 @@ public sealed partial class Gpu
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VRAM") == "1";
     static readonly bool TraceTerrainPrims =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_TERRAIN_PRIMS") == "1";
+    static readonly (int Start, int End)? TraceGameplayTicks =
+        ParseTraceGameplayTicks(
+            Environment.GetEnvironmentVariable("RECOMPONE_TRACE_GAMEPLAY_TICKS"));
     static int _terrainPrimTraceCount;
     static bool _terrainCellTraced;
     bool DitherEnabled => _dither && ConfigManager.View.Ps1Dithering;
     int _currentOtDepth;
+    uint _currentOtPacketAddress;
     bool _currentOtPacketVehicle;
     int _traceVehiclePacketHits;
     int _traceVehicleTriangles;
     int _traceVramLoadSequence;
     uint _traceVramLoadHash;
     ushort _traceVramLoadOr;
+    int _traceGameplayTick = -1;
+    int _traceGameplayTickPrimitives;
+    int _traceGameplayTickLines;
+
+    static (int Start, int End)? ParseTraceGameplayTicks(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        string[] parts = value.Split('-', 2);
+        if (!int.TryParse(parts[0], out int start)) return null;
+        int end = start;
+        if (parts.Length == 2 && !int.TryParse(parts[1], out end))
+            return null;
+        return (Math.Min(start, end), Math.Max(start, end));
+    }
 
     static bool IntersectsVramRect(
         int x, int y, int w, int h,
@@ -46,6 +64,7 @@ public sealed partial class Gpu
 
     public void SetOrderingTablePacket(uint address)
     {
+        _currentOtPacketAddress = address;
         _currentOtPacketVehicle = GpuHle.IsVehiclePacket(address);
         if (GpuHle.GameplayActive && _currentOtPacketVehicle &&
             Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1" &&
@@ -56,8 +75,10 @@ public sealed partial class Gpu
     public void EndOrderingTable()
     {
         _currentOtDepth = 0;
+        _currentOtPacketAddress = 0;
         _currentOtPacketVehicle = false;
         GpuHle.ClearVehiclePacketRanges();
+        GpuHle.ClearPacketOwners();
     }
 
     int CurTPage() => ((_texPageX / 64) & 0xf) | (((_texPageY / 256) & 1) << 4)
@@ -80,7 +101,8 @@ public sealed partial class Gpu
     PrimFlags PrimOf(bool tex, bool semi, bool raw, int clut, bool gouraud = false) => new()
     {
         Textured = tex, SemiTrans = semi, RawTexture = raw, Gouraud = gouraud, TPage = (ushort)CurTPage(), Clut = (ushort)clut,
-        OtIndex = _currentOtDepth, Vehicle = _currentOtPacketVehicle,
+        OtIndex = _currentOtDepth, PacketAddress = _currentOtPacketAddress,
+        Vehicle = _currentOtPacketVehicle,
     };
 
     void HleTri(in Vert a, in Vert b, in Vert c, bool tex, bool gouraud, bool semi, bool raw, int clut)
@@ -88,6 +110,36 @@ public sealed partial class Gpu
         int spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
         int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
         if (spanX > 1023 || spanY > 511) return;
+
+        int gameplayTick = GpuHle.DebugGameplayTick;
+        if (_traceGameplayTick != gameplayTick)
+        {
+            _traceGameplayTick = gameplayTick;
+            _traceGameplayTickPrimitives = 0;
+            _traceGameplayTickLines = 0;
+        }
+        if (TraceGameplayTicks is { } ticks &&
+            gameplayTick >= ticks.Start &&
+            gameplayTick <= ticks.End &&
+            _traceGameplayTickPrimitives++ < 4096)
+            Console.Error.WriteLine(
+                $"[V8TickTriangle] tick={gameplayTick} " +
+                $"packet=0x{_currentOtPacketAddress:X8} ot={_currentOtDepth} " +
+                $"texdepth={_texDepth} page={_texPageX},{_texPageY} " +
+                $"tpage=0x{CurTPage():X4} clut=0x{clut:X4} " +
+                $"tex={(tex ? 1 : 0)} semi={(semi ? 1 : 0)} " +
+                $"raw={(raw ? 1 : 0)} " +
+                $"xy=({a.X},{a.Y}),({b.X},{b.Y}),({c.X},{c.Y}) " +
+                $"uv=({a.U},{a.V}),({b.U},{b.V}),({c.U},{c.V}) " +
+                $"rgb=({a.R},{a.G},{a.B}),({b.R},{b.G},{b.B}),({c.R},{c.G},{c.B}) " +
+                $"z=({a.Z},{b.Z},{c.Z}) " +
+                $"gte=({(a.HasGteZ ? 1 : 0)},{(b.HasGteZ ? 1 : 0)}," +
+                $"{(c.HasGteZ ? 1 : 0)}) " +
+                $"w=({a.PerspectiveW},{b.PerspectiveW},{c.PerspectiveW}) " +
+                $"projective=({(a.HasProjectiveW ? 1 : 0)}," +
+                $"{(b.HasProjectiveW ? 1 : 0)}," +
+                $"{(c.HasProjectiveW ? 1 : 0)}) " +
+                $"owner={GpuHle.DescribePacketOwner(_currentOtPacketAddress)}");
 
         if (_currentOtPacketVehicle &&
             Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1" &&
@@ -151,6 +203,25 @@ public sealed partial class Gpu
     void HleLine(int x0, int y0, int r0, int g0, int b0, int x1, int y1, int r1, int g1, int b1, bool semi, bool gouraud)
     {
         if (Math.Abs(x1 - x0) > 1023 || Math.Abs(y1 - y0) > 511) return;
+
+        int gameplayTick = GpuHle.DebugGameplayTick;
+        if (_traceGameplayTick != gameplayTick)
+        {
+            _traceGameplayTick = gameplayTick;
+            _traceGameplayTickPrimitives = 0;
+            _traceGameplayTickLines = 0;
+        }
+        if (TraceGameplayTicks is { } ticks &&
+            gameplayTick >= ticks.Start &&
+            gameplayTick <= ticks.End &&
+            _traceGameplayTickLines++ < 4096)
+            Console.Error.WriteLine(
+                $"[V8TickLine] tick={gameplayTick} " +
+                $"packet=0x{_currentOtPacketAddress:X8} ot={_currentOtDepth} " +
+                $"xy=({x0},{y0}),({x1},{y1}) " +
+                $"rgb=({r0},{g0},{b0}),({r1},{g1},{b1}) " +
+                $"semi={(semi ? 1 : 0)} gouraud={(gouraud ? 1 : 0)} " +
+                $"owner={GpuHle.DescribePacketOwner(_currentOtPacketAddress)}");
 
         var be = GpuHle.Backend!;
         be.SetDrawEnv(CurEnv());

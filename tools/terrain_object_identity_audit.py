@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from pathlib import Path
+import argparse
 import math
 import struct
 
@@ -267,12 +268,49 @@ def summarize_level(path: Path, out):
     print("  type_bank " + ", ".join(f"{k}:{v}" for k, v in sorted(Counter((h["type"], h["bank"]) for h in heads).items())), file=out)
 
     by_name = defaultdict(list)
+    expected = []
+    empty_effects = []
+    unresolved = []
     for h in heads:
-        if h["type"] in (1, 6) or h["type"] > 6:
+        # A non-negative bank and slot are the native declaration that this
+        # HEAD owns XOBF geometry.  Do not infer object visibility from its
+        # gameplay type: Dreamland uses several HEAD types for destructible
+        # and scripted buildings.
+        if h["bank"] < 0 or h["slot"] < 0:
             continue
+        expected.append(h)
         r = resolved_object(banks, h)
         if r and r.get("verts", 0):
             by_name[h["name"]].append((h, r))
+        elif r and r.get("groups"):
+            # Some native effect anchors deliberately reference an empty
+            # render group.  Dreamland's SunLensFlare is group zero in the
+            # source N64 XOBF and has zero vertices there as well; resolving
+            # that group is not a missing model.
+            empty_effects.append((h, r))
+        else:
+            unresolved.append(h)
+
+    print(
+        f"  geometry heads expected={len(expected)} "
+        f"resolved={len(expected) - len(unresolved)} "
+        f"native_empty_effects={len(empty_effects)} "
+        f"unresolved={len(unresolved)}",
+        file=out,
+    )
+    for h, r in empty_effects:
+        print(
+            f"    NATIVE_EMPTY_EFFECT off=0x{h['off']:x} "
+            f"name={h['name']!r} type={h['type']} bank={h['bank']} "
+            f"slot={h['slot']} groups={list(r['groups'])}",
+            file=out,
+        )
+    for h in unresolved:
+        print(
+            f"    UNRESOLVED off=0x{h['off']:x} name={h['name']!r} "
+            f"type={h['type']} bank={h['bank']} slot={h['slot']}",
+            file=out,
+        )
 
     print("  resolved samples", file=out)
     for name, items in sorted(by_name.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:24]:
@@ -284,22 +322,50 @@ def summarize_level(path: Path, out):
               f"avg={avg[0]:7.2f} x {avg[1]:7.2f} x {avg[2]:7.2f} groups={groups}",
               file=out)
     print("", file=out)
+    return len(unresolved)
 
 
 def main() -> int:
-    out_path = ROOT / "analysis" / "terrain_object_identity_audit.txt"
-    out_path.parent.mkdir(exist_ok=True)
-    levels = [
-        TERRAIN / "SKIRESRT.EXP",
-        TERRAIN / "OILFIELD.EXP",
-        TERRAIN / "WILDWEST.EXP",
-        TERRAIN / "HOOVRDAM.EXP",
+    parser = argparse.ArgumentParser(
+        description="Audit terrain HEAD-to-XOBF object resolution."
+    )
+    parser.add_argument(
+        "levels",
+        nargs="*",
+        type=Path,
+        help="EXP files to audit (defaults to the available retail sample set)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="write the report to this file instead of stdout",
+    )
+    args = parser.parse_args()
+    levels = args.levels or [
+        path
+        for path in (
+            TERRAIN / "SKIRESRT.EXP",
+            TERRAIN / "OILFIELD.EXP",
+            TERRAIN / "WILDWEST.EXP",
+            TERRAIN / "HOOVRDAM.EXP",
+        )
+        if path.is_file()
     ]
-    with out_path.open("w", encoding="ascii") as out:
+    if not levels:
+        parser.error("no terrain EXP files were provided or found")
+
+    unresolved = 0
+    if args.output is None:
+        import sys
         for path in levels:
-            summarize_level(path, out)
-    print(out_path)
-    return 0
+            unresolved += summarize_level(path, sys.stdout)
+    else:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with args.output.open("w", encoding="ascii") as out:
+            for path in levels:
+                unresolved += summarize_level(path, out)
+        print(args.output)
+    return 1 if unresolved else 0
 
 
 if __name__ == "__main__":

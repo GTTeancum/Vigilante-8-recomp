@@ -31,6 +31,12 @@ class Arena:
 
 
 ARENAS = [
+    Arena(
+        "super_dreamland_64",
+        "Super Dreamland 64",
+        "location_super_dreamland_64",
+        "DREAMLND",
+    ),
     Arena("ski_resort", "Ski Resort", "location_ski_resort", "SKIRESRT"),
     Arena("canyonlands", "Canyonlands", "location_canyonlands", "CANYNLND"),
     Arena("casino_city", "Casino City", "location_casino_city", "CASNOCTY"),
@@ -46,7 +52,13 @@ ARENA_BY_KEY = {arena.key: arena for arena in ARENAS}
 BONUS_ARENAS = {"sand_factory", "secret_base"}
 PLAYERS = {
     "default": (None, None),
+    "slick_clyde": ("Slick Clyde", "choose_player"),
+    "sheila": ("Sheila", "choose_player"),
     "y_the_alien": ('"Y" the Alien', "character_y_the_alien"),
+}
+PLAYER_SELECTOR_STEPS = {
+    "slick_clyde": 1,
+    "sheila": 2,
 }
 SPECIAL_ATTACK_CODES = {
     "1:422",
@@ -171,6 +183,11 @@ def parse_args() -> argparse.Namespace:
             "starts (default: 300)."
         ),
     )
+    parser.add_argument(
+        "--visible",
+        action="store_true",
+        help="Present the rendered game window while scripted soak input runs.",
+    )
     parser.add_argument("--cycles", type=int, default=1)
     parser.add_argument(
         "--campaign-hours",
@@ -237,7 +254,11 @@ def location_script(target: Arena) -> list[str]:
     lines = ["[select_location]"]
     for poll in range(5, 105, 10):
         lines.append(f"{poll}+2=DOWN")
-    lines.extend(["", f"[{target.stage}]", "1+2=CROSS", ""])
+    # The title changes as soon as the selection index advances, while the
+    # native wheel needs several dozen polls to ease the selected thumbnail
+    # into its fixed center highlight. Keep the stage open long enough to
+    # capture and verify the settled native presentation before accepting it.
+    lines.extend(["", f"[{target.stage}]", "100+2=CROSS", ""])
     return lines
 
 
@@ -303,6 +324,15 @@ def player_script(player: str) -> list[str]:
     display, stage = PLAYERS[player]
     if display is None or stage is None:
         return ["[choose_player]", "5+2=CROSS", ""]
+
+    if player in PLAYER_SELECTOR_STEPS:
+        lines = ["[choose_player]"]
+        poll = 5
+        for _ in range(PLAYER_SELECTOR_STEPS[player]):
+            lines.append(f"{poll}+2=RIGHT")
+            poll += 20
+        lines.extend([f"{poll}+2=CROSS", ""])
+        return lines
 
     lines = ["[choose_player]"]
     for poll in range(5, 255, 10):
@@ -391,7 +421,7 @@ def build_fixture(
         "",
     ]
     if mode == "arcade":
-        if player != "default" or arena.key in BONUS_ARENAS:
+        if player == "y_the_alien" or arena.key in BONUS_ARENAS:
             lines.extend(unlock_bonus_script())
         lines.extend(
             [
@@ -490,6 +520,25 @@ def preserve_final_capture(
     return target
 
 
+def preserve_scripted_captures(
+    directory: Path, output: Path, stem: str, started_at: float
+) -> list[Path]:
+    """Keep any diagnostic captures requested by scripted-input pulses."""
+
+    preserved: list[Path] = []
+    for source in sorted(directory.glob("recompone_capture_*.ppm")):
+        try:
+            if source.stat().st_mtime < started_at - 1.0:
+                continue
+        except FileNotFoundError:
+            continue
+        suffix = source.name.removeprefix("recompone_capture_")
+        target = output / f"{stem}.{suffix}"
+        shutil.copy2(source, target)
+        preserved.append(target)
+    return preserved
+
+
 def analyze_split_capture(path: Path | None) -> tuple[int, int, bool]:
     if path is None:
         return (0, 0, False)
@@ -582,6 +631,7 @@ def run_one(
     guest_vehicle: str | None,
     guest_arena: str | None,
     capture_delay_polls: int,
+    visible: bool,
 ) -> RunResult:
     stem = f"{cycle:02d}_{mode}_{arena.key}"
     expected_overlay = (
@@ -604,7 +654,7 @@ def run_one(
     env["RECOMPONE_INPUT_FILE"] = str(fixture_path.resolve())
     env["RECOMPONE_DISABLE_LIVE_INPUT"] = "1"
     env["RECOMPONE_FORCE_PAD2_CONNECTED"] = "1" if mode != "arcade" else "0"
-    env["RECOMPONE_WINDOW_VISIBLE"] = "0"
+    env["RECOMPONE_WINDOW_VISIBLE"] = "1" if visible else "0"
     env["RECOMPONE_V8_GAME_VOLUME"] = "0"
     env["RECOMPONE_SOAK_HEARTBEAT_TICKS"] = "180"
     # Synchronous high-resolution VRAM readback is diagnostic work, not part
@@ -620,6 +670,8 @@ def run_one(
             "COOPERATIVE" if mode == "coop" else "VERSUS"
         )
     env["RECOMPONE_TRACE_LEVEL_LOAD"] = "1"
+    if arena.key == "super_dreamland_64":
+        env["RECOMPONE_CAPTURE_LOADING_CARD"] = "1"
     env["RECOMPONE_TRACE_RESULTS"] = "1"
     env["RECOMPONE_TRACE_ANIMATION"] = "1"
     env["RECOMPONE_VALIDATE_HEAP"] = "1"
@@ -646,6 +698,7 @@ def run_one(
     passed = False
     gameplay_capture: Path | None = None
     final_capture: Path | None = None
+    scripted_captures: list[Path] = []
     hang_stack: Path | None = None
 
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
@@ -787,7 +840,16 @@ def run_one(
                 exe.parent, output, stem, started
             )
             final_capture = preserve_final_capture(exe.parent, output, stem, started)
+            scripted_captures = preserve_scripted_captures(
+                exe.parent, output, stem, started
+            )
             cleanup_runtime_artifacts(exe.parent, started)
+
+    if scripted_captures:
+        print(
+            f"[{stem}] preserved {len(scripted_captures)} scripted captures",
+            flush=True,
+        )
 
     text = combined_text(stdout_path, stderr_path)
     heartbeats = [int(value) for value in re.findall(r"\[Soak\] gameplay tick=(\d+)", text)]
@@ -1047,6 +1109,7 @@ def main() -> int:
                 args.guest_vehicle,
                 args.guest_arena,
                 args.capture_delay_polls,
+                args.visible,
             )
             results.append(result)
             status = "PASS" if result.passed else "FAIL"

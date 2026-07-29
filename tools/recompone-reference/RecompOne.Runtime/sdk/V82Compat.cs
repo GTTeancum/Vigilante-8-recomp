@@ -49,6 +49,11 @@ public static class V82Compat
     static int _matchVramFailures;
     static readonly bool _traceVram =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VRAM") == "1";
+    static readonly bool _traceSelector =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_V82_SELECTOR") == "1";
+    static int _selectorDepth;
+    static int _selectorTraceCount;
+    static readonly HashSet<string> SelectorTraceLines = [];
     static int _objectFactoryTraceCount;
     static readonly Stack<uint> ObjectFactorySources = new();
     static int _objectSchedulerPass;
@@ -129,6 +134,73 @@ public static class V82Compat
         [[1, 3, 2], [1, 3, 0], [1, 3, 3]],
         [[3, 1, 0], [3, 1, 2], [3, 1, 3]],
     ];
+
+    public static bool BeginNativeGuestSelector(CpuContext c, IMemory m)
+    {
+        _selectorDepth++;
+        if (_selectorDepth == 1)
+            V82VehicleRegistry.BeginNativeSelector(c, m);
+        if (_traceSelector && _selectorDepth == 1)
+        {
+            _selectorTraceCount = 0;
+            SelectorTraceLines.Clear();
+            Console.Error.WriteLine(
+                $"[V82Selector] enter caller=0x{c.RA:X8} " +
+                $"allowed=0x{c.A0:X8} mode=0x{c.A1:X8}");
+        }
+        return true;
+    }
+
+    public static void EndNativeGuestSelector(CpuContext c, IMemory m)
+    {
+        if (_selectorDepth == 1)
+            V82VehicleRegistry.EndNativeSelector(c, m);
+        if (_traceSelector)
+            Console.Error.WriteLine(
+                $"[V82Selector] leave result={c.V0} traces={_selectorTraceCount}");
+        _selectorDepth = Math.Max(0, _selectorDepth - 1);
+    }
+
+    public static bool TraceNativeSelectorCall(CpuContext c, IMemory m)
+    {
+        if (!_traceSelector || _selectorDepth == 0 || _selectorTraceCount >= 512)
+            return true;
+
+        m = Dispatcher.UnwrapMemory(m);
+        string a0 = ReadSelectorText(m, c.A0);
+        string a1 = ReadSelectorText(m, c.A1);
+        string a2 = ReadSelectorText(m, c.A2);
+        string line =
+            $"ra=0x{c.RA:X8} " +
+            $"a0=0x{c.A0:X8}{a0} a1=0x{c.A1:X8}{a1} " +
+            $"a2=0x{c.A2:X8}{a2} a3=0x{c.A3:X8}";
+        if (SelectorTraceLines.Add(line))
+        {
+            _selectorTraceCount++;
+            Console.Error.WriteLine($"[V82Selector] {line}");
+        }
+        return true;
+    }
+
+    static string ReadSelectorText(IMemory m, uint address)
+    {
+        if (address < 0x80010000u || address >= 0x80800000u)
+            return "";
+        Span<byte> bytes = stackalloc byte[65];
+        int length = 0;
+        for (; length < 64; length++)
+        {
+            byte value = m.ReadU8(address + (uint)length);
+            if (value == 0)
+                break;
+            if (value < 0x20 || value > 0x7E)
+                return "";
+            bytes[length] = value;
+        }
+        if (length < 3 || length == 64)
+            return "";
+        return $" \"{System.Text.Encoding.ASCII.GetString(bytes[..length])}\"";
+    }
 
     // Keep the retail heap intact for the executable's bookkeeping helpers,
     // while routing allocations to an independent PC-only arena. Mixing a
@@ -870,18 +942,22 @@ public static class V82Compat
     public static void TraceCommonObjectLoadPre(CpuContext c, IMemory m)
     {
         uint requestedMask = c.A0;
-        int selectedPlayerType = _soakPlayerType >= 0
-            ? _soakPlayerType
-            : V82VehicleRegistry.SelectedType;
-        if (selectedPlayerType >= 0)
+        for (int player = 0; player < 2; player++)
         {
+            int selectedPlayerType = player == 0 && _soakPlayerType >= 0
+                ? _soakPlayerType
+                : V82VehicleRegistry.SelectedTypeForPlayer(player);
+            if (selectedPlayerType < 0)
+                continue;
             if (selectedPlayerType >= V82VehicleRegistry.RetailVehicleCount &&
                 !V82VehicleRegistry.IsCustomType((uint)selectedPlayerType))
                 throw new InvalidOperationException(
                     $"requested vehicle type {selectedPlayerType} is not registered");
-            m.WriteU8(c.GP + 0x1104u, (byte)selectedPlayerType);
+            m.WriteU8(
+                c.GP + 0x1104u + (uint)player,
+                (byte)selectedPlayerType);
             Console.Error.WriteLine(
-                $"[V82Vehicles] player-type={selectedPlayerType}");
+                $"[V82Vehicles] player={player + 1} type={selectedPlayerType}");
         }
         // func_800132CC builds the two resource masks in S3/S2 after several
         // split callbacks. Those callbacks can leak their callee-saved scratch
@@ -1934,7 +2010,7 @@ public static class V82Compat
     static void ReserveGuestVramForMatch(CpuContext c, IMemory m)
     {
         GuestVramReservations.Clear();
-        if (V82VehicleRegistry.SelectedType < 0 &&
+        if (!V82VehicleRegistry.HasAnySelection &&
             !V82VehicleRegistry.HasDefaultReplacement)
             return;
 
@@ -1987,7 +2063,7 @@ public static class V82Compat
             }
             Console.Error.WriteLine(
                 $"[V82Vehicles] reserved {GuestVramReservations.Count} " +
-                "native VRAM rectangles for selected guest");
+                "native VRAM rectangles for selected guests");
         }
         catch
         {

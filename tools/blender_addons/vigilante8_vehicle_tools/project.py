@@ -340,6 +340,8 @@ class Texture:
     indices: bytes
     compressed: bool = False
     direct_pixels_bgr555: tuple[int, ...] = ()
+    palette_origin: tuple[int, int] = (0, 0)
+    image_origin: tuple[int, int] = (0, 0)
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "Texture":
@@ -354,6 +356,8 @@ class Texture:
                 "indices",
                 "compressed",
                 "direct_pixels_bgr555",
+                "palette_origin",
+                "image_origin",
             },
             "texture",
         )
@@ -368,6 +372,12 @@ class Texture:
             direct_pixels_bgr555=tuple(
                 int(color)
                 for color in value.get("direct_pixels_bgr555", ())
+            ),
+            palette_origin=_tuple_int(
+                value.get("palette_origin", (0, 0)), 2, "palette origin"
+            ),
+            image_origin=_tuple_int(
+                value.get("image_origin", (0, 0)), 2, "image origin"
             ),
         )
 
@@ -538,6 +548,8 @@ class VehicleProject:
     stats: Mapping[str, int]
     body_kind: int = 0
     transformation_bank: ObjectBank | None = None
+    selector_preview_bank: ObjectBank | None = None
+    selector_preview_body_kind: int = 0
     transform_modes: tuple[tuple[int, ...], ...] = ()
     powerups: Mapping[str, int] = field(default_factory=dict)
     quest: Mapping[str, Any] = field(default_factory=dict)
@@ -561,6 +573,8 @@ class VehicleProject:
                 "stats",
                 "body_kind",
                 "transformation_bank",
+                "selector_preview_bank",
+                "selector_preview_body_kind",
                 "transform_modes",
                 "powerups",
                 "quest",
@@ -600,6 +614,14 @@ class VehicleProject:
                 None
                 if value.get("transformation_bank") is None
                 else ObjectBank.from_dict(value["transformation_bank"])
+            ),
+            selector_preview_bank=(
+                None
+                if value.get("selector_preview_bank") is None
+                else ObjectBank.from_dict(value["selector_preview_bank"])
+            ),
+            selector_preview_body_kind=int(
+                value.get("selector_preview_body_kind", 0)
             ),
             transform_modes=tuple(
                 _tuple_int(
@@ -641,6 +663,18 @@ class VehicleProject:
             raise ValueError("body_kind must select a top-level body object")
         if self.transformation_bank is not None:
             self._validate_bank(self.transformation_bank, "transformation")
+        if self.selector_preview_bank is not None:
+            self._validate_bank(self.selector_preview_bank, "selector preview")
+            preview_roots = {
+                index
+                for index, slot in enumerate(self.selector_preview_bank.slots)
+                if slot.parent is None
+            }
+            if self.selector_preview_body_kind not in preview_roots:
+                raise ValueError(
+                    "selector_preview_body_kind must select a top-level "
+                    "selector preview object"
+                )
         wheel_roots = (
             roots
             if self.game == "V8"
@@ -1190,6 +1224,8 @@ def _bank_to_dict(bank: VehicleProject | ObjectBank) -> dict[str, Any]:
                 "direct_pixels_bgr555": list(
                     texture.direct_pixels_bgr555
                 ),
+                "palette_origin": list(texture.palette_origin),
+                "image_origin": list(texture.image_origin),
             }
             for texture in bank.textures
         ],
@@ -1285,4 +1321,10 @@ def to_dict(vehicle: VehicleProject) -> dict[str, Any]:
         if vehicle.transformation_bank is None
         else _bank_to_dict(vehicle.transformation_bank)
     )
+    result["selector_preview_bank"] = (
+        None
+        if vehicle.selector_preview_bank is None
+        else _bank_to_dict(vehicle.selector_preview_bank)
+    )
+    result["selector_preview_body_kind"] = vehicle.selector_preview_body_kind
     return result

@@ -10,11 +10,14 @@ public static class GpuHle
     public static bool NativeResolution { get; set; }
     public static bool GameplayActive { get; set; }
     public static float TargetAspect { get; set; } = 4f / 3f;
+    public static string? DebugCaptureLabel { get; set; }
+    public static int DebugGameplayTick { get; set; }
     public const float BaseAspect = 4f / 3f;
 
     readonly record struct PacketRange(uint Start, uint End);
     static readonly List<PacketRange> VehiclePacketRanges = [];
     static readonly HashSet<uint> VehiclePackets = [];
+    static readonly Dictionary<uint, string> PacketOwners = [];
 
     static uint NormalizePacketAddress(uint address) =>
         address & (Memory.MemoryMap.RetailRamSize - 1u);
@@ -46,6 +49,16 @@ public static class GpuHle
 
     public static void RegisterVehiclePacket(uint address) =>
         VehiclePackets.Add(NormalizePacketAddress(address));
+
+    public static void RegisterPacketOwner(uint address, string owner) =>
+        PacketOwners[NormalizePacketAddress(address)] = owner;
+
+    public static string DescribePacketOwner(uint address) =>
+        PacketOwners.TryGetValue(NormalizePacketAddress(address), out string? owner)
+            ? owner
+            : "unresolved";
+
+    public static void ClearPacketOwners() => PacketOwners.Clear();
 
     public struct DispRect { public int X, Y, W, H; public long Stamp; public bool Valid; }
 

@@ -43,6 +43,8 @@ From the repository root:
 ```powershell
 python tools/recompone-v8/prepare_reference.py --cue "BINCUE/Vigilante 8 (USA).cue"
 dotnet run --project tools/recompone-reference/RecompOne.Recompiler/RecompOne.Recompiler.csproj -c Release --no-build -- reference/generated/v8.recompone.json
+python tools/recompone-v8/apply_vehicle_engine_patches.py
+python tools/recompone-v8/apply_native_location_patches.py
 dotnet build reference/generated/recompiled/Vigilante8PC.csproj -c Release --no-restore
 & "reference/generated/recompiled/bin/Release/net10.0/Vigilante8PC.exe" "BINCUE/Vigilante 8 (USA).cue"
 ```

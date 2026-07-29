@@ -67,3 +67,25 @@ body bank, allocates independent stats and identity state, resets the original
 match VRAM allocator, and reserves the bank's exact CLUT/image rectangles
 before COMMON loads. The original texture loader claims those reservations at
 construction; no retail character, donor bank, or opaque payload is used.
+
+## Independent native arena runtime
+
+Super Dreamland 64 is appended as location slot 10 in the original V8
+**Select Location** screen. The source N64 `SHELL.DLL` record supplies its
+model index, title, subtitle, and path; converted `LOCATNS.N64` model 12
+supplies its independent wheel thumbnail. The shipped Dreamland record names
+California but duplicates Ski Resort's Colorado point `(270,182)`, so the
+repaired entry uses the shared native California point `(84,222)` from the
+N64 model-7 record. Both values and the derivation are retained in
+`artifacts/n64_arena_port/native_shell_ui/native_shell_ui_report.json`. The
+N64 loading image is encoded as PlayStation MDEC BS v2 and displayed by V8's
+normal LOAD overlay. `TERRAIN/DREAMLND.DLL` and
+`TERRAIN/DREAMLND.EXP` receive private loose-file extents, so no retail
+location or neighboring LBA is replaced.
+
+After each fresh RecompOne generation, run:
+
+```powershell
+python tools/recompone-v8/apply_vehicle_engine_patches.py
+python tools/recompone-v8/apply_native_location_patches.py
+```

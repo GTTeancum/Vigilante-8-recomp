@@ -165,6 +165,8 @@ class TextureSlot:
     packed_pixels: bytes
     compressed: bool
     supported: bool
+    palette_origin: tuple[int, int] = (0, 0)
+    image_origin: tuple[int, int] = (0, 0)
 
 
 @dataclass(frozen=True)
@@ -1054,6 +1056,10 @@ class Model:
                 packed_pixels=packed,
                 compressed=compressed,
                 supported=True,
+                image_origin=(
+                    i16le(self._data, image_rect_offset + 0x00),
+                    i16le(self._data, image_rect_offset + 0x02),
+                ),
             )
         if depth not in (0, 1):
             return TextureSlot(
@@ -1120,6 +1126,14 @@ class Model:
             packed_pixels=packed,
             compressed=compressed,
             supported=True,
+            palette_origin=(
+                i16le(self._data, offset + 0x0C),
+                i16le(self._data, offset + 0x0E),
+            ),
+            image_origin=(
+                i16le(self._data, image_offset + 0x0C),
+                i16le(self._data, image_offset + 0x0E),
+            ),
         )
 
     def textures(self) -> Iterator[TextureSlot]:

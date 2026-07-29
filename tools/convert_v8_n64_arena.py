@@ -17,11 +17,19 @@ def main() -> int:
     parser.add_argument("arena", help="archive stem such as DREAMLND")
     parser.add_argument("output", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument(
+        "--source-output",
+        type=Path,
+        help="optionally retain the decoded N64 EXP before conversion",
+    )
     args = parser.parse_args()
 
     arena = args.arena.upper()
     rom = V8N64Rom(args.rom)
     source = rom.decoded(f"{arena}.EXP")
+    if args.source_output is not None:
+        args.source_output.parent.mkdir(parents=True, exist_ok=True)
+        args.source_output.write_bytes(source)
     converted, report = convert_arena(source, arena)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(converted)

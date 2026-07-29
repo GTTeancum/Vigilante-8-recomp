@@ -1,0 +1,33 @@
+# Native V8 path to the appended Dreamland location. The stock location wheel
+# begins on Secret Base; ten downward steps reach appended slot 10.
+
+[press_start]
+1+2=START
+
+[main_menu]
+1+2=DOWN
+10+2=CROSS
+
+[player_count]
+5+2=CROSS
+
+[choose_player]
+5+2=CROSS
+
+[select_location]
+5+2=DOWN
+15+2=DOWN
+25+2=DOWN
+35+2=DOWN
+45+2=DOWN
+55+2=DOWN
+65+2=DOWN
+75+2=DOWN
+85+2=DOWN
+95+2=DOWN
+
+[location_super_dreamland_64]
+1+2=CROSS
+
+[choose_enemies]
+5+2=CROSS
