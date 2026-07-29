@@ -10,6 +10,7 @@
     <SelfContained Condition="'$(Configuration)' == 'Release'">true</SelfContained>
     <PublishSingleFile Condition="'$(Configuration)' == 'Release'">true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract Condition="'$(Configuration)' == 'Release'">true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract Condition="'$(Configuration)' == 'Release'">true</IncludeAllContentForSelfExtract>
     <EnableCompressionInSingleFile Condition="'$(Configuration)' == 'Release'">true</EnableCompressionInSingleFile>
     <PublishTrimmed Condition="'$(Configuration)' == 'Release'">true</PublishTrimmed>
     <TrimMode Condition="'$(Configuration)' == 'Release'">partial</TrimMode>
@@ -20,5 +21,12 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\tools\recompone-reference\RecompOne.Runtime\RecompOne.Runtime.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(PublishTrimmed)' == 'true'">
+    <!-- Silk discovers input backends through assembly attributes. Keep that
+         metadata and both GLFW platform implementations in trimmed desktop
+         builds. -->
+    <TrimmerRootAssembly Include="Silk.NET.Input.Glfw" />
+    <TrimmerRootAssembly Include="Silk.NET.Windowing.Glfw" />
   </ItemGroup>
 </Project>

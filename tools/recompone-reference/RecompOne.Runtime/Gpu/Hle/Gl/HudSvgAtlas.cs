@@ -23,7 +23,7 @@ internal sealed class HudSvgAtlas : IDisposable
     static readonly Tile[] Tiles =
     [
         new("v82_radar.svg", 0, 0, 64, 55),
-        new("v82_status.svg", 0, 440, 84, 34),
+        new("v82_status.svg", 0, 440, 90, 34),
         new("v82_health.svg", 672, 440, 16, 49),
     ];
 

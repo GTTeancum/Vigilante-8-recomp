@@ -587,19 +587,21 @@ public sealed class GlBackend : IGpuBackend
         float drawX = r.X;
         int drawW = r.W;
         short drawU = r.U;
-        // The live vehicle-status sprite is authored four pixels left of its
-        // own 84-pixel backing so it covers the retail radar/status connector.
-        // In the detached SVG layout those pixels float in the deliberate gap;
-        // clip only that exact sprite to the status element's restored border.
-        if (ConfigManager.View.VectorIcons &&
+        // The retail status rectangle starts at x=80, but its live vehicle
+        // portrait is x=76..116 and its complete armor bar is x=80..112.
+        // Extend only the vector backing six native pixels left: the copied
+        // 44-pixel weapon-panel silhouette then lands at x=74..118, centering
+        // the portrait at 2/2 pixels and the armor bar at 6/6 pixels.
+        bool statusHudBacking =
+            ConfigManager.View.VectorIcons &&
             topGameplayHud &&
             f.Textured && f.RawTexture && f.SemiTrans &&
-            r.W == 40 && r.H == 16 &&
-            r.U == 120 && r.V == 78)
+            r.W == 84 && r.H == 34;
+        if (statusHudBacking)
         {
-            drawX += 4f;
-            drawW -= 4;
-            drawU += 4;
+            drawX -= 6f;
+            drawW += 6;
+            drawU -= 6;
         }
         float anchor = 0f;
         if (ConfigManager.View.HudAnchoring && GpuHle.GameplayActive && _kTarget is { Margin: > 0 } target)

@@ -28,6 +28,7 @@ public static class V82Compat
     const uint PcHeapBase =
         ExpandedPrimitiveBufferBase + ExpandedPrimitiveBufferSize * 2u;
     const uint PcHeapEnd = 0x80800000u;
+    const ushort MaximumAttachedWeaponAmmo = 99;
     static bool _shellPinnedAtLinkedBase;
     static bool _extendedHeapInstalled;
     static readonly List<(uint Start, uint Size)> PcFreeBlocks = new();
@@ -1019,6 +1020,8 @@ public static class V82Compat
     // Preserve the scheduler's callback ABI while checking that invariant.
     public static void RunObjectScheduler(CpuContext c, IMemory m)
     {
+        ClampAttachedWeaponAmmo(m);
+
         uint schedulerArgument = c.A0;
         uint entrySp = c.SP;
         uint savedRa = c.RA;
@@ -1454,13 +1457,16 @@ public static class V82Compat
             if (_soakWeaponObject >= PcHeapBase &&
                 _soakWeaponObject < PcHeapEnd - 0x80u)
             {
-                m.WriteU16(_soakWeaponObject + 0x1Cu, 1000);
-                _soakWeaponAmmo = 1000;
+                m.WriteU16(
+                    _soakWeaponObject + 0x1Cu,
+                    MaximumAttachedWeaponAmmo);
+                _soakWeaponAmmo = MaximumAttachedWeaponAmmo;
                 Console.Error.WriteLine(
                     $"[V82Coverage] weapon-armed kind={kind} " +
                     $"object=0x{_soakWeaponObject:X8} " +
                     $"objectKind={unchecked((sbyte)m.ReadU8(_soakWeaponObject + 9u))} " +
-                    $"callback=0x{m.ReadU32(_soakWeaponObject):X8} ammo=1000");
+                    $"callback=0x{m.ReadU32(_soakWeaponObject):X8} " +
+                    $"ammo={MaximumAttachedWeaponAmmo}");
             }
             else
             {
@@ -1485,6 +1491,21 @@ public static class V82Compat
             }
             _soakWeaponAmmo = ammo;
         }
+    }
+
+    static void ClampAttachedWeaponAmmo(IMemory m)
+    {
+        uint player = _playerVehicle;
+        if (player < PcHeapBase || player >= PcHeapEnd - 0x124u)
+            return;
+
+        uint weapon = m.ReadU32(player + 0x120u);
+        if (weapon < PcHeapBase || weapon >= PcHeapEnd - 0x20u)
+            return;
+
+        ushort ammo = m.ReadU16(weapon + 0x1Cu);
+        if (ammo > MaximumAttachedWeaponAmmo)
+            m.WriteU16(weapon + 0x1Cu, MaximumAttachedWeaponAmmo);
     }
 
     static ushort SoakWeaponCommandInput(int frame)
