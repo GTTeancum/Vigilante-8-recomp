@@ -1,0 +1,31 @@
+# Enter the original V8 one-player selector. Each RIGHT pulse after the first
+# captures the previously settled native entry; the final CROSS captures Y.
+10+2=START
+
+[press_start]
+1+2=START
+
+[main_menu]
+1+2=DOWN
+10+2=CROSS
+
+[player_count]
+5+2=CROSS
+
+[location_oilfield]
+1+2=CROSS
+
+[choose_player]
+5+2=RIGHT
+25+2=RIGHT
+45+2=RIGHT
+65+2=RIGHT
+85+2=RIGHT
+105+2=RIGHT
+125+2=RIGHT
+145+2=RIGHT
+165+2=RIGHT
+185+2=RIGHT
+205+2=RIGHT
+225+2=RIGHT
+245+2=CROSS

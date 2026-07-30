@@ -31,6 +31,8 @@ public static class V8Compat
     static bool _linkedOverlayRangesReserved;
     static readonly bool _traceMenuText =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MENU_TEXT") == "1";
+    static readonly bool _unlockNativeSelectorRoster =
+        Environment.GetEnvironmentVariable("RECOMPONE_V8_UNLOCK_ROSTER") == "1";
     static readonly bool _zeroGameVolume =
         Environment.GetEnvironmentVariable("RECOMPONE_V8_GAME_VOLUME") == "0";
     static readonly bool _traceVehicle =
@@ -2612,7 +2614,8 @@ public static class V8Compat
     {
         string text = ReadAscii(m, c.A1, 48);
         if (_traceMenuText && text.Length != 0 && _seenMenuText.Add(text))
-            Console.Error.WriteLine($"[V8Compat] menu text: {text}");
+            Console.Error.WriteLine(
+                $"[V8Compat] menu text: {text} caller=0x{c.RA:X8}");
 
         string? stage;
         if (text == "PAUSED")
@@ -2721,6 +2724,12 @@ public static class V8Compat
         if (stage != null &&
             (!_gameplayStage || stage.StartsWith("pause_", StringComparison.Ordinal)))
             _lastMenuStage = stage;
+    }
+
+    public static void UnlockNativeSelectorRoster(CpuContext c, IMemory m)
+    {
+        if (_unlockNativeSelectorRoster)
+            c.A0 &= ~0x0FFFu;
     }
 
     static bool TryGetLocationStage(string text, out string? stage)

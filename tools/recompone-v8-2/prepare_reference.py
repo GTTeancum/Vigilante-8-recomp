@@ -613,7 +613,10 @@ PROVEN_PATCHES = [
     {
         "overlay": "main",
         "address": "8001EF34",
-        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceNativeSelectorCall",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82VehicleRegistry."
+            "PrepareNativeSelectorBank"
+        ),
         "mode": "pre",
     },
     {
@@ -633,6 +636,26 @@ PROVEN_PATCHES = [
         "address": "8002CC08",
         "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.ReleaseVehicleMapping",
         "mode": "pre",
+    },
+    {
+        # Retain the sequel's native camera object/lifecycle while imported
+        # vehicles use the first game's exact follow distance.
+        "overlay": "main",
+        "address": "8004B898",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82VehicleRegistry."
+            "BeginOriginalV8CameraValues"
+        ),
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8004B898",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82VehicleRegistry."
+            "FinishOriginalV8CameraValues"
+        ),
+        "mode": "post",
     },
     {
         "overlay": "SHELL_SHELL",
@@ -803,6 +826,16 @@ PROVEN_PATCHES = [
         "overlay": "SHELL_LOAD",
         "address": "80109704",
         "target": "RecompOne.Runtime.Sdk.V82Compat.RunLoadVlc",
+        "mode": "replace",
+    },
+    {
+        # SHELL uses the same hand-written, tail-entered VLC decoder shape as
+        # LOAD. Recompiling its internal labels as independent C# functions
+        # loses native RA/delay-slot flow and leaves menu/FMVs with the gray
+        # 32-pixel strip in place of their decoded background.
+        "overlay": "SHELL_SHELL",
+        "address": "80110D14",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.RunShellVlc",
         "mode": "replace",
     },
     {

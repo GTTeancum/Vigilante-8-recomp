@@ -57,6 +57,19 @@ internal static class HostWindow
     static int _presentationFrame;
     static readonly bool _capturePresentation =
         Environment.GetEnvironmentVariable("RECOMPONE_PRESENTATION_CAPTURE") == "1";
+    static readonly int _presentationCaptureBurstFrames =
+        int.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_PRESENTATION_CAPTURE_BURST_FRAMES"),
+            out int burstFrames)
+            ? Math.Clamp(burstFrames, 0, 600)
+            : 0;
+    static readonly string? _presentationCaptureBurstLabel =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_PRESENTATION_CAPTURE_BURST_LABEL");
+    static string? _activePresentationBurstLabel;
+    static int _activePresentationBurstFrame;
+    static int _activePresentationBurstRemaining;
     static readonly bool _windowVisible =
         Environment.GetEnvironmentVariable("RECOMPONE_WINDOW_VISIBLE") != "0";
     static readonly int _displayProbeInterval =
@@ -180,7 +193,20 @@ internal static class HostWindow
         _requestedDisplayCapture = sanitized;
         Hle.GpuHle.DebugCaptureLabel = sanitized;
         if (_capturePresentation && Hle.GpuHle.Active)
+        {
             _pendingPresentationCapture = sanitized;
+            if (_presentationCaptureBurstFrames > 0 &&
+                (string.IsNullOrEmpty(_presentationCaptureBurstLabel) ||
+                 sanitized.Equals(
+                     _presentationCaptureBurstLabel,
+                     StringComparison.OrdinalIgnoreCase)))
+            {
+                _activePresentationBurstLabel = sanitized;
+                _activePresentationBurstFrame = 0;
+                _activePresentationBurstRemaining =
+                    _presentationCaptureBurstFrames;
+            }
+        }
     }
 
     public static void RequestDiscPath() => _discPicker?.Show();
@@ -465,6 +491,17 @@ internal static class HostWindow
         {
             string? capture = _pendingPresentationCapture;
             _pendingPresentationCapture = null;
+            if (_activePresentationBurstRemaining > 0 &&
+                _activePresentationBurstLabel != null)
+            {
+                capture =
+                    $"{_activePresentationBurstLabel}_" +
+                    $"{_activePresentationBurstFrame:000}";
+                _activePresentationBurstFrame++;
+                _activePresentationBurstRemaining--;
+                if (_activePresentationBurstRemaining == 0)
+                    _activePresentationBurstLabel = null;
+            }
             ++_presentationFrame;
             if (_capturePresentation &&
                 (_presentationFrame == _presentationCaptureFrame ||

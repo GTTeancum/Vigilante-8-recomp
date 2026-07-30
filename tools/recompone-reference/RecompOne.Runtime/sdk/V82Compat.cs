@@ -38,9 +38,13 @@ public static class V82Compat
     static readonly Stack<uint[]> ShellDecodeCallers = new();
     static readonly Stack<(uint FrameSp, uint SourceRect)> ShellImageDecodeFrames = new();
     static readonly Stack<(uint Width, uint Height, uint AlignWidth, uint AlignHeight, uint LimitWidth, uint LimitHeight)> VramRequests = new();
+    static readonly Stack<bool> SelectorOwnedVramRequests = new();
     static readonly List<GuestVramReservation> GuestVramReservations = [];
+    static readonly List<GuestVramReservation> SelectorVramReservations = [];
     static readonly HashSet<int> ClaimedGuestVramReservations = [];
     static readonly HashSet<uint> SyntheticVramDescriptors = [];
+    static List<GuestVramReservation>? _activeGuestVramReservations;
+    static bool _guestVramClaimReusable;
     static bool _guestVramClaimActive;
     static int _guestVramClaimIndex;
     static int _guestVramClaimMisses;
@@ -432,6 +436,16 @@ public static class V82Compat
 
     public static void RunShellVlc(CpuContext c, IMemory m)
         => RunVlcRegion(c, m, 0x80110D14u, 0x80111220u, "SHELL");
+
+    // Current checked-in generated sources predate the SHELL replacement
+    // hook. Keep their original body compile-reachable while routing every
+    // live call through the exact interpreter; a fresh RecompOne generation
+    // replaces that body outright via prepare_reference.py.
+    public static bool RunShellVlcHandled(CpuContext c, IMemory m)
+    {
+        RunShellVlc(c, m);
+        return true;
+    }
 
     static void RunVlcRegion(
         CpuContext c, IMemory m, uint start, uint end, string region)
@@ -2078,6 +2092,53 @@ public static class V82Compat
         }
     }
 
+    public static void ReserveSelectorVram(
+        CpuContext c, IMemory m, int guest)
+    {
+        ReleaseSelectorVramReservation(c, m);
+        Console.Error.WriteLine(
+            $"[V82Vehicles] streaming native selector VRAM for guest={guest}");
+    }
+
+    public static void ReleaseSelectorVramReservation(
+        CpuContext c, IMemory m)
+    {
+        if (SelectorVramReservations.Count == 0)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        var snapshot = c.Snapshot();
+        try
+        {
+            for (int index = SelectorVramReservations.Count - 1;
+                 index >= 0;
+                 index--)
+            {
+                GuestVramReservation reservation =
+                    SelectorVramReservations[index];
+                // The allocator can restructure/coalesce native nodes while a
+                // preview is alive, so a saved descriptor pointer is not
+                // stable. Use retail's coordinate-release wrapper; it searches
+                // the current tree and dispatches descriptor teardown itself.
+                c.A0 = reservation.X;
+                c.A1 = reservation.Y;
+                Dispatcher.Call(c, m, 0x80020F5Cu);
+                if (c.V0 == 0u)
+                    Console.Error.WriteLine(
+                        $"[V82Vehicles] selector VRAM rectangle at " +
+                        $"({reservation.X},{reservation.Y}) was already released");
+            }
+            Console.Error.WriteLine(
+                $"[V82Vehicles] released {SelectorVramReservations.Count} " +
+                "reusable native selector VRAM rectangles");
+            SelectorVramReservations.Clear();
+        }
+        finally
+        {
+            c.Restore(snapshot);
+        }
+    }
+
     public static void ReleaseGuestVramReservation(CpuContext c, IMemory m)
     {
         if (GuestVramReservations.Count == 0)
@@ -2091,14 +2152,15 @@ public static class V82Compat
                  index >= 0;
                  index--)
             {
-                c.A0 = GuestVramReservations[index].X;
-                c.A1 = GuestVramReservations[index].Y;
+                GuestVramReservation reservation =
+                    GuestVramReservations[index];
+                c.A0 = reservation.X;
+                c.A1 = reservation.Y;
                 Dispatcher.Call(c, m, 0x80020F5Cu);
                 if (c.V0 == 0u)
-                    throw new InvalidOperationException(
-                        $"reserved V8:2 VRAM rectangle at " +
-                        $"({GuestVramReservations[index].X}," +
-                        $"{GuestVramReservations[index].Y}) disappeared");
+                    Console.Error.WriteLine(
+                        $"[V82Vehicles] match VRAM rectangle at " +
+                        $"({reservation.X},{reservation.Y}) was already released");
             }
             Console.Error.WriteLine(
                 $"[V82Vehicles] released {GuestVramReservations.Count} " +
@@ -2111,25 +2173,44 @@ public static class V82Compat
         }
     }
 
-    public static void BeginGuestVramClaim()
+    public static void BeginGuestVramClaim(bool reusable = false)
     {
         _guestVramClaimIndex = 0;
         _guestVramClaimMisses = 0;
         ClaimedGuestVramReservations.Clear();
-        _guestVramClaimActive = GuestVramReservations.Count != 0;
+        _guestVramClaimReusable = reusable;
+        _activeGuestVramReservations =
+            reusable ? SelectorVramReservations : GuestVramReservations;
+        _guestVramClaimActive =
+            reusable || _activeGuestVramReservations.Count != 0;
     }
 
     public static void EndGuestVramClaim(CpuContext c, IMemory m)
     {
+        List<GuestVramReservation> reservations =
+            _activeGuestVramReservations ?? GuestVramReservations;
+        if (_guestVramClaimReusable)
+        {
+            int reusableClaimed = ClaimedGuestVramReservations.Count;
+            ClaimedGuestVramReservations.Clear();
+            _guestVramClaimActive = false;
+            _activeGuestVramReservations = null;
+            Console.Error.WriteLine(
+                $"[V82Vehicles] claimed {reusableClaimed} reusable " +
+                "selector VRAM rectangles");
+            return;
+        }
+
         var pending = new List<GuestVramReservation>();
-        for (int index = 0; index < GuestVramReservations.Count; index++)
+        for (int index = 0; index < reservations.Count; index++)
             if (!ClaimedGuestVramReservations.Contains(index))
-                pending.Add(GuestVramReservations[index]);
+                pending.Add(reservations[index]);
         int claimed = ClaimedGuestVramReservations.Count;
-        GuestVramReservations.Clear();
-        GuestVramReservations.AddRange(pending);
+        reservations.Clear();
+        reservations.AddRange(pending);
         ClaimedGuestVramReservations.Clear();
         _guestVramClaimActive = pending.Count != 0;
+        _activeGuestVramReservations = null;
         Console.Error.WriteLine(
             $"[V82Vehicles] claimed {claimed} body-time VRAM rectangles; " +
             $"retained {pending.Count} independent late-load reservations");
@@ -2162,6 +2243,7 @@ public static class V82Compat
     {
         _guestVramClaimActive = false;
         ClaimedGuestVramReservations.Clear();
+        _activeGuestVramReservations = null;
     }
 
     public static bool TrackVramAllocationPre(CpuContext c, IMemory m)
@@ -2170,43 +2252,75 @@ public static class V82Compat
             c.A0, c.A1, c.A2, c.A3,
             m.ReadU32(c.SP + 0x10u), m.ReadU32(c.SP + 0x14u));
         VramRequests.Push(request);
+        bool palette = request.Item3 == 16u && request.Item4 == 1u;
+        bool image = request.Item3 == 64u && request.Item4 == 256u;
+        bool selectorOwned =
+            _guestVramClaimReusable &&
+            (palette || image) &&
+            V82VehicleRegistry.OwnsCurrentTextureLoad(c, m, palette);
+        SelectorOwnedVramRequests.Push(selectorOwned);
         if (_guestVramClaimActive)
         {
-            bool palette =
-                request.Item3 == 16u && request.Item4 == 1u;
-            bool image =
-                request.Item3 == 64u && request.Item4 == 256u;
+            List<GuestVramReservation> reservations =
+                _activeGuestVramReservations ?? GuestVramReservations;
             if ((!palette && !image) ||
                 !V82VehicleRegistry.OwnsCurrentTextureLoad(
                     c, m, palette))
                 return true;
 
-            for (int index = 0; index < GuestVramReservations.Count; index++)
+            for (int index = 0; index < reservations.Count; index++)
             {
                 if (ClaimedGuestVramReservations.Contains(index))
                     continue;
 
                 GuestVramReservation reservation =
-                    GuestVramReservations[index];
+                    reservations[index];
                 NativeVramAllocation expected = reservation.Request;
-                if (request != (
-                        expected.Width,
-                        expected.Height,
-                        expected.AlignWidth,
-                        expected.AlignHeight,
-                        expected.LimitWidth,
-                        expected.LimitHeight))
+                bool reusableFit =
+                    _guestVramClaimReusable &&
+                    request.Item1 <= expected.Width &&
+                    request.Item2 <= expected.Height &&
+                    request.Item3 == expected.AlignWidth &&
+                    request.Item4 == expected.AlignHeight &&
+                    request.Item5 == expected.LimitWidth &&
+                    request.Item6 == expected.LimitHeight;
+                bool exactFit = request == (
+                    expected.Width,
+                    expected.Height,
+                    expected.AlignWidth,
+                    expected.AlignHeight,
+                    expected.LimitWidth,
+                    expected.LimitHeight);
+                if (!exactFit && !reusableFit)
                     continue;
 
+                if (_guestVramClaimReusable)
+                {
+                    m.WriteU16(
+                        reservation.Descriptor,
+                        checked((ushort)reservation.X));
+                    m.WriteU16(
+                        reservation.Descriptor + 2u,
+                        checked((ushort)reservation.Y));
+                    m.WriteU16(
+                        reservation.Descriptor + 4u,
+                        checked((ushort)request.Item1));
+                    m.WriteU16(
+                        reservation.Descriptor + 6u,
+                        checked((ushort)request.Item2));
+                }
                 c.V0 = reservation.Descriptor;
                 ClaimedGuestVramReservations.Add(index);
                 _guestVramClaimIndex++;
                 if (ClaimedGuestVramReservations.Count ==
-                    GuestVramReservations.Count)
+                    reservations.Count)
                 {
                     _guestVramClaimActive = false;
-                    GuestVramReservations.Clear();
-                    ClaimedGuestVramReservations.Clear();
+                    if (!_guestVramClaimReusable)
+                    {
+                        reservations.Clear();
+                        ClaimedGuestVramReservations.Clear();
+                    }
                     Console.Error.WriteLine(
                         $"[V82Vehicles] all {_guestVramClaimIndex} native " +
                         "VRAM reservations claimed");
@@ -2226,13 +2340,68 @@ public static class V82Compat
         return true;
     }
 
-    public static bool IgnoreSyntheticVramFree(CpuContext c, IMemory m) =>
-        !SyntheticVramDescriptors.Contains(c.A0);
+    public static bool IgnoreSyntheticVramFree(CpuContext c, IMemory m)
+    {
+        if (!SyntheticVramDescriptors.Remove(c.A0))
+            return true;
+
+        // Synthetic descriptors live in the host heap and are deliberately
+        // absent from the native allocator's linked tree. Let object teardown
+        // release the clone here, then suppress the native descriptor walk.
+        PcFree(c, Dispatcher.UnwrapMemory(m));
+        return false;
+    }
 
     public static void TrackVramAllocationPost(CpuContext c, IMemory m)
     {
         if (VramRequests.Count == 0) return;
         var request = VramRequests.Pop();
+        bool selectorOwned =
+            SelectorOwnedVramRequests.Count != 0 &&
+            SelectorOwnedVramRequests.Pop();
+        if (_guestVramClaimReusable &&
+            selectorOwned &&
+            c.V0 != 0u &&
+            !SyntheticVramDescriptors.Contains(c.V0))
+        {
+            m = Dispatcher.UnwrapMemory(m);
+            uint backingDescriptor = c.V0;
+            uint x = (uint)(short)m.ReadU16(backingDescriptor);
+            uint y = (uint)(short)m.ReadU16(backingDescriptor + 2u);
+            var snapshot = c.Snapshot();
+            c.A0 = 0x18u;
+            PcMalloc(c, m);
+            uint descriptor = c.V0;
+            c.Restore(snapshot);
+            if (descriptor == 0u)
+                throw new OutOfMemoryException(
+                    "V8:2 selector VRAM descriptor allocation failed");
+            m.WriteU16(descriptor, checked((ushort)x));
+            m.WriteU16(descriptor + 2u, checked((ushort)y));
+            m.WriteU16(
+                descriptor + 4u, checked((ushort)request.Width));
+            m.WriteU16(
+                descriptor + 6u, checked((ushort)request.Height));
+            m.WriteU32(descriptor + 8u, 1u);
+            m.WriteU32(descriptor + 0xCu, 0u);
+            m.WriteU32(descriptor + 0x10u, 0u);
+            m.WriteU32(descriptor + 0x14u, 0u);
+            SyntheticVramDescriptors.Add(descriptor);
+            SelectorVramReservations.Add(new GuestVramReservation(
+                new NativeVramAllocation(
+                    request.Width,
+                    request.Height,
+                    request.AlignWidth,
+                    request.AlignHeight,
+                    request.LimitWidth,
+                    request.LimitHeight),
+                x,
+                y,
+                descriptor));
+            ClaimedGuestVramReservations.Add(
+                SelectorVramReservations.Count - 1);
+            c.V0 = descriptor;
+        }
         if (!_matchVramActive) return;
 
         if (c.V0 != 0u)

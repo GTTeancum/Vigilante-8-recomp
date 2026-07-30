@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply durable first-three V8 seams inside V8:2's native selector.
+"""Apply durable packaged-V8-roster seams inside V8:2's native selector.
 
 RecompOne's regular patches operate on whole functions. These two generated
 sites are deliberately narrower: the native carousel's current FP slot and
@@ -24,7 +24,7 @@ REPLACEMENTS = (
         c.RA = 0x80106808u;
 """,
         """        L80106800: ;
-        c.FP = RecompOne.Runtime.Sdk.V82VehicleRegistry.ResolveNativeSelectorSlot(c.FP, m);
+        c.FP = RecompOne.Runtime.Sdk.V82VehicleRegistry.ResolveNativeSelectorSlot(c, m);
         c.RA = 0x80106808u;
 """,
     ),
@@ -77,7 +77,7 @@ def main() -> int:
 
     if changed:
         source.write_text(text, encoding="utf-8")
-    print(f"V8:2 native first-three selector seams ready ({changed} applied)")
+    print(f"V8:2 native packaged-roster selector seams ready ({changed} applied)")
     return 0
 
 

@@ -1,0 +1,23 @@
+# Enter V8:2's native selector and wrap left through every packaged V8 entry.
+# The 220-poll spacing lets the native preview settle and complete the
+# deterministic 31-frame proof rotation before moving to the next vehicle.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+2160+2=LEFT
+2380+2=LEFT
+2600+2=LEFT
+2820+2=LEFT
+3040+2=LEFT
+3260+2=LEFT
+3480+2=LEFT
+3700+2=LEFT
+3920+2=LEFT
+4140+2=LEFT
+4360+2=LEFT
+4580+2=LEFT

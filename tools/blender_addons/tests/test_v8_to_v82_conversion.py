@@ -25,6 +25,15 @@ EXPECTED_IDS = (
     "guest.v8.chassey_blue",
     "guest.v8.slick_clyde",
     "guest.v8.sheila",
+    "guest.v8.john_torque",
+    "guest.v8.dave",
+    "guest.v8.convoy",
+    "guest.v8.loki",
+    "guest.v8.houston_3",
+    "guest.v8.boogie",
+    "guest.v8.beezwax",
+    "guest.v8.molo",
+    "guest.v8.sid_burn",
 )
 
 
@@ -33,16 +42,19 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.vehicles = build_projects()
 
-    def test_three_entries_own_nine_exclusive_native_banks(self) -> None:
+    def test_full_roster_owns_exclusive_native_banks(self) -> None:
         package = registry.compile_package(self.vehicles)
         game, entries = registry.parse_registry(package.registry)
         forms = tuple(iff.parse(package.archive).forms(b"XOBF"))
 
         self.assertEqual("V8_2", game)
         self.assertEqual(EXPECTED_IDS, tuple(v.stable_id for v in self.vehicles))
-        self.assertEqual(9, len(forms))
+        self.assertEqual(len(EXPECTED_IDS) * 3, len(forms))
         self.assertEqual(
-            ((0, 1, 2), (3, 4, 5), (6, 7, 8)),
+            tuple(
+                (index * 3, index * 3 + 1, index * 3 + 2)
+                for index in range(len(EXPECTED_IDS))
+            ),
             tuple(
                 (
                     entry.archive_index,
@@ -61,7 +73,7 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
                 entry.selector_preview_archive_index,
             )
         }
-        self.assertEqual(set(range(9)), referenced)
+        self.assertEqual(set(range(len(EXPECTED_IDS) * 3)), referenced)
 
         decoded = registry.decompile_package(package.archive, package.registry)
         rebuilt = registry.compile_package(decoded)
@@ -75,8 +87,9 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
                 for slot in vehicle.slots
                 if slot.parent == vehicle.body_kind and slot.key is not None
             }
+            expected_wheels = {0x8000, 0x8001, 0x8002, 0x8003}
             self.assertEqual(
-                {0x8000, 0x8001, 0x8002, 0x8003},
+                expected_wheels,
                 direct_keys & set(range(0x8000, 0x8006)),
                 vehicle.stable_id,
             )

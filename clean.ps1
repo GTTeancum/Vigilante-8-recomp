@@ -100,6 +100,10 @@ if (-not $KeepArtifacts) {
     Remove-RepoPath -LiteralPath (Join-Path $repoRoot 'artifacts')
 }
 
+# Tool downloads, extracted comparison discs, emulator sandboxes, and one-off
+# inspection files under .tmp are disposable scratch data.
+Remove-RepoPath -LiteralPath (Join-Path $repoRoot '.tmp')
+
 # CMake build trees are wholly regenerable.
 foreach ($directory in Get-ChildItem -LiteralPath $repoRoot -Directory -Force |
          Where-Object { $_.Name -eq 'build' -or $_.Name -like 'build-*' }) {
@@ -157,7 +161,10 @@ foreach ($project in Get-ChildItem -LiteralPath $repoRoot -Filter '*.csproj' `
 foreach ($transientDirectory in @(
     (Join-Path $repoRoot 'reference\traces'),
     (Join-Path $repoRoot 'reference-v8-2\traces'),
-    (Join-Path $repoRoot 'tools\smoke\captures')
+    (Join-Path $repoRoot 'tools\smoke\captures'),
+    (Join-Path $repoRoot 'PS1 game\Screenshots'),
+    (Join-Path $repoRoot 'PS1 game\V8_2'),
+    (Join-Path $repoRoot 'V8_2_LOOSE\artifacts')
 )) {
     Remove-RepoPath -LiteralPath $transientDirectory
 }
@@ -205,6 +212,45 @@ foreach ($log in Get-ChildItem -LiteralPath $repoRoot -File -Filter '*.log' `
              $_.Name -notin @('progress.log', 'decisions.log')
          }) {
     Remove-RepoPath -LiteralPath $log.FullName
+}
+
+# Remove old comparison audio/logs and the framework-dependent sequel build
+# that was previously deployed into the original game's handoff directory.
+# The current single-file V8 executable and all loose game assets are retained.
+foreach ($stalePath in @(
+    'reference\audio_match3.wav',
+    'reference\audio_match3_stderr.log',
+    'reference\audio_match3_stdout.log',
+    'reference\cdda_pause_stderr.log',
+    'reference\cdda_pause_stdout.log',
+    'reference\cdda_test3_stderr.log',
+    'reference\cdda_test3_stdout.log',
+    'reference\cdda_test4_stderr.log',
+    'reference\cdda_test4_stdout.log',
+    'reference\deployed_final_stderr.log',
+    'reference\deployed_final_stdout.log',
+    'PS1 game\Vigilante82PC.exe',
+    'PS1 game\Vigilante82PC.dll',
+    'PS1 game\Vigilante82PC.deps.json',
+    'PS1 game\Vigilante82PC.runtimeconfig.json',
+    'PS1 game\VIGILANTE_8_2_README.md',
+    'PS1 game\Vigilante8PC_Dreamland_test.exe',
+    'PS1 game\RecompOne.Runtime.dll',
+    'PS1 game\SDL2.dll',
+    'PS1 game\createdump.exe',
+    'PS1 game\nfd.lib',
+    'PS1 game\nfd.exp'
+)) {
+    Remove-RepoPath -LiteralPath (Join-Path $repoRoot $stalePath)
+}
+
+# Satellite assemblies left by old framework-dependent publishes are not game
+# localization assets; the current handoff is a self-contained executable.
+foreach ($locale in @(
+    'cs', 'de', 'es', 'fr', 'it', 'ja', 'ko',
+    'pl', 'pt-BR', 'ru', 'tr', 'zh-Hans', 'zh-Hant'
+)) {
+    Remove-RepoPath -LiteralPath (Join-Path $repoRoot "PS1 game\$locale")
 }
 
 if (-not $SkipGitMaintenance -and

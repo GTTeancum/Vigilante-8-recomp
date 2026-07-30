@@ -666,6 +666,15 @@ def main() -> int:
         "patches": [
             {
                 "overlay": "SHELL",
+                "address": "80104D24",
+                "target": (
+                    "RecompOne.Runtime.Sdk.V8Compat."
+                    "UnlockNativeSelectorRoster"
+                ),
+                "mode": "pre",
+            },
+            {
+                "overlay": "SHELL",
                 "address": "80102BDC",
                 "target": (
                     "RecompOne.Runtime.Sdk.V8ArenaRegistry."

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build three independent V8 vehicles as new V8:2 roster entries."""
+"""Build the twelve V8-exclusive vehicles as new V8:2 roster entries."""
 
 from __future__ import annotations
 
@@ -39,27 +39,30 @@ V82_EXE = ROOT / "V8_2_LOOSE" / "SLUS_008.68"
 OUTPUT = ROOT / "artifacts" / "v8_to_v82_guest_roster"
 
 VEHICLES = (
-    (0, "guest.v8.chassey_blue", "Chassey Blue"),
-    (1, "guest.v8.slick_clyde", "Slick Clyde"),
-    (2, "guest.v8.sheila", "Sheila"),
+    (0, "guest.v8.chassey_blue", "Chassey Blue", "'67 Rattler"),
+    (1, "guest.v8.slick_clyde", "Slick Clyde", "'70 Clydesdale"),
+    (2, "guest.v8.sheila", "Sheila", "'74 Strider"),
+    (3, "guest.v8.john_torque", "John Torque", "'69 Jefferson"),
+    (4, "guest.v8.dave", "Dave", "'70 Van"),
+    (5, "guest.v8.convoy", "Convoy", "'72 Moth Truck"),
+    (6, "guest.v8.loki", "Loki", "'73 Glenn 4x4"),
+    (7, "guest.v8.houston_3", "Houston 3", "'75 Palamino"),
+    (8, "guest.v8.boogie", "Boogie", "'76 Leprechaun"),
+    (9, "guest.v8.beezwax", "Beezwax", "'70 Stag Pickup"),
+    (10, "guest.v8.molo", "Molo", "'66 School Bus"),
+    (11, "guest.v8.sid_burn", "Sid Burn", "'69 Manta"),
 )
 
-SELECTOR_REFERENCES = (
+SELECTOR_REFERENCES = tuple(
     ROOT
-    / "artifacts"
-    / "v8_native_selector_reference_fresh"
-    / "v8_choose_player.bmp",
-    ROOT
-    / "artifacts"
-    / "v8_native_selector_first_three"
-    / "slick_clyde"
-    / "slick_0025.bmp",
-    ROOT
-    / "artifacts"
-    / "v8_native_selector_first_three"
-    / "sheila"
-    / "sheila_0045.bmp",
+    / "V8_2_LOOSE"
+    / "SHELL"
+    / f"SELECTOR_{index:02}.PPM"
+    for index in range(len(VEHICLES))
 )
+# Runtime selector portraits are already the exact 260x422 native crop. Keep
+# those durable assets beside the other SHELL data instead of depending on
+# disposable captures under artifacts/.
 SELECTOR_CROP = (0, 0, 260, 422)
 
 
@@ -99,6 +102,64 @@ def crop_bmp_to_ppm(path: Path, crop: tuple[int, int, int, int]) -> bytes:
     return f"P6\n{crop_width} {crop_height}\n255\n".encode("ascii") + rgb
 
 
+def crop_ppm_to_ppm(path: Path, crop: tuple[int, int, int, int]) -> bytes:
+    """Extract exact top-left pixels from a binary P6 selector capture."""
+    data = path.read_bytes()
+    cursor = 0
+
+    def token() -> bytes:
+        nonlocal cursor
+        while cursor < len(data):
+            if data[cursor] == ord("#"):
+                cursor = data.find(b"\n", cursor)
+                if cursor < 0:
+                    raise ValueError(f"truncated PPM comment: {path}")
+            if cursor < len(data) and data[cursor] in b" \t\r\n":
+                cursor += 1
+                continue
+            break
+        start = cursor
+        while cursor < len(data) and data[cursor] not in b" \t\r\n":
+            cursor += 1
+        return data[start:cursor]
+
+    if token() != b"P6":
+        raise ValueError(f"selector reference is not a binary P6 PPM: {path}")
+    width = int(token())
+    height = int(token())
+    if int(token()) != 255:
+        raise ValueError(f"selector PPM is not 8-bit RGB: {path}")
+    if cursor >= len(data) or data[cursor] not in b" \t\r\n":
+        raise ValueError(f"selector PPM has no header delimiter: {path}")
+    if data[cursor : cursor + 2] == b"\r\n":
+        cursor += 2
+    else:
+        cursor += 1
+    pixels = data[cursor:]
+    if len(pixels) != width * height * 3:
+        raise ValueError(f"selector PPM payload is truncated: {path}")
+
+    x, y, crop_width, crop_height = crop
+    if x < 0 or y < 0 or x + crop_width > width or y + crop_height > height:
+        raise ValueError(f"selector crop is outside {width}x{height}: {path}")
+    rgb = bytearray()
+    for output_y in range(y, y + crop_height):
+        row = (output_y * width + x) * 3
+        rgb.extend(pixels[row : row + crop_width * 3])
+    return f"P6\n{crop_width} {crop_height}\n255\n".encode("ascii") + rgb
+
+
+def crop_reference_to_ppm(
+    path: Path, crop: tuple[int, int, int, int]
+) -> bytes:
+    data = path.read_bytes()[:2]
+    if data == b"BM":
+        return crop_bmp_to_ppm(path, crop)
+    if data == b"P6":
+        return crop_ppm_to_ppm(path, crop)
+    raise ValueError(f"unsupported selector reference: {path}")
+
+
 def decode_bank(path: Path, game: str, index: int) -> project.ObjectBank:
     form = tuple(iff.parse(path.read_bytes()).forms(b"XOBF"))[index]
     model_form = iff.IffChunk(
@@ -131,7 +192,7 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
     }
 
     result = []
-    for source_index, stable_id, display_name in VEHICLES:
+    for source_index, stable_id, display_name, _vehicle_name in VEHICLES:
         source_values = v8_stats.record(source_index).values()
         source_values.pop("vehicle_type")
 
@@ -208,11 +269,17 @@ def main() -> None:
         project.to_dict(item) for item in projects
     ]:
         raise AssertionError(
-            "three-entry V8-to-V8:2 package changed on semantic decode"
+            "full-roster V8-to-V8:2 package changed on semantic decode"
         )
 
     source = OUTPUT / "source_projects"
     source.mkdir(parents=True, exist_ok=True)
+    expected_projects = {
+        f"{vehicle.stable_id}.json" for vehicle in projects
+    }
+    for stale in source.glob("guest.v8.*.json"):
+        if stale.name not in expected_projects:
+            stale.unlink()
     for vehicle in projects:
         (source / f"{vehicle.stable_id}.json").write_text(
             json.dumps(project.to_dict(vehicle), indent=2) + "\n",
@@ -220,16 +287,25 @@ def main() -> None:
         )
     pre_blender = OUTPUT / "pre_blender"
     pre_blender.mkdir(parents=True, exist_ok=True)
+    selector_output = pre_blender / "SHELL"
+    selector_output.mkdir(parents=True, exist_ok=True)
+    expected_banners = {
+        f"SELECTOR_{index:02}.PPM"
+        for index in range(len(SELECTOR_REFERENCES))
+    }
+    for stale in selector_output.glob("SELECTOR_*.PPM"):
+        if stale.name not in expected_banners:
+            stale.unlink()
     (pre_blender / "CUSTOM.EXP").write_bytes(package.archive)
     (pre_blender / "VEHICLES.V8R").write_bytes(package.registry)
     selector_assets = []
     for index, reference in enumerate(SELECTOR_REFERENCES):
-        banner = crop_bmp_to_ppm(reference, SELECTOR_CROP)
+        banner = crop_reference_to_ppm(reference, SELECTOR_CROP)
         name = f"SELECTOR_{index:02}.PPM"
-        (pre_blender / name).write_bytes(banner)
+        (selector_output / name).write_bytes(banner)
         selector_assets.append(
             {
-                "name": name,
+                "name": f"SHELL/{name}",
                 "source": str(reference.relative_to(ROOT)),
                 "source_sha256": digest(reference.read_bytes()),
                 "crop": {
@@ -272,6 +348,7 @@ def main() -> None:
                 "source_form_and_stat_index": source_record[0],
                 "stable_id": vehicle.stable_id,
                 "display_name": vehicle.display_name,
+                "vehicle_name": source_record[3],
                 "menu_stats": {
                     "armor": vehicle.stats["rating_armor"],
                     "speed": vehicle.stats["rating_speed"],

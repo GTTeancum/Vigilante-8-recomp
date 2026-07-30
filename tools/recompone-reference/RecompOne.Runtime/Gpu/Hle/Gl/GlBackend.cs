@@ -507,12 +507,17 @@ public sealed class GlBackend : IGpuBackend
         if (spanX > 1023 || spanY > 511)
             return;
 
-        // World-space transparent triangles must still test against opaque
-        // terrain. Begin/Flush leaves depth writes disabled for transparency,
-        // preserving the PS1 ordering/blend behavior between transparent faces.
+        // Exact per-vertex GTE depth is needed only for transparent world
+        // planes (notably Dreamland water) so opaque terrain can occlude them
+        // fragment by fragment. Applying the recovered samples to every
+        // opaque object made unrelated projections at shared screen pixels
+        // change an object's depth from frame to frame, which caused the
+        // widespread prop/vehicle polygon flicker. Opaque primitives retain
+        // one native ordering-table depth for the complete packet.
         bool worldTransparent =
             f.SemiTrans &&
-            (a.HasGteZ || b.HasGteZ || c.HasGteZ);
+            a.HasGteZ && b.HasGteZ && c.HasGteZ &&
+            !f.Vehicle;
         bool depthTest =
             !DisableRasterDepth &&
             GpuHle.GameplayActive &&
@@ -546,7 +551,8 @@ public sealed class GlBackend : IGpuBackend
         bool shadow = !f.Textured && f.SemiTrans && a.HasGteZ && b.HasGteZ && c.HasGteZ &&
             a.R < 96 && a.G < 96 && a.B < 96 && b.R < 96 && b.G < 96 && b.B < 96 &&
             c.R < 96 && c.G < 96 && c.B < 96;
-        static float DepthOf(in HleVertex vertex, int otDepth)
+        static float DepthOf(
+            in HleVertex vertex, int otDepth, bool useGteDepth)
         {
             // GTE projection recovery gives each world vertex its native
             // camera-space SZ value. Preserve that value through OpenGL so
@@ -554,7 +560,7 @@ public sealed class GlBackend : IGpuBackend
             // opaque terrain instead of comparing one OT bucket for the
             // complete primitive. The latter made Dreamland water cross hills
             // as the bucket changed while the camera turned.
-            if (vertex.HasGteZ)
+            if (useGteDepth && vertex.HasGteZ)
                 return Math.Clamp(vertex.Z, 1f, ushort.MaxValue) /
                     ushort.MaxValue;
 
@@ -564,11 +570,11 @@ public sealed class GlBackend : IGpuBackend
             return Math.Clamp(otDepth, 1, 0x1FFF) / 8192f;
         }
         var va = V(a, f, dith, perspectiveCorrect, false,
-            DepthOf(a, f.OtIndex)); va.BaryX = 1f;
+            DepthOf(a, f.OtIndex, worldTransparent)); va.BaryX = 1f;
         var vb = V(b, f, dith, perspectiveCorrect, false,
-            DepthOf(b, f.OtIndex)); vb.BaryY = 1f;
+            DepthOf(b, f.OtIndex, worldTransparent)); vb.BaryY = 1f;
         var vc = V(c, f, dith, perspectiveCorrect, false,
-            DepthOf(c, f.OtIndex)); vc.BaryZ = 1f;
+            DepthOf(c, f.OtIndex, worldTransparent)); vc.BaryZ = 1f;
         if (TriangleProbe is { } probe &&
             GpuHle.GameplayActive &&
             _pendingProbeTriangles.Count < 1024)

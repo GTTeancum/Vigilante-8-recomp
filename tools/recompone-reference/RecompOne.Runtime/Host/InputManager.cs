@@ -272,7 +272,11 @@ internal static unsafe class InputManager
                 Console.Error.WriteLine(
                     $"[Input] scripted pulse at {location}: " +
                     $"p1=0x{pulse.Pad1Mask:X4} p2=0x{pulse.Pad2Mask:X4}");
-                if (_captureScriptedStage == pulse.Stage)
+                // "*" is a proof-run mode: capture every deterministic input
+                // checkpoint, including absolute boot/FMV/menu pulses as well
+                // as stage-relative gameplay checkpoints.
+                if (_captureScriptedStage == "*" ||
+                    _captureScriptedStage == pulse.Stage)
                     HostWindow.RequestDisplayCapture($"{pulse.Stage}_{stagePoll:0000}");
             }
             Controller.State &= (ushort)~pulse.Pad1Mask;
