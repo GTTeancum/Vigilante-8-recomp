@@ -7,7 +7,6 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
-import struct
 import sys
 
 
@@ -53,111 +52,16 @@ VEHICLES = (
     (11, "guest.v8.sid_burn", "Sid Burn", "'69 Manta"),
 )
 
-SELECTOR_REFERENCES = tuple(
-    ROOT
-    / "V8_2_LOOSE"
-    / "SHELL"
-    / f"SELECTOR_{index:02}.PPM"
-    for index in range(len(VEHICLES))
+SELECTOR_ASSETS = (
+    *(
+        ROOT / "V8_2_LOOSE" / "SHELL" / f"SELECTOR_{index:02}.PPM"
+        for index in range(len(VEHICLES))
+    ),
 )
-# Runtime selector portraits are already the exact 260x422 native crop. Keep
-# those durable assets beside the other SHELL data instead of depending on
-# disposable captures under artifacts/.
-SELECTOR_CROP = (0, 0, 260, 422)
 
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest().upper()
-
-
-def crop_bmp_to_ppm(path: Path, crop: tuple[int, int, int, int]) -> bytes:
-    """Extract the exact top-left native pixels from a 24-bit BMP capture."""
-    data = path.read_bytes()
-    if data[:2] != b"BM" or len(data) < 54:
-        raise ValueError(f"selector reference is not a BMP: {path}")
-    pixel_offset = struct.unpack_from("<I", data, 10)[0]
-    dib_size = struct.unpack_from("<I", data, 14)[0]
-    width = struct.unpack_from("<i", data, 18)[0]
-    height = struct.unpack_from("<i", data, 22)[0]
-    planes, bits = struct.unpack_from("<HH", data, 26)
-    compression = struct.unpack_from("<I", data, 30)[0]
-    if dib_size < 40 or width <= 0 or height == 0 or planes != 1:
-        raise ValueError(f"unsupported selector BMP header: {path}")
-    if bits != 24 or compression != 0:
-        raise ValueError(f"selector BMP must be uncompressed 24-bit RGB: {path}")
-
-    x, y, crop_width, crop_height = crop
-    image_height = abs(height)
-    if x < 0 or y < 0 or x + crop_width > width or y + crop_height > image_height:
-        raise ValueError(f"selector crop is outside {width}x{image_height}: {path}")
-    stride = (width * 3 + 3) & ~3
-    rgb = bytearray()
-    bottom_up = height > 0
-    for output_y in range(y, y + crop_height):
-        source_y = image_height - 1 - output_y if bottom_up else output_y
-        row = pixel_offset + source_y * stride + x * 3
-        for output_x in range(crop_width):
-            blue, green, red = data[row + output_x * 3 : row + output_x * 3 + 3]
-            rgb.extend((red, green, blue))
-    return f"P6\n{crop_width} {crop_height}\n255\n".encode("ascii") + rgb
-
-
-def crop_ppm_to_ppm(path: Path, crop: tuple[int, int, int, int]) -> bytes:
-    """Extract exact top-left pixels from a binary P6 selector capture."""
-    data = path.read_bytes()
-    cursor = 0
-
-    def token() -> bytes:
-        nonlocal cursor
-        while cursor < len(data):
-            if data[cursor] == ord("#"):
-                cursor = data.find(b"\n", cursor)
-                if cursor < 0:
-                    raise ValueError(f"truncated PPM comment: {path}")
-            if cursor < len(data) and data[cursor] in b" \t\r\n":
-                cursor += 1
-                continue
-            break
-        start = cursor
-        while cursor < len(data) and data[cursor] not in b" \t\r\n":
-            cursor += 1
-        return data[start:cursor]
-
-    if token() != b"P6":
-        raise ValueError(f"selector reference is not a binary P6 PPM: {path}")
-    width = int(token())
-    height = int(token())
-    if int(token()) != 255:
-        raise ValueError(f"selector PPM is not 8-bit RGB: {path}")
-    if cursor >= len(data) or data[cursor] not in b" \t\r\n":
-        raise ValueError(f"selector PPM has no header delimiter: {path}")
-    if data[cursor : cursor + 2] == b"\r\n":
-        cursor += 2
-    else:
-        cursor += 1
-    pixels = data[cursor:]
-    if len(pixels) != width * height * 3:
-        raise ValueError(f"selector PPM payload is truncated: {path}")
-
-    x, y, crop_width, crop_height = crop
-    if x < 0 or y < 0 or x + crop_width > width or y + crop_height > height:
-        raise ValueError(f"selector crop is outside {width}x{height}: {path}")
-    rgb = bytearray()
-    for output_y in range(y, y + crop_height):
-        row = (output_y * width + x) * 3
-        rgb.extend(pixels[row : row + crop_width * 3])
-    return f"P6\n{crop_width} {crop_height}\n255\n".encode("ascii") + rgb
-
-
-def crop_reference_to_ppm(
-    path: Path, crop: tuple[int, int, int, int]
-) -> bytes:
-    data = path.read_bytes()[:2]
-    if data == b"BM":
-        return crop_bmp_to_ppm(path, crop)
-    if data == b"P6":
-        return crop_ppm_to_ppm(path, crop)
-    raise ValueError(f"unsupported selector reference: {path}")
 
 
 def decode_bank(path: Path, game: str, index: int) -> project.ObjectBank:
@@ -177,14 +81,11 @@ def decode_bank(path: Path, game: str, index: int) -> project.ObjectBank:
 def build_projects() -> tuple[project.VehicleProject, ...]:
     v8_stats = stats.StatsFile(V8_EXE.read_bytes(), "V8")
     v82_stats = stats.StatsFile(V82_EXE.read_bytes(), "V8_2")
-    v8_wheel_library = decode_bank(V8_COMMON, "V8", 13)
+    v8_wheel_library = conversion.v8_bank_to_v82(
+        decode_bank(V8_COMMON, "V8", 13)
+    )
     v82_transform_library = decode_bank(V82_COMMON, "V8_2", 18)
     native_modes = v82_stats.transform_modes()
-    standard_wheel_roots = {
-        record.get(field)
-        for record in v82_stats.records()
-        for field in ("wheel_kind_front", "wheel_kind_rear")
-    }
     terrain_roots = {
         kind
         for mode in native_modes[1:]
@@ -204,25 +105,27 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
             decode_bank(V8_SELECTOR_VEHICLES, "V8", source_index)
         )
 
-        matched_front_wheel = conversion.closest_wheel_root(
+        wheel_bank, wheel_map = conversion.extract_roots(
             v8_wheel_library,
-            source_values["wheel_kind_front"],
-            v82_transform_library,
-            standard_wheel_roots,
+            {
+                source_values["wheel_kind_front"],
+                source_values["wheel_kind_rear"],
+            },
         )
-        matched_rear_wheel = conversion.closest_wheel_root(
-            v8_wheel_library,
-            source_values["wheel_kind_rear"],
+        terrain_bank, terrain_map = conversion.extract_roots(
             v82_transform_library,
-            standard_wheel_roots,
+            terrain_roots,
         )
-        transform, transform_map = conversion.extract_roots(
-            v82_transform_library,
-            terrain_roots
-            | {matched_front_wheel, matched_rear_wheel},
+        transform, bank_bases = conversion.merge_banks(
+            (wheel_bank, terrain_bank)
         )
-        front_wheel = transform_map[matched_front_wheel]
-        rear_wheel = transform_map[matched_rear_wheel]
+        wheel_base, terrain_base = bank_bases
+        front_wheel = (
+            wheel_base + wheel_map[source_values["wheel_kind_front"]]
+        )
+        rear_wheel = (
+            wheel_base + wheel_map[source_values["wheel_kind_rear"]]
+        )
         converted_stats = conversion.v8_stats_to_v82(
             source_values,
             front_wheel_kind=front_wheel,
@@ -232,7 +135,7 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
             tuple(
                 0
                 if mode_index == 0
-                else transform_map[kind]
+                else terrain_base + terrain_map[kind]
                 for kind in mode
             )
             for mode_index, mode in enumerate(native_modes)
@@ -289,32 +192,23 @@ def main() -> None:
     pre_blender.mkdir(parents=True, exist_ok=True)
     selector_output = pre_blender / "SHELL"
     selector_output.mkdir(parents=True, exist_ok=True)
-    expected_banners = {
-        f"SELECTOR_{index:02}.PPM"
-        for index in range(len(SELECTOR_REFERENCES))
-    }
-    for stale in selector_output.glob("SELECTOR_*.PPM"):
-        if stale.name not in expected_banners:
+    expected_selector_assets = {asset.name for asset in SELECTOR_ASSETS}
+    for stale in selector_output.glob("SELECTOR_*"):
+        if stale.name not in expected_selector_assets:
             stale.unlink()
     (pre_blender / "CUSTOM.EXP").write_bytes(package.archive)
     (pre_blender / "VEHICLES.V8R").write_bytes(package.registry)
     selector_assets = []
-    for index, reference in enumerate(SELECTOR_REFERENCES):
-        banner = crop_reference_to_ppm(reference, SELECTOR_CROP)
-        name = f"SELECTOR_{index:02}.PPM"
-        (selector_output / name).write_bytes(banner)
+    for reference in SELECTOR_ASSETS:
+        asset = reference.read_bytes()
+        (selector_output / reference.name).write_bytes(asset)
         selector_assets.append(
             {
-                "name": f"SHELL/{name}",
+                "name": f"SHELL/{reference.name}",
                 "source": str(reference.relative_to(ROOT)),
                 "source_sha256": digest(reference.read_bytes()),
-                "crop": {
-                    "x": SELECTOR_CROP[0],
-                    "y": SELECTOR_CROP[1],
-                    "width": SELECTOR_CROP[2],
-                    "height": SELECTOR_CROP[3],
-                },
-                "sha256": digest(banner),
+                "format": "original CHARSEL1 VLC record",
+                "sha256": digest(asset),
             }
         )
 
@@ -336,7 +230,7 @@ def main() -> None:
             "CUSTOM.EXP": digest(package.archive),
             "VEHICLES.V8R": digest(package.registry),
         },
-        "native_selector_banners": selector_assets,
+        "native_selector_assets": selector_assets,
     }
     for source_record, vehicle in zip(VEHICLES, projects):
         body_usage = project.bank_memory_usage(vehicle)

@@ -1,0 +1,29 @@
+# Reach V8:2's native single-player vehicle selector, enter the appended V8
+# roster, then revisit the first three entries in both directions. This catches
+# texture resources that outlive their released native selector VRAM.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+120+2=RIGHT
+150+2=RIGHT
+180+2=RIGHT
+210+2=RIGHT
+240+2=RIGHT
+270+2=RIGHT
+300+2=RIGHT
+330+2=RIGHT
+360+2=RIGHT
+390+2=RIGHT
+450+2=RIGHT
+510+2=RIGHT
+570+2=LEFT
+630+2=LEFT
+690+2=RIGHT
+750+2=LEFT

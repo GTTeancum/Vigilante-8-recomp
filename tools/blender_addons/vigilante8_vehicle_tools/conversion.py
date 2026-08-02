@@ -28,6 +28,8 @@ V82_INTERNAL_AUTHORING_DEFAULTS = {
 def extract_roots(
     source: project.ObjectBank,
     roots: set[int],
+    *,
+    preserve_texture_layout: bool = False,
 ) -> tuple[project.ObjectBank, dict[int, int]]:
     """Copy the complete semantic dependency closure of top-level roots."""
 
@@ -66,7 +68,7 @@ def extract_roots(
         }
     )
     collision_map = {old: new for new, old in enumerate(collision_indices)}
-    texture_indices = sorted(
+    referenced_texture_indices = sorted(
         {
             face.texture
             for group_index in group_indices
@@ -81,7 +83,45 @@ def extract_roots(
             for binding in frame.texture_bindings
         }
     )
+    texture_indices = (
+        list(range(len(source.textures)))
+        if preserve_texture_layout
+        else referenced_texture_indices
+    )
     texture_map = {old: new for new, old in enumerate(texture_indices)}
+
+    def remap_face(
+        native_group: project.RenderGroup,
+        face: project.Face,
+    ) -> project.Face:
+        remapped_texture = (
+            None
+            if face.texture is None
+            else (
+                face.texture
+                if preserve_texture_layout
+                else texture_map[face.texture]
+            )
+        )
+        native_slot = face.native_texture_slot
+        if not preserve_texture_layout and remapped_texture is not None:
+            # Kind-15 packets in groups with a local texture table address
+            # that table, not the bank-wide texture array.  Preserve those
+            # local indices exactly.  All other packet kinds can be rewritten
+            # to the compacted bank index.
+            is_local_animated_slot = (
+                face.packet_kind == 15
+                and native_group.texture_slot_count > 0
+                and native_slot is not None
+                and native_slot < native_group.texture_slot_count
+            )
+            if not is_local_animated_slot:
+                native_slot = remapped_texture
+        return replace(
+            face,
+            texture=remapped_texture,
+            native_texture_slot=native_slot,
+        )
 
     return (
         project.ObjectBank(
@@ -90,14 +130,7 @@ def extract_roots(
                     source.groups[old],
                     name=f"group_{new:03d}",
                     faces=tuple(
-                        replace(
-                            face,
-                            texture=(
-                                None
-                                if face.texture is None
-                                else texture_map[face.texture]
-                            ),
-                        )
+                        remap_face(source.groups[old], face)
                         for face in source.groups[old].faces
                     ),
                 )
@@ -149,7 +182,11 @@ def extract_roots(
                             texture_bindings=tuple(
                                 replace(
                                     binding,
-                                    texture=texture_map[binding.texture],
+                                    texture=(
+                                        binding.texture
+                                        if preserve_texture_layout
+                                        else texture_map[binding.texture]
+                                    ),
                                 )
                                 for binding in frame.texture_bindings
                             ),
@@ -183,19 +220,40 @@ def merge_banks(
         collision_base = len(collisions)
         texture_base = len(textures)
         slot_bases.append(slot_base)
+
+        def merge_face(
+            group: project.RenderGroup,
+            face: project.Face,
+        ) -> project.Face:
+            native_slot = face.native_texture_slot
+            is_local_animated_slot = (
+                face.packet_kind == 15
+                and group.texture_slot_count > 0
+                and native_slot is not None
+                and native_slot < group.texture_slot_count
+            )
+            if native_slot is not None and not is_local_animated_slot:
+                native_slot += texture_base
+            return replace(
+                face,
+                texture=(
+                    None
+                    if face.texture is None
+                    else (
+                        native_slot
+                        if is_local_animated_slot
+                        else face.texture + texture_base
+                    )
+                ),
+                native_texture_slot=native_slot,
+            )
+
         groups += tuple(
             replace(
                 group,
                 name=f"group_{group_base + index:03d}",
                 faces=tuple(
-                    replace(
-                        face,
-                        texture=(
-                            None
-                            if face.texture is None
-                            else face.texture + texture_base
-                        ),
-                    )
+                    merge_face(group, face)
                     for face in group.faces
                 ),
             )
@@ -271,30 +329,50 @@ def merge_banks(
 def v8_bank_to_v82(source: project.ObjectBank) -> project.ObjectBank:
     """Translate decoded V8 render packets into the V8:2 packet dialect."""
 
+    def convert_face(face: project.Face) -> project.Face:
+        if face.packet_kind != 12 or len(face.environment_parameters) != 2:
+            return face
+
+        # The retail V8 and V8:2 loaders use the same packet-mode rewrite:
+        #
+        #   render = (native & 0x0f) << 2
+        #          | (native & 0x80 ? 0x40 : 0)
+        #          | (native & 0x10 ? 0x02 : 0)
+        #          | (native & 0x40 ? 0x80 : 0)
+        #
+        # Native bit 0x20 is ignored by both loaders, so remove it without
+        # changing the render mode.  Retail V8:2 vehicle banks then use one
+        # exact tuple for each of the two environment roles:
+        #
+        #   opaque arena reflection: type 0x0C, (0x3FFF, 0x8080, 0, 0)
+        #   translucent gloss pass:  type 0x1C, (0x7FFE, 0x8080, 0, 0)
+        #
+        # V8 stores both global roles under selector 0x3FFF and distinguishes
+        # the gloss pass with native mode bit 0x10.  Translate that semantic
+        # pair to the sequel's own measured packet dialect.  Direct local
+        # texture selectors are retained rather than being mistaken for a
+        # global vehicle material.
+        source_environment = face.environment_parameters[0]
+        translucent = bool(face.packet_flags & 0x10)
+        target_environment = source_environment
+        if (source_environment & 0x3FFF) == 0x3FFF:
+            target_environment = 0x7FFE if translucent else 0x3FFF
+
+        return replace(
+            face,
+            packet_flags=face.packet_flags & ~0x20,
+            environment_parameters=(
+                target_environment,
+                0x8080,
+                0,
+                0,
+            ),
+        )
+
     groups = tuple(
         replace(
             group,
-            faces=tuple(
-                replace(
-                    face,
-                    # V8 kind-12 packets carry two words.  Every retail V8:2
-                    # kind-12 packet carries the environment selector followed
-                    # by 0x8080, 0, 0.  Preserve the V8 selector and emit the
-                    # complete sequel form.
-                    environment_parameters=(
-                        (
-                            face.environment_parameters[0],
-                            0x8080,
-                            0,
-                            0,
-                        )
-                        if face.packet_kind == 12
-                        and len(face.environment_parameters) == 2
-                        else face.environment_parameters
-                    ),
-                )
-                for face in group.faces
-            ),
+            faces=tuple(convert_face(face) for face in group.faces),
         )
         for group in source.groups
     )

@@ -68,7 +68,9 @@ def _packet_type(kind: int, flags: int) -> int:
 
 
 def _texture_word(face: project.Face) -> int:
-    if face.texture is None:
+    if face.native_texture_slot is not None:
+        texture = face.native_texture_slot
+    elif face.texture is None:
         texture = 0
     else:
         texture = face.texture
@@ -262,15 +264,16 @@ def _compile_group(dialect: str, group: project.RenderGroup) -> bytes:
     normal_offset = vertex_offset + len(vertices)
     normal_data = b"".join(struct.pack("<hhhh", *normal) for normal in normals)
     descriptor = struct.pack(
-        "<IIIIHhIB3x",
+        "<IIIIIIBBH",
         len(group.vertices),
         vertex_offset,
         len(normals),
         normal_offset,
         len(group.faces) + len(group.controls),
-        0,
         packet_offset,
         group.scale_shift,
+        group.texture_slot_count,
+        group.render_extent,
     )
     return descriptor + packets + vertices + normal_data
 
@@ -327,6 +330,16 @@ def _compile_texture(texture: project.Texture) -> bytes:
     encoded = (
         xobf.compress_v82_texture(packed) if texture.compressed else packed
     )
+    # V8:2's texture loader advances to the next record with
+    #
+    #   align4(image_block + image_block[8] + 11)
+    #
+    # Retail records store encoded_size + 13 in image_block[8], then include
+    # at least one zero byte before aligning the following record.  This is
+    # required even for an uncompressed image: a zero/stale size makes the
+    # loader point back into the current texture and eventually decode
+    # unrelated bytes.
+    v82_image_block_size = len(encoded) + 13
     if texture.depth == 2:
         # Direct-color records have no CLUT. The image RECT occupies
         # record+0x0c and compressed/uncompressed 16-bit pixels begin at
@@ -337,7 +350,7 @@ def _compile_texture(texture: project.Texture) -> bytes:
                 "<IIIhhhh",
                 0x10,
                 flags,
-                0x10,
+                v82_image_block_size,
                 texture.image_origin[0],
                 texture.image_origin[1],
                 texture.width,
@@ -345,6 +358,7 @@ def _compile_texture(texture: project.Texture) -> bytes:
             )
         )
         data += encoded
+        data += b"\0"
         _align(data)
         return bytes(data)
 
@@ -365,14 +379,17 @@ def _compile_texture(texture: project.Texture) -> bytes:
         struct.pack("<H", color) for color in texture.palette_bgr555
     )
     _align(data)
-    image_offset = len(data)
+    # The first eight bytes of a paletted image block are unused by the
+    # loader.  Retail V8:2 records overlap them with the final four CLUT
+    # entries instead of emitting an extra eight-byte pad.
+    image_offset = len(data) - 8
     pixels_per_word = 4 if texture.depth == 0 else 2
     words = texture.width // pixels_per_word
     if words * pixels_per_word != texture.width:
         raise ValueError(
             f"texture {texture.name!r} width is not aligned to its PS1 depth"
         )
-    data += b"\0" * 12
+    data += struct.pack("<I", v82_image_block_size)
     data += struct.pack(
         "<hhhh",
         texture.image_origin[0],
@@ -381,6 +398,7 @@ def _compile_texture(texture: project.Texture) -> bytes:
         texture.height,
     )
     data += encoded
+    data += b"\0"
     struct.pack_into("<I", data, 8, image_offset)
     _align(data)
     return bytes(data)

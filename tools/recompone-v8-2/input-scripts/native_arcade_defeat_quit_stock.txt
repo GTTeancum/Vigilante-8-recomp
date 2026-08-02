@@ -1,0 +1,24 @@
+# Enter a native single-player match with the first retail V8:2 vehicle.
+# RECOMPONE_V82_TEST_DEFEAT_FRAME applies a lethal hit through the retail
+# vehicle-damage routine; the retail scheduler creates the defeat prompt and
+# Triangle then follows its normal quit branch.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+[choose_player]
+650+3=CROSS
+900+3=CROSS
+1150+3=CROSS
+[defeated]
+# The result overlay appears before its native 301-tick input lock expires.
+# Capture the prompt first, press its documented X-to-quit action after that
+# gate, then exercise the returned menu to prove teardown and liveness.
+700+2=SELECT
+1000+30=CROSS
+1400+12=UP
+1600+12=DOWN

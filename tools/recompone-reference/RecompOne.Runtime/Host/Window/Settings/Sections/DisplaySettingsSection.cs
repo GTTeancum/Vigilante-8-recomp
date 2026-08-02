@@ -11,6 +11,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
     static readonly string[] GraphicsPresets = ["Original", "Enhanced", "Custom"];
     static readonly int[] MsaaModes = [0, 2, 4, 8];
     static readonly int[] AnisotropicModes = [1, 2, 4, 8, 16];
+    static readonly int[] InternalResolutionScales = [1, 2, 3, 4];
 
     public string Id => "display";
     public string Title => "Display";
@@ -18,9 +19,8 @@ internal sealed class DisplaySettingsSection : ISettingsSection
 
     public void Draw()
     {
-        string preset = ConfigManager.View.GraphicsPreset;
-        if (!GraphicsPresets.Contains(preset, StringComparer.OrdinalIgnoreCase))
-            preset = "Custom";
+        string preset = ConfigManager.View.ResolveGraphicsPreset();
+        ConfigManager.View.GraphicsPreset = preset;
         if (ImGui.BeginCombo("Graphics preset", preset))
         {
             foreach (string candidate in GraphicsPresets)
@@ -29,6 +29,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
                 if (ImGui.Selectable(candidate, selected) && candidate != "Custom")
                 {
                     ConfigManager.View.ApplyGraphicsPreset(candidate);
+                    HostWindow.ApplyGraphicsConfiguration();
                     ConfigManager.SaveView(PanelManager.Panels);
                 }
                 if (selected) ImGui.SetItemDefaultFocus();
@@ -105,14 +106,34 @@ internal sealed class DisplaySettingsSection : ISettingsSection
 
         ImGui.SeparatorText("3D rendering");
         bool highResolution3D = ConfigManager.View.HighResolution3D;
-        if (ImGui.Checkbox("High-resolution 3D (2x)", ref highResolution3D))
+        if (ImGui.Checkbox("Hardware enhanced renderer", ref highResolution3D))
         {
             ConfigManager.View.HighResolution3D = highResolution3D;
+            HostWindow.ApplyGraphicsConfiguration();
             SaveCustom();
         }
-        ImGui.TextDisabled("Rasterizes PS1 polygons at 2x internal resolution for a smooth 60 Hz target.");
-        if (ConfigManager.View.HighResolution3D != Hle.GpuHle.Active)
-            ImGui.TextDisabled("A restart is required.");
+        int internalScale = ConfigManager.View.InternalResolutionScale;
+        if (ImGui.BeginCombo("Internal 3D resolution", $"{internalScale}x"))
+        {
+            foreach (int candidate in InternalResolutionScales)
+            {
+                bool selected = candidate == internalScale;
+                if (ImGui.Selectable($"{candidate}x", selected))
+                {
+                    ConfigManager.View.InternalResolutionScale = candidate;
+                    ConfigManager.View.HighResolution3D = candidate > 1;
+                    HostWindow.ApplyGraphicsConfiguration();
+                    SaveCustom();
+                }
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+        ImGui.TextDisabled("Enhanced defaults to 3x native; 4x is available for faster GPUs.");
+        ImGui.TextDisabled(
+            Hle.GpuHle.Active
+                ? $"Active renderer: Enhanced GL at {Enhanced.GlVram.Scale}x"
+                : "Active renderer: PS1 software at 1x");
 
         bool textureSmoothing = ConfigManager.View.TextureSmoothing;
         if (ImGui.Checkbox("Upscale/smooth in-game textures", ref textureSmoothing))
@@ -152,6 +173,45 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             SaveCustom();
         }
         ImGui.TextDisabled("Uses GTE depth when available and projective quad homography otherwise.");
+
+        bool geometryCorrection = ConfigManager.View.GeometryCorrection;
+        if (ImGui.Checkbox("Sub-pixel geometry correction", ref geometryCorrection))
+        {
+            ConfigManager.View.GeometryCorrection = geometryCorrection;
+            SaveCustom();
+        }
+        ImGui.TextDisabled("Preserves fractional GTE screen coordinates to remove polygon wobble.");
+
+        bool preciseCulling = ConfigManager.View.PreciseCulling;
+        if (ImGui.Checkbox("Precise polygon culling", ref preciseCulling))
+        {
+            ConfigManager.View.PreciseCulling = preciseCulling;
+            SaveCustom();
+        }
+        ImGui.TextDisabled("Uses corrected coordinates for NCLIP to reduce cracks and geometry holes.");
+
+        bool perspectiveColors = ConfigManager.View.PerspectiveCorrectColors;
+        if (ImGui.Checkbox("Perspective-correct vertex colors", ref perspectiveColors))
+        {
+            ConfigManager.View.PerspectiveCorrectColors = perspectiveColors;
+            SaveCustom();
+        }
+
+        bool enhancedDepth = ConfigManager.View.EnhancedDepthBuffer;
+        if (ImGui.Checkbox("Enhanced depth buffer", ref enhancedDepth))
+        {
+            ConfigManager.View.EnhancedDepthBuffer = enhancedDepth;
+            SaveCustom();
+        }
+        ImGui.TextDisabled("Uses coherent GTE depth and ordering-table fallback to reduce Z fighting.");
+
+        bool trueColor = ConfigManager.View.TrueColor;
+        if (ImGui.Checkbox("True-color output", ref trueColor))
+        {
+            ConfigManager.View.TrueColor = trueColor;
+            SaveCustom();
+        }
+        ImGui.TextDisabled("Disables the PS1's final 5-bit color quantization in enhanced mode.");
 
         string levelOfDetail = ConfigManager.View.LevelOfDetail;
         if (!LevelOfDetailModes.Contains(levelOfDetail, StringComparer.OrdinalIgnoreCase))
@@ -205,13 +265,13 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
 
         bool fonts = ConfigManager.View.VectorFonts;
-        if (ImGui.Checkbox("Vector-style font contours", ref fonts))
+        if (ImGui.Checkbox("Vector font contours", ref fonts))
         {
             ConfigManager.View.VectorFonts = fonts;
             SaveCustom();
         }
         bool icons = ConfigManager.View.VectorIcons;
-        if (ImGui.Checkbox("Vector-style HUD, logo, and icon contours", ref icons))
+        if (ImGui.Checkbox("Vector HUD, logo, and icon contours", ref icons))
         {
             ConfigManager.View.VectorIcons = icons;
             SaveCustom();

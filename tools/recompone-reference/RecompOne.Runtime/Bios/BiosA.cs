@@ -368,7 +368,11 @@ public static class BiosA
                 gpu.WriteGp0(((c.A1 & 0xFFFFu) << 16) | (c.A0 & 0xFFFFu));
                 gpu.WriteGp0((height << 16) | width);
                 uint words = (width * height + 1u) / 2u;
-                for (uint i = 0; i < words; i++) gpu.WriteGp0(m.ReadU32(source + i * 4u));
+                for (uint i = 0; i < words; i++)
+                {
+                    uint address = source + i * 4u;
+                    gpu.WriteGp0(m.ReadU32(address), address);
+                }
                 c.V0 = 0u;
                 break;
             }
@@ -379,7 +383,11 @@ public static class BiosA
             case 0x49: Runtime.Gpu?.WriteGp0(c.A0); c.V0 = 0u; break;
             case 0x4A:
                 if (Runtime.Gpu != null)
-                    for (uint i = 0; i < c.A1; i++) Runtime.Gpu.WriteGp0(m.ReadU32(c.A0 + i * 4u));
+                    for (uint i = 0; i < c.A1; i++)
+                    {
+                        uint address = c.A0 + i * 4u;
+                        Runtime.Gpu.WriteGp0(m.ReadU32(address), address);
+                    }
                 c.V0 = 0u;
                 break;
             case 0x4B: Sdk.LibGpu.DrawOTag(c, m); break;

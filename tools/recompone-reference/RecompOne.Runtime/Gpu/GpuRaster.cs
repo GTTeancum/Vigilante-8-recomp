@@ -1,4 +1,5 @@
 using RecompOne.Runtime.Config;
+using RecompOne.Runtime.Hle;
 
 namespace RecompOne.Runtime;
 
@@ -7,20 +8,30 @@ public sealed partial class Gpu
 {
     struct Vert
     {
-        public int X, Y, R, G, B, U, V, Z;
-        public float PerspectiveW;
-        public bool HasGteZ, HasProjectiveW;
+        public uint SourceAddress;
+        public int X, Y, RawX, RawY, R, G, B, U, V, Z;
+        public float PerspectiveW, PreciseX, PreciseY;
+        public float ViewX, ViewY, ViewZ;
+        public float ProjectionCenterX, ProjectionCenterY, ProjectionScale;
+        public bool HasGteZ, HasPreciseGteZ, HasCoherentGteZ;
+        public bool HasProjectiveW, HasPrecisePosition, HasViewSpace;
+        public bool ReconstructedViewSpace;
     }
 
     static readonly bool TraceProjection =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PROJECTION") == "1";
     long _projectionQuadGte;
-    long _projectionQuadRecovered;
-    long _projectionQuadHomography;
     long _projectionQuadAffine;
+    long _projectionTriPrecise;
     long _projectionTriGte;
+    long _projectionTriOtCorrelated;
     long _projectionTriAffine;
     int _projectionGameplayFrames;
+    readonly Dictionary<ulong, ProjectiveDepthCacheEntry>
+        _projectiveDepthCache = [];
+
+    readonly record struct ProjectiveDepthCacheEntry(
+        ushort Depth, int OtDepth, uint PacketAddress);
 
     static readonly int[,] Dither =
     {
@@ -54,12 +65,42 @@ public sealed partial class Gpu
             }
             v[i].R = cr; v[i].G = cg; v[i].B = cb;
 
+            int vertexWordIndex = idx;
             uint vw = _fifo[idx++];
             int rawX = CoordX(vw);
             int rawY = CoordY(vw);
+            v[i].RawX = rawX;
+            v[i].RawY = rawY;
             v[i].X = _drawOffsetX + rawX;
             v[i].Y = _drawOffsetY + rawY;
-            if (Gte.TryGetScreenDepth(
+            uint sourceAddress = FifoSource(vertexWordIndex);
+            v[i].SourceAddress = sourceAddress;
+            if (sourceAddress != UnknownFifoSource &&
+                Runtime.Mem != null &&
+                Runtime.Mem.TryGetPreciseGteVertex(
+                    sourceAddress, vw,
+                    out var precise))
+            {
+                v[i].Z = precise.Depth;
+                v[i].PerspectiveW = precise.PerspectiveW;
+                v[i].PreciseX = _drawOffsetX + precise.PreciseX;
+                v[i].PreciseY = _drawOffsetY + precise.PreciseY;
+                v[i].ViewX = precise.ViewX;
+                v[i].ViewY = precise.ViewY;
+                v[i].ViewZ = precise.ViewZ;
+                v[i].ProjectionCenterX =
+                    _drawOffsetX + precise.ProjectionCenterX;
+                v[i].ProjectionCenterY =
+                    _drawOffsetY + precise.ProjectionCenterY;
+                v[i].ProjectionScale = precise.ProjectionScale;
+                v[i].HasGteZ = true;
+                v[i].HasPreciseGteZ = true;
+                v[i].HasPrecisePosition =
+                    MathF.Abs(precise.PreciseX - rawX) <= 1.5f &&
+                    MathF.Abs(precise.PreciseY - rawY) <= 1.5f;
+                v[i].HasViewSpace = precise.Valid;
+            }
+            else if (Gte.TryGetScreenDepth(
                     rawX, rawY, _currentOtDepth, out ushort z) ||
                 Gte.TryGetScreenDepth(
                     v[i].X, v[i].Y, _currentOtDepth, out z))
@@ -78,18 +119,37 @@ public sealed partial class Gpu
             }
         }
 
+        bool coherentPrecisePosition = true;
+        for (int i = 0; i < n; i++)
+            coherentPrecisePosition &= v[i].HasPrecisePosition;
+        if (!coherentPrecisePosition)
+            for (int i = 0; i < n; i++)
+                v[i].HasPrecisePosition = false;
+
+        if (!quad &&
+            !(v[0].HasPreciseGteZ &&
+              v[1].HasPreciseGteZ &&
+              v[2].HasPreciseGteZ))
+            TryRecoverCoherentTriangleDepth(v);
+
+        if (HleOn && !tex && !quad &&
+            !(v[0].HasGteZ && v[1].HasGteZ && v[2].HasGteZ) &&
+            TryRecoverOtConstrainedTriangleDepth(
+                v, clut: 0, textured: false,
+                out ushort flatZ0, out ushort flatZ1, out ushort flatZ2))
+        {
+            SetCoherentTriangleDepth(v, flatZ0, flatZ1, flatZ2);
+        }
+
         if (tex && quad && ConfigManager.View.PerspectiveCorrectTextures)
         {
-            // GPU packets do not carry the source GTE depth. Correlating it
-            // later by screen XY is ambiguous whenever surfaces overlap and
-            // was visibly warping UVs into transparent texels, making terrain,
-            // buildings and even the player vehicle blink out. A convex quad
-            // supplies its own exact screen/UV homography, so use only that
-            // self-contained denominator. Triangles retain stable affine UVs
-            // because three screen/UV points cannot determine perspective.
-            if (TryProjectiveQuadW(v))
+            // Emulator-grade PGXP behavior: use perspective W only when every
+            // packet vertex retains a validated RAM-address/GTE association.
+            // Never infer W from the quad's screen shape; that approximation
+            // changes as the camera turns and recreates the visible swimming.
+            if (TryProjectiveQuadGteW(v))
             {
-                _projectionQuadHomography++;
+                _projectionQuadGte++;
             }
             else
             {
@@ -98,11 +158,24 @@ public sealed partial class Gpu
         }
         else if (tex && !quad && ConfigManager.View.PerspectiveCorrectTextures)
         {
-            _projectionTriAffine++;
+            if (TryProjectiveTriangleW(v, clut, out bool grouped))
+            {
+                if (v[0].HasPreciseGteZ &&
+                    v[1].HasPreciseGteZ &&
+                    v[2].HasPreciseGteZ)
+                    _projectionTriPrecise++;
+                else if (grouped)
+                    _projectionTriGte++;
+                else
+                    _projectionTriOtCorrelated++;
+            }
+            else
+                _projectionTriAffine++;
         }
 
         if (HleOn)
         {
+            PopulateEnhancedViewSpace(v, n);
             HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
             if (quad) HleTri(v[1], v[2], v[3], tex, gouraud, semi, raw, clut);
         }
@@ -110,6 +183,56 @@ public sealed partial class Gpu
         {
             RasterTriangle(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
             if (quad) RasterTriangle(v[1], v[2], v[3], tex, gouraud, semi, raw, clut);
+        }
+    }
+
+    void PopulateEnhancedViewSpace(Span<Vert> vertices, int count)
+    {
+        if (!GpuHle.GameplayActive)
+            return;
+        if (!Gte.TryGetProjectionState(
+                out float centerX,
+                out float centerY,
+                out float projectionScale))
+            return;
+
+        centerX += _drawOffsetX;
+        centerY += _drawOffsetY;
+        for (int index = 0; index < count; index++)
+        {
+            ref Vert vertex = ref vertices[index];
+            if (vertex.HasViewSpace)
+                continue;
+
+            float viewZ =
+                vertex.HasProjectiveW &&
+                float.IsFinite(vertex.PerspectiveW) &&
+                vertex.PerspectiveW > 0
+                    ? vertex.PerspectiveW
+                    : vertex.HasGteZ && vertex.Z > 0
+                        ? vertex.Z
+                        : 0f;
+            if (!float.IsFinite(viewZ) || viewZ <= 0)
+                continue;
+
+            float screenX =
+                vertex.HasPrecisePosition ? vertex.PreciseX : vertex.X;
+            float screenY =
+                vertex.HasPrecisePosition ? vertex.PreciseY : vertex.Y;
+            vertex.ViewX =
+                (screenX - centerX) * viewZ / projectionScale;
+            vertex.ViewY =
+                (screenY - centerY) * viewZ / projectionScale;
+            vertex.ViewZ = viewZ;
+            vertex.ProjectionCenterX = centerX;
+            vertex.ProjectionCenterY = centerY;
+            vertex.ProjectionScale = projectionScale;
+            vertex.PerspectiveW = viewZ;
+            vertex.HasProjectiveW = true;
+            vertex.HasViewSpace =
+                float.IsFinite(vertex.ViewX) &&
+                float.IsFinite(vertex.ViewY);
+            vertex.ReconstructedViewSpace = vertex.HasViewSpace;
         }
     }
 
@@ -127,9 +250,9 @@ public sealed partial class Gpu
         Console.Error.WriteLine(
             $"[Projection] frames={_projectionGameplayFrames - 59}-" +
             $"{_projectionGameplayFrames} quad-gte={_projectionQuadGte} " +
-            $"quad-recovered={_projectionQuadRecovered} " +
-            $"quad-homography={_projectionQuadHomography} " +
             $"quad-affine={_projectionQuadAffine} tri-gte={_projectionTriGte} " +
+            $"tri-precise={_projectionTriPrecise} " +
+            $"tri-ot={_projectionTriOtCorrelated} " +
             $"tri-affine={_projectionTriAffine} gte-points={Gte.ScreenDepthCount}");
         ResetProjectionCounters();
     }
@@ -137,78 +260,262 @@ public sealed partial class Gpu
     void ResetProjectionCounters()
     {
         _projectionQuadGte = 0;
-        _projectionQuadRecovered = 0;
-        _projectionQuadHomography = 0;
         _projectionQuadAffine = 0;
+        _projectionTriPrecise = 0;
         _projectionTriGte = 0;
+        _projectionTriOtCorrelated = 0;
         _projectionTriAffine = 0;
     }
 
-    static bool TryProjectiveQuadW(Span<Vert> v)
+    bool TryProjectiveQuadGteW(Span<Vert> v)
     {
-        // Four screen/UV correspondences define a projective homography even
-        // when the original ordering-table packet no longer has GTE depth.
-        // PS1 textured quads use the corner order 0,1 / 2,3. Recover the four
-        // homogeneous denominators for that unit square and pass their ratios
-        // to OpenGL as clip W. Affine parallelograms naturally produce four
-        // equal values. Require a convex perimeter (0,1,3,2) so malformed or
-        // folded packets stay on the non-destructive affine path.
-        Span<int> perimeter = stackalloc int[4] { 0, 1, 3, 2 };
-        long winding = 0;
+        if (!HasValidPreciseDepths(v, 4))
+            return false;
+
         for (int i = 0; i < 4; i++)
         {
-            ref Vert a = ref v[perimeter[i]];
-            ref Vert b = ref v[perimeter[(i + 1) & 3]];
-            ref Vert c = ref v[perimeter[(i + 2) & 3]];
-            long cross = (long)(b.X - a.X) * (c.Y - b.Y) -
-                         (long)(b.Y - a.Y) * (c.X - b.X);
-            if (cross == 0) return false;
-            if (winding == 0) winding = Math.Sign(cross);
-            else if (Math.Sign(cross) != winding) return false;
-        }
-
-        double dx1 = v[1].X - v[3].X;
-        double dx2 = v[2].X - v[3].X;
-        double dx3 = v[0].X - v[1].X - v[2].X + v[3].X;
-        double dy1 = v[1].Y - v[3].Y;
-        double dy2 = v[2].Y - v[3].Y;
-        double dy3 = v[0].Y - v[1].Y - v[2].Y + v[3].Y;
-        double determinant = dx1 * dy2 - dx2 * dy1;
-        if (Math.Abs(determinant) < 0.000001) return false;
-
-        double g = (dx3 * dy2 - dx2 * dy3) / determinant;
-        double h = (dx1 * dy3 - dx3 * dy1) / determinant;
-        Span<double> w = stackalloc double[4]
-        {
-            1.0,
-            1.0 + g,
-            1.0 + h,
-            1.0 + g + h,
-        };
-        bool allPositive = true;
-        bool allNegative = true;
-        for (int i = 0; i < 4; i++)
-        {
-            if (!double.IsFinite(w[i]) || Math.Abs(w[i]) < 0.0001)
-                return false;
-            allPositive &= w[i] > 0.0;
-            allNegative &= w[i] < 0.0;
-        }
-        if (!allPositive && !allNegative) return false;
-        if (allNegative)
-            for (int i = 0; i < 4; i++) w[i] = -w[i];
-
-        double minW = Math.Min(Math.Min(w[0], w[1]), Math.Min(w[2], w[3]));
-        double maxW = Math.Max(Math.Max(w[0], w[1]), Math.Max(w[2], w[3]));
-        if (minW <= 0.0 || maxW / minW > 64.0) return false;
-
-        double scale = 1024.0 / minW;
-        for (int i = 0; i < 4; i++)
-        {
-            v[i].PerspectiveW = (float)Math.Clamp(w[i] * scale, 1.0, 65535.0);
             v[i].HasProjectiveW = true;
         }
         return true;
+    }
+
+    bool HasValidPreciseDepths(Span<Vert> v, int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            if (!v[i].HasPreciseGteZ ||
+                v[i].Z <= 0 ||
+                !float.IsFinite(v[i].PerspectiveW) ||
+                v[i].PerspectiveW <= 0)
+                return false;
+        }
+        return true;
+    }
+
+    bool TryRecoverCoherentTriangleDepth(Span<Vert> v)
+    {
+        bool recovered = Gte.TryGetGroupedTriangleScreenDepth(
+            v[0].RawX, v[0].RawY,
+            v[1].RawX, v[1].RawY,
+            v[2].RawX, v[2].RawY,
+            _currentOtDepth,
+            out ushort z0, out ushort z1, out ushort z2);
+        if (!recovered)
+            recovered = Gte.TryGetGroupedTriangleScreenDepth(
+                v[0].X, v[0].Y,
+                v[1].X, v[1].Y,
+                v[2].X, v[2].Y,
+                _currentOtDepth,
+                out z0, out z1, out z2);
+        if (!recovered)
+            return false;
+
+        SetCoherentTriangleDepth(v, z0, z1, z2);
+        return true;
+    }
+
+    static void SetCoherentTriangleDepth(
+        Span<Vert> v, ushort z0, ushort z1, ushort z2)
+    {
+        v[0].Z = z0;
+        v[1].Z = z1;
+        v[2].Z = z2;
+        v[0].HasGteZ = v[0].HasCoherentGteZ = true;
+        v[1].HasGteZ = v[1].HasCoherentGteZ = true;
+        v[2].HasGteZ = v[2].HasCoherentGteZ = true;
+    }
+
+    bool TryProjectiveTriangleW(Span<Vert> v, int clut, out bool grouped)
+    {
+        grouped = false;
+        bool allPrecise =
+            v[0].HasPreciseGteZ &&
+            v[1].HasPreciseGteZ &&
+            v[2].HasPreciseGteZ;
+        bool precise = allPrecise && HasValidPreciseDepths(v, 3);
+        // Match the emulator's primitive-wide fallback: do not replace a
+        // rejected exact-address set with a second, screen-coordinate guess.
+        if (allPrecise && !precise)
+            return false;
+        grouped = precise ||
+            v[0].HasCoherentGteZ &&
+            v[1].HasCoherentGteZ &&
+            v[2].HasCoherentGteZ;
+        bool recovered = grouped;
+        ushort z0 = checked((ushort)v[0].Z);
+        ushort z1 = checked((ushort)v[1].Z);
+        ushort z2 = checked((ushort)v[2].Z);
+        if (!recovered)
+        {
+            // Do not combine independent screen-coordinate lookups. A busy
+            // scene can project unrelated surfaces through the same pixel
+            // over the retained GTE generations, and mixing those depths
+            // makes vertical textures swim as the camera moves. Recover the
+            // complete triangle from one RTPT group or one tightly consecutive
+            // RTPS run instead.
+            recovered = Gte.TryGetTriangleScreenDepth(
+                v[0].RawX, v[0].RawY,
+                v[1].RawX, v[1].RawY,
+                v[2].RawX, v[2].RawY,
+                _currentOtDepth,
+                out z0, out z1, out z2);
+            if (!recovered)
+                recovered = Gte.TryGetTriangleScreenDepth(
+                    v[0].X, v[0].Y,
+                    v[1].X, v[1].Y,
+                    v[2].X, v[2].Y,
+                    _currentOtDepth,
+                    out z0, out z1, out z2);
+            if (!recovered)
+            {
+                // V8 also emits mesh triangles after projecting cached
+                // vertices one at a time. Those projections can be separated
+                // by enough unrelated GTE work that they are not one strict
+                // RTPS run. The packet's OTZ is AVSZ3 (average SZ / 8), so it
+                // gives us an independent coherence check and, when exactly
+                // one sample is absent, the correct missing-depth equation:
+                //
+                //     missing SZ = 3 * (OTZ * 8) - known SZ0 - known SZ1
+                //
+                // Previously the missing vertex received the average itself.
+                // That bends reciprocal depth across the triangle and is the
+                // source of the visible affine-like swimming on buildings.
+                recovered = TryRecoverOtConstrainedTriangleDepth(
+                    v, clut, textured: true, out z0, out z1, out z2);
+            }
+            if (!recovered)
+                return false;
+        }
+
+        if (!precise)
+        {
+            v[0].PerspectiveW = z0;
+            v[1].PerspectiveW = z1;
+            v[2].PerspectiveW = z2;
+        }
+        v[0].HasProjectiveW = true;
+        v[1].HasProjectiveW = true;
+        v[2].HasProjectiveW = true;
+        RememberProjectiveTriangleDepth(v, clut, z0, z1, z2);
+        return true;
+    }
+
+    bool TryRecoverOtConstrainedTriangleDepth(
+        Span<Vert> v, int clut, bool textured,
+        out ushort z0, out ushort z1, out ushort z2)
+    {
+        z0 = z1 = z2 = 0;
+        // Enhanced is a separate renderer, so both 4-bit model/building
+        // textures and 8-bit terrain/world textures use the same
+        // primitive-wide recovery contract.  This remains conservative:
+        // accept only two exact or same-material cached depths and derive the
+        // third from the packet's native AVSZ3 ordering-table value.  Stock
+        // never enters this path because perspective correction is disabled.
+        if (_currentOtDepth <= 0 ||
+            (textured && _texDepth is not (0 or 1)))
+            return false;
+
+        int expected = Math.Clamp(_currentOtDepth * 8, 1, ushort.MaxValue);
+        Span<int> depth = stackalloc int[3];
+        int present = 0;
+        long knownSum = 0;
+        for (int i = 0; i < 3; i++)
+        {
+            if (v[i].HasGteZ && v[i].Z > 0)
+                depth[i] = v[i].Z;
+            else if (!textured ||
+                     !TryGetCachedProjectiveDepth(
+                         v[i], clut, expected, out depth[i]))
+                continue;
+            present++;
+            knownSum += depth[i];
+        }
+
+        if (present < 2)
+            return false;
+
+        // OT bins are only eight camera-space units wide, but the game's
+        // ordering-table setup and near-plane saturation introduce a small
+        // bias. Keep the mean check tight enough to reject samples from an
+        // overlapping object while allowing the native fixed-point rounding.
+        int meanTolerance = Math.Max(96, expected / 8);
+        if (present == 3)
+        {
+            int mean = (int)((knownSum + 1) / 3);
+            if (Math.Abs(mean - expected) > meanTolerance)
+                return false;
+        }
+        else
+        {
+            long inferred = 3L * expected - knownSum;
+            if (inferred is <= 0 or > ushort.MaxValue)
+                return false;
+            for (int i = 0; i < 3; i++)
+            {
+                if (!v[i].HasGteZ)
+                {
+                    depth[i] = (int)inferred;
+                    break;
+                }
+            }
+        }
+
+        int minimum = Math.Min(depth[0], Math.Min(depth[1], depth[2]));
+        int maximum = Math.Max(depth[0], Math.Max(depth[1], depth[2]));
+        if (minimum <= 0 || maximum > minimum * 8)
+            return false;
+
+        // Every accepted sample must remain plausible for this OT bucket.
+        // The slope allowance is deliberately wider than the mean allowance:
+        // a wall viewed obliquely legitimately spans a broad depth range.
+        int vertexTolerance = Math.Max(512, expected);
+        for (int i = 0; i < 3; i++)
+            if (Math.Abs(depth[i] - expected) > vertexTolerance)
+                return false;
+
+        z0 = checked((ushort)depth[0]);
+        z1 = checked((ushort)depth[1]);
+        z2 = checked((ushort)depth[2]);
+        return true;
+    }
+
+    ulong ProjectiveDepthCacheKey(in Vert vertex, int clut) =>
+        (ushort)vertex.RawX |
+        ((ulong)(ushort)vertex.RawY << 16) |
+        ((ulong)(ushort)clut << 32) |
+        ((ulong)(ushort)CurTPage() << 48);
+
+    bool TryGetCachedProjectiveDepth(
+        in Vert vertex, int clut, int expected, out int depth)
+    {
+        depth = 0;
+        if (!_projectiveDepthCache.TryGetValue(
+                ProjectiveDepthCacheKey(vertex, clut), out var entry))
+            return false;
+
+        long packetDistance = Math.Abs(
+            (long)_currentOtPacketAddress - entry.PacketAddress);
+        int otTolerance = Math.Max(64, _currentOtDepth / 4);
+        int depthTolerance = Math.Max(512, expected);
+        if (_currentOtPacketAddress == 0 || entry.PacketAddress == 0 ||
+            packetDistance > 0x1000 ||
+            Math.Abs(_currentOtDepth - entry.OtDepth) > otTolerance ||
+            Math.Abs(entry.Depth - expected) > depthTolerance)
+            return false;
+
+        depth = entry.Depth;
+        return true;
+    }
+
+    void RememberProjectiveTriangleDepth(
+        Span<Vert> v, int clut, ushort z0, ushort z1, ushort z2)
+    {
+        if (_texDepth is not (0 or 1) || _currentOtPacketAddress == 0)
+            return;
+        Span<ushort> depth = stackalloc ushort[3] { z0, z1, z2 };
+        for (int i = 0; i < 3; i++)
+            _projectiveDepthCache[ProjectiveDepthCacheKey(v[i], clut)] =
+                new(depth[i], _currentOtDepth, _currentOtPacketAddress);
     }
 
     void RasterTriangle(Vert a, Vert b, Vert c, bool tex, bool gouraud, bool semi, bool raw, int clut)

@@ -23,7 +23,7 @@ internal static class HostWindow
     static uint _displayTex;
     static uint _vramTex;
     static uint _ramTex;
-    static Hle.GlBackend? _glBackend;
+    static Enhanced.EnhancedGlBackend? _enhancedRenderer;
     static PresentationRenderer? _presentationRenderer;
 
     static byte[] _rgbDisplay = [];
@@ -72,10 +72,30 @@ internal static class HostWindow
     static int _activePresentationBurstRemaining;
     static readonly bool _windowVisible =
         Environment.GetEnvironmentVariable("RECOMPONE_WINDOW_VISIBLE") != "0";
+    static readonly bool _forceHeadless =
+        Environment.GetEnvironmentVariable("RECOMPONE_HEADLESS") == "1";
+    static readonly int _maximumHeadlessPresents =
+        int.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_HEADLESS_MAX_PRESENTS"),
+            out int maximumHeadlessPresents)
+            ? Math.Max(1, maximumHeadlessPresents)
+            : 0;
+    static int _headlessPresents;
+    static readonly int _maximumWindowPresents =
+        int.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_WINDOW_MAX_PRESENTS"),
+            out int maximumWindowPresents)
+            ? Math.Max(1, maximumWindowPresents)
+            : 0;
+    static int _windowPresents;
     static readonly int _displayProbeInterval =
         int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_DISPLAY_PROBE_INTERVAL"), out int interval)
             ? Math.Max(1, interval)
             : 0;
+    static readonly string? _captureDirectory =
+        Environment.GetEnvironmentVariable("RECOMPONE_CAPTURE_DIR");
 
     static bool _layoutPending = true;
     static bool _closed;
@@ -84,6 +104,14 @@ internal static class HostWindow
     public static void Initialize(string title)
     {
         ConfigManager.Load();
+        if (_forceHeadless)
+        {
+            _headless = true;
+            InputManager.InitializeHeadless();
+            Console.Error.WriteLine(
+                "[Host] explicit headless software presentation enabled");
+            return;
+        }
         var outputSize = ParseOutputResolution(_outputResolutionOverride ?? ConfigManager.View.OutputResolution);
 
         try
@@ -96,7 +124,10 @@ internal static class HostWindow
             {
                 Size = new Vector2D<int>(outputSize.width, outputSize.height),
                 Title = title,
-                IsVisible = _windowVisible,
+                // Create hidden so Windows never presents its default white
+                // client brush. We reveal only after a black GL frame has
+                // been cleared and swapped.
+                IsVisible = false,
                 VSync = false,
                 UpdatesPerSecond = 0,
                 FramesPerSecond = 0,
@@ -108,6 +139,15 @@ internal static class HostWindow
             _window.Render += OnRender;
             _window.Closing += OnClosing;
             _window.Initialize();
+            // The OS/driver-created backbuffer can briefly show as bright
+            // white before the guest enables display. Seed a real host frame
+            // immediately so the pre-boot period matches the PS1 black clear.
+            try { _window.DoRender(); } catch { }
+            if (_windowVisible)
+            {
+                _window.IsVisible = true;
+                try { _window.DoRender(); } catch { }
+            }
         }
         catch (Exception e)
         {
@@ -119,7 +159,29 @@ internal static class HostWindow
     public static void Present(Gpu? gpu)
     {
         _gpu = gpu;
-        if (_headless || _window == null) return;
+        if (_headless || _window == null)
+        {
+            InputManager.Poll();
+            if (gpu is { DisplayEnabled: true } &&
+                gpu.DisplayWidth > 0 && gpu.DisplayHeight > 0)
+            {
+                int pixels = checked(gpu.DisplayWidth * gpu.DisplayHeight);
+                if (_rgbDisplay.Length < pixels * 3)
+                    _rgbDisplay = new byte[pixels * 3];
+                ConvertDisplay(gpu, gpu.DisplayWidth, gpu.DisplayHeight);
+                ProbeDisplay(gpu, gpu.DisplayWidth, gpu.DisplayHeight);
+            }
+            if (_maximumHeadlessPresents > 0 &&
+                ++_headlessPresents >= _maximumHeadlessPresents)
+            {
+                Console.Error.WriteLine(
+                    $"[Host] headless presentation limit reached: " +
+                    $"{_headlessPresents}");
+                Runtime.Shutdown();
+                Environment.Exit(0);
+            }
+            return;
+        }
         try { _window.DoEvents(); }
         catch (Exception e) {
             Console.WriteLine(e.Message);
@@ -138,6 +200,15 @@ internal static class HostWindow
             ConfigManager.SaveView(PanelManager.Panels);
         }
         _window.DoRender();
+        if (_maximumWindowPresents > 0 &&
+            ++_windowPresents >= _maximumWindowPresents)
+        {
+            Console.Error.WriteLine(
+                $"[Host] window presentation limit reached: " +
+                $"{_windowPresents}");
+            Runtime.Shutdown();
+            Environment.Exit(0);
+        }
     }
 
     internal static void Pump()
@@ -173,6 +244,31 @@ internal static class HostWindow
         _window.Size = new Vector2D<int>(size.width, size.height);
     }
 
+    internal static void ApplyGraphicsConfiguration()
+    {
+        if (_enhancedRenderer is not { Ready: true } backend)
+            return;
+
+        bool hleActive = UseEnhancedRenderer();
+        int scale = ConfigManager.View.HighResolution3D
+            ? ConfigManager.View.InternalResolutionScale
+            : 1;
+        if (Enhanced.GlVram.Scale != scale)
+        {
+            ushort[] nativeVram = _gpu?.Vram ??
+                new ushort[Gpu.VramWidth * Gpu.VramHeight];
+            backend.ApplyResolutionScale(scale, nativeVram);
+        }
+        Hle.GpuHle.Active = hleActive;
+        Hle.GpuHle.NativeResolution = !ConfigManager.View.HighResolution3D;
+        ApplyGraphicsView();
+        Console.WriteLine(
+            $"[Host] applied graphics preset=" +
+            $"{ConfigManager.View.ResolveGraphicsPreset()} " +
+            $"renderer={(hleActive ? "Enhanced GL" : "PS1 software")} " +
+            $"scale={Enhanced.GlVram.Scale}x");
+    }
+
     static (int width, int height) ParseOutputResolution(string resolution)
     {
         string[] parts = resolution.Split('x', 'X');
@@ -182,6 +278,23 @@ internal static class HostWindow
             width is >= 640 and <= 7680 && height is >= 480 and <= 4320)
             return (width, height);
         return (1280, 720);
+    }
+
+    static bool UseEnhancedRenderer()
+    {
+        string? rendererOverride =
+            Environment.GetEnvironmentVariable("RECOMPONE_GPU_HLE");
+        if (rendererOverride == "1")
+            return true;
+        if (rendererOverride == "0")
+            return false;
+
+        // Renderer choice and internal resolution are independent.  Original
+        // explicitly selects the preserved software renderer; Enhanced and
+        // Custom remain on the modern renderer even when a user chooses 1x.
+        return !ConfigManager.View.GraphicsPreset.Equals(
+            "Original",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool IsKeyDown(Key k) => InputManager.IsKeyDown(k);
@@ -232,7 +345,7 @@ internal static class HostWindow
         InputManager.Initialize(input);
 
         _gl = GL.GetApi(_window);
-        _gl.ClearColor(0.08f, 0.08f, 0.08f, 1f);
+        _gl.ClearColor(0f, 0f, 0f, 1f);
 
         var fb = _window!.FramebufferSize;
         _gl.Viewport(0, 0, (uint)fb.X, (uint)fb.Y);
@@ -256,19 +369,16 @@ internal static class HostWindow
         if (smoothingOverride is "0" or "1")
             ConfigManager.View.TextureSmoothing = smoothingOverride == "1";
 
-        string? hleOverride = Environment.GetEnvironmentVariable("RECOMPONE_GPU_HLE");
-        bool hleActive = hleOverride == "1" ||
-            (hleOverride != "0" && ConfigManager.View.HighResolution3D);
-        // A 2x native framebuffer (640x480 for normal gameplay) retains the
-        // clean Dreamcast/PS2-class geometry target while avoiding the 16x
-        // fragment load of the former 4x-per-axis path. Presentation remains
-        // at the host resolution and MSAA still resolves sub-pixel edges.
-        Hle.GlVram.Scale = ConfigManager.View.HighResolution3D ? 2 : 1;
-        _glBackend = new Hle.GlBackend(_gl);
-        _glBackend.InitGl();
+        bool hleActive = UseEnhancedRenderer();
+        Enhanced.GlVram.Scale = ConfigManager.View.HighResolution3D
+            ? ConfigManager.View.InternalResolutionScale
+            : 1;
+        _enhancedRenderer = new Enhanced.EnhancedGlBackend(_gl);
+        _enhancedRenderer.InitGl();
         Hle.GpuHle.Active = hleActive;
-        Hle.GpuHle.Backend = _glBackend;
-        Hle.GpuHle.NativeResolution = false;
+        Hle.GpuHle.Backend = _enhancedRenderer;
+        Hle.GpuHle.NativeResolution =
+            !ConfigManager.View.HighResolution3D;
         ApplyGraphicsView();
         Console.WriteLine(
             $"[Host] PS1 color dithering={(ConfigManager.View.Ps1Dithering ? "On (fidelity)" : "Off (enhanced default)")}");
@@ -339,7 +449,7 @@ internal static class HostWindow
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         var fbDef = _window!.FramebufferSize;
         gl.Viewport(0, 0, (uint)fbDef.X, (uint)fbDef.Y);
-        gl.ClearColor(0.08f, 0.08f, 0.08f, 1f);
+        gl.ClearColor(0f, 0f, 0f, 1f);
         gl.Clear(ClearBufferMask.ColorBufferBit);
 
         Runtime.RamLog.Tick();
@@ -351,15 +461,21 @@ internal static class HostWindow
         if (gpu != null)
         {
 
-            if (Hle.GpuHle.Active && _glBackend is { Ready: true } && gpu.DisplayEnabled)
+            if (Hle.GpuHle.Active &&
+                _enhancedRenderer is { Ready: true } &&
+                gpu.DisplayEnabled)
             {
                 var wf = _window!.FramebufferSize;
-                var (tex, tw, th, aspect) = _glBackend.PresentDisplay(
+                var (tex, tw, th, aspect) = _enhancedRenderer.PresentDisplay(
                     gpu.DisplayX, gpu.DisplayY,
                     gpu.DisplayWidth, gpu.DisplayHeight,
                     gpu.Display24Bit,
                     outW: wf.X, outH: wf.Y);
-                ProbeHleDisplay(_glBackend, gpu, gpu.DisplayWidth, gpu.DisplayHeight);
+                ProbeHleDisplay(
+                    _enhancedRenderer,
+                    gpu,
+                    gpu.DisplayWidth,
+                    gpu.DisplayHeight);
                 if (tex != 0) PresentTexture(gl, tex, tw, th, aspect);
                 gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                 gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
@@ -432,7 +548,7 @@ internal static class HostWindow
         ConfigManager.SaveView(PanelManager.Panels);
         ConfigManager.SaveGame();
         PanelManager.Shutdown();
-        _glBackend?.Dispose();
+        _enhancedRenderer?.Dispose();
         _presentationRenderer?.Dispose();
         _imgui?.Dispose();
         _gl?.DeleteTexture(_displayTex);
@@ -582,6 +698,12 @@ internal static class HostWindow
 
     static void WriteDisplayPpm(string path, int w, int h, int pixels)
     {
+        if (!string.IsNullOrWhiteSpace(_captureDirectory))
+        {
+            string directory = Path.GetFullPath(_captureDirectory);
+            Directory.CreateDirectory(directory);
+            path = Path.Combine(directory, Path.GetFileName(path));
+        }
         using var dump = File.Create(path);
         byte[] header = System.Text.Encoding.ASCII.GetBytes($"P6\n{w} {h}\n255\n");
         dump.Write(header);
@@ -594,9 +716,11 @@ internal static class HostWindow
         const int sz = Gpu.VramWidth * Gpu.VramHeight * 3;
         if (_rgbVram.Length < sz) _rgbVram = new byte[sz];
         ushort[] src;
-        if (Hle.GpuHle.Active && _glBackend is { Ready: true })
+        if (Hle.GpuHle.Active &&
+            _enhancedRenderer is { Ready: true })
         {
-            _glBackend.ReadVram(0, 0, Gpu.VramWidth, Gpu.VramHeight, _vramView);
+            _enhancedRenderer.ReadVram(
+                0, 0, Gpu.VramWidth, Gpu.VramHeight, _vramView);
             src = _vramView;
         }
         else src = gpu.Vram;

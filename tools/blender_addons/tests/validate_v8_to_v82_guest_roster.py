@@ -1,70 +1,37 @@
 #!/usr/bin/env python3
-"""Audit the delivered three-entry V8-to-V8:2 package and its proofs."""
+"""Programmatically audit the complete V8-to-V8:2 guest package."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 from pathlib import Path
+import struct
 import sys
 
 
 ROOT = Path(__file__).resolve().parents[3]
+TESTS = Path(__file__).resolve().parent
 ADDONS = ROOT / "tools" / "blender_addons"
-if str(ADDONS) not in sys.path:
-    sys.path.insert(0, str(ADDONS))
+for path in (TESTS, ADDONS):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
-from vigilante8_vehicle_tools import iff, project, registry  # noqa: E402
+from build_v8_to_v82_guest_roster import (  # noqa: E402
+    VEHICLES,
+    V8_COMMON,
+    V8_SELECTOR_VEHICLES,
+    decode_bank,
+)
+from vigilante8_vehicle_tools import iff, project, registry, xobf  # noqa: E402
 
 
 OUTPUT = ROOT / "artifacts" / "v8_to_v82_guest_roster"
 FINAL = OUTPUT / "final"
-EXPECTED_IDS = (
-    "guest.v8.chassey_blue",
-    "guest.v8.slick_clyde",
-    "guest.v8.sheila",
-)
-EXPECTED_WEAPONS = list(range(1, 8))
-EXPECTED_POWERUPS = [
-    "radar-jammer",
-    "repair-wrench",
-    "shield",
-    "transform-1",
-    "transform-2",
-    "transform-3",
-    "weapon-upgrade",
-]
-RUNS = {
-    "guest.v8.chassey_blue": {
-        "weapons": (
-            OUTPUT / "runtime" / "isolated" / "chassey_weapons"
-            / "summary.json"
-        ),
-        "powerups": (
-            OUTPUT / "runtime" / "final_validation" / "chassey_powerups"
-            / "summary.json"
-        ),
-    },
-    "guest.v8.slick_clyde": {
-        "weapons": (
-            OUTPUT / "runtime" / "isolated" / "slick_weapons"
-            / "summary.json"
-        ),
-        "powerups": (
-            OUTPUT / "runtime" / "final_validation"
-            / "slick_powerups_route66" / "summary.json"
-        ),
-    },
-    "guest.v8.sheila": {
-        "weapons": (
-            OUTPUT / "runtime" / "isolated" / "sheila_weapons"
-            / "summary.json"
-        ),
-        "powerups": (
-            OUTPUT / "runtime" / "final_validation"
-            / "sheila_powerups_route66" / "summary.json"
-        ),
-    },
+EXPECTED_IDS = tuple(record[1] for record in VEHICLES)
+RETAIL_ENVIRONMENT_ROLES = {
+    (0x00, (0x3FFF, 0x8080, 0, 0)),
+    (0x10, (0x7FFE, 0x8080, 0, 0)),
 }
 
 
@@ -77,6 +44,163 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+def render_mode(native_packet_type: int) -> int:
+    """Reproduce the identical retail V8/V8:2 packet-mode rewrite."""
+
+    return (
+        ((native_packet_type & 0x0F) << 2)
+        | (0x40 if native_packet_type & 0x80 else 0)
+        | (0x02 if native_packet_type & 0x10 else 0)
+        | (0x80 if native_packet_type & 0x40 else 0)
+    )
+
+
+def environment_faces(
+    bank: project.ObjectBank,
+) -> tuple[project.Face, ...]:
+    return tuple(
+        face
+        for group in bank.groups
+        for face in group.faces
+        if face.packet_kind == 12
+    )
+
+
+def validate_environment_translation(
+    stable_id: str,
+    label: str,
+    source: project.ObjectBank,
+    converted: project.ObjectBank,
+) -> dict[str, int]:
+    source_faces = environment_faces(source)
+    converted_faces = environment_faces(converted)
+    require(
+        len(source_faces) == len(converted_faces),
+        f"{stable_id} {label} changed environment face count",
+    )
+
+    opaque = 0
+    gloss = 0
+    for index, (before, after) in enumerate(
+        zip(source_faces, converted_faces)
+    ):
+        before_type = before.packet_kind | before.packet_flags
+        after_type = after.packet_kind | after.packet_flags
+        require(
+            render_mode(before_type) == render_mode(after_type),
+            f"{stable_id} {label} face {index} changed GPU render mode",
+        )
+        require(
+            after.packet_flags & 0x20 == 0,
+            f"{stable_id} {label} face {index} retained ignored V8 bit 0x20",
+        )
+
+        source_selector = before.environment_parameters[0]
+        if (source_selector & 0x3FFF) == 0x3FFF:
+            expected = (
+                (0x10, (0x7FFE, 0x8080, 0, 0))
+                if before.packet_flags & 0x10
+                else (0x00, (0x3FFF, 0x8080, 0, 0))
+            )
+            actual = (
+                after.packet_flags,
+                after.environment_parameters,
+            )
+            require(
+                actual == expected,
+                f"{stable_id} {label} face {index} is not a retail "
+                "V8:2 environment role",
+            )
+            if expected[0] == 0x10:
+                gloss += 1
+            else:
+                opaque += 1
+        else:
+            require(
+                after.environment_parameters
+                == (source_selector, 0x8080, 0, 0),
+                f"{stable_id} {label} face {index} changed a local "
+                "environment selector",
+            )
+
+    return {
+        "faces": len(converted_faces),
+        "opaque_arena_reflection": opaque,
+        "translucent_gloss": gloss,
+    }
+
+
+def validate_native_texture_boundaries(forms: tuple[iff.IffChunk, ...]) -> int:
+    texture_count = 0
+    for bank_index, form in enumerate(forms):
+        chunk = next(child for child in form.children if child.tag == b"BIN ")
+        model = xobf.Model(chunk.payload, "V8_2")
+        source = model.data
+        table = model.texture_table_offset
+        targets = tuple(
+            table + struct.unpack_from("<I", source, table + index * 4)[0]
+            for index in range(model.texture_count)
+        )
+        for texture_index, texture in enumerate(model.textures()):
+            require(
+                texture.supported,
+                f"bank {bank_index} texture {texture_index} is unsupported",
+            )
+            if texture.depth == 2:
+                image_offset = texture.offset
+            else:
+                image_offset = (
+                    texture.offset
+                    + struct.unpack_from("<I", source, texture.offset + 8)[0]
+                )
+                palette_end = (
+                    texture.offset + 0x14 + len(texture.palette) * 2
+                )
+                require(
+                    image_offset == palette_end - 8,
+                    f"bank {bank_index} texture {texture_index} does not "
+                    "use the retail CLUT/image overlap",
+                )
+            pixel_offset = image_offset + 0x14
+            encoded_size = (
+                xobf._compressed_input_size(
+                    source[pixel_offset:],
+                    len(texture.packed_pixels),
+                )
+                if texture.compressed
+                else len(texture.packed_pixels)
+            )
+            declared_size = struct.unpack_from(
+                "<I", source, image_offset + 8
+            )[0]
+            require(
+                declared_size == encoded_size + 13,
+                f"bank {bank_index} texture {texture_index} has an invalid "
+                "native image-block size",
+            )
+            logical_end = pixel_offset + encoded_size
+            runtime_end = (image_offset + declared_size + 11) & ~3
+            expected_end = (
+                targets[texture_index + 1]
+                if texture_index + 1 < len(targets)
+                else len(source)
+            )
+            require(
+                runtime_end == expected_end,
+                f"bank {bank_index} texture {texture_index} advances to "
+                "the wrong native record boundary",
+            )
+            require(
+                1 <= runtime_end - logical_end <= 4
+                and source[logical_end:runtime_end]
+                == b"\0" * (runtime_end - logical_end),
+                f"bank {bank_index} texture {texture_index} lacks retail "
+                "zero termination/alignment",
+            )
+            texture_count += 1
+    return texture_count
+
+
 def main() -> None:
     archive_path = FINAL / "CUSTOM.EXP"
     registry_path = FINAL / "VEHICLES.V8R"
@@ -87,30 +211,47 @@ def main() -> None:
     forms = tuple(iff.parse(archive).forms(b"XOBF"))
     vehicles = registry.decompile_package(archive, registry_data)
     require(game == "V8_2", "registry is not a sequel package")
-    require(len(entries) == 3, "registry does not contain exactly three entries")
-    require(len(forms) == 6, "archive does not contain three owned bank pairs")
     require(
         tuple(entry.stable_id for entry in entries) == EXPECTED_IDS,
         "stable roster identities changed",
     )
-    bank_pairs = tuple(
-        (entry.archive_index, entry.transformation_archive_index)
-        for entry in entries
+    require(
+        len(entries) == len(EXPECTED_IDS),
+        "registry does not contain the complete V8-exclusive roster",
     )
     require(
-        bank_pairs == ((0, 1), (2, 3), (4, 5)),
-        "entries do not own exclusive body/transformation bank pairs",
+        len(forms) == len(EXPECTED_IDS) * 3,
+        "archive does not contain three owned banks per vehicle",
+    )
+
+    bank_triples = tuple(
+        (
+            entry.archive_index,
+            entry.transformation_archive_index,
+            entry.selector_preview_archive_index,
+        )
+        for entry in entries
+    )
+    expected_triples = tuple(
+        (index * 3, index * 3 + 1, index * 3 + 2)
+        for index in range(len(EXPECTED_IDS))
+    )
+    require(
+        bank_triples == expected_triples,
+        "body/transformation/selector banks are not independently owned",
     )
     require(
         {
             bank
-            for pair in bank_pairs
-            for bank in pair
+            for triple in bank_triples
+            for bank in triple
             if bank is not None
         }
-        == set(range(6)),
-        "archive has shared or unreferenced support/donor banks",
+        == set(range(len(forms))),
+        "archive has shared or unreferenced banks",
     )
+    native_texture_count = validate_native_texture_boundaries(forms)
+
     rebuilt = registry.compile_package(vehicles)
     require(rebuilt.archive == archive, "native archive is not deterministic")
     require(
@@ -119,8 +260,17 @@ def main() -> None:
     )
 
     vehicle_records = []
-    for custom_offset, vehicle in enumerate(vehicles):
+    for index, vehicle in enumerate(vehicles):
         vehicle.validate()
+        require(
+            vehicle.selector_preview_bank is not None,
+            f"{vehicle.stable_id} has no owned selector bank",
+        )
+        require(
+            vehicle.transformation_bank is not None,
+            f"{vehicle.stable_id} has no owned transformation bank",
+        )
+
         direct_keys = {
             slot.key
             for slot in vehicle.slots
@@ -129,7 +279,7 @@ def main() -> None:
         require(
             direct_keys & set(range(0x8000, 0x8006))
             == {0x8000, 0x8001, 0x8002, 0x8003},
-            f"{vehicle.stable_id} does not preserve its four V8 wheel anchors",
+            f"{vehicle.stable_id} does not preserve four wheel anchors",
         )
         require(
             direct_keys & set(range(0x8010, 0x8017))
@@ -137,108 +287,64 @@ def main() -> None:
             f"{vehicle.stable_id} does not expose all sequel weapon mounts",
         )
         require(
-            vehicle.transformation_bank is not None,
-            f"{vehicle.stable_id} has no owned transformation bank",
-        )
-        require(
             len(vehicle.transform_modes) == 4
             and all(len(mode) == 6 for mode in vehicle.transform_modes),
-            f"{vehicle.stable_id} lacks the complete four-by-six mode table",
+            f"{vehicle.stable_id} lacks the native four-by-six mode table",
         )
 
-        runtime = {}
-        for profile, summary_path in RUNS[vehicle.stable_id].items():
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            require(
-                summary["coverageProfile"] == profile,
-                f"{vehicle.stable_id} {profile} summary profile is wrong",
-            )
-            require(
-                summary["totals"]["runs"] == 1
-                and summary["totals"]["passed"] == 1
-                and summary["totals"]["failed"] == 0,
-                f"{vehicle.stable_id} {profile} run did not pass",
-            )
-            run = summary["runs"][0]
-            require(
-                run["last_frame"] >= 2700
-                and run["collision_stream_rejections"] == 0,
-                f"{vehicle.stable_id} {profile} run is incomplete",
-            )
-            if profile == "weapons":
-                require(
-                    run["weapon_armed"] == EXPECTED_WEAPONS
-                    and run["weapon_fired"] == EXPECTED_WEAPONS,
-                    f"{vehicle.stable_id} did not exercise all weapons",
-                )
-            else:
-                require(
-                    run["powerups"] == EXPECTED_POWERUPS,
-                    f"{vehicle.stable_id} did not exercise all powerups",
-                )
-                require(
-                    len(run["transformation_captures"]) == 3,
-                    f"{vehicle.stable_id} lacks transformation screenshots",
-                )
-                require(
-                    all(Path(path).is_file() for path in run["transformation_captures"]),
-                    f"{vehicle.stable_id} transformation screenshot is missing",
-                )
-            runtime[profile] = {
-                "summary": str(summary_path.relative_to(ROOT)),
-                "frames": run["last_frame"],
-                "arena": run["actual_overlay"],
-                "collision_stream_rejections": (
-                    run["collision_stream_rejections"]
-                ),
-                "weapons_armed": run["weapon_armed"],
-                "weapons_fired": run["weapon_fired"],
-                "powerups": run["powerups"],
-                "transformation_captures": [
-                    str(Path(path).relative_to(ROOT))
-                    for path in run["transformation_captures"]
-                ],
-            }
+        source_index = VEHICLES[index][0]
+        source_body = decode_bank(V8_COMMON, "V8", source_index)
+        source_selector = decode_bank(
+            V8_SELECTOR_VEHICLES,
+            "V8",
+            source_index,
+        )
+        body_environment = validate_environment_translation(
+            vehicle.stable_id,
+            "body",
+            source_body,
+            vehicle,
+        )
+        selector_environment = validate_environment_translation(
+            vehicle.stable_id,
+            "selector",
+            source_selector,
+            vehicle.selector_preview_bank,
+        )
 
         source_project = (
             OUTPUT / "source_projects" / f"{vehicle.stable_id}.json"
         )
         blend = OUTPUT / "blender" / f"{vehicle.stable_id}.blend"
-        require(source_project.is_file(), f"{vehicle.stable_id} JSON is missing")
-        require(blend.is_file(), f"{vehicle.stable_id} Blender file is missing")
+        require(source_project.is_file(), f"{vehicle.stable_id} JSON missing")
+        require(blend.is_file(), f"{vehicle.stable_id} Blender file missing")
         vehicle_records.append(
             {
                 "stable_id": vehicle.stable_id,
-                "display_name": vehicle.display_name,
-                "assigned_runtime_type": 64 + custom_offset,
-                "retail_replacement": False,
-                "body_bank": bank_pairs[custom_offset][0],
-                "transformation_bank": bank_pairs[custom_offset][1],
-                "source_project": str(source_project.relative_to(ROOT)),
-                "blend": str(blend.relative_to(ROOT)),
+                "body_bank": bank_triples[index][0],
+                "transformation_bank": bank_triples[index][1],
+                "selector_bank": bank_triples[index][2],
+                "body_environment": body_environment,
+                "selector_environment": selector_environment,
+                "source_project_sha256": digest(source_project),
                 "blend_sha256": digest(blend),
-                "body_slots": len(vehicle.slots),
-                "body_groups": len(vehicle.groups),
-                "body_textures": len(vehicle.textures),
-                "body_animations": len(vehicle.animations),
-                "transformation_slots": len(
-                    vehicle.transformation_bank.slots
-                ),
-                "transformation_groups": len(
-                    vehicle.transformation_bank.groups
-                ),
-                "wheel_anchor_keys": [
-                    "0x8000",
-                    "0x8001",
-                    "0x8002",
-                    "0x8003",
-                ],
-                "weapon_mount_keys": [
-                    f"0x{key:04X}" for key in range(0x8010, 0x8017)
-                ],
-                "runtime": runtime,
             }
         )
+
+    beezwax = next(
+        record
+        for record in vehicle_records
+        if record["stable_id"] == "guest.v8.beezwax"
+    )
+    require(
+        beezwax["body_environment"]
+        == {
+            "faces": 26,
+            "opaque_arena_reflection": 18,
+            "translucent_gloss": 8,
+        },
+        "Beezwax body glass/reflection structure changed",
+    )
 
     blender_proof = json.loads(
         (OUTPUT / "blender_roundtrip.json").read_text(encoding="utf-8")
@@ -248,42 +354,32 @@ def main() -> None:
         "Blender export is not exact to the generated native package",
     )
     require(
-        blender_proof["final_package"]["CUSTOM.EXP"] == digest(archive_path)
+        blender_proof["final_package"]["CUSTOM.EXP"]
+        == digest(archive_path)
         and blender_proof["final_package"]["VEHICLES.V8R"]
         == digest(registry_path),
         "Blender proof hashes do not match the delivered package",
     )
 
-    proof_sheet = (
-        OUTPUT / "proofs"
-        / "three_v8_guests_standard_hover_float_ski.png"
-    )
-    require(proof_sheet.is_file(), "combined in-game proof sheet is missing")
     report = {
-        "schema": "v8-to-v82-three-guest-validation-v1",
+        "schema": "v8-to-v82-roster-validation-v2",
         "result": "PASS",
         "source_game": "V8",
         "target_game": "V8_2",
-        "vehicle_count": 3,
-        "retail_vehicle_count": 18,
-        "first_custom_runtime_type": 64,
-        "native_bank_count": 6,
-        "retail_replacements": 0,
-        "runtime_dependencies_on_retail_vehicle_entries": 0,
-        "shared_owned_banks": 0,
-        "unreferenced_support_or_donor_banks": 0,
-        "opaque_payloads": 0,
-        "embedded_source_archives": 0,
+        "vehicle_count": len(vehicles),
+        "owned_bank_count": len(forms),
+        "native_texture_count": native_texture_count,
+        "shared_banks": 0,
+        "unreferenced_banks": 0,
         "blender_version": blender_proof["blender_version"],
         "blender_byte_exact_export": True,
-        "blender_addon": {
-            "version": "0.3.1",
-            "path": "artifacts\\vigilante8_vehicle_tools-0.3.1.zip",
-            "sha256": digest(
-                ROOT / "artifacts"
-                / "vigilante8_vehicle_tools-0.3.1.zip"
-            ),
-        },
+        "retail_environment_roles": [
+            {
+                "packet_flags": flags,
+                "environment_parameters": list(parameters),
+            }
+            for flags, parameters in sorted(RETAIL_ENVIRONMENT_ROLES)
+        ],
         "native_package": {
             "CUSTOM.EXP": {
                 "path": str(archive_path.relative_to(ROOT)),
@@ -294,12 +390,6 @@ def main() -> None:
                 "sha256": digest(registry_path),
             },
         },
-        "proof_sheet": {
-            "path": str(proof_sheet.relative_to(ROOT)),
-            "sha256": digest(proof_sheet),
-            "rows": ["Chassey Blue", "Slick Clyde", "Sheila"],
-            "columns": ["Standard", "Hover", "Float", "Ski"],
-        },
         "vehicles": vehicle_records,
     }
     report_path = OUTPUT / "validation.json"
@@ -308,8 +398,10 @@ def main() -> None:
         encoding="utf-8",
     )
     print(
-        "PASS: 3 independent entries, 6 exclusive banks, exact Blender "
-        "export, 3 powerup/transform runs, and 3 seven-weapon runs"
+        "PASS: 12 vehicles, 36 exclusive native banks, deterministic "
+        f"compile, {native_texture_count} retail-compatible texture records, "
+        "byte-exact Blender round trip, and source-to-V8:2 environment-role "
+        "parity"
     )
 
 

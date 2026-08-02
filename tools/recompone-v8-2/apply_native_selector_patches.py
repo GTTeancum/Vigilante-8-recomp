@@ -31,12 +31,12 @@ REPLACEMENTS = (
     (
         """        c.V0 = c.FP + c.V0;
         c.V0 = m.ReadU8(c.V0);
-        c.T3 = m.ReadU32((c.SP + 0x1E8u));
+        c.LoadWord(11, m, (c.SP + 0x1E8u));
 """,
         """        c.V0 = c.FP + c.V0;
         c.V0 = m.ReadU8(c.V0);
         c.V0 = RecompOne.Runtime.Sdk.V82VehicleRegistry.NativeSelectorVariant(c.V0);
-        c.T3 = m.ReadU32((c.SP + 0x1E8u));
+        c.LoadWord(11, m, (c.SP + 0x1E8u));
 """,
     ),
     (

@@ -26,3 +26,6 @@
 [gameplay]
 250+240=UP
 320+100=LEFT
+# Capture after the steering pulse has exposed the side glass and wheel
+# surfaces, rather than relying only on the automatic rear-view checkpoint.
+410+2=SELECT

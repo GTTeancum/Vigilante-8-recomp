@@ -279,7 +279,7 @@ def _texture_for_packet(
 ) -> int | None:
     if packet.texture_slot is None:
         return None
-    texture_index = group.texture_base + packet.texture_slot
+    texture_index = packet.texture_slot & 0x3FFF
     return texture_index if 0 <= texture_index < model.texture_count else None
 
 
@@ -610,7 +610,7 @@ def _export_group(
             raw_texture = (
                 None
                 if absolute_texture is None
-                else absolute_texture - source_group.texture_base
+                else absolute_texture
             )
             textures.append(raw_texture)
             packet = source_group.packets[packet_index]
@@ -652,7 +652,7 @@ def _export_group(
         texture_slots.append(
             None
             if absolute_texture is None
-            else absolute_texture - source_group.texture_base
+            else absolute_texture
         )
         texture = (
             model.texture(absolute_texture)

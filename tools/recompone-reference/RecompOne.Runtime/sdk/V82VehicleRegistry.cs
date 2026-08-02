@@ -45,6 +45,14 @@ public static class V82VehicleRegistry
     const uint SelectorGuestZoom = 0x015Au;
     const uint SelectorDriverNameReturn = 0x80106A7Cu;
     const uint SelectorVehicleNameReturn = 0x80106B14u;
+    const uint SelectorPortraitBaseReturn = 0x801069ECu;
+    const uint SelectorPortraitPoseReturn = 0x80106A00u;
+    const uint SelectorEnemyHeaderReturn = 0x80107A1Cu;
+    const uint SelectorEnemyHeaderText = 0x801008E8u;
+    const int SelectorPortraitWidth = 260;
+    const int SelectorPortraitHeight = 422;
+    const uint ShellDisplayXAddress = 0x8006B7C0u;
+    const uint ShellDisplayYAddress = 0x8006B7C4u;
 
     static readonly UTF8Encoding StrictUtf8 =
         new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -67,9 +75,16 @@ public static class V82VehicleRegistry
     static int _selectorProxySlot;
     static int _selectorPreviousSlot = -1;
     static int _selectorPlayer;
+    static uint _selectorContext;
     static int _selectorStableFrames;
     static int _selectorStableGuest = -1;
+    static bool _selectorEnemyPhase;
+    static int _selectorEnemyFrames;
+    static int _selectorAcceptedGuest = -1;
+    static int _selectorAcceptedProxySlot = -1;
     static uint _selectorPreviewObject;
+    static readonly Dictionary<string, ushort[]> SelectorPortraitPixels =
+        new(StringComparer.OrdinalIgnoreCase);
     static readonly HashSet<int> SelectorProofCaptured = [];
     static readonly string[] SelectorVehicleNames =
     [
@@ -86,6 +101,30 @@ public static class V82VehicleRegistry
         "'66 School Bus",
         "'69 Manta",
     ];
+    // The retail result screen indexes an 18-entry table of native V8:2
+    // character/vehicle/audio stems. Imported types intentionally live outside
+    // that range, so feeding their stable type IDs into the retail table reads
+    // unrelated memory. Each legacy V8 driver uses the closest existing V8:2
+    // character record for result-screen XA playback until a package supplies
+    // an independently authored result-audio record. Exact returning
+    // characters reuse their own native sequel record.
+    static readonly IReadOnlyDictionary<string, int> ResultVoiceProxySlots =
+        new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["guest.v8.chassey_blue"] = 15,
+            ["guest.v8.slick_clyde"] = 9,
+            ["guest.v8.sheila"] = 0,
+            ["guest.v8.john_torque"] = 1,
+            ["guest.v8.dave"] = 5,
+            ["guest.v8.convoy"] = 4,
+            ["guest.v8.loki"] = 12,
+            ["guest.v8.houston_3"] = 3,
+            ["guest.v8.boogie"] = 11,
+            ["guest.v8.beezwax"] = 13,
+            ["guest.v8.molo"] = 8,
+            ["guest.v8.sid_burn"] = 17,
+        };
+    const uint ResultVoiceTableAddress = 0x8006383Cu;
     static readonly string? DefaultReplacementStableId =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_V82_DEFAULT_REPLACEMENT");
@@ -114,21 +153,12 @@ public static class V82VehicleRegistry
     public static int SelectedType => SelectedTypeForPlayer(0);
     public static int NativeSelectorGuestIndex =>
         Volatile.Read(ref _selectorGuestIndex);
-    public static string? NativeSelectorBannerPath
-    {
-        get
-        {
-            int index = NativeSelectorGuestIndex;
-            if (index < 0 || index >= Entries.Count ||
-                string.IsNullOrEmpty(_loadedPackageRoot))
-                return null;
-            return Path.Combine(
-                _loadedPackageRoot, "SHELL", $"SELECTOR_{index:00}.PPM");
-        }
-    }
     public static bool HasAnySelection =>
         Enumerable.Range(0, PlayerSelectionCount)
             .Any(player => SelectedTypeForPlayer(player) >= 0);
+
+    public static bool IsVehicleObject(uint objectAddress) =>
+        ObjectEntries.ContainsKey(objectAddress);
 
     public static VehicleRosterItem[] Roster()
     {
@@ -181,6 +211,7 @@ public static class V82VehicleRegistry
 
     public static void BeginNativeSelector(CpuContext c, IMemory m)
     {
+        V82Compat.ReleaseSelectorVramReservation(c, m);
         _selectorGuestIndex = -1;
         _selectorPreviousSlot = -1;
         _selectorFirstRetailSlot = 0;
@@ -189,28 +220,43 @@ public static class V82VehicleRegistry
         // Native selector context 1 is player one and context 2 is player
         // two. Context 0 is the AI/enemy pass and must not displace player
         // one's accepted guest.
+        _selectorContext = c.A1;
         _selectorPlayer = c.A1 == 2u ? 1 : 0;
         _selectorStableFrames = 0;
         _selectorStableGuest = -1;
+        _selectorEnemyPhase = false;
+        _selectorEnemyFrames = 0;
+        _selectorAcceptedGuest = -1;
+        _selectorAcceptedProxySlot = -1;
         _selectorPreviewObject = 0u;
         SelectorProofCaptured.Clear();
-        InputManager.SignalScriptStage("choose_player");
+        InputManager.SignalScriptStage(
+            _selectorContext == 0u ? "choose_enemies" : "choose_player");
     }
 
     public static void EndNativeSelector(CpuContext c, IMemory m)
     {
-        int guest = NativeSelectorGuestIndex;
+        int guest = _selectorAcceptedGuest >= 0
+            ? _selectorAcceptedGuest
+            : NativeSelectorGuestIndex;
+        int proxySlot = _selectorAcceptedGuest >= 0
+            ? _selectorAcceptedProxySlot
+            : _selectorProxySlot;
         if (guest >= 0 && guest < Entries.Count &&
-            c.V0 == (uint)_selectorProxySlot)
+            c.V0 == (uint)proxySlot)
         {
             VehicleEntry entry = Entries[guest];
             c.V0 = checked((uint)entry.Type);
             SelectTypeForPlayer(_selectorPlayer, entry.Type);
         }
         _selectorGuestIndex = -1;
+        _selectorEnemyPhase = false;
+        _selectorAcceptedGuest = -1;
+        _selectorAcceptedProxySlot = -1;
         _selectorPreviousSlot = -1;
         _selectorPreviewObject = 0u;
         V82Compat.ReleaseSelectorVramReservation(c, m);
+        _selectorContext = uint.MaxValue;
     }
 
     /// <summary>
@@ -221,7 +267,7 @@ public static class V82VehicleRegistry
     public static uint ResolveNativeSelectorSlot(CpuContext c, IMemory m)
     {
         uint slot = c.FP;
-        if (Entries.Count == 0)
+        if (Entries.Count == 0 || _selectorEnemyPhase)
             return slot;
 
         int current = checked((int)slot);
@@ -303,10 +349,10 @@ public static class V82VehicleRegistry
             current = _selectorProxySlot;
         }
 
+        if (guest != previousGuest)
+            V82Compat.ReleaseSelectorVramReservation(c, m);
         _selectorGuestIndex = guest;
         _selectorPreviousSlot = current;
-        if (guest != previousGuest)
-            V82Compat.ReserveSelectorVram(c, m, guest);
         if (_selectorStableGuest != guest)
         {
             _selectorStableGuest = guest;
@@ -321,6 +367,14 @@ public static class V82VehicleRegistry
 
     public static bool TickNativeSelector(CpuContext c, IMemory m)
     {
+        if (_selectorEnemyPhase)
+        {
+            int enemyFrame = ++_selectorEnemyFrames;
+            if (CaptureNativeSelectorProof && enemyFrame == 80)
+                HostWindow.RequestDisplayCapture("native_enemy_selector");
+            return true;
+        }
+
         int guest = NativeSelectorGuestIndex;
         if (TraceNativeSelectorInput && guest >= 0)
         {
@@ -353,6 +407,44 @@ public static class V82VehicleRegistry
         return true;
     }
 
+    /// <summary>
+    /// V8:2 keeps player and enemy selection inside one native selector call.
+    /// Observe its exact stock "SELECT ENEMIES" header draw so imported player
+    /// substitutions stop before the enemy portraits and previews are built.
+    /// The accepted guest is retained separately until the outer selector
+    /// returns its player slot.
+    /// </summary>
+    public static void ObserveNativeSelectorCall(CpuContext c, IMemory m)
+    {
+        if (_selectorEnemyPhase ||
+            c.RA != SelectorEnemyHeaderReturn ||
+            c.A1 != SelectorEnemyHeaderText ||
+            _selectorContext is not (1u or 2u))
+            return;
+
+        int guest = NativeSelectorGuestIndex;
+        if (guest < 0 || guest >= Entries.Count)
+            return;
+
+        _selectorAcceptedGuest = guest;
+        _selectorAcceptedProxySlot = _selectorProxySlot;
+        _selectorEnemyPhase = true;
+        _selectorEnemyFrames = 0;
+        _selectorGuestIndex = -1;
+        _selectorPreviousSlot = -1;
+        ReleaseSelectorPreviewForEnemyPhase(c, m);
+        InputManager.SignalScriptStage("choose_enemies");
+        Console.Error.WriteLine(
+            $"[V82Vehicles] entered native enemy selector after accepting " +
+            $"guest={guest}; stock portraits and previews restored");
+    }
+
+    static void ReleaseSelectorPreviewForEnemyPhase(CpuContext c, IMemory m)
+    {
+        V82Compat.ReleaseSelectorVramReservation(c, m);
+        _selectorPreviewObject = 0u;
+    }
+
     public static uint NativeSelectorVariant(uint retailVariant) =>
         NativeSelectorGuestIndex >= 0 ? 0u : retailVariant;
 
@@ -371,9 +463,14 @@ public static class V82VehicleRegistry
         if (!TrySelectorEntry(out VehicleEntry? entry) || entry == null)
             return true;
 
+        // The imported 260x422 V8 banner already contains the original
+        // driver-name treatment. Drawing V8:2's separate caption over it
+        // produces two offset copies at the lower edge.
+        if (c.RA == SelectorDriverNameReturn)
+            return false;
+
         string? text = c.RA switch
         {
-            SelectorDriverNameReturn => entry.DisplayName,
             SelectorVehicleNameReturn => NativeSelectorGuestIndex <
                 SelectorVehicleNames.Length
                 ? SelectorVehicleNames[NativeSelectorGuestIndex]
@@ -390,6 +487,41 @@ public static class V82VehicleRegistry
         m.WriteU8(SelectorTextAddress + (uint)bytes.Length, 0);
         c.A1 = SelectorTextAddress;
         return true;
+    }
+
+    /// <summary>
+    /// Replaces the stock V8:2 player portrait with the exact settled V8
+    /// 260x422 left banner. V8 composes its faction and character VLC layers
+    /// asynchronously; the durable package stores that completed composition.
+    /// Uploading it with the ordinary PS1 GP0 LoadImage command keeps the
+    /// result in native VRAM for both the software and Enhanced renderers.
+    ///
+    /// The second V8:2 pose-layer call must be skipped for imported entries:
+    /// the complete V8 banner already contains both layers. Enemy selection
+    /// (context 0) is never intercepted.
+    /// </summary>
+    public static bool BeginNativeSelectorPortrait(CpuContext c, IMemory m)
+    {
+        if ((c.RA != SelectorPortraitBaseReturn &&
+             c.RA != SelectorPortraitPoseReturn) ||
+            _selectorContext is not (1u or 2u) ||
+            !TrySelectorEntry(out VehicleEntry? entry) || entry == null)
+            return true;
+
+        if (c.RA == SelectorPortraitPoseReturn)
+            return false;
+
+        int guest = NativeSelectorGuestIndex;
+        m = Dispatcher.UnwrapMemory(m);
+        ushort[] pixels = LoadSelectorPortraitPixels(guest);
+        int x = checked((int)m.ReadU16(ShellDisplayXAddress) + (short)c.A1);
+        int y = checked((int)m.ReadU16(ShellDisplayYAddress) + (short)c.A2);
+        UploadSelectorPortrait(x, y, pixels);
+        Console.Error.WriteLine(
+            $"[V82SelectorPortrait] guest={guest} format=RGB555 " +
+            $"size={SelectorPortraitWidth}x{SelectorPortraitHeight} " +
+            $"destination=({x},{y})");
+        return false;
     }
 
     /// <summary>
@@ -488,18 +620,42 @@ public static class V82VehicleRegistry
     }
 
     /// <summary>
-    /// Object storage is recycled immediately by the retail allocator. Drop
-    /// host-side custom identity before teardown so a later retail object at
-    /// the same address cannot inherit guest banks or stats.
+    /// Compatibility no-op for generated projects produced before object
+    /// identity retirement moved into PcFree. Vehicle event 2 can call
+    /// func_8002CC08 while retaining the destroyed vehicle for the result
+    /// screen, so that routine is not an object-lifetime boundary.
     /// </summary>
     public static bool ReleaseVehicleMapping(CpuContext c, IMemory m)
+        => true;
+
+    /// <summary>
+    /// Retires guest identity at the actual object-storage lifetime boundary.
+    /// PcFree invokes this only after it has proved that the pointer owns a
+    /// live PC-heap allocation, preventing a destroy/model teardown from
+    /// invalidating the later event-4 result-screen cleanup callback.
+    /// </summary>
+    internal static void ReleaseFreedObjectMapping(
+        uint pointer, CpuContext c, IMemory m)
     {
-        if (_selectorPreviewObject == c.A0)
+        if (_selectorPreviewObject == pointer)
+        {
             _selectorPreviewObject = 0u;
-        ObjectEntries.Remove(c.A0);
-        ObjectUpgradeStatus.Remove(c.A0);
-        return true;
+            V82Compat.ReleaseSelectorVramReservation(c, m);
+        }
+        ObjectEntries.Remove(pointer);
+        ObjectUpgradeStatus.Remove(pointer);
     }
+
+    internal static void RegisterObjectMappingForProbe(uint pointer)
+    {
+        if (Entries.Count == 0)
+            throw new InvalidOperationException(
+                "guest identity probe requires a loaded vehicle package");
+        ObjectEntries[pointer] = 0;
+    }
+
+    internal static bool HasObjectMappingForProbe(uint pointer) =>
+        ObjectEntries.ContainsKey(pointer);
 
     /// <summary>
     /// Record only follow cameras owned by imported V8 vehicles. The sequel
@@ -611,6 +767,7 @@ public static class V82VehicleRegistry
 
         LoadAndValidate(registryPath, archivePath);
         _loadedPackageRoot = Path.GetDirectoryName(registryPath);
+        ValidateSelectorPortraits(_loadedPackageRoot);
         if (!_dispatchRegistered)
         {
             Dispatcher.RegisterHostFunction(
@@ -633,7 +790,19 @@ public static class V82VehicleRegistry
             throw new FileNotFoundException(
                 $"Vehicle package is incomplete in {root}");
         LoadAndValidate(registryPath, archivePath);
-        return $"vehicles={Entries.Count} banks={Banks.Count}";
+        ValidateSelectorPortraits(root);
+        return $"vehicles={Entries.Count} banks={Banks.Count} " +
+            $"portraits={Entries.Count}";
+    }
+
+    static void ValidateSelectorPortraits(string root)
+    {
+        for (int index = 0; index < Entries.Count; index++)
+        {
+            string path = Path.Combine(
+                root, "SHELL", $"SELECTOR_{index:00}.PPM");
+            _ = BuildSelectorPortraitPixels(path);
+        }
     }
 
     static void LoadAndValidate(string registryPath, string archivePath)
@@ -642,6 +811,7 @@ public static class V82VehicleRegistry
         Banks.Clear();
         ObjectEntries.Clear();
         ObjectUpgradeStatus.Clear();
+        SelectorPortraitPixels.Clear();
         _defaultReplacementEntry = null;
         ClearSelections();
         byte[] registry = File.ReadAllBytes(registryPath);
@@ -686,6 +856,37 @@ public static class V82VehicleRegistry
         return local >= 0 && local < Entries.Count
             ? Entries[local].DisplayName
             : null;
+    }
+
+    /// <summary>
+    /// Resolves the native result-screen XA stem for an imported vehicle
+    /// without allowing its out-of-range stable type to index the retail
+    /// 18-entry table. Unknown third-party packages deliberately fall back to
+    /// slot zero, which is a valid native record and keeps the unchanged result
+    /// flow alive while providing deterministic audio.
+    /// </summary>
+    public static uint ResultVoicePointer(IMemory m, int type)
+    {
+        if (!TryEntryForType(unchecked((uint)type), out VehicleEntry? entry) ||
+            entry == null)
+            return 0u;
+
+        int slot = ResultVoiceProxySlots.TryGetValue(
+            entry.StableId, out int mappedSlot)
+                ? mappedSlot
+                : 0;
+        if ((uint)slot >= RetailVehicleCount)
+            throw new InvalidOperationException(
+                $"result voice proxy slot {slot} for {entry.StableId} is invalid");
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint pointer = m.ReadU32(
+            ResultVoiceTableAddress + checked((uint)(slot * 16)));
+        if (pointer < 0x80010000u || pointer >= 0x80200000u)
+            throw new InvalidOperationException(
+                $"result voice proxy for {entry.StableId} resolved invalid " +
+                $"pointer 0x{pointer:X8}");
+        return pointer;
     }
 
     public static bool IsCustomType(uint type)
@@ -866,6 +1067,16 @@ public static class V82VehicleRegistry
         bool selectorPreview =
             _constructingSelectorPreview &&
             entry.SelectorPreviewRuntime != 0u;
+
+        // func_80036C2C assigns the resolved vehicle callback to the source
+        // object before func_80031DDC clones it. Both objects subsequently
+        // participate in the native object lifecycle: the clone drives the
+        // match, while the source remains in the object lists and receives
+        // the global event-4 teardown callback. Record the same independent
+        // identity on the source at the exact point where it acquires our
+        // callback. Registering only the clone leaves a valid custom callback
+        // with no registry entry when func_800333D0 tears the match down.
+        ObjectEntries[source] = entry.Type - FirstCustomType;
         m.WriteU32(source, CustomDispatchAddress);
         m.WriteU16(
             source + 0x1Au,
@@ -1154,6 +1365,450 @@ public static class V82VehicleRegistry
         }
     }
 
+    static ushort[] LoadSelectorPortraitPixels(int guestIndex)
+    {
+        if (string.IsNullOrEmpty(_loadedPackageRoot))
+            throw new InvalidOperationException(
+                "native selector portrait has no loaded package root");
+
+        string fileName = $"SELECTOR_{guestIndex:00}.PPM";
+        string path = Path.Combine(
+            _loadedPackageRoot, "SHELL", fileName);
+        return BuildSelectorPortraitPixels(path);
+    }
+
+    static ushort[] BuildSelectorPortraitPixels(string path)
+    {
+        path = Path.GetFullPath(path);
+        if (SelectorPortraitPixels.TryGetValue(path, out ushort[]? cached))
+            return cached;
+
+        byte[] source = File.ReadAllBytes(path);
+        int cursor = 0;
+        string magic = ReadPpmToken(source, ref cursor);
+        int width = int.Parse(ReadPpmToken(source, ref cursor));
+        int height = int.Parse(ReadPpmToken(source, ref cursor));
+        int maximum = int.Parse(ReadPpmToken(source, ref cursor));
+        if (cursor >= source.Length ||
+            !char.IsWhiteSpace((char)source[cursor]))
+            throw new InvalidDataException(
+                $"selector portrait has no PPM header terminator: {path}");
+        if (source[cursor] == '\r' &&
+            cursor + 1 < source.Length && source[cursor + 1] == '\n')
+            cursor += 2;
+        else
+            cursor++;
+        int pixelLength = checked(width * height * 3);
+        if (magic != "P6" ||
+            width != SelectorPortraitWidth ||
+            height != SelectorPortraitHeight ||
+            maximum != 255 ||
+            cursor + pixelLength != source.Length)
+            throw new InvalidDataException(
+                $"selector portrait must be an exact " +
+                $"{SelectorPortraitWidth}x{SelectorPortraitHeight} " +
+                $"binary PPM: {path}");
+
+        ushort[] pixels = new ushort[checked(width * height)];
+        for (int input = cursor, output = 0;
+             input < source.Length;
+             input += 3, output++)
+        {
+            pixels[output] = checked((ushort)(
+                source[input] >> 3 |
+                (source[input + 1] >> 3) << 5 |
+                (source[input + 2] >> 3) << 10));
+        }
+        SelectorPortraitPixels[path] = pixels;
+        return pixels;
+    }
+
+    static string ReadPpmToken(byte[] data, ref int cursor)
+    {
+        while (cursor < data.Length)
+        {
+            while (cursor < data.Length &&
+                   char.IsWhiteSpace((char)data[cursor]))
+                cursor++;
+            if (cursor >= data.Length || data[cursor] != '#')
+                break;
+            while (cursor < data.Length && data[cursor] != '\n')
+                cursor++;
+        }
+        int start = cursor;
+        while (cursor < data.Length &&
+               !char.IsWhiteSpace((char)data[cursor]))
+            cursor++;
+        if (start == cursor)
+            throw new InvalidDataException(
+                "native selector portrait PPM is truncated");
+        return Encoding.ASCII.GetString(data, start, cursor - start);
+    }
+
+    /// <summary>
+    /// Returns the exact RGB555 pixels used by the live selector.
+    /// </summary>
+    public static ushort[] BuildSelectorPortraitPixelsForProbe(string path)
+        => BuildSelectorPortraitPixels(path);
+
+    public static void UploadSelectorPortraitForProbe(
+        int x, int y, ushort[] pixels) =>
+        UploadSelectorPortrait(x, y, pixels);
+
+    static void UploadSelectorPortrait(int x, int y, ushort[] pixels)
+    {
+        if (pixels.Length != SelectorPortraitWidth * SelectorPortraitHeight)
+            throw new InvalidDataException(
+                $"selector portrait has {pixels.Length} RGB555 pixels, " +
+                $"expected {SelectorPortraitWidth * SelectorPortraitHeight}");
+        if (x < 0 || y < 0 ||
+            x + SelectorPortraitWidth > Gpu.VramWidth ||
+            y + SelectorPortraitHeight > Gpu.VramHeight)
+            throw new InvalidOperationException(
+                $"selector portrait destination ({x},{y}) is outside VRAM");
+        Gpu gpu = Runtime.Gpu ??
+            throw new InvalidOperationException(
+                "selector portrait upload requires an initialized GPU");
+        gpu.WriteGp0(0xA0000000u);
+        gpu.WriteGp0(
+            checked((uint)(ushort)x) |
+            checked((uint)(ushort)y) << 16);
+        gpu.WriteGp0(
+            checked((uint)SelectorPortraitWidth) |
+            checked((uint)SelectorPortraitHeight) << 16);
+        for (int index = 0; index < pixels.Length; index += 2)
+        {
+            uint word = pixels[index];
+            if (index + 1 < pixels.Length)
+                word |= (uint)pixels[index + 1] << 16;
+            gpu.WriteGp0(word);
+        }
+    }
+
+#if false
+    // Superseded 2026-07-30: generated TIM/PPM conversion is intentionally
+    // excluded. The imported roster now consumes the exact original V8
+    // CHARSEL1 records through V8:2's compatible native VLC path.
+    static byte[] BuildGeneratedSelectorPortraitRecord(string path)
+    {
+        path = Path.GetFullPath(path);
+        if (SelectorPortraitRecords.TryGetValue(path, out byte[]? cached))
+            return cached;
+
+        byte[] file = File.ReadAllBytes(path);
+        int cursor = 0;
+        string magic = ReadPpmToken(file, ref cursor);
+        int width = int.Parse(ReadPpmToken(file, ref cursor));
+        int height = int.Parse(ReadPpmToken(file, ref cursor));
+        int maximum = int.Parse(ReadPpmToken(file, ref cursor));
+        if (cursor >= file.Length ||
+            !char.IsWhiteSpace((char)file[cursor]))
+            throw new InvalidDataException(
+                $"selector portrait has no PPM header terminator: {path}");
+        if (file[cursor] == '\r' &&
+            cursor + 1 < file.Length && file[cursor + 1] == '\n')
+            cursor += 2;
+        else
+            cursor++;
+        int pixelLength = checked(width * height * 3);
+        if (magic != "P6" || width != SelectorPortraitSourceWidth ||
+            height != SelectorPortraitSourceHeight || maximum != 255 ||
+            cursor + pixelLength != file.Length)
+            throw new InvalidDataException(
+                $"selector portrait has invalid PPM layout: {path}");
+
+        byte[] resized = ResizeSelectorPortrait(
+            file.AsSpan(cursor, pixelLength));
+        var (palette, indices) = QuantizeSelectorPortrait(resized);
+        int rawLength = checked(
+            SelectorPortraitWordsPerRow * SelectorPortraitHeight * 2);
+        byte[] record =
+            new byte[SelectorPortraitTimHeaderSize + rawLength];
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            record.AsSpan(0, 2), checked((ushort)SelectorPortraitWidth));
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            record.AsSpan(2, 2), checked((ushort)SelectorPortraitHeight));
+        // Standard PS1 TIM: magic, 16-bpp flags, image-block byte count,
+        // authored TIM origin, dimensions in 16-bit words, then RGB555 data.
+        // func_801109FC already has a dedicated path for this format, avoiding
+        // the fixed VLC scratch area that a full-size raw image would overrun.
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            record.AsSpan(4, 4), SelectorPortraitTimMagic);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            record.AsSpan(8, 4), SelectorPortraitTim4BppWithClut);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            record.AsSpan(12, 4), SelectorPortraitClutBlockSize);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            record.AsSpan(16, 2), 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            record.AsSpan(18, 2), 480);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            record.AsSpan(20, 2), SelectorPortraitPaletteEntries);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            record.AsSpan(22, 2), 1);
+        for (int index = 0; index < palette.Length; index++)
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                record.AsSpan(24 + index * 2, 2),
+                checked((ushort)(0x8000u | palette[index])));
+
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            record.AsSpan(SelectorPortraitImageBlockOffset, 4),
+            checked((uint)(12 + rawLength)));
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            record.AsSpan(SelectorPortraitImageBlockOffset + 4, 2), 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            record.AsSpan(SelectorPortraitImageBlockOffset + 6, 2), 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            record.AsSpan(SelectorPortraitImageBlockOffset + 8, 2),
+            SelectorPortraitWordsPerRow);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            record.AsSpan(SelectorPortraitImageBlockOffset + 10, 2),
+            SelectorPortraitHeight);
+
+        int output = SelectorPortraitTimHeaderSize;
+        for (int pixelIndex = 0; pixelIndex < indices.Length; pixelIndex += 4)
+        {
+            ushort pixel = checked((ushort)(
+                indices[pixelIndex] |
+                indices[pixelIndex + 1] << 4 |
+                indices[pixelIndex + 2] << 8 |
+                indices[pixelIndex + 3] << 12));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                record.AsSpan(output, 2), pixel);
+            output += 2;
+        }
+        SelectorPortraitRecords[path] = record;
+        return record;
+    }
+
+    /// <summary>
+    /// Produces the exact runtime record so the generated host can pass it
+    /// through the recompiled TIM parser and image loader without opening a
+    /// window. This is intentionally the same cached builder used in-game.
+    /// </summary>
+    public static byte[] BuildGeneratedSelectorPortraitRecordForProbe(
+        string path) => BuildGeneratedSelectorPortraitRecord(path);
+
+    static byte[] ResizeSelectorPortrait(ReadOnlySpan<byte> source)
+    {
+        byte[] resized = new byte[
+            SelectorPortraitWidth * SelectorPortraitHeight * 3];
+        for (int y = 0; y < SelectorPortraitHeight; y++)
+        {
+            int sourceY = SelectorPortraitHeight == 1
+                ? 0
+                : checked((int)(
+                    (long)y * (SelectorPortraitSourceHeight - 1) * 65536 /
+                    (SelectorPortraitHeight - 1)));
+            int y0 = sourceY >> 16;
+            int y1 = Math.Min(y0 + 1, SelectorPortraitSourceHeight - 1);
+            int fy = sourceY & 0xFFFF;
+            for (int x = 0; x < SelectorPortraitWidth; x++)
+            {
+                int sourceX = SelectorPortraitWidth == 1
+                    ? 0
+                    : checked((int)(
+                        (long)x * (SelectorPortraitSourceWidth - 1) * 65536 /
+                        (SelectorPortraitWidth - 1)));
+                int x0 = sourceX >> 16;
+                int x1 = Math.Min(x0 + 1, SelectorPortraitSourceWidth - 1);
+                int fx = sourceX & 0xFFFF;
+                int destination =
+                    (y * SelectorPortraitWidth + x) * 3;
+                for (int channel = 0; channel < 3; channel++)
+                {
+                    int topLeft =
+                        source[(y0 * SelectorPortraitSourceWidth + x0) * 3 +
+                            channel];
+                    int topRight =
+                        source[(y0 * SelectorPortraitSourceWidth + x1) * 3 +
+                            channel];
+                    int bottomLeft =
+                        source[(y1 * SelectorPortraitSourceWidth + x0) * 3 +
+                            channel];
+                    int bottomRight =
+                        source[(y1 * SelectorPortraitSourceWidth + x1) * 3 +
+                            channel];
+                    int top = topLeft +
+                        ((topRight - topLeft) * fx + 32768 >> 16);
+                    int bottom = bottomLeft +
+                        ((bottomRight - bottomLeft) * fx + 32768 >> 16);
+                    resized[destination + channel] = checked((byte)(
+                        top + ((bottom - top) * fy + 32768 >> 16)));
+                }
+            }
+        }
+        return resized;
+    }
+
+    static (ushort[] Palette, byte[] Indices) QuantizeSelectorPortrait(
+        ReadOnlySpan<byte> pixels)
+    {
+        var frequencies = new Dictionary<ushort, int>();
+        ushort[] colors = new ushort[pixels.Length / 3];
+        for (int source = 0, pixel = 0; source < pixels.Length;
+             source += 3, pixel++)
+        {
+            ushort color = checked((ushort)(
+                pixels[source] >> 3 |
+                (pixels[source + 1] >> 3) << 5 |
+                (pixels[source + 2] >> 3) << 10));
+            colors[pixel] = color;
+            frequencies[color] =
+                frequencies.TryGetValue(color, out int count)
+                    ? count + 1
+                    : 1;
+        }
+
+        var boxes = new List<List<(ushort Color, int Count)>>
+        {
+            frequencies
+                .OrderBy(pair => pair.Key)
+                .Select(pair => (pair.Key, pair.Value))
+                .ToList(),
+        };
+        while (boxes.Count < SelectorPortraitPaletteEntries)
+        {
+            int splitIndex = -1;
+            long splitScore = long.MinValue;
+            int splitChannel = 0;
+            for (int index = 0; index < boxes.Count; index++)
+            {
+                List<(ushort Color, int Count)> box = boxes[index];
+                if (box.Count < 2) continue;
+                int minR = 31, minG = 31, minB = 31;
+                int maxR = 0, maxG = 0, maxB = 0;
+                int population = 0;
+                foreach (var item in box)
+                {
+                    int red = item.Color & 31;
+                    int green = item.Color >> 5 & 31;
+                    int blue = item.Color >> 10 & 31;
+                    minR = Math.Min(minR, red);
+                    minG = Math.Min(minG, green);
+                    minB = Math.Min(minB, blue);
+                    maxR = Math.Max(maxR, red);
+                    maxG = Math.Max(maxG, green);
+                    maxB = Math.Max(maxB, blue);
+                    population += item.Count;
+                }
+                int rangeR = maxR - minR;
+                int rangeG = maxG - minG;
+                int rangeB = maxB - minB;
+                int channel = rangeG >= rangeR && rangeG >= rangeB
+                    ? 1
+                    : rangeB >= rangeR ? 2 : 0;
+                int range = channel == 0 ? rangeR :
+                    channel == 1 ? rangeG : rangeB;
+                long score = (long)(range + 1) * (range + 1) * population;
+                if (score <= splitScore) continue;
+                splitScore = score;
+                splitIndex = index;
+                splitChannel = channel;
+            }
+            if (splitIndex < 0) break;
+
+            List<(ushort Color, int Count)> selected = boxes[splitIndex];
+            selected.Sort((left, right) =>
+            {
+                int leftValue = splitChannel == 0
+                    ? left.Color & 31
+                    : splitChannel == 1
+                        ? left.Color >> 5 & 31
+                        : left.Color >> 10 & 31;
+                int rightValue = splitChannel == 0
+                    ? right.Color & 31
+                    : splitChannel == 1
+                        ? right.Color >> 5 & 31
+                        : right.Color >> 10 & 31;
+                int comparison = leftValue.CompareTo(rightValue);
+                return comparison != 0
+                    ? comparison
+                    : left.Color.CompareTo(right.Color);
+            });
+            int total = selected.Sum(item => item.Count);
+            int running = 0;
+            int cut = 1;
+            for (; cut < selected.Count; cut++)
+            {
+                running += selected[cut - 1].Count;
+                if (running * 2 >= total) break;
+            }
+            boxes[splitIndex] = selected.GetRange(0, cut);
+            boxes.Add(selected.GetRange(cut, selected.Count - cut));
+        }
+
+        ushort[] palette = new ushort[SelectorPortraitPaletteEntries];
+        for (int index = 0; index < boxes.Count; index++)
+        {
+            long red = 0, green = 0, blue = 0, total = 0;
+            foreach (var item in boxes[index])
+            {
+                red += (item.Color & 31) * (long)item.Count;
+                green += (item.Color >> 5 & 31) * (long)item.Count;
+                blue += (item.Color >> 10 & 31) * (long)item.Count;
+                total += item.Count;
+            }
+            int averageRed = checked((int)((red + total / 2) / total));
+            int averageGreen = checked((int)((green + total / 2) / total));
+            int averageBlue = checked((int)((blue + total / 2) / total));
+            palette[index] = checked((ushort)(
+                averageRed | averageGreen << 5 | averageBlue << 10));
+        }
+        for (int index = boxes.Count;
+             index < SelectorPortraitPaletteEntries;
+             index++)
+            palette[index] = palette[Math.Max(0, boxes.Count - 1)];
+
+        byte[] indices = new byte[colors.Length];
+        for (int pixel = 0; pixel < colors.Length; pixel++)
+        {
+            int red = colors[pixel] & 31;
+            int green = colors[pixel] >> 5 & 31;
+            int blue = colors[pixel] >> 10 & 31;
+            int best = 0;
+            int bestDistance = int.MaxValue;
+            for (int index = 0; index < palette.Length; index++)
+            {
+                int deltaRed = red - (palette[index] & 31);
+                int deltaGreen = green - (palette[index] >> 5 & 31);
+                int deltaBlue = blue - (palette[index] >> 10 & 31);
+                int distance = deltaRed * deltaRed * 3 +
+                    deltaGreen * deltaGreen * 6 +
+                    deltaBlue * deltaBlue;
+                if (distance >= bestDistance) continue;
+                bestDistance = distance;
+                best = index;
+            }
+            indices[pixel] = checked((byte)best);
+        }
+        return (palette, indices);
+    }
+
+    static string ReadPpmToken(byte[] data, ref int cursor)
+    {
+        while (cursor < data.Length)
+        {
+            while (cursor < data.Length &&
+                   char.IsWhiteSpace((char)data[cursor]))
+                cursor++;
+            if (cursor >= data.Length || data[cursor] != '#')
+                break;
+            while (cursor < data.Length && data[cursor] != '\n')
+                cursor++;
+        }
+        int start = cursor;
+        while (cursor < data.Length &&
+               !char.IsWhiteSpace((char)data[cursor]))
+            cursor++;
+        if (start == cursor)
+            throw new InvalidDataException(
+                "native selector portrait PPM is truncated");
+        return Encoding.ASCII.GetString(data, start, cursor - start);
+    }
+
+#endif
+
     static uint BuildNativeBank(
         CpuContext c, IMemory m, NativeVehicleBankSource bank)
     {
@@ -1163,12 +1818,30 @@ public static class V82VehicleRegistry
         uint animation = animationSource == null
             ? 0u
             : AllocateBytes(c, m, animationSource);
+        Console.Error.WriteLine(
+            $"[V82Bank] build bin=0x{bin:X8}+0x{binSource.Length:X} " +
+            $"anm=0x{animation:X8}+0x{animationSource?.Length ?? 0:X}");
         c.A0 = bin;
         c.A1 = animation;
         c.RA = CustomDispatchAddress;
-        Dispatcher.Call(c, m, BuildNativeBankAddress);
+        try
+        {
+            Dispatcher.Call(c, m, BuildNativeBankAddress);
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine(
+                $"[V82Bank] build failed bin=0x{bin:X8}-" +
+                $"0x{bin + checked((uint)binSource.Length):X8} " +
+                $"packet=0x{c.A0:X8} group=0x{c.A2:X8} " +
+                $"source=0x{c.S1:X8} packet-index={c.T1} " +
+                $"group-index={c.A3}: {error.Message}");
+            throw;
+        }
         if (c.V0 == 0u)
             throw new OutOfMemoryException("native V8:2 object-bank build failed");
+        Console.Error.WriteLine(
+            $"[V82Bank] built runtime=0x{c.V0:X8}");
         return c.V0;
     }
 

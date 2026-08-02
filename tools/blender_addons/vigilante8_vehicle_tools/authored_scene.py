@@ -204,6 +204,8 @@ def _make_texture_image(
     image["v8_compressed"] = texture.compressed
     image["v8_palette_bgr555"] = list(texture.palette_bgr555)
     image["v8_palette_indices"] = list(texture.indices)
+    image["v8_palette_origin"] = list(texture.palette_origin)
+    image["v8_image_origin"] = list(texture.image_origin)
     image["v8_direct_pixels_bgr555"] = list(
         texture.direct_pixels_bgr555
     )
@@ -488,6 +490,8 @@ def _import_group(
     obj["v8_group_index"] = index
     obj["v8_group_name"] = group.name
     obj["v8_scale_shift"] = group.scale_shift
+    obj["v8_texture_slot_count"] = group.texture_slot_count
+    obj["v8_render_extent"] = group.render_extent
 
     _face_int_attribute(
         mesh,
@@ -501,6 +505,16 @@ def _import_group(
         mesh,
         "v8_packet_kind",
         [-1 if face.packet_kind is None else face.packet_kind for face in group.faces],
+    )
+    _face_int_attribute(
+        mesh,
+        "v8_native_texture_slot",
+        [
+            -1
+            if face.native_texture_slot is None
+            else face.native_texture_slot
+            for face in group.faces
+        ],
     )
     for field_name in (
         "packet_flags",
@@ -2201,8 +2215,13 @@ def apply_authoring_visibility(
         for child in vehicle_collection.children
         if child.get("v8_role") == ROLE_BANK
     ):
-        is_transform = bank.get("v8_bank") == "transformation"
-        bank.hide_viewport = bool(is_transform and not show_transform_library)
+        bank_name = bank.get("v8_bank")
+        is_transform = bank_name == "transformation"
+        is_selector_preview = bank_name == "selector_preview"
+        bank.hide_viewport = bool(
+            (is_transform and not show_transform_library)
+            or is_selector_preview
+        )
         for obj in bank.all_objects:
             role = str(obj.get("v8_role", ""))
             part_role = str(obj.get("v8_part_role", ""))
@@ -2244,6 +2263,9 @@ def project_to_scene(context, vehicle: project.VehicleProject) -> bpy.types.Coll
     collection["v8_stable_id"] = vehicle.stable_id
     collection["v8_display_name"] = vehicle.display_name
     collection["v8_body_kind"] = vehicle.body_kind
+    collection["v8_selector_preview_body_kind"] = (
+        vehicle.selector_preview_body_kind
+    )
     collection["v8_collision_export"] = "AUTO_IF_CHANGED"
     profile = stats.PROFILES[vehicle.game]
     for field in profile.authoring_fields:
@@ -2291,6 +2313,12 @@ def project_to_scene(context, vehicle: project.VehicleProject) -> bpy.types.Coll
     _import_bank(collection, "body", vehicle)
     if vehicle.transformation_bank is not None:
         _import_bank(collection, "transformation", vehicle.transformation_bank)
+    if vehicle.selector_preview_bank is not None:
+        _import_bank(
+            collection,
+            "selector_preview",
+            vehicle.selector_preview_bank,
+        )
     capture_collision_mesh_bounds(collection)
     settings = context.scene.v8_vehicle_settings
     settings.vehicle_collection = collection.name
@@ -2357,6 +2385,12 @@ def _texture_from_image(image: bpy.types.Image) -> project.Texture:
             indices=b"",
             compressed=bool(image.get("v8_compressed", False)),
             direct_pixels_bgr555=tuple(direct),
+            palette_origin=_prop_tuple(
+                image, "v8_palette_origin", 2, (0, 0)
+            ),
+            image_origin=_prop_tuple(
+                image, "v8_image_origin", 2, (0, 0)
+            ),
         )
 
     indices = bytearray(image.size[0] * image.size[1])
@@ -2396,6 +2430,12 @@ def _texture_from_image(image: bpy.types.Image) -> project.Texture:
         indices=bytes(indices),
         compressed=bool(image.get("v8_compressed", False)),
         direct_pixels_bgr555=(),
+        palette_origin=_prop_tuple(
+            image, "v8_palette_origin", 2, (0, 0)
+        ),
+        image_origin=_prop_tuple(
+            image, "v8_image_origin", 2, (0, 0)
+        ),
     )
 
 
@@ -2472,6 +2512,15 @@ def _export_group(obj: bpy.types.Object) -> project.RenderGroup:
                 vertices=tuple(int(value) for value in polygon.vertices),
                 color=color,
                 texture=None if texture_index < 0 else texture_index,
+                native_texture_slot=(
+                    None
+                    if _face_int(
+                        mesh, "v8_native_texture_slot", face_index, -1
+                    ) < 0
+                    else _face_int(
+                        mesh, "v8_native_texture_slot", face_index, -1
+                    )
+                ),
                 uv=uv,
                 packet_index=(
                     None
@@ -2579,6 +2628,8 @@ def _export_group(obj: bpy.types.Object) -> project.RenderGroup:
         faces=tuple(faces),
         normals=normals,
         controls=tuple(controls),
+        texture_slot_count=int(obj.get("v8_texture_slot_count", 0)),
+        render_extent=int(obj.get("v8_render_extent", 0)),
     )
 
 
@@ -2829,6 +2880,15 @@ def scene_to_project(
     transform = (
         _export_bank(collection, "transformation") if game == "V8_2" else None
     )
+    selector_preview = (
+        _export_bank(collection, "selector_preview")
+        if any(
+            child.get("v8_role") == ROLE_BANK
+            and child.get("v8_bank") == "selector_preview"
+            for child in collection.children
+        )
+        else None
+    )
     vehicle = project.VehicleProject(
         schema_version=int(collection["v8_schema_version"]),
         stable_id=str(collection["v8_stable_id"]),
@@ -2846,6 +2906,10 @@ def scene_to_project(
         },
         body_kind=int(collection["v8_body_kind"]),
         transformation_bank=transform,
+        selector_preview_bank=selector_preview,
+        selector_preview_body_kind=int(
+            collection.get("v8_selector_preview_body_kind", 0)
+        ),
         transform_modes=(
             tuple(
                 tuple(

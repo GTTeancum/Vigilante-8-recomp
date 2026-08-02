@@ -1,0 +1,21 @@
+# Start a native Route 66 match with the vehicle supplied through
+# --guest-vehicle. The driving arc exposes front, side, and rear cabin faces.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+650+3=CROSS
+900+3=CROSS
+1150+3=CROSS
+
+[gameplay]
+180+420=UP
+240+180=LEFT
+480+180=RIGHT
+720+2=SELECT

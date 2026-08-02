@@ -725,6 +725,62 @@ class DonorFreeCompilerTests(unittest.TestCase):
         self.assertEqual(package.archive, rebuilt.archive)
         self.assertEqual(package.registry, rebuilt.registry)
 
+    def test_v82_compiler_emits_retail_image_block_boundaries(self) -> None:
+        def assert_native_boundary(authored: project.VehicleProject) -> None:
+            compiled = compiler.compile_archive((authored,))
+            model = archive.VehicleArchive(compiled).entry(0).model("V8_2")
+            texture = model.texture(0)
+            source = model.data
+            if texture.depth == 2:
+                image_offset = texture.offset
+            else:
+                image_offset = (
+                    texture.offset
+                    + struct.unpack_from("<I", source, texture.offset + 8)[0]
+                )
+                palette_end = (
+                    texture.offset + 0x14 + len(texture.palette) * 2
+                )
+                self.assertEqual(palette_end - 8, image_offset)
+
+            pixel_offset = image_offset + 0x14
+            encoded_size = xobf._compressed_input_size(
+                source[pixel_offset:], len(texture.packed_pixels)
+            )
+            declared_size = struct.unpack_from(
+                "<I", source, image_offset + 8
+            )[0]
+            self.assertEqual(encoded_size + 13, declared_size)
+
+            logical_end = pixel_offset + encoded_size
+            runtime_end = (image_offset + declared_size + 11) & ~3
+            self.assertEqual(len(source), runtime_end)
+            self.assertGreaterEqual(runtime_end - logical_end, 1)
+            self.assertLessEqual(runtime_end - logical_end, 4)
+            self.assertEqual(
+                b"\0" * (runtime_end - logical_end),
+                source[logical_end:runtime_end],
+            )
+
+        authored = self._project("V8_2")
+        assert_native_boundary(authored)
+
+        value = project.to_dict(authored)
+        value["textures"][0] = {
+            "name": "direct_bgr555",
+            "width": 4,
+            "height": 4,
+            "depth": 2,
+            "palette_bgr555": [],
+            "indices": [],
+            "compressed": True,
+            "direct_pixels_bgr555": [
+                0x8000 | (index & 31) | ((index & 31) << 5)
+                for index in range(16)
+            ],
+        }
+        assert_native_boundary(project.VehicleProject.from_dict(value))
+
 
 class XobfTests(unittest.TestCase):
     def _models(self):
@@ -977,6 +1033,24 @@ class XobfTests(unittest.TestCase):
                     xobf.decompress_v82_texture(
                         encoded, len(texture.packed_pixels)
                     ),
+                )
+                image_offset = (
+                    texture.offset
+                    if texture.depth == 2
+                    else texture.offset
+                    + struct.unpack_from(
+                        "<I", model.data, texture.offset + 8
+                    )[0]
+                )
+                consumed = xobf._compressed_input_size(
+                    model.data[image_offset + 0x14 :],
+                    len(texture.packed_pixels),
+                )
+                self.assertEqual(
+                    consumed + 13,
+                    struct.unpack_from(
+                        "<I", model.data, image_offset + 8
+                    )[0],
                 )
                 tested += 1
         self.assertGreater(tested, 0)

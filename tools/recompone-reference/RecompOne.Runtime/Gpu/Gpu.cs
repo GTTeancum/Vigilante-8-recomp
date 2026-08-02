@@ -32,6 +32,8 @@ public sealed partial class Gpu
     int _dmaDir;
 
     readonly List<uint> _fifo = new(16);
+    readonly List<uint> _fifoSources = new(16);
+    const uint UnknownFifoSource = uint.MaxValue;
     int _need;
     bool _polyline;
 
@@ -115,17 +117,19 @@ public sealed partial class Gpu
         return (uint)(lo | (hi << 16));
     }
 
-    public void WriteGp0(uint word)
+    public void WriteGp0(uint word) => WriteGp0(word, UnknownFifoSource);
+
+    public void WriteGp0(uint word, uint sourceAddress)
     {
         if (_loadImage) { StoreImageHalfword((ushort)word); StoreImageHalfword((ushort)(word >> 16)); return; }
         if (_polyline)
         {
-            if ((word & 0xF000F000u) == 0x50005000u) { _polyline = false; ExecutePolyline(); _fifo.Clear(); }
-            else _fifo.Add(word);
+            if ((word & 0xF000F000u) == 0x50005000u) { _polyline = false; ExecutePolyline(); ClearFifo(); }
+            else AddFifo(word, sourceAddress);
             return;
         }
 
-        _fifo.Add(word);
+        AddFifo(word, sourceAddress);
         if (_fifo.Count == 1)
         {
             _need = CommandLength(word);
@@ -133,8 +137,25 @@ public sealed partial class Gpu
             if (_need == LenImageLoad) _need = 3;
         }
 
-        if (_fifo.Count >= _need) { Execute(); if (!_loadImage) _fifo.Clear(); }
+        if (_fifo.Count >= _need) { Execute(); if (!_loadImage) ClearFifo(); }
     }
+
+    void AddFifo(uint word, uint sourceAddress)
+    {
+        _fifo.Add(word);
+        _fifoSources.Add(sourceAddress);
+    }
+
+    void ClearFifo()
+    {
+        _fifo.Clear();
+        _fifoSources.Clear();
+    }
+
+    uint FifoSource(int index) =>
+        (uint)index < (uint)_fifoSources.Count
+            ? _fifoSources[index]
+            : UnknownFifoSource;
 
     public void WriteGp1(uint word)
     {
@@ -147,7 +168,7 @@ public sealed partial class Gpu
                 GpuHle.NotifyDisplay(_dispVramX, _dispVramY, DisplayWidth, DisplayHeight);
                 return;
             case 0x00: Reset(); break;
-            case 0x01: _fifo.Clear(); _polyline = false; _loadImage = false; break;
+            case 0x01: ClearFifo(); _polyline = false; _loadImage = false; break;
             case 0x02: break;
             case 0x03: _displayDisabled = (p & 1) != 0; break;
             case 0x04: _dmaDir = (int)(p & 3); break;
@@ -179,7 +200,7 @@ public sealed partial class Gpu
 
     void Reset()
     {
-        _fifo.Clear();
+        ClearFifo();
         _polyline = _loadImage = _readImage = false;
         _displayDisabled = true;
         _dmaDir = 0;

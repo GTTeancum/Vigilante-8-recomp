@@ -89,7 +89,10 @@ public sealed class Dma
                 uint header = _mem.ReadU32(addr);
                 uint count = header >> 24;
                 for (uint i = 0; i < count; i++)
-                    _gpu.WriteGp0(_mem.ReadU32(addr + 4u + i * 4u));
+                {
+                    uint source = addr + 4u + i * 4u;
+                    _gpu.WriteGp0(_mem.ReadU32(source), source);
+                }
                 uint next = header & 0xFFFFFFu;
                 if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
                 addr = next & ramAddressMask;
@@ -104,7 +107,7 @@ public sealed class Dma
             {
                 uint word = _mem.ReadU32(madr + i * 4u);
                 if (trace) wordOr |= word;
-                _gpu.WriteGp0(word);
+                _gpu.WriteGp0(word, madr + i * 4u);
             }
             if (trace) Log.Dma($"GPU in words={words} or=0x{wordOr:X8}");
         }

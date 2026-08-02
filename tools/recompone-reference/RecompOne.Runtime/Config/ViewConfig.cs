@@ -53,6 +53,12 @@ public class ViewConfig
         set => SetBool("HighResolution3D", value);
     }
 
+    public int InternalResolutionScale
+    {
+        get => Math.Clamp(GetInt("InternalResolutionScale", 3), 1, 4);
+        set => SetInt("InternalResolutionScale", Math.Clamp(value, 1, 4));
+    }
+
     public bool Ps1Dithering
     {
         get => GetBool("Ps1Dithering", false);
@@ -69,6 +75,36 @@ public class ViewConfig
     {
         get => GetBool("PerspectiveCorrectTextures", true);
         set => SetBool("PerspectiveCorrectTextures", value);
+    }
+
+    public bool GeometryCorrection
+    {
+        get => GetBool("GeometryCorrection", true);
+        set => SetBool("GeometryCorrection", value);
+    }
+
+    public bool PreciseCulling
+    {
+        get => GetBool("PreciseCulling", true);
+        set => SetBool("PreciseCulling", value);
+    }
+
+    public bool PerspectiveCorrectColors
+    {
+        get => GetBool("PerspectiveCorrectColors", true);
+        set => SetBool("PerspectiveCorrectColors", value);
+    }
+
+    public bool EnhancedDepthBuffer
+    {
+        get => GetBool("EnhancedDepthBuffer", true);
+        set => SetBool("EnhancedDepthBuffer", value);
+    }
+
+    public bool TrueColor
+    {
+        get => GetBool("TrueColor", true);
+        set => SetBool("TrueColor", value);
     }
 
     public string OutputResolution
@@ -166,16 +202,75 @@ public class ViewConfig
 
     public void MarkGraphicsCustom() => GraphicsPreset = "Custom";
 
+    public string ResolveGraphicsPreset()
+    {
+        bool Matches(bool original) =>
+            HighResolution3D == !original &&
+            InternalResolutionScale == (original ? 1 : 3) &&
+            Ps1Dithering == original &&
+            TextureSmoothing == !original &&
+            PerspectiveCorrectTextures == !original &&
+            GeometryCorrection == !original &&
+            PreciseCulling == !original &&
+            PerspectiveCorrectColors == !original &&
+            EnhancedDepthBuffer == !original &&
+            TrueColor == !original &&
+            AntiAliasing.Equals(
+                original ? "Off" : "FXAA",
+                StringComparison.OrdinalIgnoreCase) &&
+            MsaaSamples == (original ? 0 : 2) &&
+            AnisotropicFiltering == (original ? 1 : 4) &&
+            TextureMipmaps == !original &&
+            Widescreen == !original &&
+            HudAnchoring == !original &&
+            EnhancedShadows == !original &&
+            EnhancedParticles == !original &&
+            VectorFonts == !original &&
+            VectorIcons == !original &&
+            ExtendedDrawDistance == !original &&
+            EnhancedFog == !original &&
+            LevelOfDetail.Equals(
+                original || !IsV82 ? "Stock" : "Maximum",
+                StringComparison.OrdinalIgnoreCase);
+
+        if (Matches(original: true)) return "Original";
+        if (Matches(original: false)) return "Enhanced";
+        return "Custom";
+    }
+
+    public void ReconcileNamedGraphicsPreset()
+    {
+        string preset = GraphicsPreset;
+        if (preset.Equals("Original", StringComparison.OrdinalIgnoreCase) ||
+            preset.Equals("Enhanced", StringComparison.OrdinalIgnoreCase))
+        {
+            // A named preset is authoritative. This repairs old/stale
+            // interface.ini files where the label changed but one or more
+            // individual values retained the previous mode.
+            ApplyGraphicsPreset(preset);
+        }
+        else
+        {
+            GraphicsPreset = ResolveGraphicsPreset();
+        }
+    }
+
     public void ApplyGraphicsPreset(string preset)
     {
         bool original = preset.Equals("Original", StringComparison.OrdinalIgnoreCase);
         GraphicsPreset = original ? "Original" : "Enhanced";
         HighResolution3D = !original;
+        InternalResolutionScale = original ? 1 : 3;
         Ps1Dithering = original;
         TextureSmoothing = !original;
         PerspectiveCorrectTextures = !original;
+        GeometryCorrection = !original;
+        PreciseCulling = !original;
+        PerspectiveCorrectColors = !original;
+        EnhancedDepthBuffer = !original;
+        TrueColor = !original;
         AntiAliasing = original ? "Off" : "FXAA";
-        // 2x MSAA at the enhanced 2x internal resolution resolves geometry
+        // 2x MSAA at the enhanced 3x internal resolution resolves geometry
         // cleanly without the fill-rate spike of the former 4x default.
         MsaaSamples = original ? 0 : 2;
         AnisotropicFiltering = original ? 1 : 4;

@@ -42,6 +42,7 @@ internal static unsafe class InputManager
     static bool _traceInput;
     static string? _captureScriptedStage;
     static bool _suppressRumble;
+    static int _scriptExitAfterPoll = -1;
     static readonly (byte Large, byte Small)[] _lastRumble =
         [(byte.MaxValue, byte.MaxValue), (byte.MaxValue, byte.MaxValue)];
 
@@ -51,22 +52,7 @@ internal static unsafe class InputManager
 
     public static void Initialize(IInputContext input)
     {
-        _disableLiveInput = Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_LIVE_INPUT") == "1";
-        _forcePad2Connected =
-            Environment.GetEnvironmentVariable("RECOMPONE_FORCE_PAD2_CONNECTED") == "1";
-        _traceInput = Environment.GetEnvironmentVariable("RECOMPONE_TRACE_INPUT") == "1";
-        string? captureScriptedStage =
-            Environment.GetEnvironmentVariable("RECOMPONE_CAPTURE_SCRIPTED_STAGE");
-        _captureScriptedStage = string.IsNullOrWhiteSpace(captureScriptedStage)
-            ? null
-            : NormalizeStage(captureScriptedStage);
-        _suppressRumble =
-            Environment.GetEnvironmentVariable("RECOMPONE_SUPPRESS_RUMBLE") == "1";
-        ParseScriptedInput();
-        if (_disableLiveInput)
-            Console.Error.WriteLine("[Input] live keyboard/gamepad input disabled for deterministic replay");
-        if (_forcePad2Connected)
-            Console.Error.WriteLine("[Input] controller 2 connection forced for deterministic replay");
+        InitializeConfiguration();
         if (input.Keyboards.Count > 0)
         {
             _keyboard = input.Keyboards[0];
@@ -97,6 +83,44 @@ internal static unsafe class InputManager
             }
         }
         catch { _sdl = null; }
+    }
+
+    public static void InitializeHeadless()
+    {
+        InitializeConfiguration();
+        _disableLiveInput = true;
+        Console.Error.WriteLine(
+            "[Input] headless deterministic input initialized");
+    }
+
+    static void InitializeConfiguration()
+    {
+        _disableLiveInput =
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_DISABLE_LIVE_INPUT") == "1";
+        _forcePad2Connected =
+            Environment.GetEnvironmentVariable("RECOMPONE_FORCE_PAD2_CONNECTED") == "1";
+        _traceInput = Environment.GetEnvironmentVariable("RECOMPONE_TRACE_INPUT") == "1";
+        string? captureScriptedStage =
+            Environment.GetEnvironmentVariable("RECOMPONE_CAPTURE_SCRIPTED_STAGE");
+        _captureScriptedStage = string.IsNullOrWhiteSpace(captureScriptedStage)
+            ? null
+            : NormalizeStage(captureScriptedStage);
+        _suppressRumble =
+            Environment.GetEnvironmentVariable("RECOMPONE_SUPPRESS_RUMBLE") == "1";
+        string? exitAfterPoll =
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS");
+        _scriptExitAfterPoll =
+            int.TryParse(exitAfterPoll, out int parsedExitPoll) &&
+            parsedExitPoll > 0
+                ? parsedExitPoll
+                : -1;
+        ParseScriptedInput();
+        if (_disableLiveInput)
+            Console.Error.WriteLine("[Input] live keyboard/gamepad input disabled for deterministic replay");
+        if (_forcePad2Connected)
+            Console.Error.WriteLine("[Input] controller 2 connection forced for deterministic replay");
     }
 
     public static bool IsConnected => _pad0 != null;
@@ -281,6 +305,13 @@ internal static unsafe class InputManager
             }
             Controller.State &= (ushort)~pulse.Pad1Mask;
             Controller.State2 &= (ushort)~pulse.Pad2Mask;
+        }
+        if (_scriptExitAfterPoll >= 0 && poll >= _scriptExitAfterPoll)
+        {
+            Console.Error.WriteLine(
+                $"[Input] deterministic replay completed at poll {poll}");
+            Runtime.Shutdown();
+            Environment.Exit(0);
         }
     }
 

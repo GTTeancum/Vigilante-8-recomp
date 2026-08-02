@@ -44,6 +44,9 @@ ghidra/
 /reference/traces/
 /reference-v8-2/generated/
 /reference-v8-2/traces/
+/card*.sav
+/interface.ini
+/settings.json
 # Note: analysis/ contains Ghidra decomp output (derived work, used as
 # audit ground truth for cleaned src/ files) and IS tracked.
 

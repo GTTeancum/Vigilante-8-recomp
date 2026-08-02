@@ -15,12 +15,22 @@ public static class GpuHle
     public const float BaseAspect = 4f / 3f;
 
     readonly record struct PacketRange(uint Start, uint End);
+    readonly record struct OwnedPacketRange(
+        uint Start,
+        uint End,
+        string Owner);
     static readonly List<PacketRange> VehiclePacketRanges = [];
+    static readonly List<OwnedPacketRange> OwnedPacketRanges = [];
     static readonly HashSet<uint> VehiclePackets = [];
     static readonly Dictionary<uint, string> PacketOwners = [];
 
-    static uint NormalizePacketAddress(uint address) =>
-        address & (Memory.MemoryMap.RetailRamSize - 1u);
+    static uint NormalizePacketAddress(uint address)
+    {
+        uint ramSize = Runtime.Mode == RunMode.Devkit
+            ? Memory.MemoryMap.DevkitRamSize
+            : Memory.MemoryMap.RetailRamSize;
+        return address & (ramSize - 1u);
+    }
 
     public static void RegisterVehiclePacketRange(uint start, uint end)
     {
@@ -53,12 +63,59 @@ public static class GpuHle
     public static void RegisterPacketOwner(uint address, string owner) =>
         PacketOwners[NormalizePacketAddress(address)] = owner;
 
-    public static string DescribePacketOwner(uint address) =>
-        PacketOwners.TryGetValue(NormalizePacketAddress(address), out string? owner)
-            ? owner
-            : "unresolved";
+    public static void RegisterPacketOwnerRange(
+        uint start,
+        uint end,
+        string owner)
+    {
+        start = NormalizePacketAddress(start);
+        end = NormalizePacketAddress(end);
+        if (end > start)
+            OwnedPacketRanges.Add(new OwnedPacketRange(start, end, owner));
+    }
 
-    public static void ClearPacketOwners() => PacketOwners.Clear();
+    public static string DescribePacketOwner(uint address)
+    {
+        address = NormalizePacketAddress(address);
+        if (PacketOwners.TryGetValue(address, out string? owner))
+            return owner;
+        for (int index = OwnedPacketRanges.Count - 1; index >= 0; index--)
+        {
+            OwnedPacketRange range = OwnedPacketRanges[index];
+            if (address >= range.Start && address < range.End)
+                return range.Owner;
+        }
+        return "unresolved";
+    }
+
+    public static void ClearPacketOwners()
+    {
+        PacketOwners.Clear();
+        OwnedPacketRanges.Clear();
+    }
+
+    public static void BeginPacketArena(uint start, uint end)
+    {
+        start = NormalizePacketAddress(start);
+        end = NormalizePacketAddress(end);
+        if (end <= start)
+            return;
+
+        // V8:2 builds one display list while the other remains queued for
+        // DrawOTag.  Retire ownership only for the arena being reused; a
+        // global per-present clear races the game's double buffering and
+        // strips material identity from the list about to be consumed.
+        VehiclePacketRanges.RemoveAll(range =>
+            range.Start < end && range.End > start);
+        OwnedPacketRanges.RemoveAll(range =>
+            range.Start < end && range.End > start);
+        VehiclePackets.RemoveWhere(address =>
+            address >= start && address < end);
+        foreach (uint address in PacketOwners.Keys
+                     .Where(address => address >= start && address < end)
+                     .ToArray())
+            PacketOwners.Remove(address);
+    }
 
     public struct DispRect { public int X, Y, W, H; public long Stamp; public bool Valid; }
 

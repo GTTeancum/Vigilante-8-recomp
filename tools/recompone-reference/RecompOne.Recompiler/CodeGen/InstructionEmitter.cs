@@ -63,7 +63,7 @@ public static class InstructionEmitter
         {
             return (int)fn switch
             {
-                0 =>  rd == 0 ? "" : sa == 0 ? $"{RD} = {RT};" : $"{RD} = {RT} << {sa};",
+                0 =>  rd == 0 ? "" : sa == 0 ? $"c.CopyRegister({rd}, {rt});" : $"{RD} = {RT} << {sa};",
                 2 =>  rd == 0 ? "" : $"{RD} = {RT} >> {sa};",
                 3 =>  rd == 0 ? "" : $"{RD} = (uint)((int){RT} >> {sa});",
                 4 =>  rd == 0 ? "" : $"{RD} = {RT} << (int)({RS} & 31u);",
@@ -81,10 +81,16 @@ public static class InstructionEmitter
                 25 => $"{{ var _r = (ulong){RS} * {RT}; c.LO = (uint)_r; c.HI = (uint)(_r >> 32); }}",
                 26 => rt == 0 ? "c.LO = 0u; c.HI = 0u;" : $"if ({RT} != 0u) {{ if ((int){RS} == int.MinValue && (int){RT} == -1) {{ c.LO = 0x80000000u; c.HI = 0u; }} else {{ c.LO = (uint)((int){RS} / (int){RT}); c.HI = (uint)((int){RS} % (int){RT}); }} }}",
                 27 => rt == 0 ? "c.LO = 0u; c.HI = 0u;" : $"if ({RT} != 0u) {{ c.LO = {RS} / {RT}; c.HI = {RS} % {RT}; }}",
-                32 or 33 => rd == 0 ? "" : $"{RD} = {RS} + {RT};",
+                32 or 33 => rd == 0 ? "" :
+                    rs == 0 ? $"c.CopyRegister({rd}, {rt});" :
+                    rt == 0 ? $"c.CopyRegister({rd}, {rs});" :
+                    $"{RD} = {RS} + {RT};",
                 34 or 35 => rd == 0 ? "" : $"{RD} = {RS} - {RT};",
                 36 => rd == 0 ? "" : $"{RD} = {RS} & {RT};",
-                37 => rd == 0 ? "" : rs == 0 ? $"{RD} = {RT};" : rt == 0 ? $"{RD} = {RS};" : $"{RD} = {RS} | {RT};",
+                37 => rd == 0 ? "" :
+                    rs == 0 ? $"c.CopyRegister({rd}, {rt});" :
+                    rt == 0 ? $"c.CopyRegister({rd}, {rs});" :
+                    $"{RD} = {RS} | {RT};",
                 38 => rd == 0 ? "" : $"{RD} = {RS} ^ {RT};",
                 39 => rd == 0 ? "" : $"{RD} = ~({RS} | {RT});",
                 42 => rd == 0 ? "" : $"{RD} = (int){RS} < (int){RT} ? 1u : 0u;",
@@ -111,7 +117,7 @@ public static class InstructionEmitter
             if (((i.Word >> 25) & 1) == 1) return $"RecompOne.Runtime.Gte.Execute(0x{i.Word:X8}u);";
             return cop2rs switch
             {
-                0 => rt == 0 ? "" : $"{RT} = RecompOne.Runtime.Gte.Read({rd});",
+                0 => rt == 0 ? "" : $"c.LoadGteWord({rt}, {rd});",
                 2 => rt == 0 ? "" : $"{RT} = RecompOne.Runtime.Gte.ReadControl({rd});",
                 4 => $"RecompOne.Runtime.Gte.Write({rd}, {RT});",
                 6 => $"RecompOne.Runtime.Gte.WriteControl({rd}, {RT});",
@@ -123,27 +129,31 @@ public static class InstructionEmitter
 
         return (int)op switch
         {
-            8  or 9 =>  rt == 0 ? "" : rs == 0 ? $"{RT} = 0x{unchecked((uint)(int)imm):X8}u;" : imm >= 0 ? $"{RT} = {RS} + 0x{(uint)imm:X}u;" : $"{RT} = {RS} - 0x{unchecked((uint)(-(int)imm)):X}u;",
+            8  or 9 =>  rt == 0 ? "" :
+                imm == 0 ? $"c.CopyRegister({rt}, {rs});" :
+                rs == 0 ? $"{RT} = 0x{unchecked((uint)(int)imm):X8}u;" :
+                imm >= 0 ? $"{RT} = {RS} + 0x{(uint)imm:X}u;" :
+                $"{RT} = {RS} - 0x{unchecked((uint)(-(int)imm)):X}u;",
             10 => rt == 0 ? "" : $"{RT} = (int){RS} < {(int)imm} ? 1u : 0u;",
             11 => rt == 0 ? "" : $"{RT} = {RS} < 0x{(uint)(int)imm:X8}u ? 1u : 0u;",
             12 => rt == 0 ? "" : $"{RT} = {RS} & 0x{immU:X4}u;",
-            13 => rt == 0 ? "" : immU == 0 ? $"{RT} = {RS};" : $"{RT} = {RS} | 0x{immU:X4}u;",
+            13 => rt == 0 ? "" : immU == 0 ? $"c.CopyRegister({rt}, {rs});" : $"{RT} = {RS} | 0x{immU:X4}u;",
             14 => rt == 0 ? "" : $"{RT} = {RS} ^ 0x{immU:X4}u;",
             15 => rt == 0 ? "" : $"{RT} = 0x{(uint)immU << 16:X8}u;",
             32 => rt == 0 ? "" : $"{RT} = (uint)(sbyte)m.ReadU8({Addr(rs, imm)});",
             33 => rt == 0 ? "" : $"{RT} = (uint)(short)m.ReadU16({Addr(rs, imm)});",
             34 => rt == 0 ? "" : $"{RT} = m.ReadWordLeft({RT}, {Addr(rs, imm)});",
-            35 => rt == 0 ? "" : $"{RT} = m.ReadU32({Addr(rs, imm)});",
+            35 => rt == 0 ? "" : $"c.LoadWord({rt}, m, {Addr(rs, imm)});",
             36 => rt == 0 ? "" : $"{RT} = m.ReadU8({Addr(rs, imm)});",
             37 => rt == 0 ? "" : $"{RT} = m.ReadU16({Addr(rs, imm)});",
             38 => rt == 0 ? "" : $"{RT} = m.ReadWordRight({RT}, {Addr(rs, imm)});",
             40 => $"m.WriteU8({Addr(rs, imm)}, (byte){RT});",
             41 => $"m.WriteU16({Addr(rs, imm)}, (ushort){RT});",
             42 => $"m.WriteWordLeft({Addr(rs, imm)}, {RT});",
-            43 => $"m.WriteU32({Addr(rs, imm)}, {RT});",
+            43 => $"c.StoreWord({rt}, m, {Addr(rs, imm)});",
             46 => $"m.WriteWordRight({Addr(rs, imm)}, {RT});",
-            50 => $"RecompOne.Runtime.Gte.LoadWord({rt}, m.ReadU32({Addr(rs, imm)}));",
-            58 => $"m.WriteU32({Addr(rs, imm)}, RecompOne.Runtime.Gte.StoreWord({rt}));",
+            50 => $"RecompOne.Runtime.Gte.LoadMemoryWord({rt}, m, {Addr(rs, imm)});",
+            58 => $"m.WriteGteWord({Addr(rs, imm)}, {rt});",
             _ =>  UnknownInstr(i, $"op=0x{op:X2}")
         };
     }

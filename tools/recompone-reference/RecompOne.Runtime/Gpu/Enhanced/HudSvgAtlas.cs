@@ -4,7 +4,7 @@ using System.Reflection;
 using System.Xml.Linq;
 using Silk.NET.OpenGL;
 
-namespace RecompOne.Runtime.Hle;
+namespace RecompOne.Runtime.Enhanced;
 
 /// <summary>
 /// Loads the authored V8:2 HUD SVGs and rasterizes them into a supersampled

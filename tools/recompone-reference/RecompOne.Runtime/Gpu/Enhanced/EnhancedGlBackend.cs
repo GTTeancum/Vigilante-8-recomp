@@ -1,10 +1,18 @@
 using System.Runtime.InteropServices;
 using RecompOne.Runtime.Config;
+using RecompOne.Runtime.Hle;
 using Silk.NET.OpenGL;
 
-namespace RecompOne.Runtime.Hle;
+namespace RecompOne.Runtime.Enhanced;
 
-public sealed class GlBackend : IGpuBackend
+/// <summary>
+/// Modern renderer used by the Enhanced preset.  This backend owns its OpenGL
+/// resources, scene depth, material passes and presentation targets.  The
+/// original PS1 software rasterizer remains in <see cref="Gpu"/> and is never
+/// entered from this class; switching renderers is therefore a host-level
+/// choice rather than a collection of fidelity branches inside one rasterizer.
+/// </summary>
+public sealed class EnhancedGlBackend : Hle.IGpuBackend
 {
     [StructLayout(LayoutKind.Sequential)]
     struct GlVertex
@@ -15,11 +23,18 @@ public sealed class GlBackend : IGpuBackend
         public float U, V, PerspectiveW, Depth, RasterDepth;
         public float BaryX, BaryY, BaryZ;
         public float UvMinX, UvMinY, UvMaxX, UvMaxY;
+        public float ViewX, ViewY, ViewZ;
+        public float ProjectionCenterX, ProjectionCenterY, ProjectionScale;
+        public float HasViewSpace;
+        public int Material;
     }
 
     const int MaxVerts = 0x40000;
     static readonly bool TraceDepth =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_DEPTH") == "1";
+    static readonly bool TraceEnhancedRenderer =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_ENHANCED_RENDERER") == "1";
     static readonly bool TraceTerrainVram =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VRAM") == "1";
     static readonly bool DisableRasterDepth =
@@ -30,6 +45,9 @@ public sealed class GlBackend : IGpuBackend
         Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_STOCK_PAINT_CORRECTION") == "1";
     static readonly bool TraceRectangles =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_RECTANGLES") == "1";
+    static readonly bool TraceEnhancedFallbacks =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_ENHANCED_FALLBACKS") == "1";
     static readonly (float X, float Y)? TriangleProbe =
         ParseTriangleProbe(
             Environment.GetEnvironmentVariable(
@@ -50,9 +68,27 @@ public sealed class GlBackend : IGpuBackend
     long _traceDepthTestedTriangles;
     long _traceProjectiveTriangles;
     long _traceMissingOtTriangles;
+    long _traceEnhancedTriangles;
+    long _traceDirectViewSpaceTriangles;
+    long _traceReconstructedViewSpaceTriangles;
+    long _traceFallbackTriangles;
+    long _traceGlassTriangles;
+    long _traceWorldTriangles;
+    long _traceWorldFallbackTriangles;
+    long _traceEffectFallbackTriangles;
+    long _traceVisibleWorldTriangles;
+    long _traceVisibleWorldFallbackTriangles;
+    long _traceVehicleTriangles;
+    long _traceVehicleFallbackTriangles;
+    long _traceVisibleVehicleTriangles;
+    long _traceVisibleVehicleFallbackTriangles;
+    long _traceOpaqueFallbackTriangles;
+    long _traceAlphaTestFallbackTriangles;
+    long _traceGlassFallbackTriangles;
     int _traceMinOt = int.MaxValue;
     int _traceMaxOt;
     readonly HashSet<string> _traceRectangleShapes = [];
+    readonly HashSet<string> _traceFallbackShapes = [];
     readonly HashSet<string> _pendingProbeTriangles = [];
     readonly Queue<(long Frame, string[] Triangles)> _probeTriangleHistory = [];
 
@@ -135,17 +171,48 @@ public sealed class GlBackend : IGpuBackend
     GlDisplayRt? _kTarget;
     bool _kTransparent;
     bool _kDepthTest;
+    HleMaterialKind _kMaterial;
     int _kBlend, _kSetMask, _kCheckMask;
     int _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY;
     int _kClipX0, _kClipY0, _kClipX1, _kClipY1, _kTextureSmoothing;
     int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv;
-    int _uTextureSmoothing, _uTextureMipmaps, _uAnisotropy, _uEnhancedShadows, _uEnhancedParticles, _uEnhancedFog;
+    int _uTextureSmoothing, _uTextureMipmaps, _uAnisotropy;
+    int _uEnhancedShadows, _uEnhancedParticles, _uEnhancedFog;
+    int _uPerspectiveCorrectTextures, _uPerspectiveCorrectColors, _uTrueColor;
     int _uVectorFonts, _uVectorIcons;
     int _uPresentOrigin, _uPresentSize, _uPresentTexSize, _uPresent24Origin, _uPresent24Size;
 
     public bool Ready { get; private set; }
 
-    public GlBackend(GL gl) { _gl = gl; _vram = new GlVram(gl); }
+    public EnhancedGlBackend(GL gl) { _gl = gl; _vram = new GlVram(gl); }
+
+    public void ApplyResolutionScale(
+        int scale, ReadOnlySpan<ushort> nativeVram)
+    {
+        scale = Math.Clamp(scale, 1, 4);
+        if (scale == GlVram.Scale) return;
+
+        Flush();
+        for (int index = 0; index < _rts.Length; index++)
+        {
+            _rts[index]?.Destroy(_gl);
+            _rts[index] = null;
+        }
+        _kTarget = null;
+        _vram.ReinitializeScale(scale, nativeVram);
+        _readCacheValid = false;
+        _presentW = 0;
+        _presentH = 0;
+
+        _gl.UseProgram(_progPrim);
+        _gl.Uniform1(
+            _gl.GetUniformLocation(_progPrim, "uScale"), GlVram.Scale);
+        _gl.UseProgram(_progPresent24);
+        _gl.Uniform1(
+            _gl.GetUniformLocation(_progPresent24, "uScale"),
+            GlVram.Scale);
+        _gl.UseProgram(0);
+    }
 
     public unsafe void InitGl()
     {
@@ -168,6 +235,11 @@ public sealed class GlBackend : IGpuBackend
         _uEnhancedShadows = _gl.GetUniformLocation(_progPrim, "uEnhancedShadows");
         _uEnhancedParticles = _gl.GetUniformLocation(_progPrim, "uEnhancedParticles");
         _uEnhancedFog = _gl.GetUniformLocation(_progPrim, "uEnhancedFog");
+        _uPerspectiveCorrectTextures =
+            _gl.GetUniformLocation(_progPrim, "uPerspectiveCorrectTextures");
+        _uPerspectiveCorrectColors =
+            _gl.GetUniformLocation(_progPrim, "uPerspectiveCorrectColors");
+        _uTrueColor = _gl.GetUniformLocation(_progPrim, "uTrueColor");
         _uVectorFonts = _gl.GetUniformLocation(_progPrim, "uVectorFonts");
         _uVectorIcons = _gl.GetUniformLocation(_progPrim, "uVectorIcons");
         _uPosBias = _gl.GetUniformLocation(_progPrim, "uPosBias");
@@ -214,6 +286,10 @@ public sealed class GlBackend : IGpuBackend
         _gl.EnableVertexAttribArray(7); _gl.VertexAttribPointer(7, 4, VertexAttribPointerType.Float, false, stride, (void*)52);
         _gl.EnableVertexAttribArray(8); _gl.VertexAttribPointer(8, 1, VertexAttribPointerType.Float, false, stride, (void*)32);
         _gl.EnableVertexAttribArray(9); _gl.VertexAttribPointer(9, 1, VertexAttribPointerType.Float, false, stride, (void*)36);
+        _gl.EnableVertexAttribArray(10); _gl.VertexAttribPointer(10, 3, VertexAttribPointerType.Float, false, stride, (void*)68);
+        _gl.EnableVertexAttribArray(11); _gl.VertexAttribPointer(11, 3, VertexAttribPointerType.Float, false, stride, (void*)80);
+        _gl.EnableVertexAttribArray(12); _gl.VertexAttribPointer(12, 1, VertexAttribPointerType.Float, false, stride, (void*)92);
+        _gl.EnableVertexAttribArray(13); _gl.VertexAttribIPointer(13, 1, VertexAttribIType.Int, stride, (void*)96);
 
         // fullscreen quad for present, real vbo since gl_VertexID without arrays does not draw on mesa for some reason?? or i did it wrong?
         _presentVao = _gl.GenVertexArray();
@@ -404,12 +480,17 @@ public sealed class GlBackend : IGpuBackend
             }
     }
 
-    bool DesiredMatches(bool transparent, int blend, bool depthTest)
+    bool DesiredMatches(
+        bool transparent,
+        int blend,
+        bool depthTest,
+        HleMaterialKind material)
     {
         int twAndX = ~(_env.TwMaskX * 8) & 0xFF, twAndY = ~(_env.TwMaskY * 8) & 0xFF;
         int twOrX = (_env.TwOffX & _env.TwMaskX) * 8, twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
         return _kTransparent == transparent && _kBlend == blend &&
             _kDepthTest == depthTest
+            && _kMaterial == material
             && _kSetMask == (_env.SetMask ? 1 : 0) && _kCheckMask == (_env.CheckMask ? 1 : 0)
             && _kTwAndX == twAndX && _kTwAndY == twAndY && _kTwOrX == twOrX && _kTwOrY == twOrY
             && _kClipX0 == _env.ClipX0 && _kClipY0 == _env.ClipY0 && _kClipX1 == _env.ClipX1 && _kClipY1 == _env.ClipY1
@@ -421,16 +502,18 @@ public sealed class GlBackend : IGpuBackend
         _readCacheValid = false;
         bool transparent = f.SemiTrans;
         int blend = f.BlendMode;
+        HleMaterialKind material = f.Material;
         var target = Classify();
         if (_count > 0 &&
             (target != _kTarget ||
-             !DesiredMatches(transparent, blend, depthTest))) Flush();
+             !DesiredMatches(transparent, blend, depthTest, material))) Flush();
         if (_count + vertsNeeded > MaxVerts) Flush();
         CheckTextureFeedback(f);
 
         _kTarget = target;
         _kTransparent = transparent; _kBlend = blend;
         _kDepthTest = depthTest;
+        _kMaterial = material;
         _kSetMask = _env.SetMask ? 1 : 0; _kCheckMask = _env.CheckMask ? 1 : 0;
         _kTwAndX = ~(_env.TwMaskX * 8) & 0xFF; _kTwAndY = ~(_env.TwMaskY * 8) & 0xFF;
         _kTwOrX = (_env.TwOffX & _env.TwMaskX) * 8; _kTwOrY = (_env.TwOffY & _env.TwMaskY) * 8;
@@ -438,7 +521,10 @@ public sealed class GlBackend : IGpuBackend
         _kTextureSmoothing = ConfigManager.View.TextureSmoothing ? 1 : 0;
     }
 
-    bool DitherOf(in PrimFlags f) => _env.Dither && (f.Gouraud || (f.Textured && !f.RawTexture));
+    bool DitherOf(in PrimFlags f) =>
+        ConfigManager.View.Ps1Dithering &&
+        _env.Dither &&
+        (f.Gouraud || (f.Textured && !f.RawTexture));
 
     GlVertex V(
         in HleVertex v,
@@ -462,8 +548,16 @@ public sealed class GlBackend : IGpuBackend
         if (f.Vehicle) tpage |= 0x80000;
         float perspectiveW =
             perspectiveCorrect ? MathF.Max(1f, v.PerspectiveW) : 1f;
+        float fogDepth = v.HasProjectiveW
+            ? MathF.Max(1f, v.PerspectiveW)
+            : v.HasGteZ
+                ? MathF.Max(1f, v.Z)
+                : MathF.Max(1f, f.OtIndex * 8f);
         float screenX = v.X;
         float screenY = v.Y;
+        float projectionCenterX = v.ProjectionCenterX;
+        float projectionCenterY = v.ProjectionCenterY;
+        float projectionScale = v.ProjectionScale;
         if (!uiTexture &&
             GpuHle.GameplayActive &&
             _kTarget is { Margin: > 0 } wideTarget)
@@ -478,6 +572,12 @@ public sealed class GlBackend : IGpuBackend
                 (v.X - wideTarget.X) * wideScale;
             float centerY = wideTarget.Y + wideTarget.H * 0.5f;
             screenY = centerY + (v.Y - centerY) * wideScale;
+            projectionCenterX =
+                wideTarget.X - wideTarget.Margin +
+                (projectionCenterX - wideTarget.X) * wideScale;
+            projectionCenterY =
+                centerY + (projectionCenterY - centerY) * wideScale;
+            projectionScale *= wideScale;
         }
         return new GlVertex
         {
@@ -487,8 +587,23 @@ public sealed class GlBackend : IGpuBackend
             Texpage = tpage,
             U = v.U, V = v.V,
             PerspectiveW = perspectiveW,
-            Depth = v.HasGteZ ? MathF.Max(1f, v.Z) : 1f,
+            Depth = fogDepth,
             RasterDepth = rasterDepth,
+            ViewX = v.ViewX,
+            ViewY = v.ViewY,
+            ViewZ = v.ViewZ,
+            ProjectionCenterX = projectionCenterX,
+            ProjectionCenterY = projectionCenterY,
+            ProjectionScale = projectionScale,
+            // 2 = exact address/value GTE provenance, 1 = a complete
+            // primitive reconstructed from coherent GTE depth, 0 = stable
+            // screen-space fallback.  The shader accepts both 1 and 2 for
+            // modern clipping/projection; telemetry keeps them distinct so
+            // an OT approximation can never masquerade as exact geometry.
+            HasViewSpace = v.HasViewSpace
+                ? (v.ReconstructedViewSpace ? 1f : 2f)
+                : 0f,
+            Material = (int)f.Material,
         };
     }
 
@@ -504,36 +619,136 @@ public sealed class GlBackend : IGpuBackend
         // projected across/behind the camera can wrap into enormous screen
         // spans; the hardware drops those primitives instead of clipping them
         // into the long terrain-like wedges OpenGL would otherwise draw.
-        if (spanX > 1023 || spanY > 511)
+        bool modernGeometry =
+            a.HasViewSpace && b.HasViewSpace && c.HasViewSpace;
+        if (!modernGeometry && (spanX > 1023 || spanY > 511))
             return;
 
-        // Exact per-vertex GTE depth is needed only for transparent world
-        // planes (notably Dreamland water) so opaque terrain can occlude them
-        // fragment by fragment. Applying the recovered samples to every
-        // opaque object made unrelated projections at shared screen pixels
-        // change an object's depth from frame to frame, which caused the
-        // widespread prop/vehicle polygon flicker. Opaque primitives retain
-        // one native ordering-table depth for the complete packet.
+        // Use per-vertex GTE depth only when all three packet vertices were
+        // correlated to one native projection group. Independent XY lookups
+        // can select unrelated overlapping surfaces; that was the source of
+        // both object flicker and Dreamland water leaking through land.
+        bool coherentRasterDepth =
+            modernGeometry ||
+            a.HasCoherentGteZ &&
+            b.HasCoherentGteZ &&
+            c.HasCoherentGteZ;
         bool worldTransparent =
             f.SemiTrans &&
-            a.HasGteZ && b.HasGteZ && c.HasGteZ &&
+            coherentRasterDepth &&
             !f.Vehicle;
         bool depthTest =
             !DisableRasterDepth &&
+            ConfigManager.View.EnhancedDepthBuffer &&
             GpuHle.GameplayActive &&
+            f.Material is not
+                (HleMaterialKind.Ui or HleMaterialKind.ScreenEffect) &&
             (ConfigManager.View.HighResolution3D ||
              ConfigManager.View.PerspectiveCorrectTextures) &&
-            (!f.SemiTrans || worldTransparent) &&
-            f.OtIndex > 0;
+            (!f.SemiTrans ||
+             worldTransparent ||
+             f.Material == HleMaterialKind.Glass) &&
+            (modernGeometry || f.OtIndex > 0);
         Begin(f, 3, depthTest);
         bool dith = DitherOf(f);
         bool hasDepth = f.Textured && a.HasGteZ && b.HasGteZ && c.HasGteZ;
         bool hasProjectiveW =
             f.Textured &&
-            a.HasProjectiveW && b.HasProjectiveW && c.HasProjectiveW;
+            (modernGeometry ||
+             a.HasProjectiveW && b.HasProjectiveW && c.HasProjectiveW);
         bool perspectiveCorrect =
             !DisableProjectiveTextures &&
-            ConfigManager.View.PerspectiveCorrectTextures && hasProjectiveW;
+            f.Material is not
+                (HleMaterialKind.Ui or HleMaterialKind.ScreenEffect) &&
+            hasProjectiveW;
+        if (TraceEnhancedRenderer && GpuHle.GameplayActive &&
+            f.Material != HleMaterialKind.Ui)
+        {
+            _traceEnhancedTriangles++;
+            bool worldMaterial = f.Material is
+                HleMaterialKind.Opaque or
+                HleMaterialKind.AlphaTest or
+                HleMaterialKind.Glass;
+            float minX = Math.Min(a.X, Math.Min(b.X, c.X));
+            float maxX = Math.Max(a.X, Math.Max(b.X, c.X));
+            float minY = Math.Min(a.Y, Math.Min(b.Y, c.Y));
+            float maxY = Math.Max(a.Y, Math.Max(b.Y, c.Y));
+            bool visibleWorld =
+                worldMaterial &&
+                maxX >= _env.ClipX0 && minX <= _env.ClipX1 &&
+                maxY >= _env.ClipY0 && minY <= _env.ClipY1;
+            if (worldMaterial)
+                _traceWorldTriangles++;
+            if (visibleWorld)
+                _traceVisibleWorldTriangles++;
+            if (f.Vehicle)
+            {
+                _traceVehicleTriangles++;
+                if (visibleWorld)
+                    _traceVisibleVehicleTriangles++;
+            }
+            if (modernGeometry)
+            {
+                bool reconstructed =
+                    a.ReconstructedViewSpace ||
+                    b.ReconstructedViewSpace ||
+                    c.ReconstructedViewSpace;
+                if (reconstructed)
+                    _traceReconstructedViewSpaceTriangles++;
+                else
+                    _traceDirectViewSpaceTriangles++;
+            }
+            else
+            {
+                _traceFallbackTriangles++;
+                if (worldMaterial)
+                    _traceWorldFallbackTriangles++;
+                else
+                    _traceEffectFallbackTriangles++;
+                if (visibleWorld)
+                    _traceVisibleWorldFallbackTriangles++;
+                if (f.Vehicle)
+                {
+                    _traceVehicleFallbackTriangles++;
+                    if (visibleWorld)
+                        _traceVisibleVehicleFallbackTriangles++;
+                }
+                switch (f.Material)
+                {
+                    case HleMaterialKind.Opaque:
+                        _traceOpaqueFallbackTriangles++;
+                        break;
+                    case HleMaterialKind.AlphaTest:
+                        _traceAlphaTestFallbackTriangles++;
+                        break;
+                    case HleMaterialKind.Glass:
+                        _traceGlassFallbackTriangles++;
+                        break;
+                }
+            }
+            if (f.Material == HleMaterialKind.Glass)
+                _traceGlassTriangles++;
+        }
+        if (TraceEnhancedFallbacks && GpuHle.GameplayActive &&
+            !modernGeometry && _traceFallbackShapes.Count < 512)
+        {
+            string shape =
+                $"packet=0x{f.PacketAddress:X8} ot={f.OtIndex} " +
+                $"material={f.Material} vehicle={(f.Vehicle ? 1 : 0)} " +
+                $"tex={(f.Textured ? 1 : 0)} semi={(f.SemiTrans ? 1 : 0)} " +
+                $"xy=({a.X:F3},{a.Y:F3})({b.X:F3},{b.Y:F3})" +
+                $"({c.X:F3},{c.Y:F3}) " +
+                $"source=(0x{a.SourceAddress:X8},0x{b.SourceAddress:X8}," +
+                $"0x{c.SourceAddress:X8}) " +
+                $"z=({a.Z:F0},{b.Z:F0},{c.Z:F0}) " +
+                $"gte=({(a.HasGteZ ? 1 : 0)}," +
+                $"{(b.HasGteZ ? 1 : 0)},{(c.HasGteZ ? 1 : 0)}) " +
+                $"projective=({(a.HasProjectiveW ? 1 : 0)}," +
+                $"{(b.HasProjectiveW ? 1 : 0)}," +
+                $"{(c.HasProjectiveW ? 1 : 0)})";
+            if (_traceFallbackShapes.Add(shape))
+                Console.Error.WriteLine($"[EnhancedFallback] {shape}");
+        }
         if (TraceDepth && GpuHle.GameplayActive)
         {
             if (f.SemiTrans) _traceTransparentTriangles++;
@@ -547,34 +762,36 @@ public sealed class GlBackend : IGpuBackend
                 _traceMaxOt = Math.Max(_traceMaxOt, f.OtIndex);
             }
         }
-        bool particle = f.Textured && f.SemiTrans && hasDepth;
+        bool particle = f.Material is
+            HleMaterialKind.Particle or
+            HleMaterialKind.Additive or
+            HleMaterialKind.Subtractive;
         bool shadow = !f.Textured && f.SemiTrans && a.HasGteZ && b.HasGteZ && c.HasGteZ &&
             a.R < 96 && a.G < 96 && a.B < 96 && b.R < 96 && b.G < 96 && b.B < 96 &&
             c.R < 96 && c.G < 96 && c.B < 96;
         static float DepthOf(
-            in HleVertex vertex, int otDepth, bool useGteDepth)
+            in HleVertex vertex, int otDepth, bool useCoherentDepth)
         {
-            // GTE projection recovery gives each world vertex its native
-            // camera-space SZ value. Preserve that value through OpenGL so
-            // transparent world planes are clipped fragment-by-fragment by
-            // opaque terrain instead of comparing one OT bucket for the
-            // complete primitive. The latter made Dreamland water cross hills
-            // as the bucket changed while the camera turned.
-            if (useGteDepth && vertex.HasGteZ)
-                return Math.Clamp(vertex.Z, 1f, ushort.MaxValue) /
-                    ushort.MaxValue;
-
-            // V8 bins camera-space GTE SZ at approximately SZ/8. Recover the
-            // same normalized depth for vertices whose exact projection could
-            // not be correlated, instead of placing them twice as far away.
+            // The ordering table is the game's authoritative visibility
+            // contract.  Recovered per-vertex GTE samples are excellent for
+            // perspective-correct UVs and sub-pixel XY, but they are not
+            // globally unique: independently projected terrain and vehicle
+            // vertices can reuse the same screen coordinate.  Mixing those
+            // samples in one hardware Z buffer caused whole vehicle sections
+            // to fall behind the road.  Give every primitive its native OT
+            // bucket depth instead.  This retains exact far-to-near game
+            // ordering while still allowing the Enhanced renderer to use
+            // modern projection and texture interpolation.
             return Math.Clamp(otDepth, 1, 0x1FFF) / 8192f;
         }
-        var va = V(a, f, dith, perspectiveCorrect, false,
-            DepthOf(a, f.OtIndex, worldTransparent)); va.BaryX = 1f;
-        var vb = V(b, f, dith, perspectiveCorrect, false,
-            DepthOf(b, f.OtIndex, worldTransparent)); vb.BaryY = 1f;
-        var vc = V(c, f, dith, perspectiveCorrect, false,
-            DepthOf(c, f.OtIndex, worldTransparent)); vc.BaryZ = 1f;
+        bool screenSpacePrimitive = f.Material is
+            HleMaterialKind.Ui or HleMaterialKind.ScreenEffect;
+        var va = V(a, f, dith, perspectiveCorrect, screenSpacePrimitive,
+            DepthOf(a, f.OtIndex, coherentRasterDepth)); va.BaryX = 1f;
+        var vb = V(b, f, dith, perspectiveCorrect, screenSpacePrimitive,
+            DepthOf(b, f.OtIndex, coherentRasterDepth)); vb.BaryY = 1f;
+        var vc = V(c, f, dith, perspectiveCorrect, screenSpacePrimitive,
+            DepthOf(c, f.OtIndex, coherentRasterDepth)); vc.BaryZ = 1f;
         if (TriangleProbe is { } probe &&
             GpuHle.GameplayActive &&
             _pendingProbeTriangles.Count < 1024)
@@ -605,7 +822,10 @@ public sealed class GlBackend : IGpuBackend
                     $"target={_kTarget?.X ?? -1},{_kTarget?.Y ?? -1} " +
                     $"z=({a.Z},{b.Z},{c.Z}) " +
                     $"gte=({(a.HasGteZ ? 1 : 0)},{(b.HasGteZ ? 1 : 0)}," +
-                    $"{(c.HasGteZ ? 1 : 0)})";
+                    $"{(c.HasGteZ ? 1 : 0)}) " +
+                    $"coherent=({(a.HasCoherentGteZ ? 1 : 0)}," +
+                    $"{(b.HasCoherentGteZ ? 1 : 0)}," +
+                    $"{(c.HasCoherentGteZ ? 1 : 0)})";
                 _pendingProbeTriangles.Add(triangle);
             }
         }
@@ -744,7 +964,7 @@ public sealed class GlBackend : IGpuBackend
     public void DrawLine(in HleVertex a, in HleVertex b, in PrimFlags f)
     {
         Begin(f, 6);
-        bool dith = _env.Dither;
+        bool dith = ConfigManager.View.Ps1Dithering && _env.Dither;
         float x1 = a.X, y1 = a.Y;
         float x2 = b.X, y2 = b.Y;
         float dx = x2 - x1, dy = y2 - y1;
@@ -767,7 +987,9 @@ public sealed class GlBackend : IGpuBackend
     void LineVert(float x, float y, in HleVertex src, in PrimFlags f, bool dither)
     {
         var v = src; v.X = x; v.Y = y;
-        _verts[_count++] = V(v, f, dither, false);
+        _verts[_count++] = V(
+            v, f, dither, false,
+            f.Material == HleMaterialKind.Ui);
     }
 
     public void FillRect(int x, int y, int w, int h, ushort color15)
@@ -949,6 +1171,13 @@ public sealed class GlBackend : IGpuBackend
                 _uEnhancedParticles,
                 ConfigManager.View.EnhancedParticles ? 1 : 0);
             _gl.Uniform1(_uEnhancedFog, ConfigManager.View.EnhancedFog ? 1 : 0);
+            _gl.Uniform1(
+                _uPerspectiveCorrectTextures,
+                ConfigManager.View.PerspectiveCorrectTextures ? 1 : 0);
+            _gl.Uniform1(
+                _uPerspectiveCorrectColors,
+                ConfigManager.View.PerspectiveCorrectColors ? 1 : 0);
+            _gl.Uniform1(_uTrueColor, ConfigManager.View.TrueColor ? 1 : 0);
             _gl.Uniform1(_uVectorFonts, ConfigManager.View.VectorFonts ? 1 : 0);
             _gl.Uniform1(_uVectorIcons, ConfigManager.View.VectorIcons ? 1 : 0);
 
@@ -963,6 +1192,16 @@ public sealed class GlBackend : IGpuBackend
         else
         {
             _gl.Enable(EnableCap.Blend);
+            if (_kMaterial == HleMaterialKind.Glass)
+            {
+                _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
+                _gl.BlendFunc(
+                    BlendingFactor.SrcAlpha,
+                    BlendingFactor.OneMinusSrcAlpha);
+                _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+            }
+            else
+            {
             _gl.BlendFuncSeparate(BlendingFactor.Src1Color, BlendingFactor.Src1Alpha, BlendingFactor.One, BlendingFactor.Zero);
             if (_kBlend == 2)
             {
@@ -981,6 +1220,7 @@ public sealed class GlBackend : IGpuBackend
                 _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
                 SetBlend(_kBlend switch { 0 => 0.5f, 3 => 0.25f, _ => 1f }, _kBlend == 0 ? 0.5f : 1f);
                 _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+            }
             }
         }
 
@@ -1058,6 +1298,59 @@ public sealed class GlBackend : IGpuBackend
             _traceMissingOtTriangles = 0;
             _traceMinOt = int.MaxValue;
             _traceMaxOt = 0;
+        }
+        if (TraceEnhancedRenderer && (_frame % 60) == 0)
+        {
+            long viewSpaceTriangles =
+                _traceDirectViewSpaceTriangles +
+                _traceReconstructedViewSpaceTriangles;
+            double viewSpaceCoverage = _traceEnhancedTriangles > 0
+                ? 100.0 * viewSpaceTriangles / _traceEnhancedTriangles
+                : 0.0;
+            double directCoverage = _traceEnhancedTriangles > 0
+                ? 100.0 * _traceDirectViewSpaceTriangles /
+                    _traceEnhancedTriangles
+                : 0.0;
+            Console.Error.WriteLine(
+                $"[EnhancedRenderer] frames={_frame - 59}-{_frame} " +
+                $"triangles={_traceEnhancedTriangles} " +
+                $"direct={_traceDirectViewSpaceTriangles} " +
+                $"reconstructed={_traceReconstructedViewSpaceTriangles} " +
+                $"fallback={_traceFallbackTriangles} " +
+                $"world={_traceWorldTriangles} " +
+                $"world-fallback={_traceWorldFallbackTriangles} " +
+                $"visible-world={_traceVisibleWorldTriangles} " +
+                $"visible-world-fallback=" +
+                    $"{_traceVisibleWorldFallbackTriangles} " +
+                $"vehicle={_traceVehicleTriangles} " +
+                $"vehicle-fallback={_traceVehicleFallbackTriangles} " +
+                $"visible-vehicle={_traceVisibleVehicleTriangles} " +
+                $"visible-vehicle-fallback=" +
+                    $"{_traceVisibleVehicleFallbackTriangles} " +
+                $"opaque-fallback={_traceOpaqueFallbackTriangles} " +
+                $"alpha-fallback={_traceAlphaTestFallbackTriangles} " +
+                $"glass-fallback={_traceGlassFallbackTriangles} " +
+                $"effect-fallback={_traceEffectFallbackTriangles} " +
+                $"coverage={viewSpaceCoverage:F2}% " +
+                $"direct-coverage={directCoverage:F2}% " +
+                $"glass={_traceGlassTriangles}");
+            _traceEnhancedTriangles = 0;
+            _traceDirectViewSpaceTriangles = 0;
+            _traceReconstructedViewSpaceTriangles = 0;
+            _traceFallbackTriangles = 0;
+            _traceGlassTriangles = 0;
+            _traceWorldTriangles = 0;
+            _traceWorldFallbackTriangles = 0;
+            _traceEffectFallbackTriangles = 0;
+            _traceVisibleWorldTriangles = 0;
+            _traceVisibleWorldFallbackTriangles = 0;
+            _traceVehicleTriangles = 0;
+            _traceVehicleFallbackTriangles = 0;
+            _traceVisibleVehicleTriangles = 0;
+            _traceVisibleVehicleFallbackTriangles = 0;
+            _traceOpaqueFallbackTriangles = 0;
+            _traceAlphaTestFallbackTriangles = 0;
+            _traceGlassFallbackTriangles = 0;
         }
 
         for (int i = 0; i < _rts.Length; i++)

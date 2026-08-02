@@ -1,0 +1,16 @@
+# Enter the native player selector, wrap into the appended V8 roster, and
+# hold Beezwax long enough for the built-in 30-angle selector proof burst.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+120+2=LEFT
+240+2=LEFT
+360+2=LEFT
+480+2=LEFT

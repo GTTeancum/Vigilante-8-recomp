@@ -12,12 +12,18 @@
     <IncludeNativeLibrariesForSelfExtract Condition="'$(Configuration)' == 'Release'">true</IncludeNativeLibrariesForSelfExtract>
     <IncludeAllContentForSelfExtract Condition="'$(Configuration)' == 'Release'">true</IncludeAllContentForSelfExtract>
     <EnableCompressionInSingleFile Condition="'$(Configuration)' == 'Release'">true</EnableCompressionInSingleFile>
-    <PublishTrimmed Condition="'$(Configuration)' == 'Release'">true</PublishTrimmed>
-    <TrimMode Condition="'$(Configuration)' == 'Release'">partial</TrimMode>
+    <!-- Keep trimming visible during NuGet's restore graph evaluation.  A
+         configuration-conditioned value can be absent during implicit
+         restore, which omits the ILLink tool pack and silently produces an
+         untrimmed self-contained bundle. -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
     <InvariantGlobalization Condition="'$(Configuration)' == 'Release'">true</InvariantGlobalization>
     <JsonSerializerIsReflectionEnabledByDefault Condition="'$(Configuration)' == 'Release'">true</JsonSerializerIsReflectionEnabledByDefault>
     <DebugType Condition="'$(Configuration)' == 'Release'">None</DebugType>
     <DebugSymbols Condition="'$(Configuration)' == 'Release'">false</DebugSymbols>
+    <PythonExe Condition="Exists('$(ProgramFiles)\Blender Foundation\Blender 4.5\4.5\python\bin\python.exe')">$(ProgramFiles)\Blender Foundation\Blender 4.5\4.5\python\bin\python.exe</PythonExe>
+    <PythonExe Condition="'$(PythonExe)' == ''">python</PythonExe>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\tools\recompone-reference\RecompOne.Runtime\RecompOne.Runtime.csproj" />
@@ -29,4 +35,10 @@
     <TrimmerRootAssembly Include="Silk.NET.Input.Glfw" />
     <TrimmerRootAssembly Include="Silk.NET.Windowing.Glfw" />
   </ItemGroup>
+  <Target Name="EnsureGeneratedVehicleSeams"
+          BeforeTargets="CoreCompile"
+          Condition="Exists('$(MSBuildProjectDirectory)\main.cs')">
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\apply_vehicle_engine_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\apply_native_selector_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot;" />
+  </Target>
 </Project>

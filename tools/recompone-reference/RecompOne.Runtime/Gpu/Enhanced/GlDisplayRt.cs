@@ -1,6 +1,6 @@
 using Silk.NET.OpenGL;
 
-namespace RecompOne.Runtime.Hle;
+namespace RecompOne.Runtime.Enhanced;
 
 public sealed class GlDisplayRt
 {

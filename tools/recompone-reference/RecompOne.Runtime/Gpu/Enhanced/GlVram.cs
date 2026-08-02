@@ -1,6 +1,7 @@
 using Silk.NET.OpenGL;
+using RecompOne.Runtime.Hle;
 
-namespace RecompOne.Runtime.Hle;
+namespace RecompOne.Runtime.Enhanced;
 
 public sealed class GlVram
 {
@@ -26,6 +27,31 @@ public sealed class GlVram
         _fbo = CreateFbo(_tex);
         _stageTex = CreateTex(VramShadow.Width, VramShadow.Height);
         _stageFbo = CreateFbo(_stageTex);
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+    }
+
+    public void ReinitializeScale(
+        int scale, ReadOnlySpan<ushort> nativeVram)
+    {
+        scale = Math.Clamp(scale, 1, 4);
+        if (scale == Scale) return;
+        if (nativeVram.Length != VramShadow.Width * VramShadow.Height)
+            throw new ArgumentException(
+                "native VRAM snapshot has the wrong size",
+                nameof(nativeVram));
+
+        if (_fbo != 0) _gl.DeleteFramebuffer(_fbo);
+        if (_tex != 0) _gl.DeleteTexture(_tex);
+        if (_scratchTex != 0) _gl.DeleteTexture(_scratchTex);
+        _fbo = 0;
+        _tex = 0;
+        _scratchTex = 0;
+
+        Scale = scale;
+        _tex = CreateTex(Width, Height);
+        _fbo = CreateFbo(_tex);
+        WriteRect(
+            0, 0, VramShadow.Width, VramShadow.Height, nativeVram);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 

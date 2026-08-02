@@ -1,0 +1,10 @@
+# Reach the native player selector and hold the vehicle requested through
+# --guest-vehicle long enough for the full selector rotation proof burst.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS

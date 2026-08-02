@@ -16,21 +16,56 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_SOURCE = REPO / "reference-v8-2" / "generated" / "recompiled" / "main.cs"
 
+MIGRATIONS = (
+    (
+        """        RecompOne.Runtime.Sdk.V82Compat.EndTextureDecode(
+            c, v82TextureDecodeCallerSp);
+""",
+        """        RecompOne.Runtime.Sdk.V82Compat.EndTextureDecode(
+            c, m, v82TextureDecodeCallerSp);
+""",
+    ),
+)
+
 REPLACEMENTS = (
     (
-        """        c.A0 = m.ReadU32((c.T3 + 0x48u));
+        """    public static void func_80021064(CpuContext c, IMemory m)
+    {
+        c.SP = c.SP - 0xC70u;
+""",
+        """    public static void func_80021064(CpuContext c, IMemory m)
+    {
+        uint v82TextureDecodeCallerSp =
+            RecompOne.Runtime.Sdk.V82Compat.BeginTextureDecode(c, m);
+        c.SP = c.SP - 0xC70u;
+""",
+    ),
+    (
+        """        c.LoadWord(16, m, (c.SP + 0xC58u));
+        c.SP = c.SP + 0xC70u;
+        return;
+""",
+        """        c.LoadWord(16, m, (c.SP + 0xC58u));
+        c.SP = c.SP + 0xC70u;
+        RecompOne.Runtime.Sdk.V82Compat.EndTextureDecode(
+            c, m, v82TextureDecodeCallerSp);
+        return;
+""",
+    ),
+    (
+        """        c.LoadWord(4, m, (c.T3 + 0x48u));
         c.A3 = 0x00000008u;
 """,
-        """        c.A0 = m.ReadU32((c.T3 + 0x48u));
+        """        c.LoadWord(4, m, (c.T3 + 0x48u));
         c.A0 = RecompOne.Runtime.Sdk.V82VehicleRegistry.WheelBankForObject(m, c.S4, c.A0);
         c.A3 = 0x00000008u;
 """,
     ),
     (
-        """        c.V1 = m.ReadU32((c.T4 + 0x48u));
+        """        c.LoadWord(3, m, (c.T4 + 0x48u));
         c.A0 = c.A0 - c.S0;
 """,
-        """        c.V1 = m.ReadU32((c.T4 + 0x48u));
+        """        c.LoadWord(3, m, (c.T4 + 0x48u));
         c.V1 = RecompOne.Runtime.Sdk.V82VehicleRegistry.WheelBankForObject(m, c.S4, c.V1);
         c.A0 = c.A0 - c.S0;
 """,
@@ -61,13 +96,13 @@ REPLACEMENTS = (
         """        c.A0 = 0x80060000u;
         c.A0 = c.A0 + 0x3F74u;
         c.V1 = c.S6 << 1;
-        c.S3 = m.ReadU32((c.V0 + 0x61C0u));
+        c.LoadWord(19, m, (c.V0 + 0x61C0u));
 """,
         """        c.A0 = 0x80060000u;
         c.A0 = c.A0 + 0x3F74u;
         c.A0 = RecompOne.Runtime.Sdk.V82VehicleRegistry.TransformTableForObject(m, c.S5, c.A0);
         c.V1 = c.S6 << 1;
-        c.S3 = m.ReadU32((c.V0 + 0x61C0u));
+        c.LoadWord(19, m, (c.V0 + 0x61C0u));
         c.S3 = RecompOne.Runtime.Sdk.V82VehicleRegistry.TransformBankForObject(m, c.S5, c.S3);
 """,
     ),
@@ -95,6 +130,18 @@ def main() -> int:
     source = args.source.resolve()
     text = source.read_text(encoding="utf-8")
     changed = 0
+    for old, new in MIGRATIONS:
+        if new in text:
+            continue
+        count = text.count(old)
+        if count > 1:
+            raise RuntimeError(
+                f"expected at most one generated engine migration, found "
+                f"{count}: {old.splitlines()[0].strip()}"
+            )
+        if count == 1:
+            text = text.replace(old, new, 1)
+            changed += 1
     for old, new in REPLACEMENTS:
         if new in text:
             continue

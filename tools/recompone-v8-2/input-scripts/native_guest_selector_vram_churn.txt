@@ -1,0 +1,34 @@
+# Repeatedly cross the V8:2/V8 roster boundary and revisit the imported
+# selector banks.  Each 120-poll dwell exceeds the native 80-frame proof
+# capture point, so the final image for each guest is produced only after
+# several complete native construction/teardown cycles.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+120+2=LEFT
+240+2=LEFT
+360+2=LEFT
+480+2=LEFT
+600+2=RIGHT
+720+2=RIGHT
+840+2=RIGHT
+960+2=RIGHT
+1080+2=LEFT
+1200+2=LEFT
+1320+2=LEFT
+1440+2=LEFT
+1560+2=RIGHT
+1680+2=RIGHT
+1800+2=RIGHT
+1920+2=RIGHT
+2040+2=LEFT
+2160+2=LEFT
+2280+2=LEFT
+2400+2=LEFT

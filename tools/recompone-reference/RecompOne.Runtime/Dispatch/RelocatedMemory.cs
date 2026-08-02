@@ -30,6 +30,17 @@ internal sealed class RelocatedMemory : IMemory
     public void WriteU8(uint address, byte value) => Inner.WriteU8(Address(address), value);
     public void WriteU16(uint address, ushort value) => Inner.WriteU16(Address(address), value);
     public void WriteU32(uint address, uint value) => Inner.WriteU32(Address(address), value);
+    public void WriteGteWord(uint address, int register) =>
+        Inner.WriteGteWord(Address(address), register);
+    public void WritePreciseGteVertex(
+        uint address, in PreciseGteVertexData vertex) =>
+        Inner.WritePreciseGteVertex(Address(address), vertex);
+    public bool TryGetPreciseGteVertex(
+        uint address, uint packedScreenPosition,
+        out PreciseGteVertexData vertex) =>
+        Inner.TryGetPreciseGteVertex(
+            Address(address), packedScreenPosition,
+            out vertex);
     public uint ReadWordLeft(uint current, uint address) => Inner.ReadWordLeft(current, Address(address));
     public uint ReadWordRight(uint current, uint address) => Inner.ReadWordRight(current, Address(address));
     public void WriteWordLeft(uint address, uint value) => Inner.WriteWordLeft(Address(address), value);

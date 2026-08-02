@@ -12,12 +12,19 @@ for path in (TESTS, ADDONS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from build_v8_to_v82_guest_roster import build_projects  # noqa: E402
+from build_v8_to_v82_guest_roster import (  # noqa: E402
+    VEHICLES,
+    V8_COMMON,
+    V8_SELECTOR_VEHICLES,
+    build_projects,
+    decode_bank,
+)
 from vigilante8_vehicle_tools import (  # noqa: E402
     iff,
     project,
     registry,
     stats,
+    xobf,
 )
 
 
@@ -41,6 +48,13 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.vehicles = build_projects()
+        cls.source_banks = {
+            stable_id: (
+                decode_bank(V8_COMMON, "V8", source_index),
+                decode_bank(V8_SELECTOR_VEHICLES, "V8", source_index),
+            )
+            for source_index, stable_id, _display_name, _vehicle_name in VEHICLES
+        }
 
     def test_full_roster_owns_exclusive_native_banks(self) -> None:
         package = registry.compile_package(self.vehicles)
@@ -145,6 +159,204 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
                     self.assertEqual(-21846, bank.slots[root].flags)
                     self.assertIsNotNone(bank.slots[root].collision)
             vehicle.validate()
+
+    def test_animated_transform_material_slots_survive_conversion(self) -> None:
+        """The terrain transform renderer indexes a native local slot table."""
+
+        beezwax = next(
+            vehicle
+            for vehicle in self.vehicles
+            if vehicle.stable_id == "guest.v8.beezwax"
+        )
+        source_groups = [
+            group
+            for group in beezwax.transformation_bank.groups
+            if group.texture_slot_count == 2 and group.render_extent == 170
+        ]
+        self.assertEqual(1, len(source_groups))
+        source = source_groups[0]
+        self.assertEqual(
+            {0, 1},
+            {
+                face.native_texture_slot
+                for face in source.faces
+                if face.packet_kind == 15
+            },
+        )
+
+        package = registry.compile_package((beezwax,))
+        _game, entries = registry.parse_registry(package.registry)
+        form = tuple(iff.parse(package.archive).forms(b"XOBF"))[
+            entries[0].transformation_archive_index
+        ]
+        model_data = next(
+            child.payload for child in form.children if child.tag == b"BIN "
+        )
+        native = xobf.Model(model_data, dialect="V8_2")
+        compiled_groups = [
+            group
+            for group in native.groups()
+            if group.texture_slot_count == 2 and group.render_extent == 170
+        ]
+        self.assertEqual(1, len(compiled_groups))
+        compiled = compiled_groups[0]
+        self.assertEqual(
+            {0, 1},
+            {
+                packet.texture_slot & 0x3FFF
+                for packet in compiled.packets
+                if packet.kind == 15
+            },
+        )
+
+    @staticmethod
+    def _retail_render_mode(native_packet_type: int) -> int:
+        return (
+            ((native_packet_type & 0x0F) << 2)
+            | (0x40 if native_packet_type & 0x80 else 0)
+            | (0x02 if native_packet_type & 0x10 else 0)
+            | (0x80 if native_packet_type & 0x40 else 0)
+        )
+
+    def test_v8_environment_materials_preserve_retail_render_mode(
+        self,
+    ) -> None:
+        for vehicle in self.vehicles:
+            source_body, source_selector = self.source_banks[vehicle.stable_id]
+            for label, source_bank, converted_bank in (
+                ("body", source_body, vehicle),
+                (
+                    "selector",
+                    source_selector,
+                    vehicle.selector_preview_bank,
+                ),
+            ):
+                self.assertIsNotNone(source_bank)
+                self.assertIsNotNone(converted_bank)
+                source_faces = [
+                    face
+                    for group in source_bank.groups
+                    for face in group.faces
+                    if face.packet_kind == 12
+                ]
+                converted_faces = [
+                    face
+                    for group in converted_bank.groups
+                    for face in group.faces
+                    if face.packet_kind == 12
+                ]
+                self.assertTrue(source_faces, f"{vehicle.stable_id}: {label}")
+                self.assertEqual(len(source_faces), len(converted_faces))
+                for source_face, converted_face in zip(
+                    source_faces, converted_faces
+                ):
+                    source_type = 12 | source_face.packet_flags
+                    converted_type = 12 | converted_face.packet_flags
+                    self.assertEqual(
+                        self._retail_render_mode(source_type),
+                        self._retail_render_mode(converted_type),
+                        f"{vehicle.stable_id}: {label}",
+                    )
+                    expected_flags = source_face.packet_flags & ~0x20
+                    self.assertEqual(
+                        converted_face.packet_flags,
+                        expected_flags,
+                        f"{vehicle.stable_id}: {label}",
+                    )
+                    source_environment = (
+                        source_face.environment_parameters[0]
+                    )
+                    expected_environment = source_environment
+                    if (source_environment & 0x3FFF) == 0x3FFF:
+                        expected_environment = (
+                            0x7FFE
+                            if source_face.packet_flags & 0x10
+                            else 0x3FFF
+                        )
+                    self.assertEqual(
+                        converted_face.environment_parameters,
+                        (
+                            expected_environment,
+                            0x8080,
+                            0,
+                            0,
+                        ),
+                        f"{vehicle.stable_id}: {label}",
+                    )
+
+    def test_beezwax_environment_faces_use_only_retail_v82_roles(
+        self,
+    ) -> None:
+        source, _source_selector = self.source_banks["guest.v8.beezwax"]
+        converted = next(
+            vehicle
+            for vehicle in self.vehicles
+            if vehicle.stable_id == "guest.v8.beezwax"
+        )
+        source_opaque = [
+            face
+            for group in source.groups
+            for face in group.faces
+            if face.packet_kind == 12
+            and not (face.packet_flags & 0x10)
+        ]
+        source_gloss = [
+            face
+            for group in source.groups
+            for face in group.faces
+            if face.packet_kind == 12 and face.packet_flags & 0x10
+        ]
+        converted_environment = [
+            face
+            for group in converted.groups
+            for face in group.faces
+            if face.packet_kind == 12
+        ]
+        self.assertEqual(18, len(source_opaque))
+        self.assertEqual(8, len(source_gloss))
+        self.assertEqual(26, len(converted_environment))
+        self.assertEqual(
+            {
+                (0x00, (0x3FFF, 0x8080, 0, 0)),
+                (0x10, (0x7FFE, 0x8080, 0, 0)),
+            },
+            {
+                (face.packet_flags, face.environment_parameters)
+                for face in converted_environment
+            },
+        )
+
+    def test_compiled_beezwax_uses_stock_v82_environment_packets(
+        self,
+    ) -> None:
+        package = registry.compile_package(self.vehicles)
+        _game, entries = registry.parse_registry(package.registry)
+        beezwax_index = EXPECTED_IDS.index("guest.v8.beezwax")
+        archive_index = entries[beezwax_index].archive_index
+        form = tuple(iff.parse(package.archive).forms(b"XOBF"))[archive_index]
+        model_data = next(
+            child.payload for child in form.children if child.tag == b"BIN "
+        )
+        model = xobf.Model(model_data, dialect="V8_2")
+        packets = [
+            (
+                packet.raw[3],
+                tuple(
+                    int.from_bytes(packet.raw[offset : offset + 2], "little")
+                    for offset in range(0x10, 0x18, 2)
+                ),
+            )
+            for group in model.groups()
+            for packet in group.packets
+            if packet.kind == 12
+        ]
+        self.assertEqual(
+            {
+                (0x0C, (0x3FFF, 0x8080, 0, 0)),
+                (0x1C, (0x7FFE, 0x8080, 0, 0)),
+            },
+            set(packets),
+        )
 
     def test_shared_handling_fields_come_from_each_v8_record(self) -> None:
         source = stats.StatsFile(

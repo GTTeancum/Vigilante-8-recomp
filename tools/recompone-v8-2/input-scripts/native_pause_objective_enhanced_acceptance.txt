@@ -1,0 +1,25 @@
+# Enter Route 66, exercise the native pause and objective overlays, and leave
+# deterministic capture checkpoints after each overlay has fully rendered.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+# Select the retail Quest branch.  Quest is the second entry beneath Arcade.
+1200+3=DOWN
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+2220+2=SELECT
+2280+3=CROSS
+2400+2=SELECT
+2460+3=CROSS
+2580+2=SELECT
+2640+3=CROSS
+[gameplay]
+20+2=START
+60+2=RIGHT
+80+3=CROSS
+# Harmless capture checkpoint after the objective panel settles.
+120+2=SELECT
+160+3=TRIANGLE
+200+2=START

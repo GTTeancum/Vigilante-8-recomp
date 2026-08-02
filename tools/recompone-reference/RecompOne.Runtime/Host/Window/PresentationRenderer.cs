@@ -1,4 +1,5 @@
 using Silk.NET.OpenGL;
+using RecompOne.Runtime.Config;
 
 namespace RecompOne.Runtime.Host.Window;
 
@@ -10,29 +11,54 @@ internal sealed class PresentationRenderer : IDisposable
         #version 330 core
         in vec2 vUv;
         uniform sampler2D uSource;
-        uniform sampler2D uBanner;
         uniform vec2 uSourceSize;
-        uniform ivec2 uBannerSize;
-        uniform int uBannerActive;
+        uniform int uDedither;
+        uniform int uDeditherStep;
         out vec4 oColor;
+
+        vec3 sourcePixel(ivec2 p) {
+            return texelFetch(
+                uSource,
+                clamp(p, ivec2(0), ivec2(uSourceSize) - 1),
+                0).rgb;
+        }
+
         void main() {
             ivec2 size = ivec2(uSourceSize);
             ivec2 p = clamp(ivec2(vUv * uSourceSize), ivec2(0), size - 1);
-            ivec2 nativeP = clamp(
-                ivec2(vUv * vec2(640.0, 480.0)),
-                ivec2(0), ivec2(639, 479));
-            vec3 base = texelFetch(uSource, p, 0).rgb;
-            if (uBannerActive != 0) {
-                if (all(greaterThanEqual(nativeP, ivec2(0))) &&
-                    all(lessThan(nativeP, uBannerSize)))
-                    base = texelFetch(uBanner, nativeP, 0).rgb;
-                // Imported V8 vehicles are standard-only. The rest of the
-                // native V8:2 control strip remains pixel-for-pixel intact.
-                if (nativeP.x >= 340 && nativeP.x < 455 &&
-                    nativeP.y >= 423)
-                    base = vec3(0.0);
+            vec3 center = sourcePixel(p);
+            if (uDedither == 0) {
+                oColor = vec4(center, 1.0);
+                return;
             }
-            oColor = vec4(base, 1.0);
+
+            int s = max(uDeditherStep, 1);
+            vec3 n  = sourcePixel(p + ivec2( 0, -s));
+            vec3 ne = sourcePixel(p + ivec2( s, -s));
+            vec3 e  = sourcePixel(p + ivec2( s,  0));
+            vec3 se = sourcePixel(p + ivec2( s,  s));
+            vec3 so = sourcePixel(p + ivec2( 0,  s));
+            vec3 sw = sourcePixel(p + ivec2(-s,  s));
+            vec3 w  = sourcePixel(p + ivec2(-s,  0));
+            vec3 nw = sourcePixel(p + ivec2(-s, -s));
+
+            vec3 lo = min(center, min(min(n, ne), min(e, se)));
+            lo = min(lo, min(min(so, sw), min(w, nw)));
+            vec3 hi = max(center, max(max(n, ne), max(e, se)));
+            hi = max(hi, max(max(so, sw), max(w, nw)));
+            float localRange = max(
+                hi.r - lo.r,
+                max(hi.g - lo.g, hi.b - lo.b));
+
+            // A PS1 ordered-dither cell is a low-amplitude, high-frequency
+            // variation. Average that variation only inside low-contrast
+            // regions; geometry, text, HUD edges and texture detail exceed
+            // the upper threshold and remain untouched.
+            vec3 average = (center * 4.0 + n + ne + e + se + so + sw + w + nw)
+                / 12.0;
+            float strength =
+                1.0 - smoothstep(0.045, 0.14, localRange);
+            oColor = vec4(mix(center, average, strength), 1.0);
         }
         """;
 
@@ -90,14 +116,11 @@ internal sealed class PresentationRenderer : IDisposable
 
     readonly GL _gl;
     uint _vao, _vbo, _upscaleProgram, _fxaaProgram;
-    uint _upscaleTexture, _fxaaTexture, _upscaleFbo, _fxaaFbo, _bannerTexture;
+    uint _upscaleTexture, _fxaaTexture, _upscaleFbo, _fxaaFbo;
     int _width, _height;
-    int _bannerWidth = 1, _bannerHeight = 1;
-    string? _bannerPath;
     int _lastSourceWidth, _lastSourceHeight, _lastOutputWidth, _lastOutputHeight;
     bool _lastFxaa;
-    int _upscaleSourceSize;
-    int _upscaleBannerSize, _upscaleBannerActive;
+    int _upscaleSourceSize, _upscaleDedither, _upscaleDeditherStep;
     int _fxaaSourceSize, _fxaaInvResolution;
 
     public bool Ready { get; private set; }
@@ -106,16 +129,25 @@ internal sealed class PresentationRenderer : IDisposable
 
     public unsafe void Initialize()
     {
-        _upscaleProgram = Hle.GlShaders.Build(_gl, Hle.GlShaders.FullscreenVs, UpscaleFs, "presentation-upscale");
-        _fxaaProgram = Hle.GlShaders.Build(_gl, Hle.GlShaders.FullscreenVs, FxaaFs, "presentation-fxaa");
+        _upscaleProgram = Enhanced.GlShaders.Build(
+            _gl,
+            Enhanced.GlShaders.FullscreenVs,
+            UpscaleFs,
+            "presentation-upscale");
+        _fxaaProgram = Enhanced.GlShaders.Build(
+            _gl,
+            Enhanced.GlShaders.FullscreenVs,
+            FxaaFs,
+            "presentation-fxaa");
         if (_upscaleProgram == 0 || _fxaaProgram == 0) return;
 
         _gl.UseProgram(_upscaleProgram);
         _gl.Uniform1(_gl.GetUniformLocation(_upscaleProgram, "uSource"), 0);
-        _gl.Uniform1(_gl.GetUniformLocation(_upscaleProgram, "uBanner"), 1);
         _upscaleSourceSize = _gl.GetUniformLocation(_upscaleProgram, "uSourceSize");
-        _upscaleBannerSize = _gl.GetUniformLocation(_upscaleProgram, "uBannerSize");
-        _upscaleBannerActive = _gl.GetUniformLocation(_upscaleProgram, "uBannerActive");
+        _upscaleDedither =
+            _gl.GetUniformLocation(_upscaleProgram, "uDedither");
+        _upscaleDeditherStep =
+            _gl.GetUniformLocation(_upscaleProgram, "uDeditherStep");
         _gl.UseProgram(_fxaaProgram);
         _gl.Uniform1(_gl.GetUniformLocation(_fxaaProgram, "uSource"), 0);
         _fxaaSourceSize = _gl.GetUniformLocation(_fxaaProgram, "uSourceSize");
@@ -133,15 +165,6 @@ internal sealed class PresentationRenderer : IDisposable
 
         (_upscaleTexture, _upscaleFbo) = CreateTarget();
         (_fxaaTexture, _fxaaFbo) = CreateTarget();
-        _bannerTexture = _gl.GenTexture();
-        _gl.BindTexture(TextureTarget.Texture2D, _bannerTexture);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Nearest);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Nearest);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
-        byte[] black = [0, 0, 0];
-        _gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgb, 1, 1, 0,
-            PixelFormat.Rgb, PixelType.UnsignedByte, black);
         EnsureSize(1, 1);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         Ready = true;
@@ -195,14 +218,20 @@ internal sealed class PresentationRenderer : IDisposable
             _lastFxaa = fxaa;
         }
 
-        bool bannerActive = UpdateNativeSelectorBanner();
         PreparePass(_upscaleFbo, _upscaleProgram, sourceTexture);
         _gl.Uniform2(_upscaleSourceSize, (float)sourceWidth, sourceHeight);
-        _gl.Uniform2(_upscaleBannerSize, _bannerWidth, _bannerHeight);
-        _gl.Uniform1(_upscaleBannerActive, bannerActive ? 1 : 0);
-        _gl.ActiveTexture(TextureUnit.Texture1);
-        _gl.BindTexture(TextureTarget.Texture2D, _bannerTexture);
-        _gl.ActiveTexture(TextureUnit.Texture0);
+        bool dedither =
+            !ConfigManager.View.Ps1Dithering &&
+            Runtime.GameTitle.Contains(
+                "2nd Offense", StringComparison.Ordinal) &&
+            RecompOne.Runtime.Hle.GpuHle.Active &&
+            RecompOne.Runtime.Hle.GpuHle.GameplayActive;
+        _gl.Uniform1(_upscaleDedither, dedither ? 1 : 0);
+        _gl.Uniform1(
+            _upscaleDeditherStep,
+            ConfigManager.View.HighResolution3D
+                ? ConfigManager.View.InternalResolutionScale
+                : 1);
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
 
         uint finalTexture = _upscaleTexture;
@@ -222,58 +251,6 @@ internal sealed class PresentationRenderer : IDisposable
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         return finalTexture;
-    }
-
-    bool UpdateNativeSelectorBanner()
-    {
-        string? path = Sdk.V82VehicleRegistry.NativeSelectorBannerPath;
-        if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            return false;
-        if (path.Equals(_bannerPath, StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        byte[] file = File.ReadAllBytes(path);
-        int cursor = 0;
-        string magic = ReadPpmToken(file, ref cursor);
-        int width = int.Parse(ReadPpmToken(file, ref cursor));
-        int height = int.Parse(ReadPpmToken(file, ref cursor));
-        int maximum = int.Parse(ReadPpmToken(file, ref cursor));
-        if (cursor >= file.Length || !char.IsWhiteSpace((char)file[cursor]))
-            throw new InvalidDataException(
-                $"native selector banner has no PPM header terminator: {path}");
-        cursor++;
-        int length = checked(width * height * 3);
-        if (magic != "P6" || width != 260 || height != 422 ||
-            maximum != 255 || cursor + length != file.Length)
-            throw new InvalidDataException(
-                $"native selector banner has invalid PPM layout: {path}");
-
-        _gl.ActiveTexture(TextureUnit.Texture1);
-        _gl.BindTexture(TextureTarget.Texture2D, _bannerTexture);
-        _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
-        _gl.TexImage2D<byte>(
-            TextureTarget.Texture2D, 0, InternalFormat.Rgb,
-            (uint)width, (uint)height, 0, PixelFormat.Rgb,
-            PixelType.UnsignedByte, file.AsSpan(cursor, length));
-        _gl.ActiveTexture(TextureUnit.Texture0);
-        _bannerWidth = width;
-        _bannerHeight = height;
-        _bannerPath = path;
-        Console.WriteLine(
-            $"[Host] loaded exact native V8 selector banner '{Path.GetFileName(path)}'");
-        return true;
-    }
-
-    static string ReadPpmToken(byte[] data, ref int cursor)
-    {
-        while (cursor < data.Length && char.IsWhiteSpace((char)data[cursor]))
-            cursor++;
-        int start = cursor;
-        while (cursor < data.Length && !char.IsWhiteSpace((char)data[cursor]))
-            cursor++;
-        if (start == cursor)
-            throw new InvalidDataException("native selector PPM is truncated");
-        return System.Text.Encoding.ASCII.GetString(data, start, cursor - start);
     }
 
     void PreparePass(uint fbo, uint program, uint sourceTexture)
@@ -302,6 +279,14 @@ internal sealed class PresentationRenderer : IDisposable
 
         string mode = fxaa ? "fxaa" : "off";
         string path = $"recompone_present_{label}_{width}x{height}_{mode}.ppm";
+        string? captureDirectory =
+            Environment.GetEnvironmentVariable("RECOMPONE_CAPTURE_DIR");
+        if (!string.IsNullOrWhiteSpace(captureDirectory))
+        {
+            captureDirectory = Path.GetFullPath(captureDirectory);
+            Directory.CreateDirectory(captureDirectory);
+            path = Path.Combine(captureDirectory, path);
+        }
         using var output = File.Create(path);
         byte[] header = System.Text.Encoding.ASCII.GetBytes($"P6\n{width} {height}\n255\n");
         output.Write(header);
@@ -317,7 +302,6 @@ internal sealed class PresentationRenderer : IDisposable
         if (_fxaaProgram != 0) _gl.DeleteProgram(_fxaaProgram);
         if (_upscaleTexture != 0) _gl.DeleteTexture(_upscaleTexture);
         if (_fxaaTexture != 0) _gl.DeleteTexture(_fxaaTexture);
-        if (_bannerTexture != 0) _gl.DeleteTexture(_bannerTexture);
         if (_upscaleFbo != 0) _gl.DeleteFramebuffer(_upscaleFbo);
         if (_fxaaFbo != 0) _gl.DeleteFramebuffer(_fxaaFbo);
     }

@@ -16,6 +16,8 @@ public sealed class PSMemory : IMemory
     private readonly byte[] _scratchpad = new byte[MemoryMap.ScratchpadSize];
     private readonly byte[] _hwregs = new byte[MemoryMap.HwRegsSize];
     private readonly byte[] _bios = new byte[MemoryMap.BiosSize];
+    private readonly Dictionary<uint, PreciseGteVertexData>
+        _preciseGteVertices = [];
 
     private readonly Gpu _gpu = new();
     private readonly Spu _spu = new();
@@ -97,6 +99,39 @@ public sealed class PSMemory : IMemory
 
     }
 
+    private bool TryCanonicalPreciseWord(
+        uint phys, out uint key)
+    {
+        if (phys < MemoryMap.RamWindow)
+        {
+            key = (phys % (uint)_ram.Length) & ~3u;
+            return true;
+        }
+        if (phys >= MemoryMap.ScratchpadBase &&
+            phys < MemoryMap.ScratchpadBase +
+                MemoryMap.ScratchpadSize)
+        {
+            // Keep the physical scratchpad range in the key so it cannot
+            // alias the canonical main-RAM offsets above.
+            key = phys & ~3u;
+            return true;
+        }
+        key = 0;
+        return false;
+    }
+
+    private void InvalidatePreciseGteVertex(uint phys, int size)
+    {
+        if (!TryCanonicalPreciseWord(phys, out uint first))
+            return;
+        _preciseGteVertices.Remove(first);
+        if (TryCanonicalPreciseWord(
+                phys + (uint)Math.Max(size - 1, 0),
+                out uint last) &&
+            last != first)
+            _preciseGteVertices.Remove(last);
+    }
+
     private void TrackRead(uint phys, int size)
     {
         if (RamLogger.TrackReads && phys < MemoryMap.RamWindow)
@@ -164,6 +199,7 @@ public sealed class PSMemory : IMemory
     public void WriteU8(uint address, byte value)
     {
         uint phys = MemoryMap.ToPhysical(address);
+        InvalidatePreciseGteVertex(phys, 1);
         TrackWrite(phys, 1);
         if (_cd != null && IsCd(phys)) { _cd.Write(phys, value); return; }
         Resolve(address, 1)[0] = value;
@@ -172,6 +208,7 @@ public sealed class PSMemory : IMemory
     public void WriteU16(uint address, ushort value)
     {
         uint phys = MemoryMap.ToPhysical(address);
+        InvalidatePreciseGteVertex(phys, 2);
         TrackWrite(phys, 2);
         if (_cd != null && IsCd(phys)) { _cd.Write(phys, (byte)value); return; }
         if (IsSpu(phys)) { _spu.WriteReg16(phys, value); return; }
@@ -184,6 +221,7 @@ public sealed class PSMemory : IMemory
     public void WriteU32(uint address, uint value)
     {
         uint phys = MemoryMap.ToPhysical(address);
+        InvalidatePreciseGteVertex(phys, 4);
         TraceWatchedWrite(phys, value);
         TrackWrite(phys, 4);
         if (phys == 0x1F801810u) { _gpu.WriteGp0(value); return; }
@@ -205,6 +243,40 @@ public sealed class PSMemory : IMemory
         s[1] = (byte)(value >> 8);
         s[2] = (byte)(value >> 16);
         s[3] = (byte)(value >> 24);
+    }
+
+    public void WriteGteWord(uint address, int register)
+    {
+        bool precise = Gte.TryGetStoreVertex(register, out var vertex);
+        if (precise)
+            WritePreciseGteVertex(address, vertex);
+        else
+            WriteU32(address, Gte.Read(register));
+    }
+
+    public void WritePreciseGteVertex(
+        uint address, in PreciseGteVertexData vertex)
+    {
+        WriteU32(address, vertex.PackedScreenPosition);
+        uint phys = MemoryMap.ToPhysical(address);
+        if (vertex.Valid &&
+            TryCanonicalPreciseWord(phys, out uint key))
+            _preciseGteVertices[key] = vertex;
+    }
+
+    public bool TryGetPreciseGteVertex(
+        uint address, uint packedScreenPosition,
+        out PreciseGteVertexData vertex)
+    {
+        uint phys = MemoryMap.ToPhysical(address);
+        if (TryCanonicalPreciseWord(phys, out uint key) &&
+            _preciseGteVertices.TryGetValue(
+                key, out vertex) &&
+            vertex.PackedScreenPosition == packedScreenPosition &&
+            vertex.Valid)
+            return true;
+        vertex = default;
+        return false;
     }
 
     public uint ReadWordLeft(uint current, uint address)

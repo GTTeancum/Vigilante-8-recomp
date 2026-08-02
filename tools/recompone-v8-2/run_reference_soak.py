@@ -192,6 +192,15 @@ def parse_args() -> argparse.Namespace:
             "also enables presentation capture"
         ),
     )
+    parser.add_argument(
+        "--presentation-burst-frames",
+        type=int,
+        default=0,
+        help=(
+            "retain this many consecutive frames when the gameplay capture "
+            "stage is reached (maximum 600)"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -235,11 +244,15 @@ def build_input_script(slot: int, character_slot: int = 0) -> str:
     for index in range(slot):
         lines.append(f"{1450 + index * 30}+2=RIGHT")
     lines.append("2020+3=CROSS")
-    # The vehicle carousel ignores input while its slide animation is active.
-    # Leave a full 30-frame interval so every requested step is accepted.
-    for index in range(character_slot):
-        lines.append(f"{2160 + index * 30}+2=RIGHT")
-    character_select_frame = 2220 + character_slot * 30
+    # The harness installs the requested native vehicle type through
+    # RECOMPONE_V82_PLAYER_TYPE (or the guest registry API) at the actual
+    # player-object creation seam.  Do not try to reach that type by counting
+    # selector RIGHT presses: the integrated V8 roster deliberately extends
+    # the retail carousel, and decoding every intermediate imported preview
+    # can exceed the gameplay-entry timeout without adding gameplay coverage.
+    # Accept the current native selector entry, then let the engine seam apply
+    # the exact requested type.
+    character_select_frame = 2220
     lines.extend(
         [
             f"{character_select_frame}+2=SELECT",
@@ -367,6 +380,7 @@ def run_one(
     capture_presentation: bool,
     presentation_resolution: str,
     presentation_frames_spec: str | None,
+    presentation_burst_frames: int,
 ) -> RunResult:
     expected = EXPECTED_OVERLAYS[slot]
     stem = (
@@ -408,6 +422,10 @@ def run_one(
             "RECOMPONE_MUTE": "1",
             "RECOMPONE_UNTHROTTLED": "1",
             "RECOMPONE_LOOSE_DIR": "0",
+            # Parallel matrix workers share the staged loose-files directory.
+            # Keep every worker's framebuffer and presentation captures in its
+            # own result directory so "latest" probes cannot collide.
+            "RECOMPONE_CAPTURE_DIR": str(output.resolve()),
         }
     )
     if guest_vehicle is None:
@@ -417,6 +435,13 @@ def run_one(
     if capture_presentation or presentation_frames_spec:
         env["RECOMPONE_PRESENTATION_CAPTURE"] = "1"
         env["RECOMPONE_PRESENTATION_RESOLUTION"] = presentation_resolution
+    if presentation_burst_frames > 0:
+        env["RECOMPONE_PRESENTATION_CAPTURE"] = "1"
+        env["RECOMPONE_PRESENTATION_RESOLUTION"] = presentation_resolution
+        env["RECOMPONE_PRESENTATION_CAPTURE_BURST_FRAMES"] = str(
+            min(presentation_burst_frames, 600)
+        )
+        env["RECOMPONE_PRESENTATION_CAPTURE_BURST_LABEL"] = "gameplay"
     if presentation_frames_spec:
         env["RECOMPONE_PRESENTATION_CAPTURE_FRAMES"] = (
             presentation_frames_spec
@@ -493,36 +518,41 @@ def run_one(
         finally:
             stop_process(process)
 
+    capture_source = output
     gameplay_capture = preserve_capture(
-        exe.parent,
+        capture_source,
         output,
         "recompone_capture_gameplay.ppm",
         f"{stem}.gameplay.ppm",
         started,
     )
     final_capture = preserve_capture(
-        exe.parent,
+        capture_source,
         output,
         "recompone_vram_latest.ppm",
         f"{stem}.final.ppm",
         started,
     )
     gameplay_presentation = preserve_capture_glob(
-        exe.parent,
+        capture_source,
         output,
         "recompone_present_gameplay_*.ppm",
         f"{stem}.gameplay-presentation.ppm",
         started,
     )
     final_presentation = preserve_capture_glob(
-        exe.parent,
+        capture_source,
         output,
         "recompone_present_soak_teardown_*.ppm",
         f"{stem}.final-presentation.ppm",
         started,
     )
     presentation_frames = []
-    for source in sorted(exe.parent.glob("recompone_present_frame_*.ppm")):
+    frame_sources = [
+        *capture_source.glob("recompone_present_frame_*.ppm"),
+        *capture_source.glob("recompone_present_gameplay_???_*.ppm"),
+    ]
+    for source in sorted(frame_sources):
         try:
             if source.stat().st_mtime < started - 1:
                 continue
@@ -536,7 +566,7 @@ def run_one(
         for mode in range(1, 4)
         if (
             path := preserve_capture(
-                exe.parent,
+                capture_source,
                 output,
                 f"recompone_capture_transform_{mode}.ppm",
                 f"{stem}.transform-{mode}.ppm",
@@ -544,7 +574,7 @@ def run_one(
             )
         )
     ]
-    clean_capture_sources(exe.parent, started)
+    clean_capture_sources(capture_source, started)
 
     text = combined_text(stdout_path, stderr_path)
     overlays = re.findall(
@@ -754,12 +784,14 @@ def main() -> int:
         raise SystemExit("cycles and frames must be positive")
     if args.campaign_hours is not None and args.campaign_hours <= 0:
         raise SystemExit("campaign hours must be positive")
+    if args.presentation_burst_frames < 0:
+        raise SystemExit("presentation burst frames must be non-negative")
 
     slots = selected_slots(args.maps)
     characters = selected_characters(args.characters)
     if args.rotate_characters:
         run_pairs = [
-            (slot, index % 18)
+            (slot, characters[index % len(characters)])
             for index, slot in enumerate(slots)
         ]
     else:
@@ -810,6 +842,7 @@ def main() -> int:
                 args.capture_presentation,
                 args.presentation_resolution,
                 args.presentation_frames,
+                args.presentation_burst_frames,
             )
             results.append(result)
             write_summary(output, args, results, started)

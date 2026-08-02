@@ -289,6 +289,17 @@ water plane from painting over nearer terrain. Timed capture sequences showed
 the old failure only while the camera was inside the authored RECT footprint;
 the same route no longer shows terrain takeover after this correction.
 
+The later 2026-08-01 regression showed that three independent screen-coordinate
+depth matches were still insufficient: each water vertex could select a valid
+but unrelated overlapping projection, while opaque land wrote one flat
+ordering-table depth for the whole triangle. Raster depth now accepts a
+per-vertex triplet only when all three vertices carry the same native GTE
+projection-group identity. Opaque and semitransparent textured triangles then
+use those coherent `SZ` values on the same normalized scale; unmatched packets
+retain their native ordering-table fallback. The bounded same-group lookup is
+separate from the broader perspective-texture recovery so dense terrain does
+not incur the combinatorial fallback search.
+
 The reported terrain-colored wedges were not a heightfield or clipping defect.
 N64 flag-`0x40` morph records for `mushroom_bad` contain 26 changing vertices
 for a 36-vertex render group; the N64 path retains the ten static tail
@@ -341,6 +352,26 @@ the next-sibling chain (`+0x18`) looking for key0 values with high nibble
 rather than as a separately transformed child.
 
 ## XOBF Render Group Scale
+
+The complete 28-byte native render-group descriptor is:
+
+- `+0x00 u32`: vertex count
+- `+0x04 u32`: relative vertex-table offset
+- `+0x08 u32`: normal count
+- `+0x0c u32`: relative normal-table offset
+- `+0x10 u32`: polygon packet count
+- `+0x14 u32`: relative polygon-stream offset
+- `+0x18 u8`: render scale
+- `+0x19 u8`: local animated-texture descriptor count
+- `+0x1a u16`: render extent copied to the cached runtime group
+
+The polygon count at `+0x10` is one 32-bit field, not a 16-bit count followed
+by a texture base. `func_8001E914` reads it with `lw` and uses it as the packet
+loop bound. Treating `+0x12` as a separate base turned a 36-packet transformed
+wheel group into 131,108 packets and walked beyond the source bank. Ordinary
+textured packets therefore carry their compacted bank texture directly.
+Kind-15 packets in groups with a nonzero `+0x19` instead retain their local
+0-based animated-material slot; the ANM stream populates those cached slots.
 
 Group descriptor byte `+0x18` is the render scale used by `SLUS 8001be5c`.
 The source computes `shift = 16 - scale`, right-shifts the object MATRIX

@@ -1023,10 +1023,12 @@ public static class V8Compat
 
     public static void RegisterMeshPrimitive(CpuContext c, IMemory m)
     {
-        if (_tracePacketOwners)
-            RecompOne.Runtime.Hle.GpuHle.RegisterPacketOwner(
-                c.A2,
-                _activeMeshIdentity);
+        // Packet ownership is renderer input, not optional diagnostics.  The
+        // enhanced material pipeline needs the original mesh identity to
+        // distinguish imported bodywork/glass from particles and world alpha.
+        RecompOne.Runtime.Hle.GpuHle.RegisterPacketOwner(
+            c.A2,
+            _activeMeshIdentity);
         if (_activeMeshIsVehicle)
             RecompOne.Runtime.Hle.GpuHle.RegisterVehiclePacket(c.A2);
     }

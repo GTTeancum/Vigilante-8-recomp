@@ -1,6 +1,6 @@
 using Silk.NET.OpenGL;
 
-namespace RecompOne.Runtime.Hle;
+namespace RecompOne.Runtime.Enhanced;
 
 internal static class GlShaders
 {
@@ -68,9 +68,15 @@ internal static class GlShaders
         layout(location = 7) in vec4  inUvBounds;
         layout(location = 8) in float inDepth;
         layout(location = 9) in float inRasterDepth;
+        layout(location = 10) in vec3 inViewPosition;
+        layout(location = 11) in vec3 inProjection;
+        layout(location = 12) in float inHasViewSpace;
+        layout(location = 13) in int inMaterial;
 
-        out vec4 vColor;
-        out vec2 vUV;
+        out vec4 vColorPerspective;
+        noperspective out vec4 vColorAffine;
+        out vec2 vUVPerspective;
+        noperspective out vec2 vUVAffine;
         flat out ivec2 clutBase;
         flat out ivec2 pageBase;
         flat out int   texMode;
@@ -84,6 +90,7 @@ internal static class GlShaders
         flat out int   vHudPlate;
         flat out int   vHealthPlate;
         flat out int   vVehicle;
+        flat out int   vMaterial;
         flat out ivec4 vUvBounds;
         noperspective out vec3 vBary;
         out float vDepth;
@@ -93,12 +100,49 @@ internal static class GlShaders
         uniform vec2 uFbInv;
 
         void main() {
-            vec2 p = (inPos + uVertexOffset + uPosBias) * uFbInv - 1.0;
-            float w = max(inPerspectiveW, 1.0);
-            float clipZ = (clamp(inRasterDepth, 0.0, 1.0) * 2.0 - 1.0) * w;
+            bool modernGeometry = inHasViewSpace > 0.5;
+            float viewZ = inViewPosition.z;
+            float safeViewZ =
+                abs(viewZ) < 0.0001
+                    ? (viewZ < 0.0 ? -0.0001 : 0.0001)
+                    : viewZ;
+            vec2 projectedPosition = modernGeometry
+                ? inProjection.xy +
+                    inViewPosition.xy *
+                    (inProjection.z / safeViewZ)
+                : inPos;
+            vec2 p =
+                (projectedPosition + uVertexOffset + uPosBias) *
+                uFbInv - 1.0;
+            float w = modernGeometry
+                ? viewZ
+                : max(inPerspectiveW, 1.0);
+            // Window depth must use the same reciprocal projection as XY.
+            // Feeding linear camera Z directly as NDC depth makes OpenGL
+            // interpolate large terrain triangles affinely in screen space;
+            // their interiors then move in front of nearby vehicles even
+            // though the triangle vertices are farther away.  Build a normal
+            // perspective depth projection from the camera-space value
+            // carried by the renderer seam instead.
+            const float depthNear = 1.0;
+            const float depthFar = 65535.0;
+            float cameraDepth =
+                clamp(inRasterDepth, depthNear / depthFar, 1.0) * depthFar;
+            float depthA =
+                (depthFar + depthNear) / (depthFar - depthNear);
+            float depthB =
+                (-2.0 * depthFar * depthNear) /
+                (depthFar - depthNear);
+            float ndcDepth = depthA + depthB / cameraDepth;
+            float clipZ = ndcDepth * w;
             gl_Position = vec4(p * w, clipZ, w);
 
-            vColor = vec4(float(inColor & 0xFFu), float((inColor >> 8) & 0xFFu), float((inColor >> 16) & 0xFFu), 0.0) / 255.0;
+            vec4 unpackedColor = vec4(
+                float(inColor & 0xFFu),
+                float((inColor >> 8) & 0xFFu),
+                float((inColor >> 16) & 0xFFu), 0.0) / 255.0;
+            vColorPerspective = unpackedColor;
+            vColorAffine = unpackedColor;
             vDither = (inTexpage >> 10) & 1;
             vSmooth = (inTexpage >> 11) & 1;
             vUiTexture = (inTexpage >> 12) & 1;
@@ -108,6 +152,7 @@ internal static class GlShaders
             vHudPlate = (inTexpage >> 17) & 1;
             vHealthPlate = (inTexpage >> 18) & 1;
             vVehicle = (inTexpage >> 19) & 1;
+            vMaterial = inMaterial;
             vLongestEdge = inClut;
             vUvBounds = ivec4(round(inUvBounds));
             vBary = inBary;
@@ -117,7 +162,8 @@ internal static class GlShaders
                 texMode = 4;
             } else {
                 texMode = (inTexpage >> 7) & 3;
-                vUV = inUV;
+                vUVPerspective = inUV;
+                vUVAffine = inUV;
                 pageBase = ivec2((inTexpage & 0xf) * 64, ((inTexpage >> 4) & 1) * 256);
                 clutBase = ivec2((inClut & 0x3f) * 16, (inClut >> 6) & 0x1ff);
             }
@@ -126,8 +172,10 @@ internal static class GlShaders
 
     public const string PrimFs = """
         #version 330 core
-        in vec4 vColor;
-        in vec2 vUV;
+        in vec4 vColorPerspective;
+        noperspective in vec4 vColorAffine;
+        in vec2 vUVPerspective;
+        noperspective in vec2 vUVAffine;
         flat in ivec2 clutBase;
         flat in ivec2 pageBase;
         flat in int   texMode;
@@ -141,6 +189,7 @@ internal static class GlShaders
         flat in int   vHudPlate;
         flat in int   vHealthPlate;
         flat in int   vVehicle;
+        flat in int   vMaterial;
         flat in ivec4 vUvBounds;
         noperspective in vec3 vBary;
         in float vDepth;
@@ -162,6 +211,9 @@ internal static class GlShaders
         uniform int   uEnhancedShadows;
         uniform int   uEnhancedParticles;
         uniform int   uEnhancedFog;
+        uniform int   uPerspectiveCorrectTextures;
+        uniform int   uPerspectiveCorrectColors;
+        uniform int   uTrueColor;
         uniform int   uVectorFonts;
         uniform int   uVectorIcons;
         uniform int   uStockPaintCorrection;
@@ -204,14 +256,10 @@ internal static class GlShaders
         }
 
         vec4 smoothedTexture(vec2 uvf, vec4 nearestTexel) {
-            // Reconstruct the native PS1 texture page in shader rather than
-            // allocating replacement assets. Pages are at most 256x256, so the
-            // virtual reconstruction stays inside the requested 512x512 class.
-            // Flat UI may use the full 4x/1024 class; 3D is quantized to 2x.
-            // Four palette-resolved taps provide the desired continuous image
-            // without the previous 16-tap bicubic cost per reconstruction.
-            if (vUiTexture == 0)
-                uvf = floor(uvf * 2.0) * 0.5 + 0.25;
+            // Resolve the indexed PS1 page before filtering.  Enhanced keeps
+            // continuous sub-texel coordinates and clamps each primitive to
+            // its authored UV bounds, producing a clean virtual 512-class
+            // source without palette-index filtering or atlas bleed.
             vec2 p = uvf - vec2(0.5);
             ivec2 uv0 = ivec2(floor(p));
             vec2 f = fract(p);
@@ -323,22 +371,52 @@ internal static class GlShaders
                 clamp(rgb.g * 1.12 + rgb.b * 0.45, 0.0, 1.0));
             return mix(rgb, blue, body);
         }
+        vec3 distanceFog(vec3 rgb) {
+            if (uEnhancedFog == 0 ||
+                vUiTexture != 0 ||
+                vShadow != 0 ||
+                vDepth <= 1.0) {
+                return rgb;
+            }
+
+            // Fade every world material using camera/OT depth after texture
+            // modulation. The previous textured-only pre-modulation haze was
+            // undone by bright vertex colours and skipped meshes without an
+            // exact GTE SZ, leaving distant buildings fully saturated.
+            float amount = smoothstep(2600.0, 8500.0, vDepth) * 0.76;
+            float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
+            // Converge bright props and dark terrain toward the same bounded
+            // atmospheric range. Keeping the source luminance unbounded made
+            // white/red distant buildings remain conspicuous against already
+            // fogged terrain even though their saturation had been reduced.
+            float atmosphericLum = clamp(mix(lum, 0.58, 0.70), 0.48, 0.68);
+            float warmth = clamp((rgb.r - rgb.b) * 0.25 + 0.10, 0.0, 0.22);
+            vec3 cool = vec3(0.98, 1.00, 1.04) * atmosphericLum;
+            vec3 warm = vec3(1.06, 1.00, 0.90) * atmosphericLum;
+            vec3 atmosphere = mix(cool, warm, warmth);
+            return clamp(mix(rgb, atmosphere, amount), 0.0, 1.0);
+        }
         vec3 stockPaintCorrection8(ivec3 c8) {
             return stockPaintCorrection(vec3(c8) / 255.0);
         }
         vec3 quant5(ivec3 c8) {
+            if (uTrueColor != 0)
+                return vec3(clamp(c8, 0, 255)) / 255.0;
             if (vDither != 0) {
                 ivec2 vp = ivec2(floor(gl_FragCoord.xy / float(uScale) - uPosBias));
                 c8 = clamp(c8 + ditherTbl[(vp.y & 3) * 4 + (vp.x & 3)], 0, 255);
             }
             return vec3(min(c8 >> 3, 31)) / 31.0;
         }
-
         void main() {
             if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
 
             if (texMode == 4) {
-                vec3 corrected = stockPaintCorrection(vColor.rgb);
+                vec4 vertexColor = uPerspectiveCorrectColors != 0
+                    ? vColorPerspective
+                    : vColorAffine;
+                vec3 corrected = distanceFog(
+                    stockPaintCorrection(vertexColor.rgb));
                 FragColor = vec4(quant5(ivec3(corrected * 255.0 + 0.5)), uSetMask);
                 float coverage = 1.0;
                 if (uEnhancedShadows != 0 && vShadow != 0) {
@@ -354,8 +432,14 @@ internal static class GlShaders
                 return;
             }
 
-            int rawU = dFdx(vUV.x) < 0.0 ? int(ceil(vUV.x - 0.0001)) : int(floor(vUV.x + 0.0001));
-            int rawV = dFdy(vUV.y) < 0.0 ? int(ceil(vUV.y - 0.0001)) : int(floor(vUV.y + 0.0001));
+            vec2 sampleUV = uPerspectiveCorrectTextures != 0
+                ? vUVPerspective
+                : vUVAffine;
+            vec4 vertexColor = uPerspectiveCorrectColors != 0
+                ? vColorPerspective
+                : vColorAffine;
+            int rawU = dFdx(sampleUV.x) < 0.0 ? int(ceil(sampleUV.x - 0.0001)) : int(floor(sampleUV.x + 0.0001));
+            int rawV = dFdy(sampleUV.y) < 0.0 ? int(ceil(sampleUV.y - 0.0001)) : int(floor(sampleUV.y + 0.0001));
             ivec2 nearestUv = ivec2(rawU, rawV);
             if (vUiTexture == 0) {
                 ivec2 boundMin = vUvBounds.xy;
@@ -364,8 +448,9 @@ internal static class GlShaders
             }
             vec4 nearestTexel = textureTexel(nearestUv);
             vec4 texel = uTextureSmoothing != 0 && vSmooth != 0
-                ? filteredTexture(vUV, nearestTexel)
+                ? filteredTexture(sampleUV, nearestTexel)
                 : nearestTexel;
+            bool vehicleGlass = vMaterial == 3;
             bool vectorFont =
                 vUiTexture != 0 && vParticle != 0 && uVectorFonts != 0;
             bool vectorIcon =
@@ -373,13 +458,13 @@ internal static class GlShaders
             bool enhancedParticle =
                 vUiTexture == 0 && vParticle != 0 && uEnhancedParticles != 0;
             bool svgHud = vHudPlate != 0 && uVectorIcons != 0;
-            vec2 hudLocal = vUV - vec2(vUvBounds.xy);
+            vec2 hudLocal = sampleUV - vec2(vUvBounds.xy);
             float hudCoverage = 1.0;
             float contourCoverage = 1.0;
             float contourStp = nearestTexel.a;
 
             if ((vectorFont || vectorIcon || enhancedParticle) && !svgHud) {
-                texel = contourTexture(vUV, contourCoverage, contourStp);
+                texel = contourTexture(sampleUV, contourCoverage, contourStp);
                 if (vectorIcon && vHudPlate == 0)
                     texel.rgb = nearestTexel.rgb;
                 if (vectorFont || vectorIcon) {
@@ -395,7 +480,7 @@ internal static class GlShaders
                 }
             }
 
-            if (transparentBlack(nearestTexel)) {
+            if (transparentBlack(nearestTexel) && !vehicleGlass) {
                 // UI transparency is binary in the original packets. Do not
                 // synthesize coverage outside glyph/icon silhouettes: opaque
                 // UI draws do not have a usable alpha blend and doing so
@@ -415,13 +500,31 @@ internal static class GlShaders
                 texel = vec4(vectorTexel.rgb, 1.0);
             }
             texel.rgb = stockPaintCorrection(texel.rgb);
-            if (uEnhancedFog != 0 && vUiTexture == 0 && vDepth > 1.0) {
-                float haze = smoothstep(3500.0, 7500.0, vDepth) * 0.22;
-                texel.rgb = mix(texel.rgb, vec3(0.48, 0.52, 0.56), haze);
+            if (vehicleGlass) {
+                // Imported windows use PS1 zero/STP texels as an instruction
+                // to blend the body polygon underneath.  In a modern material
+                // pass those texels are actual glass: retain the authored
+                // tint when present and provide a neutral blue-grey tint for
+                // fully clear samples instead of cutting a hole through the
+                // vehicle.
+                float authored = max(
+                    texel.r,
+                    max(texel.g, texel.b));
+                vec3 glassTint = authored > 0.02
+                    ? texel.rgb
+                    : vec3(0.18, 0.25, 0.29);
+                FragColor = vec4(
+                    distanceFog(glassTint),
+                    authored > 0.02 ? 0.46 : 0.34);
+                BlendColor = vec4(1.0);
+                return;
             }
             ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
-            ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
-            FragColor = vec4(quant5(ivec3(stockPaintCorrection8(c8) * 255.0 + 0.5)), max(texel.a, uSetMask));
+            ivec3 c8 = (t8 * ivec3(vertexColor.rgb * 255.0 + 0.5)) >> 7;
+            vec3 corrected = distanceFog(stockPaintCorrection8(c8));
+            FragColor = vec4(
+                quant5(ivec3(corrected * 255.0 + 0.5)),
+                max(texel.a, uSetMask));
             if (svgHud) {
                 vec4 analyticBlend =
                     texel.a >= 0.5 ? uBlend : uBlendOpaque;

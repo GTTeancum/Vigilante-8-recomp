@@ -460,6 +460,7 @@ def _decode_face(
 
     textured_kinds = {1, 3, 5, 7, 9, 11, 13, 15}
     texture = None
+    native_texture_slot = None
     texture_flags = 0
     uv = ((0, 0), (0, 0), (0, 0))
     if kind == 12:
@@ -476,7 +477,8 @@ def _decode_face(
                 f"native textured packet kind {kind} has no texture word"
             )
         texture_flags = packet.texture_slot & 0xC000
-        texture = native_group.texture_base + (packet.texture_slot & 0x3FFF)
+        native_texture_slot = packet.texture_slot & 0x3FFF
+        texture = native_texture_slot
         if texture < 0 or texture >= model.texture_count:
             raise ValueError(
                 "native textured triangle references an invalid texture"
@@ -490,6 +492,7 @@ def _decode_face(
         vertices=packet.vertex_indices,
         color=packet.color,
         texture=texture,
+        native_texture_slot=native_texture_slot,
         uv=uv,
         packet_index=packet_index,
         packet_kind=kind,
@@ -571,6 +574,8 @@ def _decode_bank(form: iff.IffChunk, game: str) -> project.ObjectBank:
                     for normal in native_group.normals
                 ),
                 controls=tuple(controls),
+                texture_slot_count=native_group.texture_slot_count,
+                render_extent=native_group.render_extent,
             )
         )
 

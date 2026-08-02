@@ -20,6 +20,7 @@ public static class Runtime
     public static string GameTitle { get; private set; } = "";
 
     public static RunMode Mode { get; private set; } = RunMode.Retail;
+    public static void ConfigureGameTitle(string title) => GameTitle = title;
     public static void SetMode(RunMode mode) => Mode = mode; //devkit vs retail, devkits reads from sim and has more ram
     public static string CdPath => Config.ConfigManager.Game.CdPath;
     static string? _activeLoosePath;
@@ -53,7 +54,7 @@ public static class Runtime
 
     public static void Initialize(string title)
     {
-        GameTitle = title;
+        ConfigureGameTitle(title);
         Diagnostics.ConsoleMirror.Install();
         HostWindow.Initialize(title);
         Audio.Initialize();

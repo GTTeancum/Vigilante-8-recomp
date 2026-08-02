@@ -2,18 +2,38 @@ namespace RecompOne.Runtime.Hle;
 
 public struct HleVertex
 {
+    public uint SourceAddress;
     public float X, Y; 
     public float Z; 
     public float PerspectiveW;
+    public float ViewX, ViewY, ViewZ;
+    public float ProjectionCenterX, ProjectionCenterY, ProjectionScale;
     public byte R, G, B;
     public short U, V;
     public bool HasGteZ;
+    public bool HasCoherentGteZ;
     public bool HasProjectiveW;
+    public bool HasViewSpace;
+    public bool ReconstructedViewSpace;
+}
+
+public enum HleMaterialKind : byte
+{
+    Auto,
+    Opaque,
+    AlphaTest,
+    Glass,
+    Particle,
+    Additive,
+    Subtractive,
+    Ui,
+    ScreenEffect,
 }
 
 public struct PrimFlags
 {
     public bool Textured, SemiTrans, RawTexture, Gouraud, Vehicle;
+    public HleMaterialKind Material;
     public ushort TPage; 
     public ushort Clut; 
     public int OtIndex;

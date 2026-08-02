@@ -49,13 +49,16 @@ public static class LibGpu
             uint count = header >> 24;
             if (count == 0)
                 gpu.SetOrderingTableDepth(bucketDepth--);
-            gpu.SetOrderingTablePacket(addr);
+            gpu.SetOrderingTablePacket(addr, count);
             if (!GpuHle.GameplayActive ||
                 IsSafeGameplayOrderingTablePacket(
                     m, addr, count, out string reason))
             {
                 for (uint i = 0; i < count; i++)
-                    gpu.WriteGp0(m.ReadU32(addr + 4u + i * 4u));
+                {
+                    uint source = addr + 4u + i * 4u;
+                    gpu.WriteGp0(m.ReadU32(source), source);
+                }
             }
             else if (_rejectedGameplayOtPackets++ < 32)
             {

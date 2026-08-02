@@ -21,6 +21,8 @@ public sealed partial class Gpu
     bool _currentOtPacketVehicle;
     int _traceVehiclePacketHits;
     int _traceVehicleTriangles;
+    int _tracePacketOwnershipLookups;
+    int _traceResolvedPacketOwnershipLookups;
     int _traceVramLoadSequence;
     uint _traceVramLoadHash;
     ushort _traceVramLoadOr;
@@ -57,15 +59,33 @@ public sealed partial class Gpu
             $"suspect-clut={suspectClut} suspect-page={suspectPage}");
     }
 
-    public void BeginOrderingTable() => _currentOtDepth = 0;
+    public void BeginOrderingTable()
+    {
+        _currentOtDepth = 0;
+        _projectiveDepthCache.Clear();
+    }
 
     public void SetOrderingTableDepth(int depth) =>
         _currentOtDepth = Math.Max(1, depth);
 
-    public void SetOrderingTablePacket(uint address)
+    public void SetOrderingTablePacket(uint address, uint wordCount = 0)
     {
         _currentOtPacketAddress = address;
         _currentOtPacketVehicle = GpuHle.IsVehiclePacket(address);
+        if (GpuHle.GameplayActive &&
+            Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PACKET_OWNERS") == "1" &&
+            wordCount != 0)
+        {
+            string owner = GpuHle.DescribePacketOwner(address);
+            bool resolved = owner != "unresolved";
+            if ((resolved && _traceResolvedPacketOwnershipLookups++ < 4096) ||
+                (!resolved && _tracePacketOwnershipLookups++ < 4096))
+                Console.Error.WriteLine(
+                    $"[EnhancedPacketOwner] address=0x{address:X8} " +
+                    $"words={wordCount} " +
+                    $"vehicle={(_currentOtPacketVehicle ? 1 : 0)} " +
+                    $"owner={owner}");
+        }
         if (GpuHle.GameplayActive && _currentOtPacketVehicle &&
             Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1" &&
             _traceVehiclePacketHits++ < 32)
@@ -77,8 +97,7 @@ public sealed partial class Gpu
         _currentOtDepth = 0;
         _currentOtPacketAddress = 0;
         _currentOtPacketVehicle = false;
-        GpuHle.ClearVehiclePacketRanges();
-        GpuHle.ClearPacketOwners();
+        _projectiveDepthCache.Clear();
     }
 
     int CurTPage() => ((_texPageX / 64) & 0xf) | (((_texPageY / 256) & 1) << 4)
@@ -93,23 +112,73 @@ public sealed partial class Gpu
 
     static HleVertex HV(in Vert v) => new()
     {
-        X = v.X, Y = v.Y, R = (byte)v.R, G = (byte)v.G, B = (byte)v.B, U = (short)v.U, V = (short)v.V,
+        SourceAddress = v.SourceAddress,
+        // This path exists only for the Enhanced renderer.  Stock geometry
+        // continues through Gpu.RasterTriangle and therefore retains native
+        // integer SXY.  Do not reintroduce a fidelity toggle here.
+        X = v.HasPrecisePosition ? v.PreciseX : v.X,
+        Y = v.HasPrecisePosition ? v.PreciseY : v.Y,
+        R = (byte)v.R, G = (byte)v.G, B = (byte)v.B,
+        U = (short)v.U, V = (short)v.V,
         Z = v.Z, HasGteZ = v.HasGteZ,
+        HasCoherentGteZ = v.HasCoherentGteZ,
         PerspectiveW = v.PerspectiveW, HasProjectiveW = v.HasProjectiveW,
+        ViewX = v.ViewX, ViewY = v.ViewY, ViewZ = v.ViewZ,
+        ProjectionCenterX = v.ProjectionCenterX,
+        ProjectionCenterY = v.ProjectionCenterY,
+        ProjectionScale = v.ProjectionScale,
+        HasViewSpace = v.HasViewSpace,
+        ReconstructedViewSpace = v.ReconstructedViewSpace,
     };
 
-    PrimFlags PrimOf(bool tex, bool semi, bool raw, int clut, bool gouraud = false) => new()
+    PrimFlags PrimOf(
+        bool tex,
+        bool semi,
+        bool raw,
+        int clut,
+        bool gouraud = false)
     {
-        Textured = tex, SemiTrans = semi, RawTexture = raw, Gouraud = gouraud, TPage = (ushort)CurTPage(), Clut = (ushort)clut,
-        OtIndex = _currentOtDepth, PacketAddress = _currentOtPacketAddress,
-        Vehicle = _currentOtPacketVehicle,
-    };
+        HleMaterialKind material;
+        if (_currentOtPacketVehicle)
+            material = semi && tex
+                ? HleMaterialKind.Glass
+                : tex
+                    ? HleMaterialKind.AlphaTest
+                    : HleMaterialKind.Opaque;
+        else if (semi && tex)
+            material = _blendMode switch
+            {
+                1 => HleMaterialKind.Additive,
+                2 => HleMaterialKind.Subtractive,
+                _ => HleMaterialKind.Particle,
+            };
+        else
+            material = tex
+                ? HleMaterialKind.AlphaTest
+                : HleMaterialKind.Opaque;
+
+        return new PrimFlags
+        {
+            Textured = tex,
+            SemiTrans = semi,
+            RawTexture = raw,
+            Gouraud = gouraud,
+            TPage = (ushort)CurTPage(),
+            Clut = (ushort)clut,
+            OtIndex = _currentOtDepth,
+            PacketAddress = _currentOtPacketAddress,
+            Vehicle = _currentOtPacketVehicle,
+            Material = material,
+        };
+    }
 
     void HleTri(in Vert a, in Vert b, in Vert c, bool tex, bool gouraud, bool semi, bool raw, int clut)
     {
         int spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
         int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
-        if (spanX > 1023 || spanY > 511) return;
+        bool modernGeometry =
+            a.HasViewSpace && b.HasViewSpace && c.HasViewSpace;
+        if (!modernGeometry && (spanX > 1023 || spanY > 511)) return;
 
         int gameplayTick = GpuHle.DebugGameplayTick;
         if (_traceGameplayTick != gameplayTick)
@@ -189,15 +258,45 @@ public sealed partial class Gpu
 
         var be = GpuHle.Backend!;
         be.SetDrawEnv(CurEnv());
-        be.DrawTri(HV(a), HV(b), HV(c), PrimOf(tex, semi, raw, clut, gouraud));
+        PrimFlags flags = PrimOf(tex, semi, raw, clut, gouraud);
+        bool hasWorldProjection =
+            a.HasViewSpace || b.HasViewSpace || c.HasViewSpace ||
+            a.HasGteZ || b.HasGteZ || c.HasGteZ ||
+            a.HasProjectiveW || b.HasProjectiveW || c.HasProjectiveW;
+        int minX = Math.Min(a.X, Math.Min(b.X, c.X));
+        int maxX = Math.Max(a.X, Math.Max(b.X, c.X));
+        int minY = Math.Min(a.Y, Math.Min(b.Y, c.Y));
+        int maxY = Math.Max(a.Y, Math.Max(b.Y, c.Y));
+        // V8:2's weather/lighting overlay is emitted as a native stack of
+        // one-scanline, full-display semitransparent polygons.  It is an
+        // explicit screen effect, not world geometry: occasional XY values
+        // aliasing old GTE stores must not make those scanlines enter modern
+        // projection/depth/fog.
+        bool nativeScreenEffect =
+            GpuHle.GameplayActive &&
+            !flags.Vehicle &&
+            semi && !tex &&
+            minX <= 0 && maxX >= 320 &&
+            (maxY - minY <= 1 || (minY <= 0 && maxY >= 239));
+        bool screenSpaceOverlay =
+            !flags.Vehicle &&
+            (!GpuHle.GameplayActive ||
+             (_currentOtDepth >= 0x800 && !hasWorldProjection));
+        if (screenSpaceOverlay)
+            flags.Material = HleMaterialKind.Ui;
+        else if (nativeScreenEffect)
+            flags.Material = HleMaterialKind.ScreenEffect;
+        be.DrawTri(HV(a), HV(b), HV(c), flags);
     }
 
     void HleRect(int x, int y, int w, int h, int u, int v, int clut, int r, int g, int b, bool tex, bool semi, bool raw)
     {
         var be = GpuHle.Backend!;
         be.SetDrawEnv(CurEnv());
+        PrimFlags flags = PrimOf(tex, semi, raw, clut);
+        flags.Material = HleMaterialKind.Ui;
         be.DrawRect(new HleRect { X = x, Y = y, W = w, H = h, U = (short)u, V = (short)v, R = (byte)r, G = (byte)g, B = (byte)b },
-            PrimOf(tex, semi, raw, clut));
+            flags);
     }
 
     void HleLine(int x0, int y0, int r0, int g0, int b0, int x1, int y1, int r1, int g1, int b1, bool semi, bool gouraud)
@@ -225,10 +324,13 @@ public sealed partial class Gpu
 
         var be = GpuHle.Backend!;
         be.SetDrawEnv(CurEnv());
+        PrimFlags flags = PrimOf(false, semi, false, 0, gouraud);
+        if (!GpuHle.GameplayActive || _currentOtDepth >= 0x800)
+            flags.Material = HleMaterialKind.Ui;
         be.DrawLine(
             new HleVertex { X = x0, Y = y0, R = (byte)r0, G = (byte)g0, B = (byte)b0 },
             new HleVertex { X = x1, Y = y1, R = (byte)r1, G = (byte)g1, B = (byte)b1 },
-            PrimOf(false, semi, false, 0, gouraud));
+            flags);
     }
 
     void HleFill(int x, int y, int w, int h, ushort color)

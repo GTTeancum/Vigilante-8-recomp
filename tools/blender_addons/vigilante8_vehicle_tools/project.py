@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 MAX_TEXTURE_DIMENSION = 256
 MAX_TEXTURES_PER_BANK = 256
 MAX_TEXTURE_TEXELS_PER_BANK = 262_144
@@ -48,6 +48,10 @@ class Face:
     vertices: tuple[int, int, int]
     color: tuple[int, int, int] = (128, 128, 128)
     texture: int | None = None
+    # The native packet stores a group-local material slot, while ``texture``
+    # is the resolved bank texture used by authoring tools.  They normally
+    # coincide, but animated V8:2 groups rely on this distinction.
+    native_texture_slot: int | None = None
     uv: tuple[tuple[int, int], tuple[int, int], tuple[int, int]] = (
         (0, 0),
         (0, 0),
@@ -74,6 +78,7 @@ class Face:
                 "vertices",
                 "color",
                 "texture",
+                "native_texture_slot",
                 "uv",
                 "packet_index",
                 "packet_kind",
@@ -95,6 +100,11 @@ class Face:
             color=_tuple_int(value.get("color", (128, 128, 128)), 3, "face color"),
             texture=(
                 None if value.get("texture") is None else int(value["texture"])
+            ),
+            native_texture_slot=(
+                None
+                if value.get("native_texture_slot") is None
+                else int(value["native_texture_slot"])
             ),
             uv=tuple(_tuple_int(pair, 2, "UV pair") for pair in uv),
             packet_index=(
@@ -173,6 +183,8 @@ class RenderGroup:
     faces: tuple[Face, ...]
     normals: tuple[tuple[int, int, int, int], ...] = ()
     controls: tuple[RenderControl, ...] = ()
+    texture_slot_count: int = 0
+    render_extent: int = 0
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "RenderGroup":
@@ -185,6 +197,8 @@ class RenderGroup:
                 "normals",
                 "faces",
                 "controls",
+                "texture_slot_count",
+                "render_extent",
             },
             "render group",
         )
@@ -204,6 +218,8 @@ class RenderGroup:
                 RenderControl.from_dict(control)
                 for control in value.get("controls", ())
             ),
+            texture_slot_count=int(value.get("texture_slot_count", 0)),
+            render_extent=int(value.get("render_extent", 0)),
         )
 
 
@@ -832,6 +848,14 @@ class VehicleProject:
                 raise ValueError(
                     f"{label} group {group_index} scale_shift must be 0..15"
                 )
+            if not 0 <= group.texture_slot_count <= 255:
+                raise ValueError(
+                    f"{label} group {group_index} texture_slot_count must fit unsigned 8-bit"
+                )
+            if not 0 <= group.render_extent <= 0xFFFF:
+                raise ValueError(
+                    f"{label} group {group_index} render_extent must fit unsigned 16-bit"
+                )
             if not group.vertices:
                 raise ValueError(f"{label} group {group_index} contains no vertices")
             for vertex in group.vertices:
@@ -857,6 +881,14 @@ class VehicleProject:
                 if face.texture is not None and not 0 <= face.texture < len(bank.textures):
                     raise ValueError(
                         f"{label} group {group_index} references an invalid texture"
+                    )
+                if (
+                    face.native_texture_slot is not None
+                    and not 0 <= face.native_texture_slot <= 0x3FFF
+                ):
+                    raise ValueError(
+                        f"{label} group {group_index} native texture slot "
+                        "must fit fourteen bits"
                     )
                 if any(
                     component < 0 or component > 255
@@ -1147,6 +1179,8 @@ def _bank_to_dict(bank: VehicleProject | ObjectBank) -> dict[str, Any]:
             {
                 "name": group.name,
                 "scale_shift": group.scale_shift,
+                "texture_slot_count": group.texture_slot_count,
+                "render_extent": group.render_extent,
                 "vertices": [list(vertex) for vertex in group.vertices],
                 "normals": [list(normal) for normal in group.normals],
                 "faces": [
@@ -1172,6 +1206,13 @@ def _bank_to_dict(bank: VehicleProject | ObjectBank) -> dict[str, Any]:
                             else {
                                 "texture": face.texture,
                                 "uv": [list(pair) for pair in face.uv],
+                            }
+                        ),
+                        **(
+                            {}
+                            if face.native_texture_slot is None
+                            else {
+                                "native_texture_slot": face.native_texture_slot
                             }
                         ),
                     }

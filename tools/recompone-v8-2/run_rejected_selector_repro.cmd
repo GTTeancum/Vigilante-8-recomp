@@ -1,0 +1,16 @@
+@echo off
+set "RECOMPONE_LOOSE_FILES=1"
+set "RECOMPONE_MUTE=1"
+set "RECOMPONE_WINDOW_VISIBLE=0"
+set "RECOMPONE_DISABLE_LIVE_INPUT=1"
+set "RECOMPONE_SUPPRESS_RUMBLE=1"
+set "RECOMPONE_INPUT_FILE=C:\Programming\GitHub\Vigilante-8-recomp\tools\recompone-v8-2\input-scripts\native_guest_selector_revisit_regression.txt"
+set "RECOMPONE_CAPTURE_SCRIPTED_STAGE=choose_player"
+set "RECOMPONE_PRESENTATION_CAPTURE=1"
+set "RECOMPONE_TRACE_V82_SELECTOR=1"
+set "RECOMPONE_TRACE_V82_SELECTOR_PHYSICS=1"
+set "RECOMPONE_TRACE_VRAM=1"
+set "RECOMPONE_TRACE_PROJECTION=1"
+set "RECOMPONE_LOG_FILE=C:\Programming\GitHub\Vigilante-8-recomp\artifacts\v82_rejected_build_repro\selector_repro.log"
+cd /d "C:\Programming\GitHub\Vigilante-8-recomp\V8_2_LOOSE"
+"C:\Programming\GitHub\Vigilante-8-recomp\reference-v8-2\generated\recompiled\bin\Release\net10.0\win-x64\Vigilante82PC.exe" > "C:\Programming\GitHub\Vigilante-8-recomp\artifacts\v82_rejected_build_repro\selector_repro.log" 2>&1

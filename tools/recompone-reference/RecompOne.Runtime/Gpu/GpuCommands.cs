@@ -127,7 +127,7 @@ public sealed partial class Gpu
         _loadImage = true;
         Log.Gpu($"image load begin xy={_loadX},{_loadY} size={_loadW}x{_loadH}");
         HleLoadBegin();
-        _fifo.Clear();
+        ClearFifo();
     }
 
     void StoreImageHalfword(ushort value)

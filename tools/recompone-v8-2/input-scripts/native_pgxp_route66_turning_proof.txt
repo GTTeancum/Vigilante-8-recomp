@@ -1,0 +1,20 @@
+# Route 66 control using the same vehicle and the same five-second steering
+# schedule as the Casino/Nugget City projection proof.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+2220+2=SELECT
+2280+3=CROSS
+2400+2=SELECT
+2460+3=CROSS
+2580+2=SELECT
+2640+3=CROSS
+[gameplay]
+20+300=UP
+40+150=LEFT
+190+110=RIGHT

@@ -17,6 +17,18 @@ Then generate the initial main-executable and overlay configuration:
 python tools/recompone-v8-2/prepare_reference.py
 ```
 
+After RecompOne emits the generated C# sources, build or publish the generated
+project normally. Its pre-compile target reapplies and validates both narrow
+custom-vehicle patch sets:
+
+- gameplay engine seams (wheel bank, stats, upgrades, transformation table and
+  transformation bank);
+- native selector seams (packaged roster slot, variant and stats).
+
+This validation is intentionally part of every compile so regenerating
+`main.cs` or `SHELL_SHELL.cs` cannot silently produce a runnable build with
+guest-vehicle integration missing.
+
 The first pass uses call discovery plus linear sweep for the main executable,
 shell, loader, 18 arena overlays, and 18 vehicle overlays. Ghidra function maps
 will supersede bootstrap discovery as runtime coverage identifies ambiguous

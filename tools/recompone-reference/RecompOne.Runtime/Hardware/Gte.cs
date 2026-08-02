@@ -1,5 +1,7 @@
 namespace RecompOne.Runtime;
 
+using RecompOne.Runtime.Memory;
+
 public static class Gte
 {
     static readonly short[] V = new short[9];
@@ -8,6 +10,21 @@ public static class Gte
     static int IR0, IR1, IR2, IR3;
     static readonly short[] SX = new short[3];
     static readonly short[] SY = new short[3];
+    // Projection provenance for the three screen-coordinate FIFO entries.
+    // The hardware SZ value remains the raster depth. PerspectiveW retains
+    // the unsaturated camera-space Z used by PGXP-class renderers, because
+    // saturated 16-bit SZ is not sufficient for stable perspective mapping.
+    static readonly ushort[] SxyDepth = new ushort[3];
+    static readonly float[] SxyPerspectiveW = new float[3];
+    static readonly float[] SxyPreciseX = new float[3];
+    static readonly float[] SxyPreciseY = new float[3];
+    static readonly float[] SxyViewX = new float[3];
+    static readonly float[] SxyViewY = new float[3];
+    static readonly float[] SxyViewZ = new float[3];
+    static readonly float[] SxyProjectionCenterX = new float[3];
+    static readonly float[] SxyProjectionCenterY = new float[3];
+    static readonly float[] SxyProjectionScale = new float[3];
+    static readonly bool[] SxyHasPrecisePosition = new bool[3];
     static readonly ushort[] SZ = new ushort[4];
     static readonly uint[] RGB = new uint[3];
     // GPU packets contain only projected XY coordinates, so enhanced texture
@@ -16,34 +33,83 @@ public static class Gte
     // 4096) and dominated frame time in busy arenas. Two generation maps
     // preserve the required one-frame ordering-table latency and "latest
     // projection wins" behavior with bounded O(1) lookups.
+    readonly struct ScreenDepthSample
+    {
+        public readonly ushort Depth;
+        public readonly uint Group;
+
+        public ScreenDepthSample(ushort depth, uint group)
+        {
+            Depth = depth;
+            Group = group;
+        }
+    }
+
     readonly struct ScreenDepthSamples
     {
-        public readonly ushort A, B, C, D;
+        public readonly ScreenDepthSample A, B, C, D, E, F, G, H;
         public readonly byte Count;
 
         ScreenDepthSamples(
-            ushort a, ushort b, ushort c, ushort d, byte count)
+            ScreenDepthSample a,
+            ScreenDepthSample b,
+            ScreenDepthSample c,
+            ScreenDepthSample d,
+            ScreenDepthSample e,
+            ScreenDepthSample f,
+            ScreenDepthSample g,
+            ScreenDepthSample h,
+            byte count)
         {
-            A = a; B = b; C = c; D = d; Count = count;
+            A = a; B = b; C = c; D = d;
+            E = e; F = f; G = g; H = h;
+            Count = count;
         }
 
-        public ScreenDepthSamples Add(ushort value)
+        ScreenDepthSample At(int index) => index switch
         {
-            if ((Count > 0 && A == value) ||
-                (Count > 1 && B == value) ||
-                (Count > 2 && C == value) ||
-                (Count > 3 && D == value))
-                return this;
+            0 => A,
+            1 => B,
+            2 => C,
+            3 => D,
+            4 => E,
+            5 => F,
+            6 => G,
+            _ => H,
+        };
+
+        public ScreenDepthSamples Add(ushort depth, uint group)
+        {
+            var value = new ScreenDepthSample(depth, group);
+            for (int index = 0; index < Count; index++)
+            {
+                ScreenDepthSample existing = At(index);
+                if (existing.Depth == depth && existing.Group == group)
+                    return this;
+            }
 
             return Count switch
             {
-                0 => new(value, 0, 0, 0, 1),
-                1 => new(A, value, 0, 0, 2),
-                2 => new(A, B, value, 0, 3),
-                3 => new(A, B, C, value, 4),
-                // Retain recent projections when more than four surfaces
-                // quantize to the same screen pixel.
-                _ => new(B, C, D, value, 4),
+                0 => new(value, default, default, default,
+                         default, default, default, default, 1),
+                1 => new(A, value, default, default,
+                         default, default, default, default, 2),
+                2 => new(A, B, value, default,
+                         default, default, default, default, 3),
+                3 => new(A, B, C, value,
+                         default, default, default, default, 4),
+                4 => new(A, B, C, D, value,
+                         default, default, default, 5),
+                5 => new(A, B, C, D, E, value,
+                         default, default, 6),
+                6 => new(A, B, C, D, E, F, value,
+                         default, 7),
+                7 => new(A, B, C, D, E, F, G, value, 8),
+                // Dense distant meshes routinely quantize more than four
+                // distinct vertices to one PS1 pixel. Retain eight recent
+                // projections so the OT-constrained lookup can still find
+                // the correct surface without an unbounded history.
+                _ => new(B, C, D, E, F, G, H, value, 8),
             };
         }
 
@@ -54,18 +120,76 @@ public static class Gte
         {
             for (int index = 0; index < Count; index++)
             {
-                ushort sample = index switch
-                {
-                    0 => A,
-                    1 => B,
-                    2 => C,
-                    _ => D,
-                };
-                int error = Math.Abs(sample - expectedDepth);
+                ScreenDepthSample sample = At(index);
+                int error = Math.Abs(sample.Depth - expectedDepth);
                 if (error >= closestError) continue;
-                closest = sample;
+                closest = sample.Depth;
                 closestError = error;
             }
+        }
+
+        public int CollectGroups(
+            int expectedDepth,
+            int maximumError,
+            Span<uint> groups,
+            int count)
+        {
+            for (int index = 0; index < Count && count < groups.Length; index++)
+            {
+                ScreenDepthSample sample = At(index);
+                if (Math.Abs(sample.Depth - expectedDepth) > maximumError)
+                    continue;
+                bool duplicate = false;
+                for (int existing = 0; existing < count; existing++)
+                    duplicate |= groups[existing] == sample.Group;
+                if (!duplicate)
+                    groups[count++] = sample.Group;
+            }
+            return count;
+        }
+
+        public bool TryGetGroup(
+            uint group,
+            int expectedDepth,
+            int maximumError,
+            out ushort depth)
+        {
+            depth = 0;
+            int closestError = int.MaxValue;
+            for (int index = 0; index < Count; index++)
+            {
+                ScreenDepthSample sample = At(index);
+                if (sample.Group != group)
+                    continue;
+                int error = Math.Abs(sample.Depth - expectedDepth);
+                if (error >= closestError)
+                    continue;
+                depth = sample.Depth;
+                closestError = error;
+            }
+            return closestError <= maximumError;
+        }
+
+        public int CollectSamples(
+            int expectedDepth,
+            int maximumError,
+            Span<ScreenDepthSample> samples,
+            int count)
+        {
+            for (int index = 0; index < Count && count < samples.Length; index++)
+            {
+                ScreenDepthSample sample = At(index);
+                if (Math.Abs(sample.Depth - expectedDepth) > maximumError)
+                    continue;
+                bool duplicate = false;
+                for (int existing = 0; existing < count; existing++)
+                    duplicate |=
+                        samples[existing].Depth == sample.Depth &&
+                        samples[existing].Group == sample.Group;
+                if (!duplicate)
+                    samples[count++] = sample;
+            }
+            return count;
         }
     }
 
@@ -73,6 +197,20 @@ public static class Gte
         new(16384);
     static Dictionary<uint, ScreenDepthSamples> ScreenDepthPrevious =
         new(16384);
+    static Dictionary<uint, ScreenDepthSamples> ScreenDepthPrevious2 =
+        new(16384);
+    static Dictionary<uint, ScreenDepthSamples> ScreenDepthPrevious3 =
+        new(16384);
+    static Dictionary<uint, ScreenDepthSamples> ScreenDepthPrevious4 =
+        new(16384);
+    static Dictionary<uint, ScreenDepthSamples> ScreenDepthPrevious5 =
+        new(16384);
+    static Dictionary<uint, ScreenDepthSamples> ScreenDepthPrevious6 =
+        new(16384);
+    static Dictionary<uint, ScreenDepthSamples> ScreenDepthPrevious7 =
+        new(16384);
+    static uint ScreenProjectionGroup;
+    static uint ActiveProjectionGroup;
     static uint RES1;
     static int MAC0, MAC1, MAC2, MAC3;
     static uint LZCS, LZCR;
@@ -249,6 +387,52 @@ public static class Gte
         int ny = SatY((int)(sy >> 16));
         SX[0] = SX[1]; SX[1] = SX[2]; SX[2] = (short)nx;
         SY[0] = SY[1]; SY[1] = SY[2]; SY[2] = (short)ny;
+        SxyDepth[0] = SxyDepth[1];
+        SxyDepth[1] = SxyDepth[2];
+        SxyDepth[2] = (ushort)sz;
+        SxyPerspectiveW[0] = SxyPerspectiveW[1];
+        SxyPerspectiveW[1] = SxyPerspectiveW[2];
+        float rawViewZ = (float)(m3 / 4096.0);
+        float preciseZ = MathF.Max(H * 0.5f, rawViewZ);
+        SxyPerspectiveW[2] = preciseZ;
+        SxyPreciseX[0] = SxyPreciseX[1];
+        SxyPreciseX[1] = SxyPreciseX[2];
+        SxyPreciseY[0] = SxyPreciseY[1];
+        SxyPreciseY[1] = SxyPreciseY[2];
+        SxyViewX[0] = SxyViewX[1];
+        SxyViewX[1] = SxyViewX[2];
+        SxyViewY[0] = SxyViewY[1];
+        SxyViewY[1] = SxyViewY[2];
+        SxyViewZ[0] = SxyViewZ[1];
+        SxyViewZ[1] = SxyViewZ[2];
+        SxyProjectionCenterX[0] = SxyProjectionCenterX[1];
+        SxyProjectionCenterX[1] = SxyProjectionCenterX[2];
+        SxyProjectionCenterY[0] = SxyProjectionCenterY[1];
+        SxyProjectionCenterY[1] = SxyProjectionCenterY[2];
+        SxyProjectionScale[0] = SxyProjectionScale[1];
+        SxyProjectionScale[1] = SxyProjectionScale[2];
+        SxyHasPrecisePosition[0] = SxyHasPrecisePosition[1];
+        SxyHasPrecisePosition[1] = SxyHasPrecisePosition[2];
+        SxyViewX[2] = (float)(m1 / 4096.0);
+        SxyViewY[2] = (float)(m2 / 4096.0);
+        SxyViewZ[2] = rawViewZ;
+        SxyProjectionCenterX[2] = OFX / 65536.0f;
+        SxyProjectionCenterY[2] = OFY / 65536.0f;
+        SxyProjectionScale[2] = H;
+        float projectionScale = H / preciseZ;
+        SxyPreciseX[2] = Math.Clamp(
+            SxyProjectionCenterX[2] + SxyViewX[2] * projectionScale,
+            -1024f, 1023f);
+        SxyPreciseY[2] = Math.Clamp(
+            SxyProjectionCenterY[2] + SxyViewY[2] * projectionScale,
+            -1024f, 1023f);
+        SxyHasPrecisePosition[2] =
+            float.IsFinite(SxyPreciseX[2]) &&
+            float.IsFinite(SxyPreciseY[2]) &&
+            float.IsFinite(SxyViewX[2]) &&
+            float.IsFinite(SxyViewY[2]) &&
+            float.IsFinite(SxyViewZ[2]) &&
+            SxyProjectionScale[2] > 0;
         RecordScreenDepth((short)nx, (short)ny, (ushort)sz);
 
         if (last)
@@ -264,7 +448,7 @@ public static class Gte
         if (z == 0) return;
         uint key = ScreenKey(x, y);
         ScreenDepthCurrent.TryGetValue(key, out ScreenDepthSamples samples);
-        ScreenDepthCurrent[key] = samples.Add(z);
+        ScreenDepthCurrent[key] = samples.Add(z, ActiveProjectionGroup);
     }
 
     public static bool TryGetScreenDepth(
@@ -299,6 +483,133 @@ public static class Gte
         return false;
     }
 
+    /// <summary>
+    /// Recovers a triangle's original camera-space depths from either one
+    /// RTPT/RTPS group or a tightly consecutive RTPS run. Shared screen pixels
+    /// can contain unrelated surfaces, so three independent nearest depths
+    /// are not sufficient for safe perspective correction.
+    /// </summary>
+    public static bool TryGetTriangleScreenDepth(
+        int x0, int y0,
+        int x1, int y1,
+        int x2, int y2,
+        int orderingTableDepth,
+        out ushort z0,
+        out ushort z1,
+        out ushort z2)
+    {
+        if (TryGetGroupedTriangleScreenDepth(
+                x0, y0, x1, y1, x2, y2, orderingTableDepth,
+                out z0, out z1, out z2))
+            return true;
+
+        int expectedDepth = Math.Clamp(orderingTableDepth * 8, 1, 0xFFFF);
+        int maximumError = Math.Max(256, expectedDepth / 2);
+
+        // Some original paths project one cached vertex at a time with RTPS
+        // instead of one RTPT. Those three operations are consecutive. Match
+        // only a tight run of projection IDs so independent nearest-depth
+        // samples from overlapping objects cannot be combined.
+        Span<ScreenDepthSample> samples0 =
+            stackalloc ScreenDepthSample[16];
+        Span<ScreenDepthSample> samples1 =
+            stackalloc ScreenDepthSample[16];
+        Span<ScreenDepthSample> samples2 =
+            stackalloc ScreenDepthSample[16];
+        int count0 = CollectSamplesAt(
+            x0, y0, expectedDepth, maximumError, samples0);
+        int count1 = CollectSamplesAt(
+            x1, y1, expectedDepth, maximumError, samples1);
+        int count2 = CollectSamplesAt(
+            x2, y2, expectedDepth, maximumError, samples2);
+        int bestScore = int.MaxValue;
+        ushort best0 = 0, best1 = 0, best2 = 0;
+        for (int i = 0; i < count0; i++)
+            for (int j = 0; j < count1; j++)
+                for (int k = 0; k < count2; k++)
+                {
+                    uint minimumGroup = Math.Min(
+                        samples0[i].Group,
+                        Math.Min(samples1[j].Group, samples2[k].Group));
+                    uint maximumGroup = Math.Max(
+                        samples0[i].Group,
+                        Math.Max(samples1[j].Group, samples2[k].Group));
+                    if (maximumGroup - minimumGroup > 4u)
+                        continue;
+                    int minimumDepth = Math.Min(
+                        samples0[i].Depth,
+                        Math.Min(samples1[j].Depth, samples2[k].Depth));
+                    int maximumDepth = Math.Max(
+                        samples0[i].Depth,
+                        Math.Max(samples1[j].Depth, samples2[k].Depth));
+                    if (minimumDepth == 0 ||
+                        maximumDepth > minimumDepth * 16)
+                        continue;
+                    int score =
+                        Math.Abs(samples0[i].Depth - expectedDepth) +
+                        Math.Abs(samples1[j].Depth - expectedDepth) +
+                        Math.Abs(samples2[k].Depth - expectedDepth) +
+                        checked((int)(maximumGroup - minimumGroup) * 64);
+                    if (score >= bestScore)
+                        continue;
+                    bestScore = score;
+                    best0 = samples0[i].Depth;
+                    best1 = samples1[j].Depth;
+                    best2 = samples2[k].Depth;
+                }
+        if (bestScore != int.MaxValue)
+        {
+            z0 = best0;
+            z1 = best1;
+            z2 = best2;
+            return true;
+        }
+
+        z0 = z1 = z2 = 0;
+        return false;
+    }
+
+    /// <summary>
+    /// Recovers a triangle only when all three vertices belong to one native
+    /// RTPT/RTPS projection group. This bounded path is suitable for raster
+    /// depth, where accepting three merely nearby samples would corrupt
+    /// opaque/transparent occlusion.
+    /// </summary>
+    public static bool TryGetGroupedTriangleScreenDepth(
+        int x0, int y0,
+        int x1, int y1,
+        int x2, int y2,
+        int orderingTableDepth,
+        out ushort z0,
+        out ushort z1,
+        out ushort z2)
+    {
+        int expectedDepth = Math.Clamp(orderingTableDepth * 8, 1, 0xFFFF);
+        int maximumError = Math.Max(256, expectedDepth / 2);
+        Span<uint> groups = stackalloc uint[16];
+        int count = CollectGroupsAt(
+            x0, y0, expectedDepth, maximumError, groups);
+        for (int index = 0; index < count; index++)
+        {
+            uint group = groups[index];
+            if (!TryGetGroupAt(
+                    x0, y0, group, expectedDepth, maximumError, out z0) ||
+                !TryGetGroupAt(
+                    x1, y1, group, expectedDepth, maximumError, out z1) ||
+                !TryGetGroupAt(
+                    x2, y2, group, expectedDepth, maximumError, out z2))
+                continue;
+
+            int minimum = Math.Min(z0, Math.Min(z1, z2));
+            int maximum = Math.Max(z0, Math.Max(z1, z2));
+            if (minimum > 0 && maximum <= minimum * 16)
+                return true;
+        }
+
+        z0 = z1 = z2 = 0;
+        return false;
+    }
+
     static uint ScreenKey(short x, short y) =>
         (ushort)x | ((uint)(ushort)y << 16);
 
@@ -313,6 +624,24 @@ public static class Gte
         if (ScreenDepthPrevious.TryGetValue(
                 key, out ScreenDepthSamples previous))
             previous.FindClosest(expectedDepth, ref z, ref closestError);
+        if (ScreenDepthPrevious2.TryGetValue(
+                key, out ScreenDepthSamples previous2))
+            previous2.FindClosest(expectedDepth, ref z, ref closestError);
+        if (ScreenDepthPrevious3.TryGetValue(
+                key, out ScreenDepthSamples previous3))
+            previous3.FindClosest(expectedDepth, ref z, ref closestError);
+        if (ScreenDepthPrevious4.TryGetValue(
+                key, out ScreenDepthSamples previous4))
+            previous4.FindClosest(expectedDepth, ref z, ref closestError);
+        if (ScreenDepthPrevious5.TryGetValue(
+                key, out ScreenDepthSamples previous5))
+            previous5.FindClosest(expectedDepth, ref z, ref closestError);
+        if (ScreenDepthPrevious6.TryGetValue(
+                key, out ScreenDepthSamples previous6))
+            previous6.FindClosest(expectedDepth, ref z, ref closestError);
+        if (ScreenDepthPrevious7.TryGetValue(
+                key, out ScreenDepthSamples previous7))
+            previous7.FindClosest(expectedDepth, ref z, ref closestError);
 
         // V8 bins projected geometry at roughly SZ/8. A screen coordinate
         // shared by unrelated surfaces is common; accepting a depth from a
@@ -324,17 +653,250 @@ public static class Gte
         return closestError <= maximumError;
     }
 
+    static int CollectGroupsAt(
+        int x,
+        int y,
+        int expectedDepth,
+        int maximumError,
+        Span<uint> groups)
+    {
+        int count = CollectGroupsAtExact(
+            x, y, expectedDepth, maximumError, groups, 0);
+        if (count != 0)
+            return count;
+
+        for (int oy = -1; oy <= 1 && count < groups.Length; oy++)
+            for (int ox = -1; ox <= 1 && count < groups.Length; ox++)
+            {
+                if (ox == 0 && oy == 0)
+                    continue;
+                count = CollectGroupsAtExact(
+                    x + ox, y + oy, expectedDepth, maximumError,
+                    groups, count);
+            }
+        return count;
+    }
+
+    static int CollectSamplesAt(
+        int x,
+        int y,
+        int expectedDepth,
+        int maximumError,
+        Span<ScreenDepthSample> samples)
+    {
+        int count = CollectSamplesAtExact(
+            x, y, expectedDepth, maximumError, samples, 0);
+        if (count != 0)
+            return count;
+
+        for (int oy = -1; oy <= 1 && count < samples.Length; oy++)
+            for (int ox = -1; ox <= 1 && count < samples.Length; ox++)
+            {
+                if (ox == 0 && oy == 0)
+                    continue;
+                count = CollectSamplesAtExact(
+                    x + ox, y + oy, expectedDepth, maximumError,
+                    samples, count);
+            }
+        return count;
+    }
+
+    static int CollectSamplesAtExact(
+        int x,
+        int y,
+        int expectedDepth,
+        int maximumError,
+        Span<ScreenDepthSample> samples,
+        int count)
+    {
+        uint key = ScreenKey((short)x, (short)y);
+        if (ScreenDepthCurrent.TryGetValue(
+                key, out ScreenDepthSamples current))
+            count = current.CollectSamples(
+                expectedDepth, maximumError, samples, count);
+        if (ScreenDepthPrevious.TryGetValue(
+                key, out ScreenDepthSamples previous))
+            count = previous.CollectSamples(
+                expectedDepth, maximumError, samples, count);
+        if (ScreenDepthPrevious2.TryGetValue(
+                key, out ScreenDepthSamples previous2))
+            count = previous2.CollectSamples(
+                expectedDepth, maximumError, samples, count);
+        if (ScreenDepthPrevious3.TryGetValue(
+                key, out ScreenDepthSamples previous3))
+            count = previous3.CollectSamples(
+                expectedDepth, maximumError, samples, count);
+        if (ScreenDepthPrevious4.TryGetValue(
+                key, out ScreenDepthSamples previous4))
+            count = previous4.CollectSamples(
+                expectedDepth, maximumError, samples, count);
+        if (ScreenDepthPrevious5.TryGetValue(
+                key, out ScreenDepthSamples previous5))
+            count = previous5.CollectSamples(
+                expectedDepth, maximumError, samples, count);
+        if (ScreenDepthPrevious6.TryGetValue(
+                key, out ScreenDepthSamples previous6))
+            count = previous6.CollectSamples(
+                expectedDepth, maximumError, samples, count);
+        if (ScreenDepthPrevious7.TryGetValue(
+                key, out ScreenDepthSamples previous7))
+            count = previous7.CollectSamples(
+                expectedDepth, maximumError, samples, count);
+        return count;
+    }
+
+    static int CollectGroupsAtExact(
+        int x,
+        int y,
+        int expectedDepth,
+        int maximumError,
+        Span<uint> groups,
+        int count)
+    {
+        uint key = ScreenKey((short)x, (short)y);
+        if (ScreenDepthCurrent.TryGetValue(
+                key, out ScreenDepthSamples current))
+            count = current.CollectGroups(
+                expectedDepth, maximumError, groups, count);
+        if (ScreenDepthPrevious.TryGetValue(
+                key, out ScreenDepthSamples previous))
+            count = previous.CollectGroups(
+                expectedDepth, maximumError, groups, count);
+        if (ScreenDepthPrevious2.TryGetValue(
+                key, out ScreenDepthSamples previous2))
+            count = previous2.CollectGroups(
+                expectedDepth, maximumError, groups, count);
+        if (ScreenDepthPrevious3.TryGetValue(
+                key, out ScreenDepthSamples previous3))
+            count = previous3.CollectGroups(
+                expectedDepth, maximumError, groups, count);
+        if (ScreenDepthPrevious4.TryGetValue(
+                key, out ScreenDepthSamples previous4))
+            count = previous4.CollectGroups(
+                expectedDepth, maximumError, groups, count);
+        if (ScreenDepthPrevious5.TryGetValue(
+                key, out ScreenDepthSamples previous5))
+            count = previous5.CollectGroups(
+                expectedDepth, maximumError, groups, count);
+        if (ScreenDepthPrevious6.TryGetValue(
+                key, out ScreenDepthSamples previous6))
+            count = previous6.CollectGroups(
+                expectedDepth, maximumError, groups, count);
+        if (ScreenDepthPrevious7.TryGetValue(
+                key, out ScreenDepthSamples previous7))
+            count = previous7.CollectGroups(
+                expectedDepth, maximumError, groups, count);
+        return count;
+    }
+
+    static bool TryGetGroupAt(
+        int x,
+        int y,
+        uint group,
+        int expectedDepth,
+        int maximumError,
+        out ushort depth)
+    {
+        if (TryGetGroupAtExact(
+                x, y, group, expectedDepth, maximumError, out depth))
+            return true;
+        for (int oy = -1; oy <= 1; oy++)
+            for (int ox = -1; ox <= 1; ox++)
+            {
+                if (ox == 0 && oy == 0)
+                    continue;
+                if (TryGetGroupAtExact(
+                        x + ox, y + oy, group, expectedDepth,
+                        maximumError, out depth))
+                    return true;
+            }
+        depth = 0;
+        return false;
+    }
+
+    static bool TryGetGroupAtExact(
+        int x,
+        int y,
+        uint group,
+        int expectedDepth,
+        int maximumError,
+        out ushort depth)
+    {
+        depth = 0;
+        uint key = ScreenKey((short)x, (short)y);
+        if (ScreenDepthCurrent.TryGetValue(
+                key, out ScreenDepthSamples current) &&
+            current.TryGetGroup(
+                group, expectedDepth, maximumError, out depth))
+            return true;
+        if (ScreenDepthPrevious.TryGetValue(
+                key, out ScreenDepthSamples previous) &&
+            previous.TryGetGroup(
+                group, expectedDepth, maximumError, out depth))
+            return true;
+        if (ScreenDepthPrevious2.TryGetValue(
+                key, out ScreenDepthSamples previous2) &&
+            previous2.TryGetGroup(
+                group, expectedDepth, maximumError, out depth))
+            return true;
+        if (ScreenDepthPrevious3.TryGetValue(
+                key, out ScreenDepthSamples previous3) &&
+            previous3.TryGetGroup(
+                group, expectedDepth, maximumError, out depth))
+            return true;
+        if (ScreenDepthPrevious4.TryGetValue(
+                key, out ScreenDepthSamples previous4) &&
+            previous4.TryGetGroup(
+                group, expectedDepth, maximumError, out depth))
+            return true;
+        if (ScreenDepthPrevious5.TryGetValue(
+                key, out ScreenDepthSamples previous5) &&
+            previous5.TryGetGroup(
+                group, expectedDepth, maximumError, out depth))
+            return true;
+        if (ScreenDepthPrevious6.TryGetValue(
+                key, out ScreenDepthSamples previous6) &&
+            previous6.TryGetGroup(
+                group, expectedDepth, maximumError, out depth))
+            return true;
+        return ScreenDepthPrevious7.TryGetValue(
+                   key, out ScreenDepthSamples previous7) &&
+               previous7.TryGetGroup(
+                   group, expectedDepth, maximumError, out depth);
+    }
+
     public static int ScreenDepthCount =>
-        ScreenDepthCurrent.Count + ScreenDepthPrevious.Count;
+        ScreenDepthCurrent.Count +
+        ScreenDepthPrevious.Count +
+        ScreenDepthPrevious2.Count +
+        ScreenDepthPrevious3.Count +
+        ScreenDepthPrevious4.Count +
+        ScreenDepthPrevious5.Count +
+        ScreenDepthPrevious6.Count +
+        ScreenDepthPrevious7.Count;
 
     public static void BeginFrame()
     {
         // The game builds one ordering table while the prior table is being
-        // presented, so GPU packets commonly trail their GTE projections by
-        // one host present. Retain that prior generation without the former
-        // 4096-entry linear scan.
-        (ScreenDepthPrevious, ScreenDepthCurrent) =
-            (ScreenDepthCurrent, ScreenDepthPrevious);
+        // presented, so GPU packets can trail their GTE projections across
+        // multiple host presents. Retain eight bounded generations without
+        // the former 4096-entry linear scan.
+        (ScreenDepthPrevious7,
+         ScreenDepthPrevious6,
+         ScreenDepthPrevious5,
+         ScreenDepthPrevious4,
+         ScreenDepthPrevious3,
+         ScreenDepthPrevious2,
+         ScreenDepthPrevious,
+         ScreenDepthCurrent) =
+            (ScreenDepthPrevious6,
+             ScreenDepthPrevious5,
+             ScreenDepthPrevious4,
+             ScreenDepthPrevious3,
+             ScreenDepthPrevious2,
+             ScreenDepthPrevious,
+             ScreenDepthCurrent,
+             ScreenDepthPrevious7);
         ScreenDepthCurrent.Clear();
     }
 
@@ -349,14 +911,40 @@ public static class Gte
 
         switch (cmd & 0x3F)
         {
-            case 0x01: Rtp(V[0], V[1], V[2], sf, lm, true); break;
+            case 0x01:
+                ActiveProjectionGroup = NextProjectionGroup();
+                Rtp(V[0], V[1], V[2], sf, lm, true);
+                break;
             case 0x30:
+                ActiveProjectionGroup = NextProjectionGroup();
                 Rtp(V[0], V[1], V[2], sf, lm, false);
                 Rtp(V[3], V[4], V[5], sf, lm, false);
                 Rtp(V[6], V[7], V[8], sf, lm, true);
                 break;
             case 0x06:
-                MAC0 = (int)CheckMac0((long)SX[0] * (SY[1] - SY[2]) + (long)SX[1] * (SY[2] - SY[0]) + (long)SX[2] * (SY[0] - SY[1]));
+                if (Config.ConfigManager.View.GeometryCorrection &&
+                    Config.ConfigManager.View.PreciseCulling &&
+                    SxyHasPrecisePosition[0] &&
+                    SxyHasPrecisePosition[1] &&
+                    SxyHasPrecisePosition[2])
+                {
+                    double area =
+                        SxyPreciseX[0] *
+                            (SxyPreciseY[1] - SxyPreciseY[2]) +
+                        SxyPreciseX[1] *
+                            (SxyPreciseY[2] - SxyPreciseY[0]) +
+                        SxyPreciseX[2] *
+                            (SxyPreciseY[0] - SxyPreciseY[1]);
+                    MAC0 = (int)Math.Clamp(
+                        area, int.MinValue, int.MaxValue);
+                }
+                else
+                {
+                    MAC0 = (int)CheckMac0(
+                        (long)SX[0] * (SY[1] - SY[2]) +
+                        (long)SX[1] * (SY[2] - SY[0]) +
+                        (long)SX[2] * (SY[0] - SY[1]));
+                }
                 break;
             case 0x2D:
                 MAC0 = (int)CheckMac0((long)ZSF3 * (SZ[1] + SZ[2] + SZ[3]));
@@ -511,6 +1099,14 @@ public static class Gte
         }
     }
 
+    static uint NextProjectionGroup()
+    {
+        ScreenProjectionGroup++;
+        if (ScreenProjectionGroup == 0)
+            ScreenProjectionGroup++;
+        return ScreenProjectionGroup;
+    }
+
     public static void Write(int reg, uint val)
     {
         switch (reg)
@@ -527,12 +1123,34 @@ public static class Gte
             case 9: IR1 = (short)val; break;
             case 10: IR2 = (short)val; break;
             case 11: IR3 = (short)val; break;
-            case 12: SX[0] = (short)val; SY[0] = (short)(val >> 16); break;
-            case 13: SX[1] = (short)val; SY[1] = (short)(val >> 16); break;
-            case 14: SX[2] = (short)val; SY[2] = (short)(val >> 16); break;
+            case 12: SX[0] = (short)val; SY[0] = (short)(val >> 16); ClearPreciseFifoEntry(0); break;
+            case 13: SX[1] = (short)val; SY[1] = (short)(val >> 16); ClearPreciseFifoEntry(1); break;
+            case 14: SX[2] = (short)val; SY[2] = (short)(val >> 16); ClearPreciseFifoEntry(2); break;
             case 15:
                 SX[0] = SX[1]; SY[0] = SY[1]; SX[1] = SX[2]; SY[1] = SY[2];
+                SxyDepth[0] = SxyDepth[1]; SxyDepth[1] = SxyDepth[2];
+                SxyPerspectiveW[0] = SxyPerspectiveW[1];
+                SxyPerspectiveW[1] = SxyPerspectiveW[2];
+                SxyPreciseX[0] = SxyPreciseX[1];
+                SxyPreciseX[1] = SxyPreciseX[2];
+                SxyPreciseY[0] = SxyPreciseY[1];
+                SxyPreciseY[1] = SxyPreciseY[2];
+                SxyViewX[0] = SxyViewX[1];
+                SxyViewX[1] = SxyViewX[2];
+                SxyViewY[0] = SxyViewY[1];
+                SxyViewY[1] = SxyViewY[2];
+                SxyViewZ[0] = SxyViewZ[1];
+                SxyViewZ[1] = SxyViewZ[2];
+                SxyProjectionCenterX[0] = SxyProjectionCenterX[1];
+                SxyProjectionCenterX[1] = SxyProjectionCenterX[2];
+                SxyProjectionCenterY[0] = SxyProjectionCenterY[1];
+                SxyProjectionCenterY[1] = SxyProjectionCenterY[2];
+                SxyProjectionScale[0] = SxyProjectionScale[1];
+                SxyProjectionScale[1] = SxyProjectionScale[2];
+                SxyHasPrecisePosition[0] = SxyHasPrecisePosition[1];
+                SxyHasPrecisePosition[1] = SxyHasPrecisePosition[2];
                 SX[2] = (short)val; SY[2] = (short)(val >> 16);
+                ClearPreciseFifoEntry(2);
                 break;
             case 16: SZ[0] = (ushort)val; break;
             case 17: SZ[1] = (ushort)val; break;
@@ -641,6 +1259,110 @@ public static class Gte
     }
 
     public static void LoadWord(int reg, uint val) => Write(reg, val);
+
+    /// <summary>
+    /// Loads a COP2 data register from RAM without discarding exact projected
+    /// vertex provenance. V8 caches projected SXY words, reloads them into the
+    /// GTE FIFO for NCLIP/packet generation, then stores that FIFO into GPU
+    /// packets. Treating LWC2 as a raw uint load loses the original
+    /// unsaturated view-space vertex even though the address and value still
+    /// identify it exactly.
+    /// </summary>
+    public static void LoadMemoryWord(
+        int reg, IMemory memory, uint address)
+    {
+        uint value = memory.ReadU32(address);
+        Write(reg, value);
+        if (reg is not (12 or 13 or 14 or 15))
+            return;
+        if (!memory.TryGetPreciseGteVertex(
+                address, value, out var vertex))
+            return;
+
+        int index = reg switch
+        {
+            12 => 0,
+            13 => 1,
+            _ => 2,
+        };
+        RestorePreciseFifoEntry(index, vertex);
+    }
+
+    static void RestorePreciseFifoEntry(
+        int index, in PreciseGteVertexData vertex)
+    {
+        SxyDepth[index] = vertex.Depth;
+        SxyPerspectiveW[index] = vertex.PerspectiveW;
+        SxyPreciseX[index] = vertex.PreciseX;
+        SxyPreciseY[index] = vertex.PreciseY;
+        SxyViewX[index] = vertex.ViewX;
+        SxyViewY[index] = vertex.ViewY;
+        SxyViewZ[index] = vertex.ViewZ;
+        SxyProjectionCenterX[index] = vertex.ProjectionCenterX;
+        SxyProjectionCenterY[index] = vertex.ProjectionCenterY;
+        SxyProjectionScale[index] = vertex.ProjectionScale;
+        SxyHasPrecisePosition[index] = vertex.Valid;
+    }
+
     public static uint StoreWord(int reg) => Read(reg);
+
+    static void ClearPreciseFifoEntry(int index)
+    {
+        SxyDepth[index] = 0;
+        SxyPerspectiveW[index] = 0;
+        SxyPreciseX[index] = 0;
+        SxyPreciseY[index] = 0;
+        SxyViewX[index] = 0;
+        SxyViewY[index] = 0;
+        SxyViewZ[index] = 0;
+        SxyProjectionCenterX[index] = 0;
+        SxyProjectionCenterY[index] = 0;
+        SxyProjectionScale[index] = 0;
+        SxyHasPrecisePosition[index] = false;
+    }
+
+    public static bool TryGetStoreVertex(
+        int reg, out PreciseGteVertexData vertex)
+    {
+        uint packedScreenPosition = Read(reg);
+        int index = reg switch
+        {
+            12 => 0,
+            13 => 1,
+            14 or 15 => 2,
+            _ => -1,
+        };
+        vertex = index >= 0
+            ? new PreciseGteVertexData(
+                packedScreenPosition,
+                SxyDepth[index],
+                SxyPerspectiveW[index],
+                SxyViewX[index],
+                SxyViewY[index],
+                SxyViewZ[index],
+                SxyPreciseX[index],
+                SxyPreciseY[index],
+                SxyProjectionCenterX[index],
+                SxyProjectionCenterY[index],
+                SxyProjectionScale[index])
+            : default;
+        return index >= 0 &&
+            SxyHasPrecisePosition[index] &&
+            vertex.Valid;
+    }
+
+    public static bool TryGetProjectionState(
+        out float centerX,
+        out float centerY,
+        out float scale)
+    {
+        centerX = OFX / 65536.0f;
+        centerY = OFY / 65536.0f;
+        scale = H;
+        return H > 0 &&
+            float.IsFinite(centerX) &&
+            float.IsFinite(centerY);
+    }
+
     public static bool GetCondition() => false;
 }

@@ -21,3 +21,9 @@
 4140+2=LEFT
 4360+2=LEFT
 4580+2=LEFT
+# Capture the final Chassey state, then enter the native enemy selector. The
+# enemy-stage capture proves the V8 player banner does not persist over it.
+4900+3=CROSS
+
+[choose_enemies]
+250+3=CROSS

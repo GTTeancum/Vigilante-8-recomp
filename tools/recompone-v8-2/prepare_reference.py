@@ -376,6 +376,22 @@ PROVEN_PATCHES = [
         "mode": "pre",
     },
     {
+        # The Arcade result builder uses the retail formatter and strlen
+        # helpers.  Keep their behavior unchanged, but retain the native
+        # caller and arguments so a corrupt result pointer is attributable to
+        # the exact branch instead of surfacing only as an unmapped read.
+        "overlay": "main",
+        "address": "8005EFDC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceResultStringLength",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8005FA9C",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceResultFormat",
+        "mode": "pre",
+    },
+    {
         "overlay": "main",
         "address": "80020A80",
         "target": "RecompOne.Runtime.Sdk.V82Compat.TrackVramAllocationPost",
@@ -475,6 +491,20 @@ PROVEN_PATCHES = [
         "address": "8002D9E0",
         "target": "RecompOne.Runtime.Sdk.V82Compat.RepairObjectTerrainQuery",
         "mode": "pre",
+    },
+    {
+        # Capture the native object renderer's exact packet-buffer interval so
+        # Enhanced receives vehicle/material ownership before GPU decoding.
+        "overlay": "main",
+        "address": "8002D9E0",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginObjectRender",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8002D9E0",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndObjectRender",
+        "mode": "post",
     },
     {
         # func_8002D9E0 compares this transform's distance output against
@@ -630,12 +660,6 @@ PROVEN_PATCHES = [
         "address": "8003C464",
         "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.FinalizeNativeSelectorPreview",
         "mode": "post",
-    },
-    {
-        "overlay": "main",
-        "address": "8002CC08",
-        "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.ReleaseVehicleMapping",
-        "mode": "pre",
     },
     {
         # Retain the sequel's native camera object/lifecycle while imported

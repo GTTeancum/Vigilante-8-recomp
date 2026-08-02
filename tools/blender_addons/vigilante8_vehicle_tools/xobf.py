@@ -94,9 +94,10 @@ class RenderGroup:
     normal_count: int
     normal_offset: int
     polygon_count: int
-    texture_base: int
     polygon_offset: int
     scale_shift: int
+    texture_slot_count: int
+    render_extent: int
     vertices: tuple[Vertex, ...]
     normals: tuple[Vertex, ...]
     packets: tuple[PolygonPacket, ...]
@@ -621,15 +622,16 @@ class Model:
         descriptor = self._relative_table_target(
             self.group_table_offset, index, self.group_count
         )
-        require_range(self._data, descriptor, 0x19)
+        require_range(self._data, descriptor, 0x1C)
         vertex_count = u32le(self._data, descriptor + 0x00)
         vertex_offset = descriptor + u32le(self._data, descriptor + 0x04)
         normal_count = u32le(self._data, descriptor + 0x08)
         normal_offset = descriptor + u32le(self._data, descriptor + 0x0C)
-        polygon_count = u16le(self._data, descriptor + 0x10)
-        texture_base = i16le(self._data, descriptor + 0x12)
+        polygon_count = u32le(self._data, descriptor + 0x10)
         polygon_offset = descriptor + u32le(self._data, descriptor + 0x14)
         scale_shift = u8(self._data, descriptor + 0x18)
+        texture_slot_count = u8(self._data, descriptor + 0x19)
+        render_extent = u16le(self._data, descriptor + 0x1A)
         if scale_shift > 15:
             raise FormatError(
                 f"group {index} has invalid render scale shift {scale_shift}"
@@ -642,9 +644,10 @@ class Model:
             normal_count=normal_count,
             normal_offset=normal_offset,
             polygon_count=polygon_count,
-            texture_base=texture_base,
             polygon_offset=polygon_offset,
             scale_shift=scale_shift,
+            texture_slot_count=texture_slot_count,
+            render_extent=render_extent,
             vertices=self._parse_vertices(vertex_offset, vertex_count),
             normals=self._parse_vertices(normal_offset, normal_count),
             packets=self._parse_packets(polygon_offset, polygon_count, vertex_count),
@@ -920,15 +923,16 @@ class Model:
         normal_relative = vertex_relative + len(encoded_vertices)
         replacement = bytearray(
             struct.pack(
-                "<IIIIHhIB3x",
+                "<IIIIIIBBH",
                 len(vertices),
                 vertex_relative,
                 textured_faces,
                 normal_relative,
                 len(faces),
-                original.texture_base,
                 polygon_relative,
                 scale_shift,
+                original.texture_slot_count,
+                original.render_extent,
             )
         )
         replacement += encoded_packets
@@ -1279,7 +1283,21 @@ class Model:
         else:
             consumed = len(packed_pixels)
             encoded = packed_pixels
-        old_end = pixel_offset + consumed
+        if self.dialect == "V8_2":
+            old_declared_size = u32le(self._data, image_offset + 0x08)
+            old_end = (image_offset + old_declared_size + 11) & ~3
+            if old_end < pixel_offset + consumed:
+                raise FormatError(
+                    f"texture {index} has an invalid V8:2 image-block size"
+                )
+            new_declared_size = len(encoded) + 13
+            new_end = (image_offset + new_declared_size + 11) & ~3
+            replacement = encoded + b"\0" * (
+                new_end - pixel_offset - len(encoded)
+            )
+        else:
+            old_end = pixel_offset + consumed
+            replacement = encoded
 
         table_specs = (
             (0x04, self.group_table_offset, self.group_count),
@@ -1300,8 +1318,13 @@ class Model:
         ):
             raise FormatError(f"texture {index} pixels overlap a top-level object")
 
-        delta = len(encoded) - consumed
-        self._data[pixel_offset:old_end] = encoded
+        delta = len(replacement) - (old_end - pixel_offset)
+        self._data[pixel_offset:old_end] = replacement
+        if self.dialect == "V8_2":
+            # V8:2 advances with align4(image + image[8] + 11).  Keep the
+            # native encoded-size-plus-13 field synchronized when a
+            # compressed stream changes length.
+            put_u32le(self._data, image_offset + 0x08, new_declared_size)
 
         def translated(offset: int) -> int:
             return offset + delta if offset >= old_end else offset

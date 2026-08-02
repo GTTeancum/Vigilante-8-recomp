@@ -1,7 +1,7 @@
-# Capture a one-second moving proof from the opening STR before skipping it.
-# LEFT is ignored by the movie player; the _0480 checkpoint starts the
-# presentation burst while START at 540 retains the standard deterministic
-# route to the title and main menus.
+# LEFT is ignored by the movie player.  The first checkpoint starts a
+# five-second presentation burst spanning the authored opening streams; the
+# later checkpoint keeps a settled late-FMV frame for composition checks.
+1+2=LEFT
 480+2=LEFT
 540+3=START
 900+3=START

@@ -56,6 +56,7 @@ public static class ConfigManager
         if (File.Exists(InterfaceFile))
         {
             var (view, imguiIni) = ParseInterfaceFile(File.ReadAllText(InterfaceFile));
+            view.ReconcileNamedGraphicsPreset();
             View = view;
             _pendingImGuiIni = imguiIni;
         }

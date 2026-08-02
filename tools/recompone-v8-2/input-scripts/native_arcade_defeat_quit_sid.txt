@@ -1,0 +1,24 @@
+# Enter Arcade with Sid Burn through the appended native selector. The opt-in
+# defeat fixture applies damage through the unchanged retail damage routine;
+# the rest of the result build, input gate, quit, and menu return is native.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+120+2=LEFT
+240+2=LEFT
+650+3=CROSS
+900+3=CROSS
+1150+3=CROSS
+
+[defeated]
+700+2=SELECT
+1000+30=CROSS
+1400+12=UP
+1600+12=DOWN
