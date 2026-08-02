@@ -1,0 +1,23 @@
+# Deterministic native two-player Versus traversal. Both controllers select
+# through the retail menus and continue into opposed split-screen play.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=DOWN
+1140+3=CROSS
+1200+2=SELECT
+1260+3=UP
+1320+3=CROSS
+1380+2=SELECT
+2020+3=P1:CROSS,P2:CROSS
+[choose_player]
+650+3=P1:CROSS
+900+2=P2:RIGHT
+960+3=P2:CROSS
+1150+3=P1:CROSS,P2:CROSS
+1400+3=P1:CROSS,P2:CROSS
+1650+3=P1:CROSS,P2:CROSS
+[gameplay]
+20+45=P1:CROSS,P1:LEFT,P2:CROSS,P2:RIGHT
+90+45=P1:CROSS,P1:RIGHT,P2:CROSS,P2:LEFT
+160+20=P1:L2,P2:L2
