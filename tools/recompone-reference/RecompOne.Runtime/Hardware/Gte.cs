@@ -28,6 +28,8 @@ public static class Gte
             "RECOMPONE_V82_TRACE_NEAR_PROJECTION") == "1";
     static long _projectionFlagsWithheld;
     static int _lastH;
+    /// <summary>Depth of the most recent projection, for emitter attribution.</summary>
+    public static int LastProjectedDepth;
     static bool _lastDivideSaturated;
     // func_80022... reads the GTE FLAG register and skips the primitive when
     // the error summary bit is set:
@@ -65,9 +67,13 @@ public static class Gte
     // without. The apparent doubling seen first came from comparing raw counts
     // between soak runs that had diverged. Left off; it alters game-visible
     // packed coordinates for no demonstrated benefit.
+    // On, and not widescreen-scoped. The artifact occurs at 4:3 as well, so
+    // gating this on a wide aspect meant it never ran in any test. The
+    // projection divide saturates below depth H/2 = 128, and the observed
+    // floor on drawn geometry is 110-115 in every capture taken so far.
     static readonly bool NearKeepGeometry =
         Environment.GetEnvironmentVariable(
-            "RECOMPONE_V82_NEAR_KEEP") == "1";
+            "RECOMPONE_V82_NEAR_KEEP") != "0";
 
     public static (long Total, long Near100, long Near60, int H)
         ConsumeRtpNearCounts()
@@ -261,6 +267,26 @@ public static class Gte
     static readonly float[] SxyProjectionScale = new float[3];
     static readonly bool[] SxyHasPrecisePosition = new bool[3];
     static readonly ushort[] SZ = new ushort[4];
+
+    /// <summary>
+    /// The triangle currently in the projection registers, for recording
+    /// geometry the engine rejects. Every capture so far has shown only what
+    /// survived, so the cause of a rejection has had to be inferred from an
+    /// absence; this makes the rejected triangle itself observable.
+    /// </summary>
+    public static void ReadProjectedTriangle(
+        Span<int> xs, Span<int> ys, Span<int> zs)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            xs[i] = SX[i];
+            ys[i] = SY[i];
+            zs[i] = SZ[i + 1];
+        }
+    }
+
+    public static uint CurrentFlags => FLAG;
+    public static int CurrentMac0 => MAC0;
     static readonly uint[] RGB = new uint[3];
     // GPU packets contain only projected XY coordinates, so enhanced texture
     // projection correlates them with the GTE's most recent screen/depth
@@ -638,6 +664,7 @@ public static class Gte
         IR3 = MAC3 < (lm ? 0 : -0x8000) ? (lm ? 0 : -0x8000) : MAC3 > 0x7FFF ? 0x7FFF : MAC3;
 
         int sz = SatSZ((int)(m3 >> 12));
+        LastProjectedDepth = sz;
         SZ[0] = SZ[1]; SZ[1] = SZ[2]; SZ[2] = SZ[3]; SZ[3] = (ushort)sz;
 
         if (TraceNearProjection)
@@ -660,7 +687,8 @@ public static class Gte
         // under the same conditions - Enhanced never reads MAC0 or the packed
         // result for these vertices, so nothing that is drawn changes.
         bool nearKeep =
-            NearKeepGeometry && wideProjection && _lastDivideSaturated;
+            NearKeepGeometry && _lastDivideSaturated &&
+            ConfigManager.View.HighResolution3D && GpuHle.GameplayActive;
         // Measured harmful: withholding these dropped near geometry from
         // 32 to 5.5 primitives per million drawn. Left raising the flags.
         long sx = CheckMac0((long)div * IR1 + OFX); MAC0 = (int)sx;
@@ -1288,11 +1316,19 @@ public static class Gte
                 break;
             case 0x06:
                 if (NoRetailCull &&
+                    _terrainProjectionDepth == 0 &&
                     ConfigManager.View.HighResolution3D &&
                     GpuHle.GameplayActive)
                 {
-                    // Never let the engine reject a primitive on its own
-                    // backface test.
+                    // Diagnostic. Never let the engine reject an object
+                    // primitive on its own backface test, so a scene can be
+                    // driven to see whether that test is what removes geometry
+                    // beside the camera. Terrain is excluded: NCLIP is the only
+                    // thing culling terrain back faces, and without it the
+                    // ground renders as a checkerboard of undersides.
+                    //
+                    // Object back faces WILL be drawn with this on. It is not
+                    // shippable; it answers one question.
                     MAC0 = 0x01000000;
                     break;
                 }

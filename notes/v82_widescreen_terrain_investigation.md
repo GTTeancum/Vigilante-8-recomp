@@ -1885,3 +1885,73 @@ Effect, same runs:
 Safe and doing its job. `RECOMPONE_V82_WIDE_PRECISE_NCLIP=0` disables it.
 
 **Staged:** `V8_2_LOOSE/Vigilante82PC.exe`, SHA256 `1a494ff9ce2708c63d025627...`
+
+### T71 — bypassing retail culling needs the renderer to cull
+
+Authorised to disconnect the retail pipeline rather than keep patching its
+gates one at a time. A prerequisite surfaced immediately:
+
+**The Enhanced renderer does not cull back faces.** It calls
+`_gl.Disable(EnableCap.CullFace)` and relies entirely on the engine's NCLIP
+test to remove them. So neutralising that test submits every interior face as
+well as the geometry we want back.
+
+That makes `RECOMPONE_V82_NO_RETAIL_CULL` a diagnostic rather than a shippable
+change: it answers whether NCLIP is the gate holding the reported wall, but it
+would draw model interiors if shipped alone.
+
+A shippable bypass therefore has two halves:
+
+1. stop the engine rejecting primitives (forcing NCLIP positive), and
+2. cull back faces in the renderer, from the reconstructed camera-space
+   positions it already draws from - where the arithmetic is float and the
+   coordinates are not clamped to +/-1024.
+
+Half 2 needs care: some geometry is legitimately double-sided, so a blanket
+GL cull would remove wanted faces. The camera-space signed area per primitive
+is the same decision NCLIP makes, just computed where it is reliable.
+
+### T72 — a headless reproduction, at last
+
+The reporter's clarifications reframed the artifact completely:
+
+* it happens at **4:3 as well** - so it is not a widescreen bug, and every
+  widescreen-gated fix built for it could never have fired;
+* it is **polygon-level**, not object-level;
+* the trigger is **camera-to-object distance**;
+* it has **always** happened - not a regression.
+
+`tools/recompone-v8-2/measure_triangle_retention.py` reproduces it without any
+manual testing: track each object across a run's dumps and compare its triangle
+count when far against when near. Objects lose 33-83% of their triangles as
+they approach - e.g. `806BD510`, 33 triangles at depth 1864 down to 6 at 525.
+
+Baseline: **13% of tracked objects lose more than 30%** of their polygons when
+close.
+
+### T73 — only removing the engine's backface test helps
+
+| configuration | objects losing >30% |
+|---|---|
+| engine culls normally, coordinate clamp on | 12/93 (13%) |
+| clamp off | 15/89 (17%) |
+| **engine backface culling disabled** | **7/93 (8%)** |
+| engine off + renderer-side cull, one winding | 23/94 (24%) |
+| engine off + renderer-side cull, other winding | 17/93 (18%) |
+| engine culls from unclamped coordinates | 21/89 (24%) |
+
+Differences of a few objects out of ~90 are within noise; the pattern is not.
+Every attempt to *replace* the engine's culling with a supposedly better one
+makes retention worse, while simply removing it improves it.
+
+**Reading:** the replacement test is computed on the wrong vertex order. NCLIP
+uses the GTE's register order, while the renderer receives packet order, and
+packets may store vertices differently. A single global sign cannot then be
+right for a mixed population - which is exactly the observed result, both signs
+worse than baseline.
+
+**Next:** establish the vertex order the engine's NCLIP actually sees, by
+recording SX/SY at the NCLIP instruction alongside the packet the emitter
+writes, and comparing. Until that correspondence is known, renderer-side
+culling cannot replace the engine's, and disabling the engine's leaves back
+faces drawn - which the reporter observed as z-fighting.

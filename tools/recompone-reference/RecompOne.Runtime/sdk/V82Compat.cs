@@ -439,6 +439,7 @@ public static class V82Compat
     /// </summary>
     public static void RecordObjectVisibilityInputs(CpuContext c, IMemory m)
     {
+        RecordCameraPose(c, m);
         _objectCullPosition = c.A0;
         _objectCullRadius = c.A1;
         _lastVisibilityCulled = false;
@@ -450,6 +451,8 @@ public static class V82Compat
     // distance limit. Counting which one fires says where a wall segment is
     // being dropped instead of testing candidate fixes one at a time.
     static bool _lastVisibilityCulled;
+    // Which of func_8002D9E0's three exits fired, for the census.
+    static string? _lastEmptyReason;
     static bool _visibilityTestRan;
     static uint _objectRenderPacketStart;
     static uint _objectRenderAddress;
@@ -465,13 +468,13 @@ public static class V82Compat
             Dispatcher.UnwrapMemory(m).ReadU32(c.GP + 0x610u);
         _visibilityTestRan = false;
         _lastVisibilityCulled = false;
+        _lastEmptyReason = null;
         _renderedObjects++;
     }
 
     public static void TraceObjectRenderEnd(CpuContext c, IMemory m)
     {
-        if ((!TraceObjectCull && !_censusOpen) || !GpuHle.GameplayActive ||
-            _objectRenderAddress == 0u)
+        if (!GpuHle.GameplayActive || _objectRenderAddress == 0u)
             return;
         m = Dispatcher.UnwrapMemory(m);
         if (m.ReadU32(c.GP + 0x610u) != _objectRenderPacketStart)
@@ -488,6 +491,7 @@ public static class V82Compat
         else if (_lastVisibilityCulled)
         { _emptyByFrustum++; outcome = "frustum"; }
         else { _emptyByDistance++; outcome = "distance"; }
+        _lastEmptyReason = outcome;
         RecordCensus(m, _objectRenderAddress, outcome);
     }
 
@@ -525,6 +529,53 @@ public static class V82Compat
     // arming point sits at a different place in the frame than object
     // submission, so an armed window recorded nothing. ~90 objects a frame is
     // cheap enough to just always collect and clear.
+    // Camera pose, captured every frame. With it a capture is self-contained:
+    // any object's world position can be projected to screen offline, so a
+    // question about geometry that is missing does not need another play test
+    // to answer.
+    public static int CamX, CamY, CamZ;
+    public static readonly short[] CamMatrix = new short[9];
+
+    // func_8001D414 links a packet into the ordering table, but only while a
+    // pool counter is under 64. Past that the packet is dropped silently -
+    // a polygon-level loss with no flag, no cull and no trace. Count how often
+    // that happens and how deep the offered geometry was.
+    public static long PoolLinked, PoolDropped;
+    public static long EmitterNearTotal, EmitterNearDropped;
+
+    public readonly record struct RejectedTriangle(
+        uint Emitter, int X0, int Y0, int Z0, int X1, int Y1, int Z1,
+        int X2, int Y2, int Z2, uint Flags, int Mac0);
+
+    public static readonly List<RejectedTriangle> RejectedTriangles = [];
+    public static int PoolHighWater;
+
+    public static void RecordPoolLink(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        uint bufferBase = 0x800C0000u - 0x2A90u;
+        if (m.ReadU32(c.GP + 0x20u) != 0u)
+            bufferBase += 0x404u;
+        int count = unchecked((int)m.ReadU32(bufferBase));
+        if (count > PoolHighWater)
+            PoolHighWater = count;
+        if (count < 64)
+            PoolLinked++;
+        else
+            PoolDropped++;
+    }
+
+    public static void RecordCameraPose(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        CamX = unchecked((int)m.ReadU32(c.GP + 0xF3Cu));
+        CamY = unchecked((int)m.ReadU32(c.GP + 0xF40u));
+        CamZ = unchecked((int)m.ReadU32(c.GP + 0xF44u));
+        for (int i = 0; i < 9; i++)
+            CamMatrix[i] =
+                unchecked((short)m.ReadU16(c.GP + 0xF28u + (uint)(i * 2)));
+    }
+
     public static void BeginObjectCensus() => _censusOpen = true;
 
     public static IReadOnlyList<ObjectRecord> EndObjectCensus() =>
@@ -1371,8 +1422,12 @@ public static class V82Compat
         // pointer has to come from the scope captured on entry. Diagnostic
         // only - gated so a shipping build does not pay a dictionary write and
         // three reads for every object every frame.
-        if (CensusOwnership &&
-            _objectCensus.Count < 8192 &&
+        // Always recorded: one dictionary write and three reads per object per
+        // frame is nothing, and this is the only thing that distinguishes an
+        // object that was offered and drew nothing from one that was never
+        // offered. Gating it meant every capture from a normal play session
+        // came back empty.
+        if (_objectCensus.Count < 8192 &&
             scope.ObjectAddress != 0u &&
             (scope.ObjectAddress & 0x1FFFFFFFu) <= 0x00FFFFF0u)
         {
@@ -1388,7 +1443,9 @@ public static class V82Compat
                 havePos ? unchecked((int)m.ReadU32(pos + 4u)) : 0,
                 havePos ? unchecked((int)m.ReadU32(pos + 8u)) : 0,
                 (int)_objectCullRadius,
-                packetEnd > scope.PacketStart ? "drawn" : "empty",
+                packetEnd > scope.PacketStart
+                    ? "drawn"
+                    : _lastEmptyReason ?? "empty",
                 CensusFrame);
         }
         if (TraceRendererOwnership && _rendererOwnershipTraceCount++ < 128)
@@ -1400,8 +1457,11 @@ public static class V82Compat
         // other submitter reading as "unresolved" - including the arena walls
         // this investigation is chasing. Name them too when a capture is
         // running, so a missing model can be attributed to a subsystem.
-        if (CensusOwnership && !scope.IsVehicle &&
-            packetEnd > scope.PacketStart)
+        // Always named, for the same reason the census is always recorded: a
+        // capture from a normal play session is the only place the reported
+        // artifact appears, and an unattributed packet cannot be traced to the
+        // object that failed to draw it.
+        if (!scope.IsVehicle && packetEnd > scope.PacketStart)
             GpuHle.RegisterPacketOwnerRange(
                 scope.PacketStart,
                 packetEnd,
@@ -1644,21 +1704,72 @@ public static class V82Compat
     static readonly Stack<(uint Addr, uint Start)> IndirectCalls = new();
     public static int IndirectPacketDepth => IndirectCalls.Count;
 
+    // Only the four mesh emitters. Bracketing every indirect call buried the
+    // signal in unrelated traffic.
+    static readonly HashSet<uint> MeshEmitters =
+        [0x80022A4Cu, 0x80022C54u, 0x800229A0u, 0x80022870u];
+
     public static void BeginIndirectCall(CpuContext c, IMemory m, uint addr)
     {
+        if (!MeshEmitters.Contains(addr))
+            return;
         IndirectCalls.Push(
             (addr, Dispatcher.UnwrapMemory(m).ReadU32(c.GP + 0x610u)));
     }
 
+    // Each mesh-emitter call handles one triangle, so a call that writes no
+    // packet is a polygon the engine considered and dropped. Counting those
+    // per emitter measures polygon-level loss directly, without having to
+    // guess which test inside the emitter rejected it.
+    public static readonly Dictionary<uint, (long Emitted, long Dropped)>
+        IndirectPolygonCounts = [];
+
     public static void EndIndirectCall(CpuContext c, IMemory m, uint addr)
     {
-        if (IndirectCalls.Count == 0)
+        if (!MeshEmitters.Contains(addr) || IndirectCalls.Count == 0)
             return;
+        // Depth of the triangle just projected, so drops can be attributed to
+        // how close the polygon was rather than merely counted.
+        int sz = Gte.LastProjectedDepth;
+        if (sz > 0)
+        {
+            if (sz < 128) EmitterNearTotal++;
+        }
         var (target, start) = IndirectCalls.Pop();
         uint end = Dispatcher.UnwrapMemory(m).ReadU32(c.GP + 0x610u);
         if (end > start)
             GpuHle.RegisterPacketOwnerRange(
                 start, end, $"v82-indirect=0x{target:X8}");
+        if (sz > 0 && sz < 128 && end <= start) EmitterNearDropped++;
+        // Record the triangle itself when the emitter wrote no packet. This is
+        // the geometry that goes missing, and nothing else in the pipeline can
+        // observe it.
+        if (end <= start && RejectedTriangles.Count < 4096)
+        {
+            Span<int> xs = stackalloc int[3];
+            Span<int> ys = stackalloc int[3];
+            Span<int> zs = stackalloc int[3];
+            Gte.ReadProjectedTriangle(xs, ys, zs);
+            RejectedTriangles.Add(new RejectedTriangle(
+                target, xs[0], ys[0], zs[0], xs[1], ys[1], zs[1],
+                xs[2], ys[2], zs[2], Gte.CurrentFlags, Gte.CurrentMac0));
+        }
+        IndirectPolygonCounts.TryGetValue(target, out var counts);
+        IndirectPolygonCounts[target] = end > start
+            ? (counts.Emitted + 1, counts.Dropped)
+            : (counts.Emitted, counts.Dropped + 1);
+    }
+
+    public static string DescribePolygonDrops()
+    {
+        var parts = new List<string>();
+        foreach (var kv in IndirectPolygonCounts)
+        {
+            if (kv.Value.Emitted + kv.Value.Dropped < 200)
+                continue;
+            parts.Add($"{kv.Key:X8}:{kv.Value.Emitted}/{kv.Value.Dropped}");
+        }
+        return string.Join(" ", parts);
     }
 
     public static void BeginSceneryPass(CpuContext c, IMemory m) =>

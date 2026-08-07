@@ -171,6 +171,14 @@ internal static class HostWindow
             if (_windowVisible)
             {
                 _window.IsVisible = true;
+                // The window is created hidden so the first frame can be
+                // cleared before it appears, and a maximized state set at
+                // creation does not survive being shown. Reassert it once the
+                // window is actually on screen.
+                if (!ConfigManager.View.Fullscreen &&
+                    ConfigManager.View.StartMaximized &&
+                    _window.WindowState != WindowState.Maximized)
+                    _window.WindowState = WindowState.Maximized;
                 try { _window.DoRender(); } catch { }
             }
         }

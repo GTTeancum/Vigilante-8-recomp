@@ -235,6 +235,15 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     /// carrying view-space provenance. The packed <c>X</c> is ignored there,
     /// so moving a backdrop quad means moving <c>ViewX</c>.
     /// </summary>
+    static float ReconstructedY(in GlVertex v) =>
+        v.HasViewSpace >= 1f && v.ViewZ > 0f && v.ProjectionScale != 0f
+            ? v.ProjectionCenterY + v.ViewY * v.ProjectionScale / v.ViewZ
+            : v.Y;
+
+    static readonly bool RendererCull =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_RENDERER_CULL") == "1";
+
     static float ReconstructedX(in GlVertex v) =>
         v.HasViewSpace >= 1f && v.ViewZ > 0f && v.ProjectionScale != 0f
             ? v.ProjectionCenterX + v.ViewX * v.ProjectionScale / v.ViewZ
@@ -308,6 +317,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     // the label matches one of the patterns it preserves, so paired captures
     // are labelled gameplay_NNN and the index is logged next to the frame.
     static int _geometryDumpIndex;
+    static int _drawnFrameCounter;
 
     static bool _geometryDumpRequested;
     static bool _geometryDumping;
@@ -1731,6 +1741,30 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         // outer edge out to the frame boundary, moving the texture coordinate
         // with it at the rate the quad itself establishes, so the sky
         // continues rather than stretches.
+        // Backface culling, done here instead of by the engine. The engine's
+        // NCLIP test decides this from coordinates clamped to +/-1024 and a
+        // divide that overflows below depth 128, which is why it discards
+        // polygons of anything the camera gets close to. The same decision
+        // from the reconstructed camera-space projection is exact: float
+        // arithmetic, no clamp, no overflow.
+        //
+        // Terrain is excluded. Its winding convention differs and culling it
+        // here renders the ground as a checkerboard of undersides.
+        if (RendererCull && GpuHle.GameplayActive && !f.Vehicle &&
+            f.Material is HleMaterialKind.Opaque or HleMaterialKind.AlphaTest &&
+            va.HasViewSpace >= 1f && vb.HasViewSpace >= 1f &&
+            vc.HasViewSpace >= 1f)
+        {
+            float ax = ReconstructedX(va), ay = ReconstructedY(va);
+            float bx = ReconstructedX(vb), by = ReconstructedY(vb);
+            float cx = ReconstructedX(vc), cy = ReconstructedY(vc);
+            float area = ax * (by - cy) + bx * (cy - ay) + cx * (ay - by);
+            // Sign convention determined empirically: culling the opposite
+            // sign removed geometry that should be visible.
+            if (area >= 0f)
+                return;
+        }
+
         if (BackdropFill && GpuHle.GameplayActive &&
             _kTarget is { Margin: > 0 } bdTarget &&
             f.Material is HleMaterialKind.Opaque or HleMaterialKind.AlphaTest)
@@ -3117,6 +3151,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 $"nclipT={nclip.Terrain} nclipO={nclip.Object} " +
                 $"rtp={rtp.Total} rtpNear100={rtp.Near100} " +
                 $"flagReads={Gte.FlagRegisterReads} " +
+                $"polyDrops[{Sdk.V82Compat.DescribePolygonDrops()}] " +
+                $"nearPolys={Sdk.V82Compat.EmitterNearTotal} " +
+                $"nearPolysDropped={Sdk.V82Compat.EmitterNearDropped} " +
+                $"poolDropped={Sdk.V82Compat.PoolDropped} " +
+                $"poolPeak={Sdk.V82Compat.PoolHighWater} " +
                 $"flagErrors={Gte.FlagRegisterErrors} " +
                 $"depths[{ConsumeNearDepthHistogram()}] " +
                 $"rtpNear60={rtp.Near60} H={rtp.H} " +
@@ -3139,6 +3178,17 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             }
             var census = Sdk.V82Compat.EndObjectCensus();
             var header = new System.Text.StringBuilder();
+            var cm = Sdk.V82Compat.CamMatrix;
+            header.Append("# camera world=")
+                  .Append(Sdk.V82Compat.CamX).Append(',')
+                  .Append(Sdk.V82Compat.CamY).Append(',')
+                  .Append(Sdk.V82Compat.CamZ).Append(" matrix=");
+            for (int i = 0; i < cm.Length; i++)
+            {
+                if (i > 0) header.Append(',');
+                header.Append(cm[i]);
+            }
+            header.AppendLine();
             header.Append("# objects considered this frame: ")
                   .Append(census.Count)
                   .Append(" hookCalls=")
@@ -3157,8 +3207,20 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                       .Append(o.Z).Append(" radius=").Append(o.Radius)
                       .Append(" lastFrame=").Append(o.Frame)
                       .AppendLine();
+            foreach (var r in Sdk.V82Compat.RejectedTriangles)
+                header.Append("# rejected ")
+                      .Append(r.Emitter.ToString("X8")).Append(' ')
+                      .Append(r.X0).Append(',').Append(r.Y0).Append(',')
+                      .Append(r.Z0).Append(' ')
+                      .Append(r.X1).Append(',').Append(r.Y1).Append(',')
+                      .Append(r.Z1).Append(' ')
+                      .Append(r.X2).Append(',').Append(r.Y2).Append(',')
+                      .Append(r.Z2).Append(" flags=")
+                      .Append(r.Flags.ToString("X8")).Append(" mac0=")
+                      .Append(r.Mac0).AppendLine();
             System.IO.File.WriteAllText(
                 path, header.ToString() + (_geometryDump?.ToString() ?? ""));
+            Sdk.V82Compat.RejectedTriangles.Clear();
             _geometryDumpIndex++;
             Console.WriteLine(
                 $"[V82GeometryDump] frame={_frame} " +
@@ -3176,7 +3238,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                  (GeometryDumpFrame > 0 && _frame == GeometryDumpFrame) ||
                  (GeometryDumpEvery > 0 && GpuHle.GameplayActive &&
                   _terrainFrameWorldTriangles > 0 &&
-                  (_frame % GeometryDumpEvery) == 0))
+                  // Count drawn frames rather than testing _frame: it advances
+                  // by two during gameplay and can sit permanently on odd
+                  // values, so a modulo of an even interval never fires.
+                  (++_drawnFrameCounter % GeometryDumpEvery) == 0))
         {
             _geometryDumpRequested = false;
             _geometryDumping = true;
