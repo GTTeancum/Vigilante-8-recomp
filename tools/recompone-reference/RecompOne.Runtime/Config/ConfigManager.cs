@@ -20,7 +20,17 @@ public static class ConfigManager
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
 
-    const string GameConfigPath = "settings.json";
+    // settings.json used to be a bare relative path, so it resolved against
+    // whatever directory the game happened to be launched from. Several copies
+    // exist across a working tree and a staged install, holding different
+    // input profiles, which meant the bindings actually in force depended on
+    // the launch directory rather than on what the player configured -- a
+    // Classic copy silently leaves brake/reverse on the stick and D-pad only.
+    // Resolve it next to the executable instead, and migrate a config found
+    // beside the launch directory the first time so nothing is lost.
+    static readonly string GameConfigPath =
+        Path.Combine(AppContext.BaseDirectory, "settings.json");
+    const string LegacyGameConfigPath = "settings.json";
     const string InterfaceFile = "interface.ini";
 
     public static GameConfig Game { get; private set; } = new();
@@ -31,10 +41,16 @@ public static class ConfigManager
     public static void Load()
     {
         bool saveGame = false;
-        if (File.Exists(GameConfigPath))
+        string? source =
+            File.Exists(GameConfigPath) ? GameConfigPath
+            : File.Exists(LegacyGameConfigPath) ? Path.GetFullPath(LegacyGameConfigPath)
+            : null;
+        if (source != null)
         {
-            try { Game = JsonSerializer.Deserialize(File.ReadAllText(GameConfigPath), RuntimeJsonContext.Default.GameConfig) ?? new(); }
+            try { Game = JsonSerializer.Deserialize(File.ReadAllText(source), RuntimeJsonContext.Default.GameConfig) ?? new(); }
             catch { Game = new(); saveGame = true; }
+            if (!string.Equals(source, GameConfigPath, StringComparison.OrdinalIgnoreCase))
+                saveGame = true;
         }
         else
         {
@@ -67,6 +83,13 @@ public static class ConfigManager
             saveGame = true;
         }
         if (saveGame) SaveGame();
+        Console.Error.WriteLine(
+            $"[Config] settings={GameConfigPath} " +
+            $"profile={Game.InputProfile} " +
+            $"down=[{string.Join(',', Game.Pad.Down)}]" +
+            (source != null && !string.Equals(source, GameConfigPath,
+                StringComparison.OrdinalIgnoreCase)
+                ? $" (migrated from {source})" : string.Empty));
 
         if (File.Exists(InterfaceFile))
         {

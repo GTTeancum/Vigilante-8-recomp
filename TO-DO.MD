@@ -6,10 +6,12 @@ Status: AUTONOMOUS WORK EXHAUSTED - AWAITING USER SIGN-OFF
 # User entered list
 
 1. Vehicles will not reverse. Brakes allow stopping, but not reversing.
-   The engine's reverse is confirmed working on the digital Down command (measured brake-then-reverse
-   curve, notes/v82_reverse_input_investigation.md). Gameplay input is digital only; proportional analog
-   is not supported by the game and reporting an analog pad id degrades driving. Analog binding
-   hysteresis added. The reporter's LT/face-button symptom is not yet reproduced.
+   RESOLVED pending confirmation. The engine's reverse was never broken; `settings.json` resolved
+   against the launch directory, so the bindings in force depended on where the game was started
+   from. A Classic copy leaves brake/reverse on the stick and D-pad only, with face buttons on
+   "Brake" and LT on fire -- exactly the reported symptom. Config now resolves next to the
+   executable and the active profile is logged at startup. See
+   notes/v82_reverse_input_investigation.md.
 2. Widescreen support
 3. Support for higher resolution textures. Possibly make UI shapes runtime-drawn instead of textured
 4. Support for modded content, including V8: Second Offense and Star Wars Demolition content, and ports of Interstate 76 cars.

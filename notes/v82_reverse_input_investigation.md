@@ -84,15 +84,68 @@ because they engage at 8000 of 32767 (24%) against the sticks' 16000 (49%).
 `Apply` now evaluates every binding rather than returning on the first hit, so
 the latch state of the rest stays current.
 
+## Root cause: the effective input profile depended on the launch directory
+
+`settings.json` and `interface.ini` were bare relative paths, so they resolved
+against whatever directory the process was started from. The working directory
+is never normalised (`Program.cs` only records it). A working tree plus a
+staged install holds several copies, and they disagree:
+
+```
+./settings.json                                  Modern         Down=[2,12,105]
+./V8_2_LOOSE/settings.json                       Trigger Drive  Down=[100,12,105]
+./reference-v8-2/.../win-x64/settings.json       Modern         Down=[2,12,105]
+./PS1 game/settings.json                         Classic        Down=[12,105]
+```
+
+Under **Classic** the reported symptom is exact and complete:
+
+| input | Classic binding | result |
+|-------|-----------------|--------|
+| left stick down (105) | Down | brake, then reverse |
+| d-pad down (12) | Down | brake, then reverse |
+| face X (2) | Square = "Brake" | stops, never reverses |
+| LT (100) | L2 = fire weapon | nothing |
+
+So a player who configures Trigger Drive in one location and launches from
+another gets Classic or Modern bindings instead, and brake/reverse survives
+only on the stick and D-pad. That is "the control stick works as reverse, face
+buttons or LT do not, depending on controller config".
+
+`settings.json` now resolves next to the executable, deterministically,
+migrating a config found beside the launch directory the first time so nothing
+is lost. Startup logs the resolved path, the active profile and the Down
+bindings, which makes this class of problem self-evident:
+
+```
+[Config] settings=...\win-x64\settings.json profile=Trigger Drive down=[100,12,105]
+```
+
+`interface.ini` is deliberately left alone: the soak determinism tooling
+restores it between runs and moving it would disturb that.
+
+## Verification
+
+With the Trigger Drive config loaded, driven through the real binding chain
+(profile resolution, binding arrays, hysteresis latch) using a synthetic pad:
+
+| input | native bit | final signed forward speed | |
+|-------|-----------|---------------------------|---|
+| LT | Down | -32,549 | reverses |
+| left stick down | Down | -23,764 | reverses |
+| A (bound to L2) | none | - | correctly no Down |
+
 ## Not resolved
 
-The reported symptom itself is not reproduced. Scripted input writes
-`Controller.State` directly and bypasses the binding layer entirely, so no
-headless run exercises the path where LT or a face button differs from the
-stick. The hysteresis change is a mechanism-level fix for a real defect found
-on the way; whether it is *the* defect behind the report is unproven.
+Ordinary scripted pulses write `Controller.State` directly and bypass profiles,
+`ResolvePad` and `Pressed`, so the binding layer had no headless coverage at
+all. Input scripts now also accept physical inputs -- `PHYS:LT`, `PHYS:A`,
+`PHYS:LSDOWN`, `PHYS:DPADDOWN` and so on -- which are routed through the real
+resolution path against a synthetic controller. That is what made the profile
+difference visible and what the verification table above is measured with.
 
-The remaining candidate that cannot be settled from here is the device side:
-a controller whose SDL mapping does not expose LT as `Triggerleft` (some older
-drivers report both triggers on one shared axis) would show exactly this
-symptom, with stick and D-pad working because they are stock bindings.
+One device-side possibility remains untestable from here: a controller whose
+SDL mapping does not expose LT as `Triggerleft` (some older drivers report both
+triggers on a single shared axis) would still fail while stick and D-pad work.
+The startup `[Config]` line plus a `PHYS:` probe run distinguishes that from a
+profile problem in one go.

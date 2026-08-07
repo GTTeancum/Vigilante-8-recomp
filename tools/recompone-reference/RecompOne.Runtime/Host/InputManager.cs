@@ -1,5 +1,6 @@
 using Silk.NET.Input;
 using Silk.NET.SDL;
+using System.Linq;
 using System.Runtime.InteropServices;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Hardware;
@@ -33,6 +34,34 @@ internal static unsafe class InputManager
         string? Stage, int Start, int End, ushort Pad1Mask, ushort Pad2Mask);
 
     static readonly List<ScriptedPulse> _scriptedInput = new();
+
+    // Physical-input pulses. An ordinary scripted pulse writes Controller.State
+    // directly and so bypasses profiles, ResolvePad and Pressed entirely --
+    // which means no headless run has ever covered the binding layer, the very
+    // place a "this button does not work" report lives. A physical pulse
+    // instead marks a controller input as held and lets the real resolution
+    // path decide which native bit that produces.
+    readonly record struct PhysicalPulse(
+        string? Stage, int Start, int End, int[] Codes, int Pad);
+
+    static readonly List<PhysicalPulse> _scriptedPhysical = new();
+    static readonly HashSet<int>[] _fakePressed = [new(), new()];
+    static bool _fakePadActive;
+
+    static readonly Dictionary<string, int> PhysicalNames = new(
+        StringComparer.OrdinalIgnoreCase)
+    {
+        ["A"] = 0, ["B"] = 1, ["X"] = 2, ["Y"] = 3,
+        ["BACK"] = 4, ["START"] = 6, ["LS"] = 7, ["RS"] = 8,
+        ["LB"] = 9, ["RB"] = 10,
+        ["DPADUP"] = 11, ["DPADDOWN"] = 12,
+        ["DPADLEFT"] = 13, ["DPADRIGHT"] = 14,
+        ["LT"] = LeftTrigger, ["RT"] = RightTrigger,
+        ["LSLEFT"] = LeftStickLeft, ["LSRIGHT"] = LeftStickRight,
+        ["LSUP"] = LeftStickUp, ["LSDOWN"] = LeftStickDown,
+        ["RSLEFT"] = RightStickLeft, ["RSRIGHT"] = RightStickRight,
+        ["RSUP"] = RightStickUp, ["RSDOWN"] = RightStickDown,
+    };
     static int _inputPoll;
     static string? _scriptStage;
     static int _stagePoll;
@@ -163,6 +192,8 @@ internal static unsafe class InputManager
     static void ParseScriptedInput()
     {
         _scriptedInput.Clear();
+        _scriptedPhysical.Clear();
+        _fakePadActive = false;
         _inputPoll = 0;
         _scriptStage = null;
         _stagePoll = 0;
@@ -205,22 +236,40 @@ internal static unsafe class InputManager
 
             ushort pad1Mask = 0;
             ushort pad2Mask = 0;
+            var physical = new List<(int Code, int Pad)>();
             foreach (string token in sides[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
                 string button = token;
                 int pad = 1;
                 int colon = token.IndexOf(':');
+                // Only a pad selector is consumed here; "PHYS:" is part of the
+                // input name and must survive for the physical branch below.
                 if (colon >= 0)
                 {
                     string prefix = token[..colon].Trim();
-                    button = token[(colon + 1)..].Trim();
-                    pad = prefix.ToUpperInvariant() switch
+                    int? selected = prefix.ToUpperInvariant() switch
                     {
                         "P1" or "PAD1" => 1,
                         "P2" or "PAD2" => 2,
+                        "PHYS" => null,
                         _ => throw new InvalidOperationException(
                             $"Unknown scripted controller prefix: {prefix}"),
                     };
+                    if (selected is int padIndex)
+                    {
+                        pad = padIndex;
+                        button = token[(colon + 1)..].Trim();
+                    }
+                }
+
+                if (button.StartsWith("PHYS:", StringComparison.OrdinalIgnoreCase))
+                {
+                    string name = button[5..].Trim();
+                    if (!PhysicalNames.TryGetValue(name, out int code))
+                        throw new InvalidOperationException(
+                            $"Unknown scripted physical input: {name}");
+                    physical.Add((code, pad));
+                    continue;
                 }
 
                 ushort mask = button.ToUpperInvariant() switch
@@ -243,6 +292,15 @@ internal static unsafe class InputManager
                 };
                 if (pad == 1) pad1Mask |= mask;
                 else pad2Mask |= mask;
+            }
+            if (physical.Count > 0)
+            {
+                _fakePadActive = true;
+                foreach (var group in physical.GroupBy(entry => entry.Pad))
+                    _scriptedPhysical.Add(new PhysicalPulse(
+                        stage, start, start + duration,
+                        group.Select(entry => entry.Code).ToArray(),
+                        group.Key - 1));
             }
             _scriptedInput.Add(new ScriptedPulse(
                 stage, start, start + duration, pad1Mask, pad2Mask));
@@ -315,6 +373,20 @@ internal static unsafe class InputManager
             }
             Controller.State &= (ushort)~pulse.Pad1Mask;
             Controller.State2 &= (ushort)~pulse.Pad2Mask;
+        }
+        if (_fakePadActive)
+        {
+            _fakePressed[0].Clear();
+            _fakePressed[1].Clear();
+            foreach (var pulse in _scriptedPhysical)
+            {
+                int currentPoll = pulse.Stage == null ? poll
+                    : pulse.Stage == _scriptStage ? stagePoll : -1;
+                if (currentPoll < pulse.Start || currentPoll >= pulse.End) continue;
+                int pad = Math.Clamp(pulse.Pad, 0, 1);
+                foreach (int code in pulse.Codes) _fakePressed[pad].Add(code);
+            }
+            ApplyFakePads();
         }
         if (_scriptExitAfterPoll >= 0 && poll >= _scriptExitAfterPoll)
         {
@@ -452,6 +524,80 @@ internal static unsafe class InputManager
         cfg.L1.Length > 0 || cfg.R1.Length > 0 || cfg.L2.Length > 0 || cfg.R2.Length > 0 ||
         cfg.L3.Length > 0 || cfg.R3.Length > 0 || cfg.Start.Length > 0 || cfg.Select.Length > 0 ||
         cfg.Up.Length > 0 || cfg.Down.Length > 0 || cfg.Left.Length > 0 || cfg.Right.Length > 0;
+
+    // Runs the synthetic controller through the same profile resolution and
+    // press tests as a real pad, so a scripted physical input exercises
+    // ResolvePad, the binding arrays and the hysteresis latch.
+    static void ApplyFakePads()
+    {
+        for (int pad = 0; pad < 2; pad++)
+        {
+            GamepadBindings bindings = InputBindingResolver.ResolvePad(
+                ConfigManager.Game.InputProfile,
+                pad == 0 ? ConfigManager.Game.Pad : ConfigManager.Game.Pad2,
+                GpuHle.GameplayActive,
+                _nativeGameplayMenuPolls > 0);
+            ushort s = pad == 0 ? Controller.State : Controller.State2;
+            s = FakeApply(bindings.Cross,    Controller.Cross,    s, pad);
+            s = FakeApply(bindings.Circle,   Controller.Circle,   s, pad);
+            s = FakeApply(bindings.Square,   Controller.Square,   s, pad);
+            s = FakeApply(bindings.Triangle, Controller.Triangle, s, pad);
+            s = FakeApply(bindings.L1,       Controller.L1,       s, pad);
+            s = FakeApply(bindings.R1,       Controller.R1,       s, pad);
+            s = FakeApply(bindings.L2,       Controller.L2,       s, pad);
+            s = FakeApply(bindings.R2,       Controller.R2,       s, pad);
+            s = FakeApply(bindings.L3,       Controller.L3,       s, pad);
+            s = FakeApply(bindings.R3,       Controller.R3,       s, pad);
+            s = FakeApply(bindings.Start,    Controller.Start,    s, pad);
+            s = FakeApply(bindings.Select,   Controller.Select,   s, pad);
+            s = FakeApply(bindings.Up,       Controller.Up,       s, pad);
+            s = FakeApply(bindings.Down,     Controller.Down,     s, pad);
+            s = FakeApply(bindings.Left,     Controller.Left,     s, pad);
+            s = FakeApply(bindings.Right,    Controller.Right,    s, pad);
+            if (pad == 0) Controller.State = s; else Controller.State2 = s;
+
+            // Keep the analog bytes consistent with a stick that is actually
+            // deflected, so the pad image the game sees is coherent.
+            byte lx = FakeAxisByte(pad, LeftStickLeft, LeftStickRight);
+            byte ly = FakeAxisByte(pad, LeftStickUp, LeftStickDown);
+            byte rx = FakeAxisByte(pad, RightStickLeft, RightStickRight);
+            byte ry = FakeAxisByte(pad, RightStickUp, RightStickDown);
+            if (pad == 0)
+            {
+                Controller.LeftX = lx; Controller.LeftY = ly;
+                Controller.RightX = rx; Controller.RightY = ry;
+            }
+            else
+            {
+                Controller.LeftX2 = lx; Controller.LeftY2 = ly;
+                Controller.RightX2 = rx; Controller.RightY2 = ry;
+            }
+        }
+    }
+
+    static byte FakeAxisByte(int pad, int negative, int positive) =>
+        _fakePressed[pad].Contains(positive) ? (byte)0xFF
+        : _fakePressed[pad].Contains(negative) ? (byte)0x00
+        : (byte)0x80;
+
+    static ushort FakeApply(int[] bindings, ushort bit, ushort s, int pad)
+    {
+        bool pressed = false;
+        foreach (int binding in bindings)
+            if (FakePressed(binding, pad)) pressed = true;
+        return pressed ? (ushort)(s & ~bit) : s;
+    }
+
+    static bool FakePressed(int binding, int pad)
+    {
+        bool held = _fakePressed[pad].Contains(binding);
+        int value = held ? short.MaxValue : 0;
+        if (binding == LeftTrigger || binding == RightTrigger)
+            return AnalogLatch(pad, binding, value, AxisThreshold, latch: true);
+        if (IsStickBinding(binding))
+            return AnalogLatch(pad, binding, value, StickThreshold, latch: true);
+        return held;
+    }
 
     static void PollGamepads()
     {

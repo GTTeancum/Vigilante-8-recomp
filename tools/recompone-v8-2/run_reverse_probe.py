@@ -42,7 +42,7 @@ def build_input_script(slot: int, character_slot: int = 0) -> str:
     return (
         f"{script}\n"
         f"60+{COAST_FRAMES}=CROSS\n"
-        f"{60 + COAST_FRAMES + 30}+{HOLD_FRAMES}=DOWN\n"
+        f"{60 + COAST_FRAMES + 30}+{HOLD_FRAMES}={_HOLD_BUTTON}\n"
     )
 
 
@@ -61,6 +61,9 @@ if __name__ == "__main__":
     args, _ = ap.parse_known_args()
 
     os.environ["RECOMPONE_V82_REVERSE_TRACE"] = "1"
+    # REVERSE_PROBE_BUTTON may name a native command (DOWN) or, with a
+    # "PHYS:" prefix, a physical controller input (PHYS:LT) that is routed
+    # through profile resolution exactly as a real pad would be.
     os.environ["RECOMPONE_V82_SOAK_NO_AUTOINPUT"] = "1"
     if args.analog:
         os.environ["RECOMPONE_V82_DIGITAL_ANALOG"] = "1"
