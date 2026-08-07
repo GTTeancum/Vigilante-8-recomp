@@ -138,7 +138,23 @@ public sealed class PSMemory : IMemory
             Runtime.RamLog.RecordRead(phys % (uint)_ram.Length, size);
     }
 
-    private Span<byte> Resolve(uint address, int size)
+    // Reads of an unmapped address terminate the process today. Hardware does
+    // no such thing: it returns whatever the bus yields and the game carries
+    // on. Quest mode reaches a call that passes a corrupted string pointer for
+    // two of the eighteen character types, and the resulting fatal read is
+    // what the player sees as the game freezing on that quest. Returning zero
+    // ends the string harmlessly and keeps the game running, while a bad
+    // *write* still throws, because that corrupts state and must be caught.
+    static readonly bool StrictUnmappedReads =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_STRICT_UNMAPPED_READS") == "1";
+    static readonly byte[] _unmappedRead = new byte[8];
+    readonly HashSet<uint> _reportedUnmapped = [];
+
+    private Span<byte> Resolve(uint address, int size) =>
+        Resolve(address, size, forWrite: true);
+
+    private Span<byte> Resolve(uint address, int size, bool forWrite)
     {
         uint phys = MemoryMap.ToPhysical(address);
 
@@ -155,6 +171,15 @@ public sealed class PSMemory : IMemory
             return _bios.AsSpan((int)(phys - MemoryMap.BiosBase), size);
 
         V8Compat.TraceUnmappedMemoryAddress(address, size);
+        if (!forWrite && !StrictUnmappedReads)
+        {
+            if (_reportedUnmapped.Add(address))
+                Console.Error.WriteLine(
+                    $"[Memory] unmapped read at 0x{address:X8} " +
+                    $"size={size}; returning zero");
+            Array.Clear(_unmappedRead);
+            return _unmappedRead.AsSpan(0, size);
+        }
         throw new InvalidOperationException($"unmapped address: 0x{address:X8}");
     }
 
@@ -166,7 +191,7 @@ public sealed class PSMemory : IMemory
         uint phys = MemoryMap.ToPhysical(address);
         TrackRead(phys, 1);
         if (_cd != null && IsCd(phys)) return _cd.Read(phys);
-        return Resolve(address, 1)[0];
+        return Resolve(address, 1, forWrite: false)[0];
     }
 
     public ushort ReadU16(uint address)
@@ -176,7 +201,7 @@ public sealed class PSMemory : IMemory
         if (_cd != null && IsCd(phys)) return _cd.Read(phys);
         if (IsSpu(phys)) return _spu.ReadReg16(phys);
         if (Timers.InRange(phys) && _timers.TryRead(phys, out uint tv)) return (ushort)tv;
-        var s = Resolve(address, 2);
+        var s = Resolve(address, 2, forWrite: false);
         return (ushort)(s[0] | (s[1] << 8));
     }
 
@@ -192,7 +217,7 @@ public sealed class PSMemory : IMemory
         if (_cd != null && IsCd(phys)) return _cd.Read(phys);
         if (IsSpu(phys)) return (uint)(_spu.ReadReg16(phys) | (_spu.ReadReg16(phys + 2) << 16));
         if (Timers.InRange(phys) && _timers.TryRead(phys, out uint tv)) return tv;
-        var s = Resolve(address, 4);
+        var s = Resolve(address, 4, forWrite: false);
         return (uint)(s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24));
     }
 

@@ -1955,3 +1955,73 @@ recording SX/SY at the NCLIP instruction alongside the packet the emitter
 writes, and comparing. Until that correspondence is known, renderer-side
 culling cannot replace the engine's, and disabling the engine's leaves back
 faces drawn - which the reporter observed as z-fighting.
+
+## T74 — Quest-mode crash (TO-DO #3) root cause
+
+Smoked quest mode across all 18 character slots. 16 passed; slots 5 and 11 died
+identically:
+
+```
+System.InvalidOperationException: unmapped address: 0x24020D0E
+  PSMemory.ReadU8 -> func_800196B8 -> func_80103F10 -> func_80033550 -> func_800132CC
+```
+
+`0x24020D0E` is a MIPS instruction word (`addiu v0, zero, 0x0D0E`), not a
+pointer. `func_800196B8` is the text formatter and walks it byte by byte.
+
+### The chain
+
+Instrumenting `S5` (the string argument) inside `func_80103F10` showed it was
+already garbage on entry, so the caller supplies it. The live caller chain is
+`func_80011540 -> func_80014FD8 -> func_800132CC -> func_80033550 ->
+func_80103F10`, and the argument is built in `func_800132CC`
+(main.cs:2905-2921) by a two-level table walk:
+
+```
+A2 = (sbyte)[gp+0x1104]            ; quest record index
+A1 = [gp+0x1034]                   ; table base
+A1 = [A1 + A2*4 + 0x10]            ; record pointer
+A3 = (sbyte)[gp+0xC3C]             ; sub-index
+A1 = [A1 + 12*A3 + 8]              ; string pointer
+```
+
+Traced values at the failure:
+
+```
+[QuestText] bad string ptr 0x24020D0E table=0x807F4580
+            recIndex=5 subIndex=0 record=0x00000000
+```
+
+**The record pointer is NULL.** With `A1 = 0` and `A3 = 0`, the second load
+reads `[0x00000008]` — the PS1 exception-vector region — and gets a BIOS
+instruction word back, which is then treated as a string. So the defect is a
+missing quest record for that index, and everything downstream is the game
+faithfully dereferencing whatever it found at address 8.
+
+Note the earlier hypothesis in this file's working notes — that
+`func_80103F10`'s random 53-entry taunt table at `0x8010A390` was the source —
+is wrong. That branch only runs when the caller passes NULL, and a dump hook
+placed on it never fired.
+
+### What is still unknown
+
+Why `[table + 5*4 + 0x10]` is NULL. Both failing slots are consistent with the
+`/6` arithmetic a few instructions later (5 and 11 differ by 6), so this looks
+like a per-character quest record that was never populated. It is not yet
+established whether that is a real data-loading gap or an artifact of the smoke
+harness injecting the character through `RECOMPONE_V82_PLAYER_TYPE` instead of
+the normal selection flow, which may be what populates the table.
+
+### Mitigation shipped
+
+`PSMemory.Resolve` now distinguishes reads from writes. An unmapped **read**
+logs once and returns zero; an unmapped **write** still throws, because a bad
+write corrupts state and must be caught. Hardware behaves the same way: it
+returns whatever the bus yields and the game carries on. Set
+`RECOMPONE_STRICT_UNMAPPED_READS=1` to restore the old fatal behaviour when
+hunting bugs.
+
+With that in place all 18 slots complete a full quest run. The failing two each
+log exactly one `[Memory] unmapped read at 0x24020D0E size=1; returning zero`;
+the zero terminates the string, so the affected line renders blank instead of
+killing the process.
