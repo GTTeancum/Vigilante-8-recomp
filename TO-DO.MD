@@ -17,6 +17,7 @@ Status: AUTONOMOUS WORK EXHAUSTED - AWAITING USER SIGN-OFF
 9. Quest mode completion: each of the fifteen quests must be playable to the end and must unlock the
    character it awards. Entering quest mode is verified for all fifteen (see notes T74); stage-by-stage
    progression and the unlock itself are not started.
+10. Port Y the Alien from the original Vigilante 8. (Assigned to Codex, not this agent.)
 
 ## Closed
 
