@@ -5,28 +5,28 @@ Status: AUTONOMOUS WORK EXHAUSTED - AWAITING USER SIGN-OFF
 
 # User entered list
 
-1. Vehicles will not reverse. Brakes allow stopping, but not reversing.
-   RESOLVED pending confirmation. The engine's reverse was never broken; `settings.json` resolved
-   against the launch directory, so the bindings in force depended on where the game was started
-   from. A Classic copy leaves brake/reverse on the stick and D-pad only, with face buttons on
-   "Brake" and LT on fire -- exactly the reported symptom. Config now resolves next to the
-   executable and the active profile is logged at startup. See
-   notes/v82_reverse_input_investigation.md.
-2. Widescreen support
-3. Support for higher resolution textures. Possibly make UI shapes runtime-drawn instead of textured
-4. Support for modded content, including V8: Second Offense and Star Wars Demolition content, and ports of Interstate 76 cars.
+1. Widescreen support
+2. Support for higher resolution textures. Possibly make UI shapes runtime-drawn instead of textured
+3. Support for modded content, including V8: Second Offense and Star Wars Demolition content, and ports of Interstate 76 cars.
    Interstate '76 `I76.ZFS` source staging is complete in ignored `I76_ZFS/`; conversion of the 34 inventoried `.vdf` vehicle candidates remains deferred.
-5. Updating of in-game menus so that options like resolution, controls, etc are not externall
-6. Windows detection of controller type (Xbox, PS, etc) and a custom model for each in controls (wishlist)
-7. "advanced" (PS2 era) lighting options. Bettter lights generally, but also shadows
-8. Game will occasionally freeze for 2-4 seconds
-9. Quest mode completion: each of the fifteen quests must be playable to the end and must unlock the
+4. Updating of in-game menus so that options like resolution, controls, etc are not externall
+5. Windows detection of controller type (Xbox, PS, etc) and a custom model for each in controls (wishlist)
+6. "advanced" (PS2 era) lighting options. Bettter lights generally, but also shadows
+7. Game will occasionally freeze for 2-4 seconds
+8. Quest mode completion: each of the fifteen quests must be playable to the end and must unlock the
    character it awards. Entering quest mode is verified for all fifteen (see notes T74); stage-by-stage
    progression and the unlock itself are not started.
+9. Pause menu layout is broken in widescreen: the selection highlight and the Track/Quit/Resume
+   entries are offset from each other and overlap. Reported 2026-08-07 with a screenshot.
 10. Port Y the Alien from the original Vigilante 8. (Assigned to Codex, not this agent.)
 
 ## Closed
 
+- Vehicles will not reverse; brakes stop but do not reverse. The engine's reverse was never broken.
+  `settings.json` resolved against the launch directory, so the bindings in force depended on where
+  the game was started from; a Classic copy leaves brake/reverse on the stick and D-pad only, with
+  face buttons on "Brake" and LT on fire. Config now resolves next to the executable and the active
+  profile is logged at startup (2a791d0). See notes/v82_reverse_input_investigation.md.
 - Game froze when starting Chassey Blue's quest; smoke quest mode with each character.
   Quest mode killed the process on a NULL quest-briefing record (the code then read the
   PS1 exception vector and used a BIOS instruction word as a string pointer). Fixed in
