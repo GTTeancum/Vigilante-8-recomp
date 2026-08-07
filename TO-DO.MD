@@ -7,17 +7,25 @@ Status: AUTONOMOUS WORK EXHAUSTED - AWAITING USER SIGN-OFF
 
 1. Vehicles will not reverse. Brakes allow stopping, but not reversing
 2. Widescreen support
-3. Game froze when starting Chassey Blue's quest. Smoke quest mode with each character
-4. Support for higher resolution textures. Possibly make UI shapes runtime-drawn instead of textured
-5. Support for modded content, including V8: Second Offense and Star Wars Demolition content, and ports of Interstate 76 cars.
+3. Support for higher resolution textures. Possibly make UI shapes runtime-drawn instead of textured
+4. Support for modded content, including V8: Second Offense and Star Wars Demolition content, and ports of Interstate 76 cars.
    Interstate '76 `I76.ZFS` source staging is complete in ignored `I76_ZFS/`; conversion of the 34 inventoried `.vdf` vehicle candidates remains deferred.
-6. Updating of in-game menus so that options like resolution, controls, etc are not externall
-7. Windows detection of controller type (Xbox, PS, etc) and a custom model for each in controls (wishlist)
-8. "advanced" (PS2 era) lighting options. Bettter lights generally, but also shadows
-9. Game will occasionally freeze for 2-4 seconds
+5. Updating of in-game menus so that options like resolution, controls, etc are not externall
+6. Windows detection of controller type (Xbox, PS, etc) and a custom model for each in controls (wishlist)
+7. "advanced" (PS2 era) lighting options. Bettter lights generally, but also shadows
+8. Game will occasionally freeze for 2-4 seconds
+9. Quest mode completion: each of the fifteen quests must be playable to the end and must unlock the
+   character it awards. Entering quest mode is verified for all fifteen (see notes T74); stage-by-stage
+   progression and the unlock itself are not started.
 
 ## Closed
 
+- Game froze when starting Chassey Blue's quest; smoke quest mode with each character.
+  Quest mode killed the process on a NULL quest-briefing record (the code then read the
+  PS1 exception vector and used a BIOS instruction word as a string pointer). Fixed in
+  85e7517 by making unmapped reads return zero while unmapped writes still throw. All
+  fifteen Quest-capable characters now enter and run, Chassey Blue included. Playing each
+  quest through to its unlock is tracked separately as open item 9.
 - Fix PS1 texture projection
 - Add LOD options - draw terrain at highest LOD always, same with vehicles and weapons. Also add a draw distance option
 - V8: 2nd Offense movies/FMVs appeared broken on a stale/earlier deployment: screenshot showed mostly black with a gray block/partial frame. Fresh 2026-07-27 deployment decodes full MDEC frames and captured valid ACTLOGO frames 60/120/180/260; keep broader FMV audit in the sequel UI/presentation goal.
