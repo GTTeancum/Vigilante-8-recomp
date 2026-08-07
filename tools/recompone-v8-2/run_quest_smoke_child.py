@@ -26,6 +26,7 @@ if __name__ == "__main__":
     ap.add_argument("--character", type=int, required=True)
     ap.add_argument("--frames", type=int, required=True)
     ap.add_argument("--output", required=True)
+    ap.add_argument("--presentation-frames", default=None)
     args, _ = ap.parse_known_args()
     sys.argv = [
         "run_reference_soak.py",
@@ -36,4 +37,6 @@ if __name__ == "__main__":
         "--coverage-profile", "weapons",
         "--output", args.output,
     ]
+    if args.presentation_frames:
+        sys.argv += ["--presentation-frames", args.presentation_frames]
     sys.exit(soak.main())

@@ -2003,14 +2003,42 @@ Note the earlier hypothesis in this file's working notes — that
 is wrong. That branch only runs when the caller passes NULL, and a dump hook
 placed on it never fired.
 
-### What is still unknown
+### Why the record is NULL
 
-Why `[table + 5*4 + 0x10]` is NULL. Both failing slots are consistent with the
-`/6` arithmetic a few instructions later (5 and 11 differ by 6), so this looks
-like a per-character quest record that was never populated. It is not yet
-established whether that is a real data-loading gap or an artifact of the smoke
-harness injecting the character through `RECOMPONE_V82_PLAYER_TYPE` instead of
-the normal selection flow, which may be what populates the table.
+Dumping the whole record table for a failing slot (5) and a passing slot (4)
+gives byte-identical output, so this is **not** an artifact of the harness
+injecting the character through `RECOMPONE_V82_PLAYER_TYPE`:
+
+```
+[QuestTable] base=0x807F4580 recIndex=5
+[ 0] 0x807F47C4   [ 1] 0x807F4824   [ 2] 0x807F4884   [ 3] 0x807F48E4
+[ 4] 0x807F4944   [ 5] 0x00000000 <== NULL
+[ 6] 0x807F49A4   [ 7] 0x807F4A04   [ 8] 0x807F4A64   [ 9] 0x807F4AC4
+[10] 0x807F4B24   [11] 0x00000000 <== NULL
+[12] 0x807F4B84   [13] 0x807F4BE4   [14] 0x807F4C44   [15] 0x807F4CA4
+[16] 0x807F4D04   [17] 0x00000000 <== NULL
+```
+
+`recIndex` is `(sbyte)[gp+0x1104]` and tracks the character slot directly
+(slot 4 -> 4, slot 5 -> 5). The records are contiguous 0x60-byte entries with
+**no gap in memory** — `0x807F4944 + 0x60 == 0x807F49A4` — so the array holds
+15 records that 18 pointer slots index, and slots 5, 11 and 17 are NULL by
+construction rather than by a failed load. The data was authored with 15
+briefings for 18 selectable slots.
+
+### Visible effect
+
+`artifacts/quest-smoke/quest_briefing_slot4_vs_slot5.png` is the briefing
+screen for slot 4 (left) and slot 5 (right) at the same frame. Slot 4 shows the
+character portrait and the full briefing paragraph; slot 5 shows **no portrait
+and no text at all**. So the missing record costs the entire briefing, not one
+line.
+
+Most likely reading: the three NULL slots are positions the retail carousel
+never reaches in Quest mode, and this project's integrated roster (which
+`run_reference_soak.py:248-252` notes "deliberately extends the retail
+carousel") makes them selectable. Confirming that needs a carousel-walking run,
+which the smoke harness deliberately avoids. Tracked as its own TO-DO item.
 
 ### Mitigation shipped
 
