@@ -1,23 +1,22 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-07-23 EDT
+Last updated: 2026-08-02 EDT
 Status: AUTONOMOUS WORK EXHAUSTED - AWAITING USER SIGN-OFF
 
 # User entered list
 1. Vehicles will not reverse. Brakes allow stopping, but not reversing
 2. Fix PS1 texture projection
-3. There is an option to rasterize 3D models, but this appears to do nothing
-4. Add LOD options - draw terrain at highest LOD always, same with vehicles and weapons. Also add a draw distance option
-5. Widescreen support
-6. Game froze when starting Chassey Blue's quest. Smoke quest mode with each character
-7. Support for higher resolution textures. Possibly make UI shapes runtime-drawn instead of textured
-8. Support for modded content, including V8: Second Offense and Star Wars Demolition content, and ports of Interstate 76 cars.
+3. Add LOD options - draw terrain at highest LOD always, same with vehicles and weapons. Also add a draw distance option
+4. Widescreen support
+5. Game froze when starting Chassey Blue's quest. Smoke quest mode with each character
+6. Support for higher resolution textures. Possibly make UI shapes runtime-drawn instead of textured
+7. Support for modded content, including V8: Second Offense and Star Wars Demolition content, and ports of Interstate 76 cars.
    Interstate '76 `I76.ZFS` source staging is complete in ignored `I76_ZFS/`; conversion of the 34 inventoried `.vdf` vehicle candidates remains deferred.
-9. Updating of in-game menus so that options like resolution, controls, etc are not externall
-10. Windows detection of controller type (Xbox, PS, etc) and a custom model for each in controls (wishlist)
-11. "advanced" (PS2 era) lighting options. Bettter lights generally, but also shadows
-12. Game will occasionally freeze for 2-4 seconds
-13. V8: 2nd Offense movies/FMVs appeared broken on a stale/earlier deployment: screenshot showed mostly black with a gray block/partial frame. Fresh 2026-07-27 deployment decodes full MDEC frames and captured valid ACTLOGO frames 60/120/180/260; keep broader FMV audit in the sequel UI/presentation goal.
+8. Updating of in-game menus so that options like resolution, controls, etc are not externall
+9. Windows detection of controller type (Xbox, PS, etc) and a custom model for each in controls (wishlist)
+10. "advanced" (PS2 era) lighting options. Bettter lights generally, but also shadows
+11. Game will occasionally freeze for 2-4 seconds
+12. V8: 2nd Offense movies/FMVs appeared broken on a stale/earlier deployment: screenshot showed mostly black with a gray block/partial frame. Fresh 2026-07-27 deployment decodes full MDEC frames and captured valid ACTLOGO frames 60/120/180/260; keep broader FMV audit in the sequel UI/presentation goal.
 
 ## Current goal
 
@@ -87,6 +86,35 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
       are preserved; coherent changes are committed.
 
 ## Work queue
+
+### V8: 2nd Offense roadmap
+
+- [ ] Bring the original Vigilante 8 quests into V8: 2nd Offense, including
+      their associated video playback and quest-transition behavior.
+- [ ] Add a curated Star Wars: Demolition bonus-content pack, taking advantage
+      of the shared developer, engine lineage, and original PlayStation target
+      to port a selection of its vehicles and levels through the existing
+      guest-vehicle and arena systems.
+- [ ] Add four-player local split-screen support. Preserve the validated
+      two-player Cooperative and Versus paths and treat stable four-viewport
+      rendering, simultaneous four-pad input, match progression, and clean
+      teardown as acceptance requirements.
+- [ ] Internalize more wrapper functionality into the game UI so the external
+      header/menu bar can be removed.
+- [ ] Update the menu presentation to use Vigilante 8 visuals everywhere
+      except the existing map-selection screen, and update the main-menu art
+      and title treatment to `V8 Classic`.
+- [x] Ensure menu music starts reliably on boot and resumes after gameplay,
+      results, movies, quests, and returns to the main menu. The native CDDA
+      path now has an idle-shell recovery guard and passed the 13-case
+      stock/imported-vehicle transition matrix.
+- [ ] Add fully customizable controls for keyboard and controllers, together
+      with user-friendly Modern, Classic, and Southpaw presets, integrated
+      into the native V8:2 Options/Controls shell at stock visual and
+      interaction parity. The rejected wrapper-font prototype does not count.
+- [x] Change Square driving behavior so it brakes the vehicle to a stop and,
+      when held while already stopped, engages reverse. Modern routes physical
+      Square to the existing native Down command used by stick-down.
 
 ### User-found defect remediation
 

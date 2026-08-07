@@ -20,18 +20,95 @@ public sealed partial class Gpu
 
     static readonly bool TraceProjection =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PROJECTION") == "1";
+    static readonly bool TraceSoftwareRectangles =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_SOFTWARE_RECTANGLES") == "1";
+    static readonly (int X, int Y)? RasterPixelProbe =
+        ParseRasterPixelProbe(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_TRACE_RASTER_PIXEL"));
     long _projectionQuadGte;
     long _projectionQuadAffine;
     long _projectionTriPrecise;
     long _projectionTriGte;
     long _projectionTriOtCorrelated;
     long _projectionTriAffine;
+    long _projectionWideReconstructedVertices;
+    long _projectionFullViewSpacePrimitives;
+    long _projectionPartialViewSpaceFallbackPrimitives;
+    long _projectionIncoherentViewSpaceFallbackPrimitives;
     int _projectionGameplayFrames;
+    int _softwareRectangleTraceCount;
     readonly Dictionary<ulong, ProjectiveDepthCacheEntry>
         _projectiveDepthCache = [];
 
     readonly record struct ProjectiveDepthCacheEntry(
         ushort Depth, int OtDepth, uint PacketAddress);
+
+    static (int X, int Y)? ParseRasterPixelProbe(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        string[] parts = value.Split(
+            ',',
+            StringSplitOptions.RemoveEmptyEntries |
+            StringSplitOptions.TrimEntries);
+        return parts.Length == 2 &&
+            int.TryParse(parts[0], out int x) &&
+            int.TryParse(parts[1], out int y)
+                ? (x, y)
+                : null;
+    }
+
+    static bool RasterPixelProbeMatches(int x, int y)
+    {
+        if (RasterPixelProbe is not { } probe || x != probe.X)
+            return false;
+        // V8 alternates native 320x240 draw buffers at VRAM Y=0 and Y=240.
+        // The probe is expressed in display coordinates and follows either
+        // buffer so both halves of the renderer's frame cadence are audited.
+        return y == probe.Y || y == probe.Y + 240;
+    }
+
+    static bool RasterPixelProbeTickEnabled()
+    {
+        if (RasterPixelProbe is null || !GpuHle.GameplayActive)
+            return false;
+        int tick = GpuHle.DebugGameplayTick;
+        return TraceGameplayTicks is not { } range ||
+            tick >= range.Start && tick <= range.End;
+    }
+
+    void TraceRasterPixel(
+        int x,
+        int y,
+        in Vert a,
+        in Vert b,
+        in Vert c,
+        bool tex,
+        bool semi,
+        bool raw,
+        int clut,
+        int u,
+        int v,
+        ushort texel,
+        ushort before,
+        ushort after,
+        string outcome)
+    {
+        Console.Error.WriteLine(
+            $"[V8RasterPixel] tick={GpuHle.DebugGameplayTick} " +
+            $"xy={x},{y} packet=0x{_currentOtPacketAddress:X8} " +
+            $"ot={_currentOtDepth} outcome={outcome} " +
+            $"tex={(tex ? 1 : 0)} semi={(semi ? 1 : 0)} " +
+            $"raw={(raw ? 1 : 0)} tpage=0x{CurTPage():X3} " +
+            $"clut=0x{clut:X4} uv={u},{v} texel=0x{texel:X4} " +
+            $"before=0x{before:X4} after=0x{after:X4} " +
+            $"tri=({a.X},{a.Y})({b.X},{b.Y})({c.X},{c.Y}) " +
+            $"tri-uv=({a.U},{a.V})({b.U},{b.V})({c.U},{c.V}) " +
+            $"rgb=({a.R},{a.G},{a.B})({b.R},{b.G},{b.B})" +
+            $"({c.R},{c.G},{c.B})");
+    }
 
     static readonly int[,] Dither =
     {
@@ -173,9 +250,55 @@ public sealed partial class Gpu
                 _projectionTriAffine++;
         }
 
+        if (Gte.MarkRescuedNclip && GpuHle.GameplayActive)
+            Gte.CandidatePrimitives++;
+        if (Gte.MarkRescuedNclip &&
+            GpuHle.GameplayActive &&
+            v[0].HasViewSpace && v[1].HasViewSpace &&
+            v[2].HasViewSpace &&
+            v[0].ViewZ > 0f && v[1].ViewZ > 0f && v[2].ViewZ > 0f)
+        {
+            // Proof aid, not a game feature. Recompute the backface sign the
+            // way the engine did - from the widescreen-compressed integer
+            // coordinates - and the way it is computed now, from the
+            // fractional projection. Where they disagree and the fractional
+            // one says front-facing, this primitive is on screen only because
+            // of the NCLIP fix; before it, the rounded test deleted it.
+            Gte.TestedPrimitives++;
+            long packedArea =
+                (long)v[0].RawX * (v[1].RawY - v[2].RawY) +
+                (long)v[1].RawX * (v[2].RawY - v[0].RawY) +
+                (long)v[2].RawX * (v[0].RawY - v[1].RawY);
+            Span<double> px = stackalloc double[3];
+            Span<double> py = stackalloc double[3];
+            for (int i = 0; i < 3; i++)
+            {
+                px[i] = v[i].ProjectionCenterX +
+                    v[i].ViewX * v[i].ProjectionScale / v[i].ViewZ;
+                py[i] = v[i].ProjectionCenterY +
+                    v[i].ViewY * v[i].ProjectionScale / v[i].ViewZ;
+            }
+            double preciseArea =
+                px[0] * (py[1] - py[2]) +
+                px[1] * (py[2] - py[0]) +
+                px[2] * (py[0] - py[1]);
+            if ((packedArea > 0) != (preciseArea > 0d))
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    v[i].R = 255; v[i].G = 32; v[i].B = 32;
+                }
+                tex = false;
+                gouraud = false;
+                raw = false;
+                Gte.MarkedPrimitives++;
+            }
+        }
+
         if (HleOn)
         {
             PopulateEnhancedViewSpace(v, n);
+            NormalizeEnhancedPrimitiveViewSpace(v, n);
             HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
             if (quad) HleTri(v[1], v[2], v[3], tex, gouraud, semi, raw, clut);
         }
@@ -219,6 +342,22 @@ public sealed partial class Gpu
                 vertex.HasPrecisePosition ? vertex.PreciseX : vertex.X;
             float screenY =
                 vertex.HasPrecisePosition ? vertex.PreciseY : vertex.Y;
+            if (ConfigManager.View.HighResolution3D &&
+                GpuHle.WideAspect > GpuHle.BaseAspect + 0.001f)
+            {
+                // GTE.Rtp deliberately compresses the retail-visible SXY
+                // result so the original 320-pixel clip tests retain geometry
+                // from the expanded widescreen frustum. Exact correlated
+                // vertices carry the uncompressed camera-space position.
+                // Undo that known compression before reconstructing a missing
+                // vertex, or one triangle can mix two projection spaces and
+                // stretch into jagged terrain/water-like overlays.
+                float inverseWideRatio =
+                    GpuHle.WideAspect / GpuHle.BaseAspect;
+                screenX =
+                    centerX + (screenX - centerX) * inverseWideRatio;
+                _projectionWideReconstructedVertices++;
+            }
             vertex.ViewX =
                 (screenX - centerX) * viewZ / projectionScale;
             vertex.ViewY =
@@ -233,6 +372,62 @@ public sealed partial class Gpu
                 float.IsFinite(vertex.ViewX) &&
                 float.IsFinite(vertex.ViewY);
             vertex.ReconstructedViewSpace = vertex.HasViewSpace;
+        }
+    }
+
+    void NormalizeEnhancedPrimitiveViewSpace(
+        Span<Vert> vertices,
+        int count)
+    {
+        if (!GpuHle.GameplayActive || count <= 0)
+            return;
+
+        int viewSpaceCount = 0;
+        for (int index = 0; index < count; index++)
+            if (vertices[index].HasViewSpace)
+                viewSpaceCount++;
+
+        if (viewSpaceCount == 0)
+            return;
+
+        bool coherent = viewSpaceCount == count;
+        if (coherent)
+        {
+            float centerX = vertices[0].ProjectionCenterX;
+            float centerY = vertices[0].ProjectionCenterY;
+            float scale = vertices[0].ProjectionScale;
+            for (int index = 1; index < count; index++)
+            {
+                ref Vert vertex = ref vertices[index];
+                if (MathF.Abs(vertex.ProjectionCenterX - centerX) > 1.5f ||
+                    MathF.Abs(vertex.ProjectionCenterY - centerY) > 1.5f ||
+                    MathF.Abs(vertex.ProjectionScale - scale) > 1.5f)
+                {
+                    coherent = false;
+                    break;
+                }
+            }
+        }
+
+        if (coherent)
+        {
+            _projectionFullViewSpacePrimitives++;
+            return;
+        }
+
+        if (viewSpaceCount != count)
+            _projectionPartialViewSpaceFallbackPrimitives++;
+        else
+            _projectionIncoherentViewSpaceFallbackPrimitives++;
+
+        // Projection is selected by the vertex shader per endpoint. A
+        // primitive must never combine camera-space and packet screen-space
+        // vertices. Preserve the native packet as one coherent fallback when
+        // a complete camera-space primitive cannot be established.
+        for (int index = 0; index < count; index++)
+        {
+            vertices[index].HasViewSpace = false;
+            vertices[index].ReconstructedViewSpace = false;
         }
     }
 
@@ -253,7 +448,15 @@ public sealed partial class Gpu
             $"quad-affine={_projectionQuadAffine} tri-gte={_projectionTriGte} " +
             $"tri-precise={_projectionTriPrecise} " +
             $"tri-ot={_projectionTriOtCorrelated} " +
-            $"tri-affine={_projectionTriAffine} gte-points={Gte.ScreenDepthCount}");
+            $"tri-affine={_projectionTriAffine} " +
+            $"wide-reconstructed-vertices=" +
+            $"{_projectionWideReconstructedVertices} " +
+            $"full-viewspace-primitives={_projectionFullViewSpacePrimitives} " +
+            $"partial-viewspace-fallback-primitives=" +
+            $"{_projectionPartialViewSpaceFallbackPrimitives} " +
+            $"incoherent-viewspace-fallback-primitives=" +
+            $"{_projectionIncoherentViewSpaceFallbackPrimitives} " +
+            $"gte-points={Gte.ScreenDepthCount}");
         ResetProjectionCounters();
     }
 
@@ -265,6 +468,10 @@ public sealed partial class Gpu
         _projectionTriGte = 0;
         _projectionTriOtCorrelated = 0;
         _projectionTriAffine = 0;
+        _projectionWideReconstructedVertices = 0;
+        _projectionFullViewSpacePrimitives = 0;
+        _projectionPartialViewSpaceFallbackPrimitives = 0;
+        _projectionIncoherentViewSpaceFallbackPrimitives = 0;
     }
 
     bool TryProjectiveQuadGteW(Span<Vert> v)
@@ -534,6 +741,9 @@ public sealed partial class Gpu
         int maxY = Math.Min(_drawAreaBottom, Math.Max(a.Y, Math.Max(b.Y, c.Y)));
         if (minX > maxX || minY > maxY) return;
 
+        if (tex && semi)
+            TraceImportedShadowSourceSoftware(a, b, c, clut);
+
         int bias0 = IsTopLeft(b, c) ? 0 : -1;
         int bias1 = IsTopLeft(c, a) ? 0 : -1;
         int bias2 = IsTopLeft(a, b) ? 0 : -1;
@@ -568,13 +778,48 @@ public sealed partial class Gpu
                     int u = (int)((w0 * a.U + w1 * b.U + w2 * c.U) / area);
                     int tv = (int)((w0 * a.V + w1 * b.V + w2 * c.V) / area);
                     ushort texel = FetchTexel(u, tv, clut);
-                    if (texel == 0) continue;
+                    bool tracePixel =
+                        RasterPixelProbeTickEnabled() &&
+                        RasterPixelProbeMatches(x, y);
+                    ushort before = tracePixel
+                        ? Vram[y * VramWidth + x]
+                        : (ushort)0;
+                    if (texel == 0)
+                    {
+                        if (tracePixel)
+                            TraceRasterPixel(
+                                x, y, a, b, c, tex, semi, raw, clut,
+                                u, tv, texel, before, before,
+                                "transparent-texel");
+                        continue;
+                    }
                     bool stp = (texel & 0x8000) != 0;
                     int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
                     if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
                     Plot(x, y, tr, tg, tb, semi && stp, ditherTex, stp);
+                    if (tracePixel)
+                        TraceRasterPixel(
+                            x, y, a, b, c, tex, semi, raw, clut,
+                            u, tv, texel, before,
+                            Vram[y * VramWidth + x],
+                            "write");
                 }
-                else Plot(x, y, r, g, bl, semi, DitherEnabled && gouraud);
+                else
+                {
+                    bool tracePixel =
+                        RasterPixelProbeTickEnabled() &&
+                        RasterPixelProbeMatches(x, y);
+                    ushort before = tracePixel
+                        ? Vram[y * VramWidth + x]
+                        : (ushort)0;
+                    Plot(x, y, r, g, bl, semi, DitherEnabled && gouraud);
+                    if (tracePixel)
+                        TraceRasterPixel(
+                            x, y, a, b, c, tex, semi, raw, clut,
+                            0, 0, 0, before,
+                            Vram[y * VramWidth + x],
+                            "write");
+                }
             }
         }
     }
@@ -611,6 +856,19 @@ public sealed partial class Gpu
         if (sz == 0) { uint wh = _fifo[idx]; w = (int)(wh & 0xFFFF); h = (int)((wh >> 16) & 0xFFFF); }
         else { w = h = sz == 1 ? 1 : sz == 2 ? 8 : 16; }
 
+        if (TraceSoftwareRectangles &&
+            GpuHle.GameplayActive &&
+            _softwareRectangleTraceCount++ < 8192)
+            Console.Error.WriteLine(
+                "[SoftwareRect] " +
+                $"tick={GpuHle.DebugGameplayTick} " +
+                $"packet=0x{_currentOtPacketAddress:X8} " +
+                $"ot={_currentOtDepth} xy={x},{y} wh={w}x{h} " +
+                $"uv={u0},{v0} tex={(tex ? 1 : 0)} " +
+                $"semi={(semi ? 1 : 0)} raw={(raw ? 1 : 0)} " +
+                $"rgb={cr},{cg},{cb} tpage=0x{CurTPage():X3} " +
+                $"clut=0x{clut:X4}");
+
         if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
 
         for (int dy = 0; dy < h; dy++)
@@ -620,7 +878,9 @@ public sealed partial class Gpu
                 if (px < _drawAreaLeft || px > _drawAreaRight || py < _drawAreaTop || py > _drawAreaBottom) continue;
                 if (tex)
                 {
-                    ushort texel = FetchTexel((u0 + dx) & 0xFF, (v0 + dy) & 0xFF, clut);
+                    int sampleU = u0 + (_texFlipX ? -dx : dx);
+                    int sampleV = v0 + (_texFlipY ? -dy : dy);
+                    ushort texel = FetchTexel(sampleU & 0xFF, sampleV & 0xFF, clut);
                     if (texel == 0) continue;
                     bool stp = (texel & 0x8000) != 0;
                     int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;

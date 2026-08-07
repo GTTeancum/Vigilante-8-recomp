@@ -7,8 +7,7 @@ internal static class MainMenuBar
 {
     public static void Draw()
     {
-
-        ConfigMenu();
+        if (!ImGui.BeginMainMenuBar()) return;
         ModsMenu();
         DebugMenu();
         HelpMenu();
@@ -16,35 +15,6 @@ internal static class MainMenuBar
         ImGui.EndMainMenuBar();
     }
 
-    static void ConfigMenu()
-    {
-        if (!ImGui.BeginMainMenuBar()) return;
-
-        if (ImGui.BeginMenu("Settings"))
-        {
-            if (ImGui.MenuItem("Settings..."))
-                if (PanelManager.Get<SettingsPopup>() is { } popup) popup.IsOpen = true;
-
-            ImGui.Separator();
-
-            bool showBar = !ConfigManager.View.HideTopBar;
-            if (ImGui.MenuItem("Show Menu Bar", "F1", showBar))
-            {
-                ConfigManager.View.HideTopBar = showBar;
-                ConfigManager.SaveView(PanelManager.Panels);
-            }
-
-            bool fs = ConfigManager.View.Fullscreen;
-            if (ImGui.MenuItem("Fullscreen", "F11", fs))
-            {
-                ConfigManager.View.Fullscreen = !fs;
-                HostWindow.SetFullscreen(!fs);
-                ConfigManager.SaveView(PanelManager.Panels);
-            }
-
-            ImGui.EndMenu();
-        }
-    }
     static void ModsMenu()
     {
         if (!ImGui.BeginMenu("Mods")) return;

@@ -25,6 +25,16 @@ var launchArguments = args.ToList();
 for (int index = 0; index < launchArguments.Count; index++)
 {
     if (launchArguments[index].Equals(
+            "--muted", StringComparison.OrdinalIgnoreCase))
+    {
+        // Keep automated/headless runs silent without mutating the player's
+        // saved audio settings. Runtime.Initialize consumes this override.
+        Environment.SetEnvironmentVariable("RECOMPONE_MUTE", "1");
+        launchArguments.RemoveAt(index);
+        index--;
+        continue;
+    }
+    if (launchArguments[index].Equals(
             "--loose", StringComparison.OrdinalIgnoreCase))
     {
         if (index + 1 >= launchArguments.Count)
@@ -45,6 +55,57 @@ for (int index = 0; index < launchArguments.Count; index++)
     break;
 }
 args = launchArguments.ToArray();
+
+if (args.Length == 1 &&
+    args[0].Equals("--probe-native-controls", StringComparison.OrdinalIgnoreCase))
+{
+    try
+    {
+        var modern = InputProfiles.CreatePad(InputProfiles.Modern);
+        var triggerDrive =
+            InputProfiles.CreatePad(InputProfiles.TriggerDrive);
+        var classic = InputProfiles.CreatePad(InputProfiles.Classic);
+        var southpaw = InputProfiles.CreatePad(InputProfiles.Southpaw);
+        if (!InputProfiles.ValidateModernBrakeReverse(modern))
+            throw new InvalidOperationException("Modern Square is not routed to native brake/reverse");
+        if (!InputProfiles.ValidateTriggerDrive(triggerDrive))
+            throw new InvalidOperationException(
+                "Trigger Drive physical-to-native gameplay mapping is incomplete");
+        if (!ReferenceEquals(
+                InputBindingResolver.ResolvePad(
+                    InputProfiles.TriggerDrive, triggerDrive,
+                    gameplayActive: true, nativeGameplayMenuActive: false),
+                triggerDrive))
+            throw new InvalidOperationException(
+                "Trigger Drive gameplay mapping was replaced");
+        var triggerMenu = InputBindingResolver.ResolvePad(
+            InputProfiles.TriggerDrive, triggerDrive,
+            gameplayActive: false, nativeGameplayMenuActive: false);
+        var triggerPause = InputBindingResolver.ResolvePad(
+            InputProfiles.TriggerDrive, triggerDrive,
+            gameplayActive: true, nativeGameplayMenuActive: true);
+        if (!InputProfiles.IsClassicDefaults(triggerMenu) ||
+            !InputProfiles.IsClassicDefaults(triggerPause))
+            throw new InvalidOperationException(
+                "Trigger Drive menu fallback is not the stock DualShock layout");
+        if (!classic.Square.Contains(2) || classic.Down.Contains(2))
+            throw new InvalidOperationException("Classic retail Square mapping changed");
+        if (!southpaw.Down.Contains(2) || !southpaw.Down.Contains(109))
+            throw new InvalidOperationException("Southpaw reverse mapping is incomplete");
+        Console.WriteLine(
+            "[NativeControlsProbe] PASS " +
+            "presets=Modern,TriggerDrive,Classic,Southpaw " +
+            "trigger_drive=RT_Gas,LT_BrakeReverse,A_SelectedWeapon," +
+            "X_MachineGun,LB_RB_Swap menu_face_buttons=stock " +
+            "modern_square=Down modern_stick_down=Down");
+        return 0;
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"[NativeControlsProbe] FAILED: {exception}");
+        return 1;
+    }
+}
 
 if (args.Length is 2 or 3 &&
     args[0].Equals(
@@ -200,7 +261,11 @@ if (args.Length == 1 &&
         $"scale={(view.HighResolution3D ? view.InternalResolutionScale : 1)}x " +
         $"projection={(view.PerspectiveCorrectTextures ? "perspective" : "affine")} " +
         $"lod={view.LevelOfDetail} dithering={view.Ps1Dithering} " +
-        $"smoothing={view.TextureSmoothing}");
+        $"smoothing={view.TextureSmoothing} aa={view.AntiAliasing} " +
+        $"msaa={view.MsaaSamples} anisotropy={view.AnisotropicFiltering} " +
+        $"mipmaps={view.TextureMipmaps} widescreen={view.Widescreen} " +
+        $"world-texture-class={ViewConfig.MaximumWorldTextureClass} " +
+        $"ui-texture-class={ViewConfig.MaximumUiTextureClass}");
     return 0;
 }
 
@@ -219,27 +284,24 @@ if (args.Length == 2 &&
         var resolved = new List<string>(roster.Length);
         foreach (VehicleRosterItem item in roster)
         {
-            uint pointer =
-                V82VehicleRegistry.ResultVoicePointer(memory, item.Type);
-            if (pointer == 0u)
-                throw new InvalidDataException(
-                    $"result voice proxy missing for {item.StableId}");
-            var stem = new System.Text.StringBuilder();
-            for (uint offset = 0; offset < 32u; offset++)
+            foreach (bool defeated in new[] { false, true })
             {
-                byte value = memory.ReadU8(pointer + offset);
-                if (value == 0)
-                    break;
-                if (value < 0x20 || value > 0x7E)
+                string? stem = V82VehicleRegistry.ResultVoiceStem(
+                    item.Type, defeated);
+                if (stem == null)
                     throw new InvalidDataException(
-                        $"result voice stem for {item.StableId} is not ASCII");
-                stem.Append((char)value);
+                        $"result voice bank missing for {item.StableId}");
+                int channel = item.Type - 64;
+                string expected =
+                    $"V8VOICE\\{(defeated ? "D" : "V")}{channel:00}";
+                if (!stem.Equals(expected, StringComparison.Ordinal))
+                    throw new InvalidDataException(
+                        $"result voice stem for {item.StableId} was " +
+                        $"'{stem}', expected '{expected}'");
+                resolved.Add(
+                    $"{item.Type}:{item.StableId}:{(defeated ? "defeat" : "victory")}" +
+                    $"={stem}");
             }
-            if (stem.Length == 0)
-                throw new InvalidDataException(
-                    $"result voice stem for {item.StableId} is empty");
-            resolved.Add(
-                $"{item.Type}:{item.StableId}={stem}@0x{pointer:X8}");
         }
         Console.WriteLine(
             $"[ResultVoiceProxy] {validation} resolved={roster.Length} " +
@@ -368,6 +430,7 @@ string? explicitSource = args.Length switch
     1 => Path.GetFullPath(args[0], launchDirectory),
     _ => throw new ArgumentException(
         "usage: Vigilante82PC [disc.cue|directory] [--loose <directory>] " +
+        "[--muted] " +
         "[--probe-vehicle-package <directory>] [--probe-graphics-config] " +
         "[--probe-result-voice-proxies <directory>] " +
         "[--probe-defeat-quit-lifetime <directory>] " +

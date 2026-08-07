@@ -20,6 +20,7 @@ public sealed partial class Gpu
     int _blendMode;
     bool _dither;
     bool _texDisable;
+    bool _texFlipX, _texFlipY;
 
     int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
 
@@ -205,7 +206,7 @@ public sealed partial class Gpu
         _displayDisabled = true;
         _dmaDir = 0;
         _texPageX = _texPageY = _texDepth = _blendMode = 0;
-        _dither = _texDisable = false;
+        _dither = _texDisable = _texFlipX = _texFlipY = false;
         _texWinMaskX = _texWinMaskY = _texWinOffX = _texWinOffY = 0;
         _drawAreaLeft = _drawAreaTop = 0;
         _drawAreaRight = VramWidth - 1;

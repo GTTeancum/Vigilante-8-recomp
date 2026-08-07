@@ -23,6 +23,7 @@ public static class LibCdStream
     static int _streamEndLba = int.MaxValue;
     static string _streamName = "unknown";
     static int _framesQueued;
+    static int _xaSectorsQueued;
     static int _lastFrameNumber = -1;
     static bool _streamSummaryPending;
     static readonly Stopwatch _clock = new();
@@ -131,6 +132,7 @@ public static class LibCdStream
             _streamEndLba = endLba;
             _streamName = name;
             _framesQueued = 0;
+            _xaSectorsQueued = 0;
             _lastFrameNumber = -1;
             _streamSummaryPending = true;
             _loggedScan = false;
@@ -138,6 +140,9 @@ public static class LibCdStream
             Monitor.PulseAll(_lock);
         }
         Console.WriteLine($"[CdStream] start '{name}' LBA={lba} end={endLba}");
+        if (name.Replace('\\', '/').Contains(
+                "/V8VOICE/", StringComparison.OrdinalIgnoreCase))
+            XaAudio.BeginDiagnosticCapture(name);
         EnsureThread();
     }
 
@@ -221,7 +226,10 @@ public static class LibCdStream
                     continue;
                 }
                 if ((sec[2] & 0x04) != 0 && LibCd.AcceptXaSector(sec[0], sec[1]))
+                {
                     XaAudio.DecodeSector(sec, 8, sec[3], _streamLba, sec[0], sec[1]);
+                    _xaSectorsQueued++;
+                }
                 LibCd.ReportXaSector(_streamLba);
                 _streamLba++;
                 continue;
@@ -284,7 +292,10 @@ public static class LibCdStream
             if (payload < 0)
             {
                 if ((sec[2] & 0x04) != 0 && LibCd.AcceptXaSector(sec[0], sec[1]))
+                {
                     XaAudio.DecodeSector(sec, 8, sec[3], lba - 1, sec[0], sec[1]);
+                    _xaSectorsQueued++;
+                }
                 LibCd.ReportXaSector(lba - 1);
                 continue;
             }
@@ -312,7 +323,11 @@ public static class LibCdStream
     {
         if (!_streamSummaryPending) return;
         _streamSummaryPending = false;
-        Console.WriteLine($"[CdStream] end '{_streamName}' reason={reason} frames={_framesQueued} last={_lastFrameNumber} elapsed={_clock.Elapsed.TotalSeconds:F2}s");
+        Console.WriteLine(
+            $"[CdStream] end '{_streamName}' reason={reason} " +
+            $"frames={_framesQueued} xa={_xaSectorsQueued} " +
+            $"last={_lastFrameNumber} elapsed={_clock.Elapsed.TotalSeconds:F2}s");
+        XaAudio.EndDiagnosticCapture();
     }
 
     static ushort Read16(byte[] b, int o) => (ushort)(b[o] | (b[o + 1] << 8));

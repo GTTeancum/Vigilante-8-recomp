@@ -24,7 +24,10 @@ internal sealed class HudSvgAtlas : IDisposable
     [
         new("v82_radar.svg", 0, 0, 64, 55),
         new("v82_status.svg", 0, 440, 90, 34),
-        new("v82_health.svg", 672, 440, 16, 49),
+        // Status occupies atlas x=0..719 after its measured six-pixel
+        // left extension. Keep health in a disjoint aligned tile; the former
+        // x=672 origin overwrote the status panel's final six native pixels.
+        new("v82_health.svg", 736, 440, 16, 49),
     ];
 
     interface IPaint
@@ -126,6 +129,7 @@ internal sealed class HudSvgAtlas : IDisposable
     public HudSvgAtlas(GL gl)
     {
         _gl = gl;
+        ValidateTiles();
         byte[] rgba = new byte[AtlasSize * AtlasSize * 4];
         foreach (Tile tile in Tiles)
             Rasterize(LoadSvg(tile.File), tile, rgba);
@@ -142,6 +146,33 @@ internal sealed class HudSvgAtlas : IDisposable
             AtlasSize, AtlasSize, 0, PixelFormat.Rgba,
             PixelType.UnsignedByte, rgba);
         gl.GenerateMipmap(TextureTarget.Texture2D);
+    }
+
+    static void ValidateTiles()
+    {
+        for (int i = 0; i < Tiles.Length; i++)
+        {
+            Tile a = Tiles[i];
+            int ax1 = a.X + a.Width * RasterScale;
+            int ay1 = a.Y + a.Height * RasterScale;
+            if (a.X < 0 || a.Y < 0 ||
+                ax1 > AtlasSize || ay1 > AtlasSize)
+                throw new InvalidDataException(
+                    $"HUD SVG atlas tile is out of bounds: {a.File}");
+
+            for (int j = i + 1; j < Tiles.Length; j++)
+            {
+                Tile b = Tiles[j];
+                int bx1 = b.X + b.Width * RasterScale;
+                int by1 = b.Y + b.Height * RasterScale;
+                bool overlaps =
+                    a.X < bx1 && ax1 > b.X &&
+                    a.Y < by1 && ay1 > b.Y;
+                if (overlaps)
+                    throw new InvalidDataException(
+                        $"HUD SVG atlas tiles overlap: {a.File}, {b.File}");
+            }
+        }
     }
 
     public void Dispose()

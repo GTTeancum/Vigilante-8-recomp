@@ -70,6 +70,11 @@ public sealed partial class Gpu
         _texDepth = (int)((word >> 7) & 3);
         _dither = (word & (1u << 9)) != 0;
         _texDisable = (word & (1u << 11)) != 0;
+        // GP0(E1h) bits 12/13 reverse texture stepping for rectangles.
+        // Polygons ignore these bits, but sprites—including V8:2's HUD
+        // plates—consume them.
+        _texFlipX = (word & (1u << 12)) != 0;
+        _texFlipY = (word & (1u << 13)) != 0;
     }
 
     void SetTextureWindow(uint word)

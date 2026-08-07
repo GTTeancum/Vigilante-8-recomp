@@ -63,6 +63,127 @@ public class GamepadBindings
         Up.Length > 0 || Down.Length > 0 || Left.Length > 0 || Right.Length > 0;
 }
 
+public static class InputProfiles
+{
+    public const string Modern = "Modern";
+    public const string TriggerDrive = "Trigger Drive";
+    public const string Classic = "Classic";
+    public const string Southpaw = "Southpaw";
+    public const string Custom = "Custom";
+
+    public static readonly string[] Names =
+        [Modern, TriggerDrive, Classic, Southpaw];
+
+    public static KeyBindings CreateKeys(string profile, bool playerTwo = false)
+    {
+        if (playerTwo) return KeyBindings.Empty();
+        return new KeyBindings();
+    }
+
+    public static GamepadBindings CreatePad(string profile)
+    {
+        var pad = new GamepadBindings();
+        switch (profile)
+        {
+            case TriggerDrive:
+                // Xbox-style driving uses the original native commands:
+                // RT is Gas (Cross), LT is Brake/Reverse (Down), A fires the
+                // selected attachment (L2), and X fires the machine gun (R2).
+                // B/Y retain Hand Brake/Select Target, while LB/RB use the
+                // retail previous/next attached-weapon commands.
+                pad.Cross = [101];
+                pad.Square = [];
+                pad.L2 = [0];
+                pad.R2 = [2];
+                pad.Down = [100, 12, 105];
+                break;
+            case Modern:
+                // V8: 2nd Offense already implements the desired driving
+                // behavior on the native Down command: brake until stopped,
+                // then reverse. Physical Square joins D-pad/stick Down on
+                // that command instead of creating a second physics path.
+                pad.Square = [];
+                pad.Down = [2, 12, 105];
+                break;
+            case Southpaw:
+                pad.Square = [];
+                pad.Down = [2, 12, 109];
+                pad.Up = [11, 108];
+                pad.Left = [13, 106];
+                pad.Right = [14, 107];
+                break;
+            case Classic:
+            default:
+                break;
+        }
+        return pad;
+    }
+
+    public static void Apply(GameConfig game, string profile)
+    {
+        if (!Names.Contains(profile, StringComparer.Ordinal))
+            throw new ArgumentOutOfRangeException(nameof(profile), profile, "Unknown input profile");
+
+        game.Keys = CreateKeys(profile);
+        game.Keys2 = CreateKeys(profile, playerTwo: true);
+        game.Pad = CreatePad(profile);
+        game.Pad2 = CreatePad(profile);
+        game.InputProfile = profile;
+    }
+
+    public static bool IsClassicDefaults(GamepadBindings pad) =>
+        Same(pad.Cross, [0]) && Same(pad.Circle, [1]) &&
+        Same(pad.Square, [2]) && Same(pad.Triangle, [3]) &&
+        Same(pad.L1, [9]) && Same(pad.R1, [10]) &&
+        Same(pad.L2, [100]) && Same(pad.R2, [101]) &&
+        Same(pad.L3, [7]) && Same(pad.R3, [8]) &&
+        Same(pad.Start, [6]) && Same(pad.Select, [4]) &&
+        Same(pad.Up, [11, 104]) && Same(pad.Down, [12, 105]) &&
+        Same(pad.Left, [13, 102]) && Same(pad.Right, [14, 103]);
+
+    public static bool ValidateModernBrakeReverse(GamepadBindings pad) =>
+        pad.Square.Length == 0 &&
+        pad.Down.Contains(2) &&
+        pad.Down.Contains(105);
+
+    public static bool ValidateTriggerDrive(GamepadBindings pad) =>
+        Same(pad.Cross, [101]) &&
+        Same(pad.Circle, [1]) &&
+        pad.Square.Length == 0 &&
+        Same(pad.Triangle, [3]) &&
+        Same(pad.L1, [9]) && Same(pad.R1, [10]) &&
+        Same(pad.L2, [0]) && Same(pad.R2, [2]) &&
+        Same(pad.Down, [100, 12, 105]) &&
+        Same(pad.Left, [13, 102]) && Same(pad.Right, [14, 103]);
+
+    static bool Same(int[] actual, int[] expected) =>
+        actual.AsSpan().SequenceEqual(expected);
+}
+
+public static class InputBindingResolver
+{
+    static readonly GamepadBindings MenuPad = new();
+
+    // Trigger Drive's gameplay layout deliberately moves Cross and the two
+    // weapon triggers. The retail shell and gameplay overlays still need the
+    // familiar face-button navigation, so those contexts resolve through the
+    // stock DualShock layout without modifying the saved preset.
+    public static GamepadBindings ResolvePad(
+        string profile,
+        GamepadBindings configured,
+        bool gameplayActive,
+        bool nativeGameplayMenuActive)
+    {
+        if (!string.Equals(
+                profile, InputProfiles.TriggerDrive,
+                StringComparison.Ordinal))
+            return configured;
+        return gameplayActive && !nativeGameplayMenuActive
+            ? configured
+            : MenuPad;
+    }
+}
+
 public class GameConfig
 {
     // V8: 2nd Offense native cheat bits. DRIVE_ONLY (bit 6) and the
@@ -72,6 +193,7 @@ public class GameConfig
     // loose-files mods discovery as the source of truth.
     public string V82VehiclePackagePath { get; set; } = "";
     public int InputBindingsVersion { get; set; }
+    public string InputProfile { get; set; } = InputProfiles.Modern;
     public string CdPath { get; set; } = "";
     public float MasterVolume { get; set; } = 1.0f;
     public bool Muted { get; set; } = false;

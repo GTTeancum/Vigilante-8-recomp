@@ -392,6 +392,24 @@ PROVEN_PATCHES = [
         "mode": "pre",
     },
     {
+        # Appended original-V8 result banks are absent from V8:2's boot-time
+        # retail file tree. Resolve only that nested loose path to a native
+        # file descriptor, then leave its XA streamer/filter/SPU path intact.
+        "overlay": "main",
+        "address": "80018210",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ResolveOriginalResultVoiceFile",
+        "mode": "pre",
+    },
+    {
+        # Keep the V8:2 XA player, callbacks, filtering, and SPU path. Original
+        # V8 result banks store one driver per channel instead of one file per
+        # driver, so translate only the native result player's channel.
+        "overlay": "main",
+        "address": "8001DA14",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.OverrideResultVoiceChannel",
+        "mode": "pre",
+    },
+    {
         "overlay": "main",
         "address": "80020A80",
         "target": "RecompOne.Runtime.Sdk.V82Compat.TrackVramAllocationPost",
@@ -493,6 +511,118 @@ PROVEN_PATCHES = [
         "mode": "pre",
     },
     {
+        # Extended draw distance moves only the object limit, leaving distant
+        # props standing past the last terrain row. Push the traversal polygon
+        # out to match before the walker selects rows.
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ScaleTerrainTraversalRange",
+        "mode": "pre",
+    },
+    {
+        # func_8001C158 hands func_8001BECC the completed world-space traversal
+        # polygon. Its far corners lose lateral reach against the widened 16:9
+        # frustum whenever the camera is pitched, so refit them here before the
+        # walker selects terrain rows.
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalWideFit",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalAspect",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalOmnidirectional",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalLateral",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalPolygon",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceTerrainTraversalPolygon",
+        "mode": "pre",
+    },
+    {
+        # func_8001BE68 receives the inclusive/exclusive X-cell span selected
+        # for one terrain row. Diagnostic widescreen padding at this exact
+        # layer distinguishes insufficient row coverage from packet clipping.
+        "overlay": "main",
+        "address": "8001BE68",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainRowSpan",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "800288E0",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "BeginTerrainRoutePacketWrites"
+        ),
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "800288E0",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "EndTerrainRoutePacketWrites"
+        ),
+        "mode": "post",
+    },
+    {
+        # func_8001C158 constructs the native terrain traversal polygon from
+        # gp+0xEDC (horizontal extent) and gp+0xF20 (vertical extent). Expand
+        # only the horizontal source while Enhanced true widescreen is active,
+        # then restore it immediately after the traversal completes.
+        "overlay": "main",
+        "address": "8001C134",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainFrustum",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        # Restore the authored 320-pixel packet clip before func_8001C158
+        # copies gp+0xEDC into scratchpad+0x94. The expanded value is only a
+        # world-space traversal input; carrying it into the packet clip makes
+        # terrain clipping asymmetric after the GTE widescreen projection.
+        "address": "8001C89C",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.RestoreTerrainFrustum",
+        "mode": "pre",
+    },
+    {
+        # func_8002DFF0 builds the object/scenery frustum planes from the
+        # authored 320-wide clip width, and func_8002E22C tests every object
+        # and every backdrop quad against them. Widen the width across the
+        # build so the planes cover the widescreen view, then restore it.
+        "overlay": "main",
+        "address": "8002DFF0",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandObjectFrustum",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8002DFF0",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.RestoreObjectFrustum",
+        "mode": "post",
+    },
+    {
         # Capture the native object renderer's exact packet-buffer interval so
         # Enhanced receives vehicle/material ownership before GPU decoding.
         "overlay": "main",
@@ -505,6 +635,30 @@ PROVEN_PATCHES = [
         "address": "8002D9E0",
         "target": "RecompOne.Runtime.Sdk.V82Compat.EndObjectRender",
         "mode": "post",
+    },
+    {
+        # Resolve each native model descriptor to its authored imported bank
+        # and group before it emits packets.  This differentiates body/LOD/
+        # wheel geometry without texture, palette, colour, or screen heuristics.
+        "overlay": "main",
+        "address": "80021F70",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginImportedRenderGroup",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "80021F70",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndImportedRenderGroup",
+        "mode": "post",
+    },
+    {
+        # func_8002E22C is the per-object frustum test. Its three planes are
+        # built for the authored 4:3 view, so widescreen culls objects that are
+        # still on screen at the left and right edges.
+        "overlay": "main",
+        "address": "8002E22C",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.WidenObjectVisibilityTest",
+        "mode": "pre",
     },
     {
         # func_8002D9E0 compares this transform's distance output against
@@ -620,6 +774,24 @@ PROVEN_PATCHES = [
         "overlay": "main",
         "address": "8001A3B0",
         "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.OverrideNativeSelectorText",
+        "mode": "pre",
+    },
+    {
+        # Observe the retail SHELL text renderer rather than introducing a
+        # host-side menu. This supplies deterministic stage/capture points for
+        # the unmodified V8:2 Options pages and native PC extensions.
+        "overlay": "main",
+        "address": "8001A3B0",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceNativeOptionsText",
+        "mode": "pre",
+    },
+    {
+        # Gameplay pause/objective prompts use the sibling formatted-text
+        # renderer. Observe that stock seam as well so context-sensitive PC
+        # bindings can retain ordinary face-button navigation in overlays.
+        "overlay": "main",
+        "address": "8001A6BC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceNativeOptionsText",
         "mode": "pre",
     },
     {

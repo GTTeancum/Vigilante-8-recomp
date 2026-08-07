@@ -33,6 +33,14 @@ NEW_LOAD = """        c.A1 = RecompOne.Runtime.Sdk.V8ArenaRegistry.ResolveNative
             c, m, m.ReadU32(c.V0));
         c.A0 = c.S0 + 0u;
 """
+OLD_LOAD_REGISTER = """        c.LoadWord(5, m, c.V0);
+        c.CopyRegister(4, 16);
+"""
+NEW_LOAD_REGISTER = """        c.LoadWord(5, m, c.V0);
+        c.A1 = RecompOne.Runtime.Sdk.V8ArenaRegistry.ResolveNativeLoadingTitle(
+            c, m, c.A1);
+        c.CopyRegister(4, 16);
+"""
 OLD_LOAD_CAPTURE = """        L80101EB8: ;
         c.S2 = 0x80060000u;
         c.RA = 0x80101EC0u;
@@ -59,7 +67,9 @@ def main() -> int:
     load = args.load_source.read_text(encoding="utf-8")
 
     shell_done = NEW_SHELL in shell
-    load_done = load.count(NEW_LOAD) == 2
+    load_done = (
+        load.count(NEW_LOAD) + load.count(NEW_LOAD_REGISTER)
+    ) == 2
     capture_done = load.count(NEW_LOAD_CAPTURE) == 1
     if args.check:
         if not shell_done:
@@ -87,12 +97,15 @@ def main() -> int:
         args.source.write_text(shell, encoding="utf-8")
 
     if not load_done:
-        count = load.count(OLD_LOAD)
-        if count != 2:
+        legacy_count = load.count(OLD_LOAD)
+        register_count = load.count(OLD_LOAD_REGISTER)
+        if legacy_count + register_count != 2:
             raise SystemExit(
-                f"expected two V8 native loading caption lookups, found {count}"
+                "expected two V8 native loading caption lookups, found "
+                f"{legacy_count + register_count}"
             )
         load = load.replace(OLD_LOAD, NEW_LOAD)
+        load = load.replace(OLD_LOAD_REGISTER, NEW_LOAD_REGISTER)
 
     if not capture_done:
         count = load.count(OLD_LOAD_CAPTURE)

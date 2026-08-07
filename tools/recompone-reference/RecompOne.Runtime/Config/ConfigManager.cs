@@ -51,6 +51,21 @@ public static class ConfigManager
             Game.InputBindingsVersion = 1;
             saveGame = true;
         }
+        if (Game.InputBindingsVersion < 2)
+        {
+            bool isV82 = Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal);
+            bool legacyDefaults =
+                InputProfiles.IsClassicDefaults(Game.Pad) &&
+                InputProfiles.IsClassicDefaults(Game.Pad2);
+            if (isV82 && legacyDefaults)
+                InputProfiles.Apply(Game, InputProfiles.Modern);
+            else if (legacyDefaults)
+                Game.InputProfile = InputProfiles.Classic;
+            else
+                Game.InputProfile = InputProfiles.Custom;
+            Game.InputBindingsVersion = 2;
+            saveGame = true;
+        }
         if (saveGame) SaveGame();
 
         if (File.Exists(InterfaceFile))

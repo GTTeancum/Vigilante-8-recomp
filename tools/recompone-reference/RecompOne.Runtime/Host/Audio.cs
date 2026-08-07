@@ -34,6 +34,9 @@ internal static unsafe class Audio
     static long _capturedBytes;
     static int _captureBuffersSinceHeader;
 
+    internal static long MixedFrames =>
+        Interlocked.Read(ref _mixedFrames);
+
     public static void Initialize()
     {
         try

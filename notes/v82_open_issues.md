@@ -16,10 +16,11 @@ Unchecked items below are open and required for acceptance.
   - Root cause and fix: the guest runtime vehicle correctly retained identity through destruction, but `func_80036C2C` had also assigned the custom callback to its native source object without registering that source. The global event-4 quit sweep therefore reached a valid custom callback with no registry entry. Identity is now registered on both callback-owning objects at assignment time and retired only at their actual allocator lifetime boundary.
   - Verification status: fresh muted loose-files runs exercise the authentic `func_80039DCC → func_80038C40 → func_80038870` lethal path for both guest and stock vehicles, wait through the native 301-tick result lock, press the documented X-to-quit action, reload `SHELL_SHELL`, and accept Up/Down input on the returned main menu. The exact staged executable completes with no crash, hang, stale match state, or corrupted return UI.
 
-- [ ] **V82-OPEN-002 — Quest defeat return has side artifacts**
-  - Reproduction: lose a Quest match and press X to return.
-  - Observed: expected black bars appear, but the exposed sides contain visual artifacts during the menu transition.
-  - Pass condition: authored 4:3 content remains cleanly pillarboxed throughout the complete transition, with black side bars and no stale framebuffer/VRAM content.
+- [ ] **V82-OPEN-002 — 16:9 gameplay to 4:3 menu return exposes HOM side bands**
+  - Reproduction: leave 16:9 gameplay and return to any authored 4:3 front-end menu; the Quest defeat/X-to-return path is one deterministic reproduction.
+  - Observed: the newly exposed left/right host regions retain stale imagery as the presentation contracts from 16:9 to 4:3.
+  - Pass condition: every pixel in both newly exposed side bands is explicitly black from the first 4:3 return frame through the settled menu. The authored 4:3 menu remains centered and unstretched, with no stale framebuffer/VRAM content or transient HOM.
+  - Candidate fix: `SHELL_SHELL` load now retires only the host-owned expanded 16:9 render target and invalidates the last wide output texture. The host backbuffer and complete output-panel region are painted black before the centered 4:3 image is submitted. Native PS1 VRAM is deliberately preserved; clearing it was rejected as an incorrect layer boundary that could erase valid shell assets.
 
 ## Guest vehicle integration
 
@@ -64,7 +65,8 @@ Unchecked items below are open and required for acceptance.
 
 ## UI and HUD
 
-- [ ] **V82-OPEN-009 — Defeat/game-over text spacing is corrupt**
+- [x] **V82-OPEN-009 — Defeat/game-over text spacing is corrupt**
+  - User acceptance: signed off 2026-08-04.
   - Observed: “PLAYER 1 destroyed!” has a large mid-word gap (`PL    AYER`).
   - Pass condition: all defeat/game-over strings use correct glyph advance, kerning, and centering at every supported resolution and aspect ratio.
   - Evidence: `codex-clipboard-5cf6fd17-27ca-4fb0-95f0-8d48f18e7105.png`.
@@ -74,7 +76,8 @@ Unchecked items below are open and required for acceptance.
   - Pass condition: the complete authored overlay, heading, body text, and control prompts are centered as one 4:3 UI composition without stretching.
   - Evidence: `codex-clipboard-3dfa69ad-7a6a-48e7-a480-58b5ad1e20f8.png`.
 
-- [ ] **V82-OPEN-011 — HUD backing/content regression**
+- [x] **V82-OPEN-011 — HUD backing/content regression**
+  - User acceptance: signed off 2026-08-04 after the right-side atlas-overlap correction.
   - Observed: the weapon panel has displaced/duplicated translucent backing pieces and incorrect alignment.
   - Pass condition: all measured SVG HUD backings align exactly with their live contents and retain the accepted colors, bevels, spacing, left anchor, opacity, and two-digit ammunition layout.
   - Evidence: `codex-clipboard-09809a90-e84d-4505-9fdc-b39a6d4bf9a5.png`.

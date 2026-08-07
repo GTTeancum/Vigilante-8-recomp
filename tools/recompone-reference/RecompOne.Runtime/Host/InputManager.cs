@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Hardware;
 using RecompOne.Runtime.Sdk;
+using RecompOne.Runtime.Hle;
 
 namespace RecompOne.Runtime.Host;
 
@@ -43,6 +44,7 @@ internal static unsafe class InputManager
     static string? _captureScriptedStage;
     static bool _suppressRumble;
     static int _scriptExitAfterPoll = -1;
+    static int _nativeGameplayMenuPolls;
     static readonly (byte Large, byte Small)[] _lastRumble =
         [(byte.MaxValue, byte.MaxValue), (byte.MaxValue, byte.MaxValue)];
 
@@ -129,6 +131,12 @@ internal static unsafe class InputManager
 
     public static bool IsKeyDown(Key k) => _keyboard?.IsKeyPressed(k) ?? false;
 
+    // Refreshed by the retail PAUSED / QUEST OBJECTIVES text path. Keeping the
+    // context pulse at the native UI seam lets Trigger Drive retain ordinary
+    // A/B/X/Y menu navigation without inventing a second pause-state machine.
+    internal static void SignalNativeGameplayMenu() =>
+        _nativeGameplayMenuPolls = 8;
+
     public static void Poll()
     {
         if (_disableLiveInput)
@@ -148,6 +156,8 @@ internal static unsafe class InputManager
         Controller.State &= (ushort)~V82Compat.GetAutomationInputMask();
         Controller.Connected2 = _forcePad2Connected ||
             (!_disableLiveInput && (_pad1 != null || HasAnyKey(ConfigManager.Game.Keys2)));
+        if (_nativeGameplayMenuPolls > 0)
+            _nativeGameplayMenuPolls--;
     }
 
     static void ParseScriptedInput()
@@ -449,7 +459,12 @@ internal static unsafe class InputManager
 
         if (_pad0 != null)
         {
-            Controller.State = PadState(_pad0, ConfigManager.Game.Pad, Controller.State);
+            GamepadBindings pad = InputBindingResolver.ResolvePad(
+                ConfigManager.Game.InputProfile,
+                ConfigManager.Game.Pad,
+                GpuHle.GameplayActive,
+                _nativeGameplayMenuPolls > 0);
+            Controller.State = PadState(_pad0, pad, Controller.State);
             Controller.LeftX = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Leftx));
             Controller.LeftY = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Lefty));
             Controller.RightX = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Rightx));
@@ -458,7 +473,12 @@ internal static unsafe class InputManager
 
         if (_pad1 != null)
         {
-            Controller.State2 = PadState(_pad1, ConfigManager.Game.Pad2, Controller.State2);
+            GamepadBindings pad = InputBindingResolver.ResolvePad(
+                ConfigManager.Game.InputProfile,
+                ConfigManager.Game.Pad2,
+                GpuHle.GameplayActive,
+                _nativeGameplayMenuPolls > 0);
+            Controller.State2 = PadState(_pad1, pad, Controller.State2);
             Controller.LeftX2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Leftx));
             Controller.LeftY2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Lefty));
             Controller.RightX2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Rightx));

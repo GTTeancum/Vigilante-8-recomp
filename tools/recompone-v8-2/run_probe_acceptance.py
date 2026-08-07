@@ -93,9 +93,27 @@ def main() -> int:
         (output / f"{name}.stderr.log").write_text(
             stderr, encoding="utf-8")
         combined = stdout + "\n" + stderr
+        graphics_contract = (
+            "preset=Enhanced",
+            "hle=enhanced",
+            "projection=perspective",
+            "dithering=False",
+            "smoothing=True",
+            "aa=FXAA",
+            "msaa=2",
+            "anisotropy=4",
+            "mipmaps=True",
+            "widescreen=True",
+            "world-texture-class=512",
+            "ui-texture-class=1024",
+        )
         passed = (
             completed.returncode == 0
             and marker in combined
+            and (
+                name != "graphics"
+                or all(token in combined for token in graphics_contract)
+            )
             and "[Fatal]" not in combined
             and "FAILED:" not in combined
         )
@@ -104,6 +122,8 @@ def main() -> int:
                 "case": name,
                 "exit_code": completed.returncode,
                 "marker": marker,
+                "graphics_contract":
+                    list(graphics_contract) if name == "graphics" else None,
                 "passed": passed,
             }
         )

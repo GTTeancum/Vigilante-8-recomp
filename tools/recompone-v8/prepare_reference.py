@@ -804,9 +804,45 @@ def main() -> int:
             },
             {
                 "overlay": "main",
+                "address": "80021460",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.RestoreTerrainFrustum",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
                 "address": "8001DE08",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.ApplyModelLevelOfDetail",
                 "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8001BE5C",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceMeshRenderPre",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8001BE5C",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceMeshRenderPost",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
+                "address": "80040E38",
+                "target": (
+                    "RecompOne.Runtime.Sdk.V8Compat."
+                    "BeginTerrainRoutePacketWrites"
+                ),
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "80040E38",
+                "target": (
+                    "RecompOne.Runtime.Sdk.V8Compat."
+                    "EndTerrainRoutePacketWrites"
+                ),
+                "mode": "post",
             },
             {
                 "overlay": "main",

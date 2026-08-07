@@ -10,6 +10,12 @@ PS1 framebuffer pixels.
 | Vehicle/status, weapon, and ammo backing | `(80, 20)` | `(64, 90)` | `84 x 34` |
 | Vertical health backing | `(24, 71)` | `(0, 145)` | `16 x 49` |
 
+The status row is emitted at authored UV `(64, 90)`, tpage `0x005`, CLUT
+`0x7804`, with texture-window masking disabled for this draw. Runtime
+classification uses that complete native packet identity plus its exact
+`84 x 34` dimensions; the former inferred `(104, 32)` identity was disproved
+by the live packet trace.
+
 The radar face occupies the left `55 x 55` pixels of its rectangle. Its center
 is `(27.5, 27.5)` in local atlas coordinates. Inspection of the recovered
 `hud1.bmp` source shows three interior range rings, with measured centers at

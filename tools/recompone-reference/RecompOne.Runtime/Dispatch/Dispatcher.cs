@@ -163,6 +163,7 @@ public static class Dispatcher
         foreach (var (addr, fn) in overlay.Functions)
             _funcMap[addr] = fn;
 
+        Sdk.LibCd.NotifyOverlayLoaded(name);
         if (already) return;
         Runtime.OverlayLog.Record(name, OverlayEventKind.Loaded);
         Console.WriteLine($"[Dispatcher] loaded overlay: {name}");
@@ -258,7 +259,33 @@ public static class Dispatcher
         Runtime.OverlayLog.Record(name, OverlayEventKind.Unloaded);
     }
 
+    // Attribution probe. Mesh emitters are reached through a function pointer
+    // per model type, so no static search finds them. Bracketing every
+    // indirect call with the packet-buffer pointer names whichever one wrote a
+    // given packet. Gated: this is a hot path.
+    public static readonly bool TraceIndirectPackets =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TRACE_INDIRECT") == "1";
+
     public static void Call(CpuContext c, IMemory m, uint addr)
+    {
+        if (TraceIndirectPackets && Sdk.V82Compat.IndirectPacketDepth < 8)
+        {
+            Sdk.V82Compat.BeginIndirectCall(c, m, addr);
+            try
+            {
+                CallInner(c, m, addr);
+            }
+            finally
+            {
+                Sdk.V82Compat.EndIndirectCall(c, m, addr);
+            }
+            return;
+        }
+        CallInner(c, m, addr);
+    }
+
+    static void CallInner(CpuContext c, IMemory m, uint addr)
     {
         if (BiosKernel.TryDispatch(c, m, addr)) return;
         if (_hostFunctions.TryGetValue(addr, out var hostFunction))
@@ -397,6 +424,7 @@ public static class Dispatcher
         Rebuild();
         Runtime.OverlayLog.Record(overlay.Name, OverlayEventKind.Loaded,
             $"relocated by 0x{delta:X8}");
+        Sdk.LibCd.NotifyOverlayLoaded(overlay.Name);
         Console.WriteLine($"[Dispatcher] loaded relocated overlay: {overlay.Name} base=0x{actualBase:X8} delta=0x{delta:X8}");
     }
 

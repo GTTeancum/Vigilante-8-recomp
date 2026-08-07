@@ -1,9 +1,237 @@
 namespace RecompOne.Runtime;
 
+using RecompOne.Runtime.Config;
+using RecompOne.Runtime.Hle;
 using RecompOne.Runtime.Memory;
 
 public static class Gte
 {
+    static long _wideProjectionVertices;
+    static long _wideProjectionExpandedVertices;
+    static long _wideProjectionSaturatedVertices;
+    static long _wideProjectionSaturatedObjectVertices;
+    static long _divideSaturations;
+    static long _nclipTerrainCorrections;
+    static long _nclipObjectCorrections;
+    static long _nclipRescued;
+    // Is near geometry never projected, or projected and then discarded? The
+    // renderer only sees what the engine submits, so counting projections the
+    // GTE actually performed at close range separates an engine-side gate
+    // from a projection that never happens.
+    static long _rtpNear100, _rtpNear60, _rtpTotal;
+    // These sit in the per-vertex projection path (11.5M calls a run) and in
+    // every FLAG read. They answered what they were added for - H is 256, so
+    // the divide saturates below depth 128 - and are gated off by default so
+    // the JIT can drop them entirely.
+    static readonly bool TraceNearProjection =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TRACE_NEAR_PROJECTION") == "1";
+    static long _projectionFlagsWithheld;
+    static int _lastH;
+    static bool _lastDivideSaturated;
+    // func_80022... reads the GTE FLAG register and skips the primitive when
+    // the error summary bit is set:
+    //     c.At = Gte.ReadControl(31);
+    //     if ((int)c.At < 0) { ...skip... }
+    // Bits 13..18 all feed that summary: packed X/Y saturation (13, 14),
+    // MAC0 overflow (15, 16) and divide overflow (17). Geometry passing close
+    // beside the camera raises all of them, so withholding only bit 17 - which
+    // is what SuppressNearRejection did - never stopped the primitive being
+    // thrown away. Retail is right to reject: it cannot draw what it cannot
+    // represent. Enhanced reconstructs these vertices from camera space and
+    // clips them at its own near plane, so the only thing the flags cost us is
+    // the primitive itself. Withhold the whole group; no value changes.
+    const uint ProjectionErrorFlags = 0x0007E000u;
+    // On: this is what lets geometry passing close beside the camera be
+    // drawn at all. The engine reads the GTE FLAG register and skips the
+    // primitive when the error summary bit is set; a wall the car is driving
+    // alongside trips it, and the wall is sliced off where it passes closest.
+    // Measured on the near-cutoff metric (Wild West, 700 frames): the nearest
+    // submitted wall vertex moves from depth 72.9 to 26.2 with this on.
+    // Enhanced reconstructs these vertices from camera space and clips them at
+    // its own near plane, so the flags cost only the primitive itself.
+    static readonly bool NearFlagSuppression =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_NEAR_FLAGS") != "0";
+    // Geometry passing close beside the camera projects far outside the range
+    // a PS1 coordinate can hold, so the packed result saturates and the engine
+    // throws the primitive away - correct for hardware that can only draw what
+    // it can represent. Enhanced reconstructs this geometry from camera space
+    // and never reads the packed value, so folding the saturated coordinate
+    // back into a representable window only stops the primitive being
+    // discarded. Nothing that is drawn moves.
+    // Measured inert. Normalised against each run's own drawn geometry it
+    // changes nothing: 32.4 near primitives per million drawn with it, 32.0
+    // without. The apparent doubling seen first came from comparing raw counts
+    // between soak runs that had diverged. Left off; it alters game-visible
+    // packed coordinates for no demonstrated benefit.
+    static readonly bool NearKeepGeometry =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_NEAR_KEEP") == "1";
+
+    public static (long Total, long Near100, long Near60, int H)
+        ConsumeRtpNearCounts()
+    {
+        var v = (_rtpTotal, _rtpNear100 + _projectionFlagsWithheld * 0,
+            _rtpNear60, _lastH);
+        _rtpTotal = _rtpNear100 = _rtpNear60 = 0;
+        return v;
+    }
+
+    // Proof aid, not a game feature. The soak harness is not deterministic
+    // frame-to-frame - two identical runs differ across most of the frame -
+    // so a before/after screenshot pair cannot show what this fix restored.
+    // Record the polygons whose front-facing sign the rounded integer test
+    // erased and let the rasteriser paint them, so one frame shows exactly
+    // the geometry that used to be missing.
+    public static readonly bool MarkRescuedNclip =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_MARK_NCLIP") == "1";
+    static readonly HashSet<ulong> RescuedTriangles = [];
+    public static long MarkedPrimitives;
+    public static long TestedPrimitives;
+    public static long CandidatePrimitives;
+    public static int RescuedTriangleCount => RescuedTriangles.Count;
+
+    static ulong RescueHash(int x, int y) =>
+        (((ulong)(ushort)(short)x << 16) | (ushort)(short)y)
+            * 0x9E3779B97F4A7C15UL;
+
+    /// <summary>Order-independent identity for a projected triangle.</summary>
+    public static ulong RescueKey(
+        int x0, int y0, int x1, int y1, int x2, int y2) =>
+        RescueHash(x0, y0) ^ RescueHash(x1, y1) ^ RescueHash(x2, y2);
+
+    public static bool WasNclipRescued(ulong key) =>
+        RescuedTriangles.Contains(key);
+
+    public static void ClearNclipRescued() => RescuedTriangles.Clear();
+
+
+    /// <summary>
+    /// Polygons whose backface sign the widescreen-compressed integer NCLIP
+    /// got wrong, split into the terrain transform and everything else.
+    /// </summary>
+    public static (long Terrain, long Object, long Rescued)
+        ConsumeNclipCorrections()
+    {
+        var value = (_nclipTerrainCorrections, _nclipObjectCorrections,
+            _nclipRescued);
+        _nclipTerrainCorrections = 0;
+        _nclipObjectCorrections = 0;
+        _nclipRescued = 0;
+        return value;
+    }
+
+    static readonly bool SuppressNearRejection =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_NEAR_REJECTION") != "0";
+
+    public static long ConsumeDivideSaturations()
+    {
+        long value = _divideSaturations;
+        _divideSaturations = 0;
+        return value;
+    }
+
+    public static long ConsumeSaturatedObjectVertices()
+    {
+        long value = _wideProjectionSaturatedObjectVertices;
+        _wideProjectionSaturatedObjectVertices = 0;
+        return value;
+    }
+
+    public static long ConsumeSaturatedVertices()
+    {
+        long value = _wideProjectionSaturatedVertices;
+        _wideProjectionSaturatedVertices = 0;
+        return value;
+    }
+    // Native pixels of unused window left on each side of the packed
+    // widescreen projection, while the terrain transform is running. Retail
+    // packet clipping operates on the packed SXY, so a terrain primitive that
+    // straddles the packed window edge is discarded whole even though its
+    // visible part is inside the widened viewport, which opens wedges along
+    // both outer edges. Enhanced draws terrain from camera space and never
+    // reads the packed X, so reserving headroom moves the retail clip
+    // boundary outside the real picture instead of through it.
+    //
+    // Measured on Route 66: outer-edge terrain loss stops falling at 40 native
+    // pixels and is identical at 56 and 72, so 48 sits on the plateau with
+    // slack for other camera pitches while leaving the packed window ample
+    // resolution for retail logic.
+    //
+    // Confined to the terrain scope. Applying it to every gameplay projection
+    // was tried against a report of objects vanishing at the outer edges up
+    // close, and made no measurable difference to how much object geometry
+    // reaches the edges (11.02% against 10.69%, inside run-to-run noise) or to
+    // packed-coordinate saturation. Do not widen this scope again without a
+    // reproduction that it demonstrably fixes.
+    static readonly int WideClipHeadroom =
+        int.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_V82_WIDE_CLIP_HEADROOM"),
+            out int wideClipHeadroom)
+            ? Math.Clamp(wideClipHeadroom, 0, 120)
+            : 48;
+    static readonly bool TerrainPreciseNclip =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TERRAIN_PRECISE_NCLIP") != "0";
+    // Widescreen narrows the PS1-visible SX by BaseAspect/WideAspect before
+    // rounding it to an integer. NCLIP's cross product is a sum of x*dy terms,
+    // so that scaling shrinks every polygon's measured area by the same ratio
+    // and pushes far more of them under one unit, where rounding decides the
+    // sign. A tall thin vertical quad - which is exactly what a destructible
+    // wall panel is - has an area dominated by sub-pixel x differences, so the
+    // rounded test flips it to backfacing at random and the engine drops the
+    // whole panel. The result on screen is a full-height vertical slice of
+    // wall missing. Measure the area from the same fractional projection the
+    // renderer draws from; the sign only changes for polygons the integer test
+    // was already getting wrong, because a uniform positive x scale cannot
+    // reorder a cross product on its own.
+    // On, scoped. All four mesh emitters (func_80022A4C and siblings) run
+    // NCLIP, read MAC0 and discard the triangle when the area is <= 0. SatX /
+    // SatY clamp packed coordinates to +/-1024, so geometry passing close
+    // beside the camera saturates, reads degenerate, and is thrown away - the
+    // reported artifact, and why it only happens near objects.
+    //
+    // The area is computed from SxyUnclamped* for object geometry only.
+    // Terrain keeps the clamped projection: feeding it unclamped values
+    // inverted terrain backface signs and shredded the ground (T68), and no
+    // geometry statistic detected it - only a whole-frame image comparison
+    // did (T69). Gate any change here with whole_frame_gate.py, whose control
+    // run establishes the ~1.8% noise floor.
+    // Retail culling neutralised. All four mesh emitters reject a triangle
+    // when NCLIP's area comes out <= 0, computed from coordinates the PS1
+    // could represent. Enhanced draws from camera space and does not need that
+    // decision made for it, so this forces the result positive and lets the
+    // renderer decide what is visible. Diagnostic sledgehammer first: if
+    // geometry the engine was dropping still does not appear with this on, the
+    // rejection is not NCLIP at all.
+    static readonly bool NoRetailCull =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_NO_RETAIL_CULL") == "1";
+
+    static readonly bool WidePreciseNclip =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_WIDE_PRECISE_NCLIP") != "0";
+    static readonly bool WideClipHeadroomGlobal =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_WIDE_CLIP_GLOBAL") == "1";
+    static int _terrainProjectionDepth;
+
+    /// <summary>
+    /// Brackets the retail terrain transform. Only projections issued inside
+    /// take the widescreen clip headroom described on
+    /// <see cref="WideClipHeadroom"/>.
+    /// </summary>
+    public static void BeginTerrainProjection() => _terrainProjectionDepth++;
+
+    public static void EndTerrainProjection()
+    {
+        if (_terrainProjectionDepth > 0)
+            _terrainProjectionDepth--;
+    }
     static readonly short[] V = new short[9];
     static byte RGBC_R, RGBC_G, RGBC_B, RGBC_CODE;
     static ushort OTZ;
@@ -17,6 +245,13 @@ public static class Gte
     static readonly ushort[] SxyDepth = new ushort[3];
     static readonly float[] SxyPerspectiveW = new float[3];
     static readonly float[] SxyPreciseX = new float[3];
+    // The clamped copies above are what a PS1 coordinate can represent.
+    // NCLIP's signed area must not be computed from them: geometry passing
+    // close beside the camera projects far off-screen, two or three vertices
+    // clamp to the same limit, the triangle reads as degenerate and the engine
+    // discards it as backfacing. Keep the unclamped projection for that test.
+    static readonly float[] SxyUnclampedX = new float[3];
+    static readonly float[] SxyUnclampedY = new float[3];
     static readonly float[] SxyPreciseY = new float[3];
     static readonly float[] SxyViewX = new float[3];
     static readonly float[] SxyViewY = new float[3];
@@ -227,6 +462,8 @@ public static class Gte
     static int DQB;
     static short ZSF3, ZSF4;
     static uint FLAG;
+    public static long FlagRegisterReads;
+    public static long FlagRegisterErrors;
 
     static readonly byte[] Unr = BuildUnr();
 
@@ -351,7 +588,29 @@ public static class Gte
 
     static uint Divide(uint h, uint sz3)
     {
-        if (h >= sz3 * 2) { Flag(17); return 0x1FFFF; }
+        if (h >= sz3 * 2)
+        {
+            _divideSaturations++;
+            _lastDivideSaturated = true;
+            // Retail rejects the whole primitive when this overflows, which is
+            // correct for hardware that can only draw what this produces. A
+            // wall segment passing beside the camera trips it and disappears,
+            // and widescreen shows a third more of exactly that region, so the
+            // gap lands inside the picture as a vertical cut that slides along
+            // the wall as you drive.
+            //
+            // Enhanced projects this geometry from camera space and never
+            // reads the result, so withholding the overflow flag only stops
+            // the primitive being thrown away. The saturated value is still
+            // returned, so anything that does consume it sees what it saw
+            // before.
+            if (!SuppressNearRejection ||
+                !ConfigManager.View.HighResolution3D ||
+                !GpuHle.GameplayActive)
+                Flag(17);
+            return 0x1FFFF;
+        }
+        _lastDivideSaturated = false;
         int z = Clz16(sz3);
         ulong n = (ulong)h << z;
         ulong d = (ulong)sz3 << z;
@@ -366,6 +625,7 @@ public static class Gte
 
     static void Rtp(int vx, int vy, int vz, int sf, bool lm, bool last)
     {
+        uint flagBeforeProjection = FLAG;
         long m1 = ((long)TR[0] << 12) + (long)RT[0] * vx + (long)RT[1] * vy + (long)RT[2] * vz;
         long m2 = ((long)TR[1] << 12) + (long)RT[3] * vx + (long)RT[4] * vy + (long)RT[5] * vz;
         long m3 = ((long)TR[2] << 12) + (long)RT[6] * vx + (long)RT[7] * vy + (long)RT[8] * vz;
@@ -380,11 +640,85 @@ public static class Gte
         int sz = SatSZ((int)(m3 >> 12));
         SZ[0] = SZ[1]; SZ[1] = SZ[2]; SZ[2] = SZ[3]; SZ[3] = (ushort)sz;
 
+        if (TraceNearProjection)
+        {
+            _lastH = (int)H;
+            _rtpTotal++;
+            if (SZ[3] < 100) _rtpNear100++;
+            if (SZ[3] < 60) _rtpNear60++;
+        }
         uint div = Divide(H, SZ[3]);
+        bool wideProjection =
+            ConfigManager.View.HighResolution3D &&
+            GpuHle.GameplayActive &&
+            GpuHle.WideAspect > GpuHle.BaseAspect + 0.001f;
+        // Geometry beside the camera overflows MAC0 here as well: the divide
+        // has already saturated, and multiplying that by a large IR leaves the
+        // 32-bit range. Bits 13..18 of FLAG all feed the error summary bit the
+        // engine tests, so withholding only the divide's bit 17 still loses
+        // the primitive. Withhold the overflow bits from this projection too,
+        // under the same conditions - Enhanced never reads MAC0 or the packed
+        // result for these vertices, so nothing that is drawn changes.
+        bool nearKeep =
+            NearKeepGeometry && wideProjection && _lastDivideSaturated;
+        // Measured harmful: withholding these dropped near geometry from
+        // 32 to 5.5 primitives per million drawn. Left raising the flags.
         long sx = CheckMac0((long)div * IR1 + OFX); MAC0 = (int)sx;
         long sy = CheckMac0((long)div * IR2 + OFY); MAC0 = (int)sy;
-        int nx = SatX((int)(sx >> 16));
-        int ny = SatY((int)(sy >> 16));
+        long packedSx = sx;
+        if (wideProjection)
+        {
+            // The renderer keeps the original, uncompressed view-space
+            // projection below.  Only the PS1-visible SXY result is narrowed
+            // so retail frustum/clip tests cover the wider PC viewport.
+            // This is the same projection contract as an emulator's
+            // widescreen geometry hack, but it cannot distort Enhanced output
+            // because Enhanced reconstructs from SxyView* and the original
+            // projection center/scale.
+            double ratio = GpuHle.BaseAspect / GpuHle.WideAspect;
+            if (WideClipHeadroom > 0 &&
+                (WideClipHeadroomGlobal || _terrainProjectionDepth > 0))
+            {
+                // The packed window is the authored gameplay display, which is
+                // where retail clipping happens regardless of output size.
+                const double window = 320d;
+                double usable = window - 2d * WideClipHeadroom;
+                if (usable > 32d)
+                    ratio *= usable / window;
+            }
+            packedSx = OFX + (long)Math.Round(
+                (sx - OFX) * ratio,
+                MidpointRounding.AwayFromZero);
+            _wideProjectionVertices++;
+
+            double center = OFX / 65536.0;
+            double originalX = sx / 65536.0;
+            double nativeX = packedSx / 65536.0;
+            if (Math.Abs(originalX - center) > 160.0 &&
+                Math.Abs(nativeX - center) <= 160.0)
+                _wideProjectionExpandedVertices++;
+        }
+        // Count vertices whose packed X leaves the range retail geometry can
+        // represent. Those are the ones the retail clipper mishandles, and
+        // they are produced by geometry that is both close and far off-axis.
+        long packedX = packedSx >> 16;
+        if (wideProjection && (packedX < -1023 || packedX > 1023))
+        {
+            if (_terrainProjectionDepth > 0)
+                _wideProjectionSaturatedVertices++;
+            else
+                _wideProjectionSaturatedObjectVertices++;
+        }
+        long packedY = sy >> 16;
+        if (nearKeep)
+        {
+            // Keep the direction, drop only the unrepresentable magnitude.
+            long cx = OFX >> 16, cy = OFY >> 16;
+            packedX = Math.Clamp(packedX, cx - 480, cx + 480);
+            packedY = Math.Clamp(packedY, cy - 480, cy + 480);
+        }
+        int nx = SatX((int)packedX);
+        int ny = SatY((int)packedY);
         SX[0] = SX[1]; SX[1] = SX[2]; SX[2] = (short)nx;
         SY[0] = SY[1]; SY[1] = SY[2]; SY[2] = (short)ny;
         SxyDepth[0] = SxyDepth[1];
@@ -399,6 +733,10 @@ public static class Gte
         SxyPreciseX[1] = SxyPreciseX[2];
         SxyPreciseY[0] = SxyPreciseY[1];
         SxyPreciseY[1] = SxyPreciseY[2];
+        SxyUnclampedX[0] = SxyUnclampedX[1];
+        SxyUnclampedX[1] = SxyUnclampedX[2];
+        SxyUnclampedY[0] = SxyUnclampedY[1];
+        SxyUnclampedY[1] = SxyUnclampedY[2];
         SxyViewX[0] = SxyViewX[1];
         SxyViewX[1] = SxyViewX[2];
         SxyViewY[0] = SxyViewY[1];
@@ -420,12 +758,16 @@ public static class Gte
         SxyProjectionCenterY[2] = OFY / 65536.0f;
         SxyProjectionScale[2] = H;
         float projectionScale = H / preciseZ;
-        SxyPreciseX[2] = Math.Clamp(
-            SxyProjectionCenterX[2] + SxyViewX[2] * projectionScale,
-            -1024f, 1023f);
-        SxyPreciseY[2] = Math.Clamp(
-            SxyProjectionCenterY[2] + SxyViewY[2] * projectionScale,
-            -1024f, 1023f);
+        float unclampedX =
+            SxyProjectionCenterX[2] + SxyViewX[2] * projectionScale;
+        float unclampedY =
+            SxyProjectionCenterY[2] + SxyViewY[2] * projectionScale;
+        SxyUnclampedX[2] = float.IsFinite(unclampedX)
+            ? Math.Clamp(unclampedX, -1e7f, 1e7f) : 0f;
+        SxyUnclampedY[2] = float.IsFinite(unclampedY)
+            ? Math.Clamp(unclampedY, -1e7f, 1e7f) : 0f;
+        SxyPreciseX[2] = Math.Clamp(unclampedX, -1024f, 1023f);
+        SxyPreciseY[2] = Math.Clamp(unclampedY, -1024f, 1023f);
         SxyHasPrecisePosition[2] =
             float.IsFinite(SxyPreciseX[2]) &&
             float.IsFinite(SxyPreciseY[2]) &&
@@ -441,6 +783,29 @@ public static class Gte
             MAC0 = (int)dp;
             IR0 = SatIR0((int)(dp >> 12));
         }
+
+        if (NearFlagSuppression && wideProjection)
+        {
+            // Put bits 13..18 back exactly as this projection found them and
+            // recompute the summary bit, so a vertex the hardware could not
+            // represent no longer costs the engine the whole primitive.
+            FLAG = (FLAG & ~ProjectionErrorFlags) |
+                   (flagBeforeProjection & ProjectionErrorFlags);
+            FLAG &= ~0x80000000u;
+            if ((FLAG & 0x7F87E000u) != 0)
+                FLAG |= 0x80000000u;
+            _projectionFlagsWithheld++;
+        }
+    }
+
+    public static (long Vertices, long ExpandedVertices)
+        ConsumeWidescreenProjectionMetrics()
+    {
+        long vertices = _wideProjectionVertices;
+        long expanded = _wideProjectionExpandedVertices;
+        _wideProjectionVertices = 0;
+        _wideProjectionExpandedVertices = 0;
+        return (vertices, expanded);
     }
 
     static void RecordScreenDepth(short x, short y, ushort z)
@@ -922,21 +1287,84 @@ public static class Gte
                 Rtp(V[6], V[7], V[8], sf, lm, true);
                 break;
             case 0x06:
-                if (Config.ConfigManager.View.GeometryCorrection &&
-                    Config.ConfigManager.View.PreciseCulling &&
+                if (NoRetailCull &&
+                    ConfigManager.View.HighResolution3D &&
+                    GpuHle.GameplayActive)
+                {
+                    // Never let the engine reject a primitive on its own
+                    // backface test.
+                    MAC0 = 0x01000000;
+                    break;
+                }
+                // NCLIP is game-visible GTE state. The engine branches on
+                // MAC0 while traversing terrain, so replacing the native
+                // integer-SXY result with host fractional coordinates changes
+                // which faces the original game submits. Geometry correction
+                // belongs after packet submission in the Enhanced renderer;
+                // emulated CPU/GTE behavior remains bit-exact here.
+                //
+                // The one exception is the terrain transform. Terrain near the
+                // horizon is a stack of strips a fraction of a native pixel
+                // tall, and integer SXY rounding drives their three vertices
+                // exactly collinear, so the engine's own zero-area rejection
+                // deletes them. At 1x that removes something genuinely
+                // sub-pixel; Enhanced draws the same strip from camera space
+                // several real pixels tall, so the rejection punches a visible
+                // slit along the horizon instead. Inside the terrain scope
+                // only, measure the area with the fractional projection that
+                // the renderer is actually going to draw.
+                if (((TerrainPreciseNclip && _terrainProjectionDepth > 0) ||
+                     (WidePreciseNclip &&
+                      ConfigManager.View.HighResolution3D &&
+                      GpuHle.GameplayActive &&
+                      GpuHle.WideAspect > GpuHle.BaseAspect + 0.001f)) &&
                     SxyHasPrecisePosition[0] &&
                     SxyHasPrecisePosition[1] &&
                     SxyHasPrecisePosition[2])
                 {
+                    // Terrain keeps the clamped projection. That path was
+                    // tuned against it to close the horizon slits, and feeding
+                    // it unclamped values changes sign decisions the walker
+                    // depends on - it shreds the ground. Only object geometry,
+                    // where saturation is what deletes triangles beside the
+                    // camera, uses the unclamped projection.
+                    bool terrainScope = _terrainProjectionDepth > 0;
+                    float[] ax = terrainScope ? SxyPreciseX : SxyUnclampedX;
+                    float[] ay = terrainScope ? SxyPreciseY : SxyUnclampedY;
                     double area =
-                        SxyPreciseX[0] *
-                            (SxyPreciseY[1] - SxyPreciseY[2]) +
-                        SxyPreciseX[1] *
-                            (SxyPreciseY[2] - SxyPreciseY[0]) +
-                        SxyPreciseX[2] *
-                            (SxyPreciseY[0] - SxyPreciseY[1]);
+                        (double)ax[0] * (ay[1] - ay[2]) +
+                        (double)ax[1] * (ay[2] - ay[0]) +
+                        (double)ax[2] * (ay[0] - ay[1]);
+                    // A strip whose true area is a fraction of a pixel still
+                    // has to survive the engine's integer sign test, so keep
+                    // the sign when truncation would erase it.
                     MAC0 = (int)Math.Clamp(
-                        area, int.MinValue, int.MaxValue);
+                        area >= 0d ? Math.Ceiling(area) : Math.Floor(area),
+                        int.MinValue,
+                        int.MaxValue);
+                    long packed =
+                        (long)SX[0] * (SY[1] - SY[2]) +
+                        (long)SX[1] * (SY[2] - SY[0]) +
+                        (long)SX[2] * (SY[0] - SY[1]);
+                    // Only a polygon whose two tests disagree changes what the
+                    // engine submits, so count those and nothing else.
+                    if ((packed > 0) != (MAC0 > 0))
+                    {
+                        if (_terrainProjectionDepth > 0)
+                            _nclipTerrainCorrections++;
+                        else
+                            _nclipObjectCorrections++;
+                        // Rounding erased a front face the renderer would have
+                        // drawn: this is the direction that punches holes.
+                        if (MAC0 > 0)
+                        {
+                            _nclipRescued++;
+                            if (MarkRescuedNclip)
+                                RescuedTriangles.Add(RescueKey(
+                                    SX[0], SY[0], SX[1], SY[1],
+                                    SX[2], SY[2]));
+                        }
+                    }
                 }
                 else
                 {
@@ -1214,7 +1642,14 @@ public static class Gte
             case 28: return (uint)DQB;
             case 29: return (uint)ZSF3;
             case 30: return (uint)ZSF4;
-            case 31: return FLAG;
+            case 31:
+                // The engine skips a primitive when the error summary bit is
+                // set at this read. Counting how often that is true is the
+                // only direct measure of whether the suppression reaches the
+                // path that actually rejects geometry.
+                FlagRegisterReads++;
+                if ((FLAG & 0x80000000u) != 0u) FlagRegisterErrors++;
+                return FLAG;
             default: return 0;
         }
     }

@@ -60,6 +60,9 @@ v8_previous_*.log
 tools/smoke/captures/
 __pycache__/
 *.pyc
+/tools/n64_reference/bin/
+/tools/n64_reference/state/
+/tools/n64_reference/vendor/
 
 # Compiled objects
 **/obj/

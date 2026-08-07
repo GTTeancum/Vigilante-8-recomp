@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+
 namespace RecompOne.Runtime;
 
 public static class XaAudio
@@ -16,6 +18,9 @@ public static class XaAudio
     static readonly bool _trace =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_AUDIO") == "1";
     static long _sectorsDecoded;
+    static FileStream? _diagnosticCapture;
+    static long _diagnosticCaptureBytes;
+    static string _diagnosticCaptureSource = "";
 
     static int _oldL, _olderL, _oldR, _olderR;
     static int _srcRate = 37800;
@@ -29,6 +34,7 @@ public static class XaAudio
     {
         lock (_gate)
         {
+            EndDiagnosticCaptureLocked();
             _oldL = _olderL = _oldR = _olderR = 0;
             _writeIdx = _readIdx = _count = 0;
             _playing = false;
@@ -37,6 +43,92 @@ public static class XaAudio
             _underrun = 0;
             _sectorsDecoded = 0;
         }
+    }
+
+    public static void BeginDiagnosticCapture(string sourceName)
+    {
+        string? configured =
+            Environment.GetEnvironmentVariable("RECOMPONE_XA_CAPTURE");
+        if (string.IsNullOrWhiteSpace(configured))
+            return;
+        lock (_gate)
+        {
+            EndDiagnosticCaptureLocked();
+            string path = Path.GetFullPath(configured);
+            if (!Path.HasExtension(path))
+            {
+                Directory.CreateDirectory(path);
+                string safe = string.Concat(
+                    sourceName.Select(character =>
+                        char.IsLetterOrDigit(character) ? character : '_'));
+                path = Path.Combine(path, $"{safe}.wav");
+            }
+            else
+            {
+                string? directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+            }
+            _diagnosticCapture =
+                new FileStream(
+                    path, FileMode.Create, FileAccess.ReadWrite,
+                    FileShare.Read);
+            _diagnosticCapture.Write(new byte[44]);
+            _diagnosticCaptureBytes = 0;
+            _diagnosticCaptureSource = sourceName;
+            WriteDiagnosticCaptureHeaderLocked();
+            Console.Error.WriteLine(
+                $"[XA_CAPTURE] begin source='{sourceName}' path='{path}'");
+        }
+    }
+
+    public static void EndDiagnosticCapture()
+    {
+        lock (_gate)
+            EndDiagnosticCaptureLocked();
+    }
+
+    static void EndDiagnosticCaptureLocked()
+    {
+        if (_diagnosticCapture == null)
+            return;
+        WriteDiagnosticCaptureHeaderLocked();
+        Console.Error.WriteLine(
+            $"[XA_CAPTURE] end source='{_diagnosticCaptureSource}' " +
+            $"rate={_srcRate} bytes={_diagnosticCaptureBytes}");
+        _diagnosticCapture.Dispose();
+        _diagnosticCapture = null;
+        _diagnosticCaptureBytes = 0;
+        _diagnosticCaptureSource = "";
+    }
+
+    static void WriteDiagnosticCaptureHeaderLocked()
+    {
+        if (_diagnosticCapture == null)
+            return;
+        Span<byte> header = stackalloc byte[44];
+        "RIFF"u8.CopyTo(header);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            header[4..], checked((uint)(36 + _diagnosticCaptureBytes)));
+        "WAVE"u8.CopyTo(header[8..]);
+        "fmt "u8.CopyTo(header[12..]);
+        BinaryPrimitives.WriteUInt32LittleEndian(header[16..], 16);
+        BinaryPrimitives.WriteUInt16LittleEndian(header[20..], 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(header[22..], 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            header[24..], checked((uint)_srcRate));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            header[28..], checked((uint)(_srcRate * 4)));
+        BinaryPrimitives.WriteUInt16LittleEndian(header[32..], 4);
+        BinaryPrimitives.WriteUInt16LittleEndian(header[34..], 16);
+        "data"u8.CopyTo(header[36..]);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            header[40..], checked((uint)_diagnosticCaptureBytes));
+        long position = _diagnosticCapture.Position;
+        _diagnosticCapture.Position = 0;
+        _diagnosticCapture.Write(header);
+        _diagnosticCapture.Position = position;
+        _diagnosticCapture.Flush();
     }
 
     static int Clamp(int v) => v < -32768 ? -32768 : v > 32767 ? 32767 : v;
@@ -99,6 +191,15 @@ public static class XaAudio
         {
             _srcRate = rate;
             int peak = 0;
+            if (_diagnosticCapture != null)
+            {
+                byte[] capture = new byte[n * 4];
+                for (int index = 0; index < n; index++)
+                    BinaryPrimitives.WriteInt32LittleEndian(
+                        capture.AsSpan(index * 4, 4), frames[index]);
+                _diagnosticCapture.Write(capture);
+                _diagnosticCaptureBytes += capture.Length;
+            }
             for (int i = 0; i < n; i++)
             {
                 int packed = frames[i];

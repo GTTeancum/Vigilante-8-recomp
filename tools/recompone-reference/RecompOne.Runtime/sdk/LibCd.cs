@@ -53,6 +53,8 @@ public static class LibCd
     static int _cddaPendingReportLba = -1;
     static volatile int _cddaTrackNumber;
     static int _cddaLastReportSecond = -1;
+    static bool _menuMusicWanted;
+    static int _menuMusicGraceFrames;
     static byte _filterFile;
     static byte _filterChannel;
     static byte _cdMixLl = 0x80;
@@ -179,6 +181,7 @@ public static class LibCd
     {
         DispatchXaReport();
         DispatchCddaReport();
+        MaintainMenuMusic();
         bool xaMode = (_mode & 0x40) != 0;
 
         if (_readActive && xaMode) return;
@@ -186,6 +189,68 @@ public static class LibCd
         if (!_readActive || _cbData == 0) return;
         while (_cbData != 0)
             ServiceReadOnce();
+    }
+
+    public static void NotifyOverlayLoaded(string name)
+    {
+        if (!Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal))
+            return;
+
+        if (name.Equals("SHELL_SHELL", StringComparison.OrdinalIgnoreCase))
+        {
+            // Stop presenting the expanded gameplay target immediately.
+            // Returning to the authored 4:3 shell exposes host-side regions
+            // that did not exist in the 16:9 image. The render thread owns
+            // those regions and must black them without erasing the shell's
+            // native VRAM assets or framebuffer pages.
+            Hle.GpuHle.GameplayActive = false;
+            Hle.GpuHle.WidescreenMenuReturnPending = true;
+            Host.InputManager.SignalScriptStage("shell_transition");
+            _menuMusicWanted = true;
+            _menuMusicGraceFrames = 180;
+            return;
+        }
+
+        if (name.Equals("SHELL_LOAD", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("LEVELS_", StringComparison.OrdinalIgnoreCase))
+        {
+            _menuMusicWanted = false;
+            _menuMusicGraceFrames = 0;
+        }
+    }
+
+    static void MaintainMenuMusic()
+    {
+        if (!_menuMusicWanted || Runtime.Cd == null || _cddaActive) return;
+        // Never compete with the game's data or movie/voice streams. The
+        // native shell issues Play after its reads are complete; recovery is
+        // reserved for a genuinely idle shell (for example after an explicit
+        // Stop or after a menu track reaches its end).
+        if (_xaActive || _readActive)
+        {
+            _menuMusicGraceFrames = Math.Max(_menuMusicGraceFrames, 180);
+            return;
+        }
+        if (_menuMusicGraceFrames-- > 0) return;
+        if (!Runtime.Cd.TryGetTrackStartLba(2, out int lba)) return;
+        StartCdda(lba, "menu recovery");
+    }
+
+    static void StartCdda(int lba, string source)
+    {
+        _readActive = false;
+        _xaActive = false;
+        _xaReportLba = -1;
+        _xaPendingReportLba = -1;
+        _xaLastTraceSecond = -1;
+        _cddaLba = lba;
+        _cddaActive = true;
+        _cddaPendingReportLba = -1;
+        _cddaLastReportSecond = -1;
+        XaAudio.Reset();
+        CddaAudio.Reset();
+        EnsureXaThread();
+        Console.Error.WriteLine($"[CDDA] play LBA={_cddaLba} mode=0x{_mode:X2} source={source}");
     }
 
     public static void ServiceReadOnce()
@@ -388,10 +453,17 @@ public static class LibCd
         if (Runtime.Cd == null || !Runtime.Cd.Fs.Locate(name, out int lba, out uint size))
         {
             Log.Sdk($"CdSearchFile '{name}'wasnt found");
+            if (name.Contains("V8VOICE", StringComparison.OrdinalIgnoreCase))
+                Console.Error.WriteLine(
+                    $"[V82ResultVoice] CdSearchFile failed '{name}'");
             c.V0 = 0;
             return;
         }
         Log.Sdk($"CdSearchFile '{name}' lba={lba} size={size}");
+        if (name.Contains("V8VOICE", StringComparison.OrdinalIgnoreCase))
+            Console.Error.WriteLine(
+                $"[V82ResultVoice] CdSearchFile '{name}' " +
+                $"lba={lba} logicalSize={size}");
         lock (_locatedFileGate)
             _locatedFiles[lba] = (lba + (int)((size + 2047u) >> 11), name);
 
@@ -454,6 +526,8 @@ public static class LibCd
         _cddaPendingReportLba = -1;
         _cddaTrackNumber = 0;
         _cddaLastReportSecond = -1;
+        _menuMusicWanted = false;
+        _menuMusicGraceFrames = 0;
         CddaAudio.Reset();
         XaAudio.Reset();
         _filterFile = _filterChannel = 0;
@@ -577,19 +651,7 @@ public static class LibCd
                 Dispatcher.ClearPending();
                 break;
             case Play:
-                _readActive = false;
-                _xaActive = false;
-                _xaReportLba = -1;
-                _xaPendingReportLba = -1;
-                _xaLastTraceSecond = -1;
-                _cddaLba = CurrentLba;
-                _cddaActive = true;
-                _cddaPendingReportLba = -1;
-                _cddaLastReportSecond = -1;
-                XaAudio.Reset();
-                CddaAudio.Reset();
-                EnsureXaThread();
-                Console.Error.WriteLine($"[CDDA] play LBA={_cddaLba} mode=0x{_mode:X2}");
+                StartCdda(CurrentLba, "native command");
                 break;
             case Mute:
                 _cdMuted = true;

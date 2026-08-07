@@ -10,6 +10,96 @@ namespace RecompOne.Runtime.Sdk;
 
 public static class V82Compat
 {
+    static readonly bool TraceNativeOptions =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_NATIVE_OPTIONS") == "1";
+    static readonly HashSet<string> SeenNativeOptionText = [];
+    static bool _nativeOptionsActive;
+
+    public static int? GetFirstPressedNativeControlPadButton(int player) =>
+        InputManager.GetFirstPressedPadButton(player);
+
+    public static string? GetFirstPressedNativeControlKey()
+    {
+        foreach (Silk.NET.Input.Key key in Enum.GetValues<Silk.NET.Input.Key>())
+        {
+            if (key is Silk.NET.Input.Key.Unknown or Silk.NET.Input.Key.Menu)
+                continue;
+            if (InputManager.IsKeyDown(key))
+                return key.ToString();
+        }
+        return null;
+    }
+
+    public static void SignalNativeControlsPage()
+    {
+        InputManager.SignalScriptStage(
+            "v82_options_native_controls", captureDelayPolls: 12);
+    }
+
+    public static void TraceNativeOptionsText(CpuContext c, IMemory m)
+    {
+        string text = ReadNativeAscii(m, c.A1, 64);
+        if (text.Length == 0)
+            return;
+
+        if (GpuHle.GameplayActive &&
+            text is "PAUSED" or "QUEST OBJECTIVES" or "ARE YOU SURE?")
+            InputManager.SignalNativeGameplayMenu();
+
+        if (TraceNativeOptions && SeenNativeOptionText.Add(text))
+        {
+            Span<byte> layout = stackalloc byte[16];
+            for (int index = 0; index < layout.Length; index++)
+                layout[index] = m.ReadU8(c.A2 + (uint)index);
+            Console.Error.WriteLine(
+                $"[V82NativeOptions] text='{text}' caller=0x{c.RA:X8} " +
+                $"object=0x{c.A0:X8} layout=0x{c.A2:X8} flags=0x{c.A3:X8} " +
+                $"layout16={Convert.ToHexString(layout)}");
+        }
+
+        string? stage = null;
+        if (text == "OPTIONS")
+        {
+            _nativeOptionsActive = true;
+            stage = "v82_options";
+        }
+        else if (_nativeOptionsActive)
+        {
+            stage = text switch
+            {
+                "GAME STATUS" => "v82_options_game_status",
+                "MEMORY CARD" => "v82_options_memory_card",
+                "DIFFICULTY" => "v82_options_difficulty",
+                "CONTROLLER" => "v82_options_controller",
+                "AUDIO" => "v82_options_audio",
+                "BACK STORY" => "v82_options_back_story",
+                "CREDITS" => "v82_options_credits",
+                _ => null,
+            };
+        }
+
+        if (stage != null)
+            InputManager.SignalScriptStage(stage, captureDelayPolls: 12);
+    }
+
+    static string ReadNativeAscii(IMemory m, uint address, int maxLength)
+    {
+        if (address < 0x80010000u || address >= 0x80200000u)
+            return string.Empty;
+        Span<char> chars = stackalloc char[maxLength];
+        int length = 0;
+        while (length < chars.Length)
+        {
+            byte value = m.ReadU8(address + (uint)length);
+            if (value == 0)
+                break;
+            if (value is < 0x20 or > 0x7E)
+                return string.Empty;
+            chars[length++] = (char)value;
+        }
+        return new string(chars[..length]);
+    }
+
     readonly record struct GuestVramReservation(
         NativeVramAllocation Request,
         uint X,
@@ -23,6 +113,12 @@ public static class V82Compat
     // visibly in Air Grave's arena callback. Reserve two host-only 512 KiB
     // arenas below the loose-file heap so high-detail packets cannot overwrite
     // gameplay allocations before the scheduler validates the cursor.
+    //
+    // Do not enlarge these without re-verifying gameplay frame by frame.
+    // Growing them to 1 MiB moves PcHeapBase from 0x80300000 to 0x80400000 and
+    // puts the second arena where the heap used to start; the visible result
+    // was terrain dropping out on alternating frames once the car left spawn,
+    // which single-frame captures do not show.
     const uint ExpandedPrimitiveBufferBase = 0x80200000u;
     const uint ExpandedPrimitiveBufferSize = 0x00080000u;
     const uint PcHeapBase =
@@ -66,7 +162,13 @@ public static class V82Compat
     readonly record struct ObjectRenderScope(
         uint ObjectAddress,
         uint PacketStart,
-        bool IsVehicle);
+        bool IsVehicle,
+        bool IsImportedVehicle);
+    readonly record struct ImportedRenderGroupScope(
+        uint PacketStart,
+        uint Descriptor,
+        bool Resolved,
+        V82VehicleRegistry.ImportedRenderGroupInfo Info);
     static readonly Stack<ObjectRenderScope> ObjectRenderScopes = [];
     static readonly bool TraceRendererOwnership =
         Environment.GetEnvironmentVariable(
@@ -81,6 +183,437 @@ public static class V82Compat
     static int _geometrySuppressedLeaves;
     static int _geometryContinuationIterations;
     static int _geometryClipCount;
+    static uint _terrainFrustumWidthAddress;
+    static uint _terrainFrustumNativeWidth;
+    static bool _terrainFrustumAdjusted;
+    static bool _terrainFrustumLogged;
+    static readonly double TerrainFrustumScaleOverride =
+        ReadTerrainFrustumScaleOverride();
+    // Widening the widescreen terrain edge happens here rather than on the
+    // traversal polygon. func_8001BE68 takes an inclusive/exclusive X-cell
+    // span that it already clamps to the grid, so padding it cannot produce a
+    // polygon the walker refuses to walk. Widening the polygon instead starved
+    // func_8001BECC on roughly 6% of frames - it selected a single cell and
+    // the ground vanished for that frame - while producing an identical edge
+    // result. See tools/recompone-v8-2/analyze_terrain_flicker.py.
+    //
+    // 4 cells is where the outer-left hole count reaches zero; 2 leaves 536.
+    const int DefaultTerrainRowCellPadding = 4;
+    static readonly int TerrainRowCellPadding =
+        int.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_V82_TERRAIN_ROW_CELL_PADDING"),
+            out int terrainRowCellPadding)
+            ? Math.Clamp(terrainRowCellPadding, 0, 16)
+            : DefaultTerrainRowCellPadding;
+    static bool _terrainRowCellPaddingLogged;
+    static readonly int TerrainPolygonPaddingCells =
+        int.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_V82_TERRAIN_POLYGON_PADDING_CELLS"),
+            out int terrainPolygonPaddingCells)
+            ? Math.Clamp(terrainPolygonPaddingCells, 0, 32)
+            : 0;
+    static bool _terrainPolygonPaddingLogged;
+    static readonly int TerrainLateralPaddingCells =
+        int.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_V82_TERRAIN_LATERAL_PADDING_CELLS"),
+            out int terrainLateralPaddingCells)
+            ? Math.Clamp(terrainLateralPaddingCells, 0, 64)
+            : 0;
+    static bool _terrainLateralPaddingLogged;
+    static readonly bool TerrainOmnidirectional =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TERRAIN_OMNIDIRECTIONAL") == "1";
+    static bool _terrainOmnidirectionalLogged;
+    static readonly bool TerrainAspectPolygon =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TERRAIN_ASPECT_POLYGON") == "1";
+    static bool _terrainAspectPolygonLogged;
+    // Off by default. Extending the range never grounded the props it was
+    // written for - 2.0, 3.0 and 4.0 all leave them floating by the same
+    // amount - and it costs traversal and packet budget the arena cannot
+    // absorb once the car leaves spawn. Kept only as an investigation lever.
+    const double DefaultTerrainRangeScale = 1d;
+    const double MaximumTerrainRangeScale = 2d;
+    static readonly double TerrainRangeScaleOverride =
+        double.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_V82_TERRAIN_RANGE_SCALE"),
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out double terrainRangeScale) &&
+        double.IsFinite(terrainRangeScale)
+            // Deliberately clamped: higher values overflow the terrain packet
+            // arena and corrupt the frame rather than degrading gracefully.
+            ? Math.Clamp(terrainRangeScale, 1d, MaximumTerrainRangeScale)
+            : 0d;
+    static bool _terrainRangeLogged;
+    // Off by default: it closes the widescreen edge exactly as well as the row
+    // padding above, but it does so by rewriting the traversal polygon, and a
+    // widened polygon intermittently starves the walker. Retained as an
+    // investigation lever only.
+    static readonly bool TerrainWideFit =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TERRAIN_WIDE_FIT") == "1";
+    static readonly double TerrainWideFitMarginCells =
+        double.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_V82_TERRAIN_WIDE_FIT_MARGIN_CELLS"),
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out double terrainWideFitMarginCells) &&
+        double.IsFinite(terrainWideFitMarginCells)
+            ? Math.Clamp(terrainWideFitMarginCells, 0d, 8d)
+            : 1d;
+    // A widened traversal polygon still has to stay inside the terrain grid
+    // and the packet budget; this bounds a pathological camera from demanding
+    // an enormous one.
+    const double MaximumTerrainWideFitFactor = 2.5d;
+    // func_8001BE68 clamps its row spans to 0..2048 quarter-cell indices, so
+    // the authored grid is 512 cells of 1024 world units on each axis.
+    const double TerrainGridExtentCells = 512d;
+    static bool _terrainWideFitLogged;
+    static bool _objectVisibilityLogged;
+    // func_8002E22C's three planes are built for the authored 4:3 view, so in
+    // widescreen it rejects objects that are still on screen. Granting it the
+    // lateral reach the widened frustum has at each object's own distance cuts
+    // objects that stop drawing while still visible by 23% - 45 against 58.5
+    // over paired deterministic runs, measured with
+    // tools/recompone-v8-2/analyze_object_pops.py.
+    //
+    // It does not help the specific case of props vanishing at the extreme
+    // left and right edges up close: those stay at 15 against 16. That remains
+    // open and is pre-existing.
+    static readonly bool WideObjectCull =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_WIDE_OBJECT_CULL") != "0";
+    static readonly bool TraceObjectCull =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TRACE_OBJECT_CULL") == "1";
+    const int MaximumFalseCullLogs = 400;
+    const int MaximumFalseCullCaptures = 6;
+    static int _falseCullsLogged;
+    static uint _objectCullPosition;
+    static uint _objectCullRadius;
+    static readonly Dictionary<uint, (int Tick, bool Accepted, double Distance)>
+        ObjectCullHistory = [];
+    // Swept against the pop detector on repeated deterministic runs. Objects
+    // that stop drawing while still on screen: 54 with no widening, 34 at
+    // 1.05, 28 at 1.6, and back up to 46 at 2.5 - past a point the extra reach
+    // only defers the transition rather than removing it.
+    // Measured at the gate itself rather than through a downstream proxy:
+    // of every object func_8002D9E0 renders, the share that emits anything is
+    // 32.2% at stock, 51.4% at 1.6 and 61.5% at 2.5. At 4.0 the test rejects
+    // nothing at all, which is no longer a frustum test and would draw objects
+    // behind the camera, so 2.5 is the most reach that still culls.
+    const double DefaultObjectCullSlack = 2.5d;
+    static readonly double ObjectCullSlackScale =
+        double.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_V82_OBJECT_CULL_SLACK"),
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out double objectCullSlack) &&
+        double.IsFinite(objectCullSlack)
+            ? Math.Clamp(objectCullSlack, 1d, 4d)
+            : DefaultObjectCullSlack;
+    static int _objectsTested;
+    static int _objectsCulled;
+
+    public static (int Tested, int Culled) ConsumeObjectCullCounts()
+    {
+        var counts = (_objectsTested, _objectsCulled);
+        _objectsTested = 0;
+        _objectsCulled = 0;
+        return counts;
+    }
+
+    /// <summary>
+    /// Records whether func_8002E22C accepted the object, and reports any
+    /// object it rejected while that object was still overlapping the visible
+    /// screen.
+    ///
+    /// This exists so the defect finds itself. Objects vanishing at the outer
+    /// edges cannot be chased with the autodrive - it diverges after roughly
+    /// 180 frames, so whichever object happens to be near an edge differs
+    /// every run and every aggregate metric drowns in that. Instead the engine
+    /// checks its own decision each time: project the object's bounding sphere
+    /// with the real camera basis, and if a rejected object still covers part
+    /// of the widened viewport, say so with everything needed to go back to
+    /// that exact spot.
+    ///
+    /// Enable with RECOMPONE_V82_TRACE_OBJECT_CULL=1.
+    /// </summary>
+    public static void RecordObjectVisibility(CpuContext c, IMemory m)
+    {
+        if (!GpuHle.GameplayActive)
+            return;
+        _objectsTested++;
+        bool culled = c.V0 == 0u;
+        _lastVisibilityCulled = culled;
+        if (culled)
+            _objectsCulled++;
+        if (!TraceObjectCull)
+            return;
+
+        uint position = _objectCullPosition;
+        if (position < 0x80000000u || position > 0x807FFFF0u)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        double projection = unchecked((int)m.ReadU32(c.GP + 0xED8u));
+        double nativeWidth = _terrainFrustumNativeWidth != 0u
+            ? _terrainFrustumNativeWidth
+            : unchecked((int)m.ReadU32(c.GP + 0xEDCu));
+        double nativeHeight = unchecked((int)m.ReadU32(c.GP + 0xF20u));
+        if (projection < 1d || nativeWidth < 1d || nativeHeight < 1d)
+            return;
+
+        double camX = unchecked((int)m.ReadU32(c.GP + 0xF3Cu)) / 256d;
+        double camY = unchecked((int)m.ReadU32(c.GP + 0xF40u)) / 256d;
+        double camZ = unchecked((int)m.ReadU32(c.GP + 0xF44u)) / 256d;
+        double objX = unchecked((int)m.ReadU32(position)) / 256d;
+        double objY = unchecked((int)m.ReadU32(position + 4u)) / 256d;
+        double objZ = unchecked((int)m.ReadU32(position + 8u)) / 256d;
+        double dx = objX - camX, dy = objY - camY, dz = objZ - camZ;
+        double distance = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+
+        uint matrix = c.GP + 0xF28u;
+        double R(int index) =>
+            unchecked((short)m.ReadU16(matrix + (uint)(index * 2))) / 4096d;
+        double viewX = R(0) * dx + R(1) * dy + R(2) * dz;
+        double viewY = R(3) * dx + R(4) * dy + R(5) * dz;
+        double viewZ = R(6) * dx + R(7) * dy + R(8) * dz;
+
+        double screenX = viewZ >= 1d ? viewX * projection / viewZ : double.NaN;
+        double screenY = viewZ >= 1d ? viewY * projection / viewZ : double.NaN;
+        double halfWidth =
+            nativeWidth * 0.5d +
+            GpuHle.WideMargin((int)Math.Round(nativeWidth));
+        double halfHeight = nativeHeight * 0.5d;
+
+        int tick = GpuHle.DebugGameplayTick;
+        ObjectCullHistory.TryGetValue(position, out var previous);
+        ObjectCullHistory[position] = (tick, !culled, distance);
+
+        // The defect is an object that was being drawn and stops while it is
+        // still comfortably on screen and has not meaningfully moved away.
+        // Ordinary distance culling shows up as a rejection at a much larger
+        // distance, and objects leaving the view show up outside the frame.
+        if (!culled ||
+            !previous.Accepted ||
+            previous.Tick != tick - 1 ||
+            _falseCullsLogged >= MaximumFalseCullLogs ||
+            double.IsNaN(screenX) ||
+            distance > previous.Distance * 1.05d ||
+            Math.Abs(screenX) > halfWidth * 0.94d ||
+            Math.Abs(screenY) > halfHeight * 0.94d)
+            return;
+
+        // Which of the three planes rejected it, and by how much.
+        int plane0 = unchecked((short)Gte.Read(9));
+        int plane1 = unchecked((short)Gte.Read(10));
+        int plane2 = unchecked((short)Gte.Read(11));
+        int compared = (int)(_objectCullRadius >> 8);
+
+        _falseCullsLogged++;
+        Console.Error.WriteLine(
+            $"[V82ObjectPop] tick={tick} object=0x{position:X8} " +
+            $"planes=({plane0},{plane1},{plane2}) vs={compared} " +
+            $"world=({objX:F0},{objY:F0},{objZ:F0}) " +
+            $"camera=({camX:F0},{camY:F0},{camZ:F0}) " +
+            $"distance={distance:F0} previous={previous.Distance:F0} " +
+            $"screen=({screenX:F1},{screenY:F1}) " +
+            $"halfWidth={halfWidth:F0} halfHeight={halfHeight:F0} " +
+            $"radius={_objectCullRadius / 256d:F0}");
+        if (_falseCullsLogged <= MaximumFalseCullCaptures)
+            HostWindow.RequestDisplayCapture(
+                $"object_pop_{_falseCullsLogged:00}");
+    }
+
+    /// <summary>
+    /// Captures the arguments func_8002E22C was called with, so the post-hook
+    /// can reason about the object it just rejected.
+    /// </summary>
+    public static void RecordObjectVisibilityInputs(CpuContext c, IMemory m)
+    {
+        _objectCullPosition = c.A0;
+        _objectCullRadius = c.A1;
+        _lastVisibilityCulled = false;
+        _visibilityTestRan = true;
+    }
+
+    // Why func_8002D9E0 produced nothing for an object. It has exactly three
+    // ways out before it draws: a flag on the object, the frustum test, and a
+    // distance limit. Counting which one fires says where a wall segment is
+    // being dropped instead of testing candidate fixes one at a time.
+    static bool _lastVisibilityCulled;
+    static bool _visibilityTestRan;
+    static uint _objectRenderPacketStart;
+    static uint _objectRenderAddress;
+    static int _renderedObjects, _emptyByFlag, _emptyByFrustum,
+        _emptyByDistance, _emptyUnexplained, _emittedObjects;
+
+    public static void TraceObjectRenderBegin(CpuContext c, IMemory m)
+    {
+        if ((!TraceObjectCull && !_censusOpen) || !GpuHle.GameplayActive)
+            return;
+        _objectRenderAddress = c.A0;
+        _objectRenderPacketStart =
+            Dispatcher.UnwrapMemory(m).ReadU32(c.GP + 0x610u);
+        _visibilityTestRan = false;
+        _lastVisibilityCulled = false;
+        _renderedObjects++;
+    }
+
+    public static void TraceObjectRenderEnd(CpuContext c, IMemory m)
+    {
+        if ((!TraceObjectCull && !_censusOpen) || !GpuHle.GameplayActive ||
+            _objectRenderAddress == 0u)
+            return;
+        m = Dispatcher.UnwrapMemory(m);
+        if (m.ReadU32(c.GP + 0x610u) != _objectRenderPacketStart)
+        {
+            _emittedObjects++;
+            RecordCensus(m, _objectRenderAddress, "drawn");
+            return;
+        }
+        uint flags = m.ReadU32(_objectRenderAddress + 4u);
+        string outcome;
+        if ((flags & 2u) != 0u) { _emptyByFlag++; outcome = "flag"; }
+        else if (!_visibilityTestRan)
+        { _emptyUnexplained++; outcome = "other"; }
+        else if (_lastVisibilityCulled)
+        { _emptyByFrustum++; outcome = "frustum"; }
+        else { _emptyByDistance++; outcome = "distance"; }
+        RecordCensus(m, _objectRenderAddress, outcome);
+    }
+
+    // Every object the engine considered this frame and what became of it.
+    // The drawn-triangle dump can only show what survived; when a whole model
+    // is missing the question is whether it was considered and rejected - and
+    // by which gate - or never offered at all. Only a census answers that.
+    public readonly record struct ObjectRecord(
+        uint Address, int X, int Y, int Z, int Radius, string Outcome,
+        long Frame);
+
+    /// <summary>
+    /// Frame counter stamped onto census records. Clearing the census per
+    /// frame proved unreliable because the reset point sits elsewhere in the
+    /// loop than object submission; stamping is order-independent.
+    /// </summary>
+    public static long CensusFrame;
+
+    // Not cleared per frame: the per-frame clear runs at a different point in
+    // the loop than object submission, so it emptied the list before any
+    // capture could read it. A running map keyed by object address answers the
+    // question that matters - was this object ever offered to the renderer -
+    // and costs one entry per distinct object.
+    static readonly Dictionary<uint, ObjectRecord> _objectCensus = [];
+    static bool _censusOpen = true;
+    static readonly bool CensusOwnership =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_CENSUS_OWNERSHIP") == "1";
+    public static int CensusHookCalls;
+    public static long ObjectRenderEntries;
+    public static long ObjectRenderExits;
+    public static int CensusRejected;
+
+    // Kept running continuously rather than armed around a capture: the
+    // arming point sits at a different place in the frame than object
+    // submission, so an armed window recorded nothing. ~90 objects a frame is
+    // cheap enough to just always collect and clear.
+    public static void BeginObjectCensus() => _censusOpen = true;
+
+    public static IReadOnlyList<ObjectRecord> EndObjectCensus() =>
+        _objectCensus.Values.ToList();
+
+    /// <summary>Drops the frame just recorded, after any capture read it.</summary>
+    public static void ResetObjectCensus()
+    {
+    }
+
+    static void RecordCensus(IMemory m, uint address, string outcome)
+    {
+        // Addresses reach here both KSEG-mapped and physical, so judge the
+        // offset rather than the window.
+        CensusHookCalls++;
+        if (!_censusOpen || _objectCensus.Count >= 8192 ||
+            address == 0u || (address & 0x1FFFFFFFu) > 0x00FFFFF0u)
+        {
+            CensusRejected++;
+            return;
+        }
+        _objectCensus[address] = new ObjectRecord(
+            address,
+            unchecked((int)m.ReadU32(address)),
+            unchecked((int)m.ReadU32(address + 4u)),
+            unchecked((int)m.ReadU32(address + 8u)),
+            (int)_objectCullRadius,
+            outcome,
+            CensusFrame);
+    }
+
+    public static void ReportObjectRenderGates()
+    {
+        if (!TraceObjectCull || _renderedObjects == 0)
+            return;
+        Console.Error.WriteLine(
+            $"[V82ObjectGates] rendered={_renderedObjects} " +
+            $"emitted={_emittedObjects} " +
+            $"emptyFlag={_emptyByFlag} emptyFrustum={_emptyByFrustum} " +
+            $"emptyDistance={_emptyByDistance} " +
+            $"emptyOther={_emptyUnexplained}");
+        _renderedObjects = _emittedObjects = _emptyByFlag = _emptyByFrustum =
+            _emptyByDistance = _emptyUnexplained = 0;
+    }
+    static readonly bool TraceTerrainTraversal =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TRACE_TERRAIN_TRAVERSAL") == "1";
+    static int _terrainTraversalTraceCount;
+    static readonly bool TraceTerrainCells =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TRACE_TERRAIN_CELLS") == "1";
+    readonly record struct TerrainCellScope(
+        int Frame,
+        uint X,
+        uint Z,
+        uint PacketStart);
+    sealed class TerrainCellFrameStats
+    {
+        public int Frame;
+        public int Calls;
+        public int Emitted;
+        public long PacketBytes;
+        public uint MinX = uint.MaxValue;
+        public uint MaxX;
+        public uint MinZ = uint.MaxValue;
+        public uint MaxZ;
+        public uint EmittedMinX = uint.MaxValue;
+        public uint EmittedMaxX;
+        public uint EmittedMinZ = uint.MaxValue;
+        public uint EmittedMaxZ;
+        public readonly List<string> Rejected = [];
+    }
+    // Cheap always-on counters so a per-frame terrain report can separate
+    // "the walker selected nothing" from "the emit stage rejected everything".
+    static int _terrainCellsSubmitted;
+    static int _terrainCellsEmitted;
+    static uint _terrainCellPacketCursor;
+
+    public static (int Submitted, int Emitted) ConsumeTerrainCellCounts()
+    {
+        var counts = (_terrainCellsSubmitted, _terrainCellsEmitted);
+        _terrainCellsSubmitted = 0;
+        _terrainCellsEmitted = 0;
+        return counts;
+    }
+
+    static readonly Stack<TerrainCellScope> TerrainCellScopes = [];
+    static TerrainCellFrameStats? _terrainCellFrame;
+    static int _terrainCellFramesLogged;
     static int _geometryTextureTraceCount;
     static readonly bool TraceGeometryTextures =
         Environment.GetEnvironmentVariable(
@@ -351,6 +884,21 @@ public static class V82Compat
         // the vehicle callback.
         V82VehicleRegistry.ReleaseFreedObjectMapping(pointer, c, m);
         InsertFreeBlock(allocation.Header, allocation.Size);
+    }
+
+    public static int PcAllocationCount
+    {
+        get
+        {
+            lock (PcAllocations)
+                return PcAllocations.Count;
+        }
+    }
+
+    public static bool IsPcAllocationLive(uint pointer)
+    {
+        lock (PcAllocations)
+            return PcAllocations.ContainsKey(pointer);
     }
 
     public static string ProbeGuestIdentityLifetime(
@@ -791,37 +1339,168 @@ public static class V82Compat
     /// </summary>
     public static void BeginObjectRender(CpuContext c, IMemory m)
     {
+        ObjectRenderEntries++;
+        TraceObjectRenderBegin(c, m);
         m = Dispatcher.UnwrapMemory(m);
         uint objectAddress = c.A0;
         uint packetStart = m.ReadU32(c.GP + 0x610u);
         bool isVehicle =
             VehicleObjects.Contains(objectAddress) ||
             V82VehicleRegistry.IsVehicleObject(objectAddress);
+        bool isImportedVehicle =
+            V82VehicleRegistry.IsVehicleObject(objectAddress);
         ObjectRenderScopes.Push(
-            new ObjectRenderScope(objectAddress, packetStart, isVehicle));
+            new ObjectRenderScope(
+                objectAddress,
+                packetStart,
+                isVehicle,
+                isImportedVehicle));
     }
 
     public static void EndObjectRender(CpuContext c, IMemory m)
     {
+        ObjectRenderExits++;
+        TraceObjectRenderEnd(c, m);
         if (ObjectRenderScopes.Count == 0)
             return;
 
         m = Dispatcher.UnwrapMemory(m);
         ObjectRenderScope scope = ObjectRenderScopes.Pop();
         uint packetEnd = m.ReadU32(c.GP + 0x610u);
+        // A0 is clobbered by the time the renderer returns, so the object
+        // pointer has to come from the scope captured on entry. Diagnostic
+        // only - gated so a shipping build does not pay a dictionary write and
+        // three reads for every object every frame.
+        if (CensusOwnership &&
+            _objectCensus.Count < 8192 &&
+            scope.ObjectAddress != 0u &&
+            (scope.ObjectAddress & 0x1FFFFFFFu) <= 0x00FFFFF0u)
+        {
+            // The object struct's first words are not its position; the
+            // visibility test receives a separate position pointer, which is
+            // the only place the world coordinates are known.
+            uint pos = _objectCullPosition;
+            bool havePos = pos != 0u &&
+                (pos & 0x1FFFFFFFu) <= 0x00FFFFF0u;
+            _objectCensus[scope.ObjectAddress] = new ObjectRecord(
+                scope.ObjectAddress,
+                havePos ? unchecked((int)m.ReadU32(pos)) : 0,
+                havePos ? unchecked((int)m.ReadU32(pos + 4u)) : 0,
+                havePos ? unchecked((int)m.ReadU32(pos + 8u)) : 0,
+                (int)_objectCullRadius,
+                packetEnd > scope.PacketStart ? "drawn" : "empty",
+                CensusFrame);
+        }
         if (TraceRendererOwnership && _rendererOwnershipTraceCount++ < 128)
             Console.Error.WriteLine(
                 $"[EnhancedOwner] render object=0x{scope.ObjectAddress:X8} " +
                 $"vehicle={(scope.IsVehicle ? 1 : 0)} " +
                 $"packets=0x{scope.PacketStart:X8}..0x{packetEnd:X8}");
+        // Ownership was only ever recorded for vehicles, which left every
+        // other submitter reading as "unresolved" - including the arena walls
+        // this investigation is chasing. Name them too when a capture is
+        // running, so a missing model can be attributed to a subsystem.
+        if (CensusOwnership && !scope.IsVehicle &&
+            packetEnd > scope.PacketStart)
+            GpuHle.RegisterPacketOwnerRange(
+                scope.PacketStart,
+                packetEnd,
+                $"v82-object=0x{scope.ObjectAddress:X8}");
         if (!scope.IsVehicle || packetEnd <= scope.PacketStart)
             return;
 
         GpuHle.RegisterVehiclePacketRange(scope.PacketStart, packetEnd);
+        if (scope.IsImportedVehicle)
+            GpuHle.RegisterImportedVehiclePacketRange(
+                scope.PacketStart,
+                packetEnd);
         GpuHle.RegisterPacketOwnerRange(
             scope.PacketStart,
             packetEnd,
             $"v82-vehicle-object=0x{scope.ObjectAddress:X8}");
+    }
+
+    static readonly Stack<ImportedRenderGroupScope> ImportedRenderGroupScopes =
+        new();
+    static readonly bool TraceImportedRenderGroups =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_V82_RENDER_GROUPS") == "1";
+    static int _importedRenderGroupTraceCount;
+
+    /// <summary>
+    /// Captures packet provenance at the native model renderer boundary.  This
+    /// is the narrowest source-owned seam that distinguishes the imported
+    /// body, its authored distance LOD, and independently mounted wheels.
+    /// </summary>
+    public static void BeginImportedRenderGroup(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        uint packetStart = m.ReadU32(c.GP + 0x610u);
+        bool resolved = V82VehicleRegistry.TryDescribeImportedRenderGroup(
+            m,
+            c.A0,
+            out V82VehicleRegistry.ImportedRenderGroupInfo info);
+        ImportedRenderGroupScopes.Push(
+            new ImportedRenderGroupScope(
+                packetStart,
+                c.A0,
+                resolved,
+                info));
+        if (!resolved && TraceImportedRenderGroups)
+        {
+            string relationship =
+                V82VehicleRegistry.DescribeImportedRenderGroupMiss(
+                    m,
+                    c.A0);
+            // Retail shell/model draws occur before any imported bank exists.
+            // They are outside this diagnostic's scope and must not consume
+            // the bounded trace budget needed for an imported gameplay model.
+            if (relationship != "none" &&
+                _importedRenderGroupTraceCount++ < 128)
+                Console.Error.WriteLine(
+                    $"[V82RenderGroupMiss] descriptor=0x{c.A0:X8} " +
+                    relationship);
+        }
+    }
+
+    public static void EndImportedRenderGroup(CpuContext c, IMemory m)
+    {
+        if (ImportedRenderGroupScopes.Count == 0)
+            return;
+        m = Dispatcher.UnwrapMemory(m);
+        ImportedRenderGroupScope scope = ImportedRenderGroupScopes.Pop();
+        if (!scope.Resolved)
+            return;
+        uint packetEnd = m.ReadU32(c.GP + 0x610u);
+        if (packetEnd <= scope.PacketStart)
+            return;
+        string owner =
+            $"v82-imported={scope.Info.StableId} " +
+            $"bank={scope.Info.BankKind} " +
+            $"group={scope.Info.GroupIndex} " +
+            $"distance-lod={(scope.Info.DistanceLod ? 1 : 0)}";
+        // func_80021F70 is the native model renderer for each authored BIN
+        // group.  Imported gameplay vehicles can reach it through a native
+        // hierarchy child rather than the registry's top-level object
+        // pointer, so the outer object scope alone is not authoritative.
+        // Register this exact source-resolved packet interval with the same
+        // vehicle material system used by native render scopes.
+        GpuHle.RegisterVehiclePacketRange(
+            scope.PacketStart,
+            packetEnd);
+        GpuHle.RegisterImportedVehiclePacketRange(
+            scope.PacketStart,
+            packetEnd);
+        GpuHle.RegisterPacketOwnerRange(
+            scope.PacketStart,
+            packetEnd,
+            owner);
+        if (TraceImportedRenderGroups &&
+            _importedRenderGroupTraceCount++ < 4096)
+            Console.Error.WriteLine(
+                $"[V82RenderGroup] descriptor=0x{scope.Descriptor:X8} " +
+                $"packets=0x{scope.PacketStart:X8}..0x{packetEnd:X8} " +
+                owner);
     }
 
     public static void ValidateConstructedObject(CpuContext c, IMemory m)
@@ -906,9 +1585,1115 @@ public static class V82Compat
         c.A1 = savedA1;
     }
 
+    /// <summary>
+    /// Expands the native terrain traversal polygon to the same horizontal
+    /// field of view as the Enhanced widescreen projection.  func_8001C158
+    /// derives its X corner rays from gp+0xEDC and its Y corner rays from
+    /// gp+0xF20.  Leaving the X extent at its authored 4:3 value means the
+    /// native terrain walker never submits the sectors exposed at the sides
+    /// of a 16:9 target, producing large sky-coloured holes even though the
+    /// Enhanced renderer itself rejects no triangles.
+    /// </summary>
+    // func_8002DFF0 builds the frustum planes at gp+0xF00 (copied to gp+0xFD8)
+    // from gp+0xEDC, the authored 320-wide clip width. Those planes are what
+    // func_8002E22C tests every object and every scenery/backdrop quad
+    // against, so in widescreen the leftmost and rightmost items are rejected
+    // even though they are now on screen - the panorama then stops short of
+    // the frame edge and the world beside it has nothing behind it.
+    //
+    // Widen the clip width across the plane build and put it straight back,
+    // exactly as ExpandTerrainFrustum does for the terrain traversal. Only the
+    // planes change; gp+0xEDC is restored before anything else reads it.
+    static uint _objectFrustumWidthAddress;
+    static uint _objectFrustumNativeWidth;
+    static bool _objectFrustumAdjusted;
+    static bool _objectFrustumLogged;
+    static readonly double ObjectFrustumScale =
+        double.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_V82_OBJECT_FRUSTUM_SCALE"),
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out double objectFrustumScale)
+            ? objectFrustumScale
+            : -1d;
+
+    // Attribution probe: the panorama comes out "unresolved" because none of
+    // the existing ownership brackets cover whatever draws it. Bracketing the
+    // remaining per-frame renderers names the one that does.
+    static readonly Stack<(string Name, uint Start)> NamedRenderScopes = new();
+
+    static void BeginNamedRender(CpuContext c, IMemory m, string name)
+    {
+        if (!CensusOwnership)
+            return;
+        NamedRenderScopes.Push(
+            (name, Dispatcher.UnwrapMemory(m).ReadU32(c.GP + 0x610u)));
+    }
+
+    static void EndNamedRender(CpuContext c, IMemory m)
+    {
+        if (!CensusOwnership || NamedRenderScopes.Count == 0)
+            return;
+        var (name, start) = NamedRenderScopes.Pop();
+        uint end = Dispatcher.UnwrapMemory(m).ReadU32(c.GP + 0x610u);
+        if (end > start)
+            GpuHle.RegisterPacketOwnerRange(start, end, $"v82-pass={name}");
+    }
+
+    static readonly Stack<(uint Addr, uint Start)> IndirectCalls = new();
+    public static int IndirectPacketDepth => IndirectCalls.Count;
+
+    public static void BeginIndirectCall(CpuContext c, IMemory m, uint addr)
+    {
+        IndirectCalls.Push(
+            (addr, Dispatcher.UnwrapMemory(m).ReadU32(c.GP + 0x610u)));
+    }
+
+    public static void EndIndirectCall(CpuContext c, IMemory m, uint addr)
+    {
+        if (IndirectCalls.Count == 0)
+            return;
+        var (target, start) = IndirectCalls.Pop();
+        uint end = Dispatcher.UnwrapMemory(m).ReadU32(c.GP + 0x610u);
+        if (end > start)
+            GpuHle.RegisterPacketOwnerRange(
+                start, end, $"v82-indirect=0x{target:X8}");
+    }
+
+    public static void BeginSceneryPass(CpuContext c, IMemory m) =>
+        BeginNamedRender(c, m, "scenery-80050B38");
+
+    public static void EndSceneryPass(CpuContext c, IMemory m) =>
+        EndNamedRender(c, m);
+
+    public static void BeginSkyPass(CpuContext c, IMemory m) =>
+        BeginNamedRender(c, m, "pass-8003150C");
+
+    public static void EndSkyPass(CpuContext c, IMemory m) =>
+        EndNamedRender(c, m);
+
+    public static void BeginLatePass(CpuContext c, IMemory m) =>
+        BeginNamedRender(c, m, "pass-8001C910");
+
+    public static void EndLatePass(CpuContext c, IMemory m) =>
+        EndNamedRender(c, m);
+
+    public static void ExpandObjectFrustum(CpuContext c, IMemory m)
+    {
+        _objectFrustumAdjusted = false;
+        if (ObjectFrustumScale == 0d ||
+            !ConfigManager.View.HighResolution3D ||
+            !ConfigManager.View.Widescreen ||
+            !GpuHle.GameplayActive ||
+            GpuHle.WideAspect <= GpuHle.BaseAspect + 0.001f)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint address = c.GP + 0xEDCu;
+        uint nativeWidth = m.ReadU32(address);
+        if (nativeWidth == 0u || nativeWidth > 0x00100000u)
+            return;
+
+        double scale = ObjectFrustumScale >= 1d
+            ? ObjectFrustumScale
+            : (double)GpuHle.WideAspect / GpuHle.BaseAspect;
+        uint expandedWidth = checked((uint)Math.Clamp(
+            Math.Round(nativeWidth * scale, MidpointRounding.AwayFromZero),
+            1d,
+            0x00100000d));
+        if (expandedWidth <= nativeWidth)
+            return;
+
+        _objectFrustumWidthAddress = address;
+        _objectFrustumNativeWidth = nativeWidth;
+        _objectFrustumAdjusted = true;
+        m.WriteU32(address, expandedWidth);
+
+        if (!_objectFrustumLogged)
+        {
+            _objectFrustumLogged = true;
+            Console.Error.WriteLine(
+                $"[V82WideObjectFrustum] native={nativeWidth} " +
+                $"expanded={expandedWidth} scale={scale:F6}");
+        }
+    }
+
+    public static void RestoreObjectFrustum(CpuContext c, IMemory m)
+    {
+        if (!_objectFrustumAdjusted)
+            return;
+        _objectFrustumAdjusted = false;
+        Dispatcher.UnwrapMemory(m)
+            .WriteU32(_objectFrustumWidthAddress, _objectFrustumNativeWidth);
+    }
+
+    public static void ExpandTerrainFrustum(CpuContext c, IMemory m)
+    {
+        _terrainFrustumAdjusted = false;
+        if (!ConfigManager.View.HighResolution3D ||
+            !ConfigManager.View.Widescreen ||
+            !GpuHle.GameplayActive ||
+            GpuHle.WideAspect <= GpuHle.BaseAspect + 0.001f)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint address = c.GP + 0xEDCu;
+        uint nativeWidth = m.ReadU32(address);
+        if (nativeWidth == 0u || nativeWidth > 0x00100000u)
+            return;
+
+        double aspectScale =
+            (double)GpuHle.WideAspect / GpuHle.BaseAspect;
+        double scale = TerrainFrustumScaleOverride >= 1d
+            ? TerrainFrustumScaleOverride
+            : aspectScale;
+        uint expandedWidth = checked((uint)Math.Clamp(
+            Math.Round(
+                nativeWidth * scale,
+                MidpointRounding.AwayFromZero),
+            1d,
+            0x00100000d));
+        if (expandedWidth <= nativeWidth)
+            return;
+
+        _terrainFrustumWidthAddress = address;
+        _terrainFrustumNativeWidth = nativeWidth;
+        _terrainFrustumAdjusted = true;
+        m.WriteU32(address, expandedWidth);
+
+        if (!_terrainFrustumLogged)
+        {
+            _terrainFrustumLogged = true;
+            Console.Error.WriteLine(
+                $"[V82WideTerrainFrustum] native={nativeWidth} " +
+                $"expanded={expandedWidth} " +
+                $"scale={scale:F6} aspect={GpuHle.WideAspect:F6} " +
+                $"projection={m.ReadU32(c.GP + 0xED8u)} " +
+                $"focal={m.ReadU16(c.GP + 0xDB4u)} " +
+                $"height={m.ReadU32(c.GP + 0xF20u)}");
+        }
+    }
+
+    static double ReadTerrainFrustumScaleOverride()
+    {
+        string? value = Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TERRAIN_FRUSTUM_SCALE");
+        return double.TryParse(
+            value,
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out double scale) &&
+            double.IsFinite(scale) &&
+            scale >= 1d &&
+            scale <= 4d
+                ? scale
+                : 0d;
+    }
+
+    public static void RestoreTerrainFrustum(CpuContext c, IMemory m)
+    {
+        if (!_terrainFrustumAdjusted)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        m.WriteU32(
+            _terrainFrustumWidthAddress,
+            _terrainFrustumNativeWidth);
+        _terrainFrustumAdjusted = false;
+    }
+
+    public static void TraceTerrainTraversalPolygon(
+        CpuContext c,
+        IMemory m)
+    {
+        if (!TraceTerrainTraversal || _terrainTraversalTraceCount >= 8)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        int count = unchecked((int)c.A1);
+        uint points = c.A0;
+        uint byteCount = (uint)(count * 8);
+        bool retailRam =
+            points >= 0x80000000u &&
+            points <= 0x801FFFFFu - byteCount;
+        bool scratchpad =
+            points >= 0x1F800000u &&
+            points <= 0x1F800400u - byteCount;
+        if (count <= 0 ||
+            count > 32 ||
+            (!retailRam && !scratchpad))
+            return;
+
+        int minX = int.MaxValue;
+        int maxX = int.MinValue;
+        int minZ = int.MaxValue;
+        int maxZ = int.MinValue;
+        long sumX = 0;
+        long sumZ = 0;
+        var detail = new System.Text.StringBuilder();
+        for (int index = 0; index < count; index++)
+        {
+            int x = unchecked((int)m.ReadU32(points + (uint)(index * 8)));
+            int z = unchecked((int)m.ReadU32(
+                points + (uint)(index * 8 + 4)));
+            sumX += x;
+            sumZ += z;
+            minX = Math.Min(minX, x);
+            maxX = Math.Max(maxX, x);
+            minZ = Math.Min(minZ, z);
+            maxZ = Math.Max(maxZ, z);
+            if (index != 0)
+                detail.Append(';');
+            detail.Append(x).Append(',').Append(z);
+        }
+
+        uint matrix = c.GP + 0xF28u;
+        short m00 = unchecked((short)m.ReadU16(matrix));
+        short m01 = unchecked((short)m.ReadU16(matrix + 2u));
+        short m02 = unchecked((short)m.ReadU16(matrix + 4u));
+        short m10 = unchecked((short)m.ReadU16(matrix + 6u));
+        short m11 = unchecked((short)m.ReadU16(matrix + 8u));
+        short m12 = unchecked((short)m.ReadU16(matrix + 10u));
+        short m20 = unchecked((short)m.ReadU16(matrix + 12u));
+        short m21 = unchecked((short)m.ReadU16(matrix + 14u));
+        short m22 = unchecked((short)m.ReadU16(matrix + 16u));
+        uint translation = c.GP + 0xF3Cu;
+        int cameraXFixed = unchecked((int)m.ReadU32(translation));
+        int cameraYFixed = unchecked((int)m.ReadU32(translation + 4u));
+        int cameraZFixed = unchecked((int)m.ReadU32(translation + 8u));
+        int cameraX = cameraXFixed / 256;
+        int cameraY = cameraYFixed / 256;
+        int cameraZ = cameraZFixed / 256;
+        double centerX = (double)sumX / count;
+        double centerZ = (double)sumZ / count;
+        double cameraToCenterX = centerX - cameraX;
+        double cameraToCenterZ = centerZ - cameraZ;
+        double cameraToCenterLength = Math.Sqrt(
+            cameraToCenterX * cameraToCenterX +
+            cameraToCenterZ * cameraToCenterZ);
+        double inferredRightX = cameraToCenterLength >= 1d
+            ? cameraToCenterZ / cameraToCenterLength
+            : 0d;
+        double inferredRightZ = cameraToCenterLength >= 1d
+            ? -cameraToCenterX / cameraToCenterLength
+            : 0d;
+
+        _terrainTraversalTraceCount++;
+        Console.Error.WriteLine(
+            $"[V82TerrainTraversalPolygon] count={count} " +
+            $"bounds-x={minX}..{maxX} bounds-z={minZ}..{maxZ} " +
+            $"center={centerX:F1},{centerZ:F1} " +
+            $"camera={cameraX},{cameraY},{cameraZ} " +
+            $"inferred-right={inferredRightX:F6},{inferredRightZ:F6} " +
+            $"matrix=[{m00},{m01},{m02};{m10},{m11},{m12};" +
+            $"{m20},{m21},{m22}] points={detail}");
+    }
+
+    public static void ExpandTerrainTraversalLateral(
+        CpuContext c,
+        IMemory m)
+    {
+        if (TerrainOmnidirectional ||
+            TerrainAspectPolygon ||
+            TerrainLateralPaddingCells <= 0 ||
+            !ConfigManager.View.HighResolution3D ||
+            !ConfigManager.View.Widescreen ||
+            !GpuHle.GameplayActive)
+            return;
+
+        int count = unchecked((int)c.A1);
+        uint points = c.A0;
+        uint byteCount = (uint)Math.Max(0, count * 8);
+        bool retailRam =
+            points >= 0x80000000u &&
+            points <= 0x801FFFFFu - byteCount;
+        bool scratchpad =
+            points >= 0x1F800000u &&
+            points <= 0x1F800400u - byteCount;
+        if (count < 3 ||
+            count > 32 ||
+            (!retailRam && !scratchpad))
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint matrix = c.GP + 0xF28u;
+        double rightX = unchecked((short)m.ReadU16(matrix));
+        double rightZ = unchecked((short)m.ReadU16(matrix + 12u));
+        double rightLength = Math.Sqrt(
+            rightX * rightX +
+            rightZ * rightZ);
+        if (rightLength < 1d)
+            return;
+        rightX /= rightLength;
+        rightZ /= rightLength;
+
+        uint translation = c.GP + 0xF3Cu;
+        double cameraX =
+            unchecked((int)m.ReadU32(translation)) / 256d;
+        double cameraZ =
+            unchecked((int)m.ReadU32(translation + 8u)) / 256d;
+        double padding = TerrainLateralPaddingCells * 1024d;
+        int movedLeft = 0;
+        int movedRight = 0;
+        for (int index = 0; index < count; index++)
+        {
+            uint point = points + (uint)(index * 8);
+            double x = unchecked((int)m.ReadU32(point));
+            double z = unchecked((int)m.ReadU32(point + 4u));
+            double side =
+                (x - cameraX) * rightX +
+                (z - cameraZ) * rightZ;
+            if (Math.Abs(side) < 0.5d)
+                continue;
+
+            double direction = side > 0d ? 1d : -1d;
+            m.WriteU32(
+                point,
+                unchecked((uint)(int)Math.Round(
+                    x + rightX * padding * direction,
+                    MidpointRounding.AwayFromZero)));
+            m.WriteU32(
+                point + 4u,
+                unchecked((uint)(int)Math.Round(
+                    z + rightZ * padding * direction,
+                    MidpointRounding.AwayFromZero)));
+            if (direction < 0d)
+                movedLeft++;
+            else
+                movedRight++;
+        }
+
+        if (!_terrainLateralPaddingLogged)
+        {
+            _terrainLateralPaddingLogged = true;
+            Console.Error.WriteLine(
+                $"[V82WideTerrainLateral] " +
+                $"cells={TerrainLateralPaddingCells} " +
+                $"worldPadding={padding:F0} " +
+                $"camera={cameraX:F1},{cameraZ:F1} " +
+                $"right={rightX:F6},{rightZ:F6} " +
+                $"moved-left={movedLeft} moved-right={movedRight} " +
+                $"vertices={count}");
+        }
+    }
+
+    public static void ExpandTerrainTraversalPolygon(
+        CpuContext c,
+        IMemory m)
+    {
+        if (TerrainOmnidirectional ||
+            TerrainAspectPolygon ||
+            TerrainPolygonPaddingCells <= 0 ||
+            !ConfigManager.View.HighResolution3D ||
+            !ConfigManager.View.Widescreen ||
+            !GpuHle.GameplayActive)
+            return;
+
+        int count = unchecked((int)c.A1);
+        uint points = c.A0;
+        uint byteCount = (uint)Math.Max(0, count * 8);
+        bool retailRam =
+            points >= 0x80000000u &&
+            points <= 0x801FFFFFu - byteCount;
+        bool scratchpad =
+            points >= 0x1F800000u &&
+            points <= 0x1F800400u - byteCount;
+        if (count < 3 ||
+            count > 32 ||
+            (!retailRam && !scratchpad))
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        long sumX = 0;
+        long sumZ = 0;
+        for (int index = 0; index < count; index++)
+        {
+            sumX += unchecked((int)m.ReadU32(
+                points + (uint)(index * 8)));
+            sumZ += unchecked((int)m.ReadU32(
+                points + (uint)(index * 8 + 4)));
+        }
+
+        double centerX = (double)sumX / count;
+        double centerZ = (double)sumZ / count;
+        double padding = TerrainPolygonPaddingCells * 1024d;
+        for (int index = 0; index < count; index++)
+        {
+            uint point = points + (uint)(index * 8);
+            double x = unchecked((int)m.ReadU32(point));
+            double z = unchecked((int)m.ReadU32(point + 4u));
+            double dx = x - centerX;
+            double dz = z - centerZ;
+            double length = Math.Sqrt(dx * dx + dz * dz);
+            if (length < 1d)
+                continue;
+            double scale = (length + padding) / length;
+            m.WriteU32(
+                point,
+                unchecked((uint)(int)Math.Round(
+                    centerX + dx * scale,
+                    MidpointRounding.AwayFromZero)));
+            m.WriteU32(
+                point + 4u,
+                unchecked((uint)(int)Math.Round(
+                    centerZ + dz * scale,
+                    MidpointRounding.AwayFromZero)));
+        }
+
+        if (!_terrainPolygonPaddingLogged)
+        {
+            _terrainPolygonPaddingLogged = true;
+            Console.Error.WriteLine(
+                $"[V82WideTerrainPolygon] cells={TerrainPolygonPaddingCells} " +
+                $"worldPadding={padding:F0} center={centerX:F1},{centerZ:F1} " +
+                $"vertices={count}");
+        }
+    }
+
+    public static void ExpandTerrainTraversalOmnidirectional(
+        CpuContext c,
+        IMemory m)
+    {
+        if (!TerrainOmnidirectional ||
+            !ConfigManager.View.HighResolution3D ||
+            !GpuHle.GameplayActive)
+            return;
+
+        int count = unchecked((int)c.A1);
+        uint points = c.A0;
+        uint byteCount = (uint)Math.Max(0, count * 8);
+        bool retailRam =
+            points >= 0x80000000u &&
+            points <= 0x801FFFFFu - byteCount;
+        bool scratchpad =
+            points >= 0x1F800000u &&
+            points <= 0x1F800400u - byteCount;
+        if (count < 3 ||
+            count > 32 ||
+            (!retailRam && !scratchpad))
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint translation = c.GP + 0xF3Cu;
+        double cameraX =
+            unchecked((int)m.ReadU32(translation)) / 256d;
+        double cameraZ =
+            unchecked((int)m.ReadU32(translation + 8u)) / 256d;
+        var original = new (double X, double Z)[count];
+        double radius = 0d;
+        double signedArea = 0d;
+        for (int index = 0; index < count; index++)
+        {
+            uint point = points + (uint)(index * 8);
+            double x = unchecked((int)m.ReadU32(point));
+            double z = unchecked((int)m.ReadU32(point + 4u));
+            original[index] = (x, z);
+            double dx = x - cameraX;
+            double dz = z - cameraZ;
+            radius = Math.Max(radius, Math.Sqrt(dx * dx + dz * dz));
+        }
+        for (int index = 0; index < count; index++)
+        {
+            (double x0, double z0) = original[index];
+            (double x1, double z1) = original[(index + 1) % count];
+            signedArea += x0 * z1 - x1 * z0;
+        }
+        if (radius < 1024d)
+            return;
+
+        double direction = signedArea < 0d ? -1d : 1d;
+        double startAngle = Math.Atan2(
+            original[0].Z - cameraZ,
+            original[0].X - cameraX);
+        for (int index = 0; index < count; index++)
+        {
+            double angle =
+                startAngle +
+                direction * Math.Tau * index / count;
+            uint point = points + (uint)(index * 8);
+            m.WriteU32(
+                point,
+                unchecked((uint)(int)Math.Round(
+                    cameraX + Math.Cos(angle) * radius,
+                    MidpointRounding.AwayFromZero)));
+            m.WriteU32(
+                point + 4u,
+                unchecked((uint)(int)Math.Round(
+                    cameraZ + Math.Sin(angle) * radius,
+                    MidpointRounding.AwayFromZero)));
+        }
+
+        if (!_terrainOmnidirectionalLogged)
+        {
+            _terrainOmnidirectionalLogged = true;
+            Console.Error.WriteLine(
+                $"[V82TerrainOmnidirectional] vertices={count} " +
+                $"camera={cameraX:F1},{cameraZ:F1} radius={radius:F1}");
+        }
+    }
+
+    /// <summary>
+    /// Pushes terrain out to the distance the objects standing on it are
+    /// already drawn at.
+    ///
+    /// Extended draw distance moves only the object limit (see
+    /// <see cref="ExtendObjectDrawDistance"/>), so roadside buildings on
+    /// Route 66 are drawn past the last terrain row and visibly hang in the
+    /// sky with nothing underneath them.
+    ///
+    /// Two limits have to move together, because either one alone does
+    /// nothing:
+    ///
+    /// * the traversal polygon, or `func_8001BECC` never walks that far.
+    ///   Every vertex is scaled away from the camera vertex, which preserves
+    ///   the polygon's shape and angles and changes only how far it reaches.
+    /// * scratchpad `+0x98`, which `func_8001C158` fills with
+    ///   `gp+0xDB6 &lt;&lt; 8` (10240 by default) just before calling the
+    ///   walker. `func_800288E0` tests each cell corner's GTE SZ3 against it
+    ///   and emits nothing when all four are beyond, so a widened polygon on
+    ///   its own only produces submitted-then-rejected cells.
+    ///
+    /// This is not a widescreen problem and is deliberately not gated on it.
+    /// </summary>
+    static double EffectiveTerrainRangeScale() =>
+        TerrainRangeScaleOverride >= 1d
+            ? TerrainRangeScaleOverride
+            : ConfigManager.View.ExtendedDrawDistance
+                ? DefaultTerrainRangeScale
+                : 1d;
+
+    public static void ScaleTerrainTraversalRange(CpuContext c, IMemory m)
+    {
+        if (TerrainOmnidirectional ||
+            !GpuHle.GameplayActive)
+            return;
+
+        double scale = EffectiveTerrainRangeScale();
+        if (scale <= 1.0001d)
+            return;
+
+        int count = unchecked((int)c.A1);
+        uint points = c.A0;
+        uint byteCount = (uint)Math.Max(0, count * 8);
+        bool retailRam =
+            points >= 0x80000000u &&
+            points <= 0x801FFFFFu - byteCount;
+        bool scratchpad =
+            points >= 0x1F800000u &&
+            points <= 0x1F800400u - byteCount;
+        if (count < 3 ||
+            count > 32 ||
+            (!retailRam && !scratchpad))
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint translation = c.GP + 0xF3Cu;
+        double cameraX = unchecked((int)m.ReadU32(translation)) / 256d;
+        double cameraZ = unchecked((int)m.ReadU32(translation + 8u)) / 256d;
+
+        for (int index = 0; index < count; index++)
+        {
+            uint point = points + (uint)(index * 8);
+            double x = unchecked((int)m.ReadU32(point));
+            double z = unchecked((int)m.ReadU32(point + 4u));
+            m.WriteU32(
+                point,
+                unchecked((uint)(int)Math.Round(
+                    cameraX + (x - cameraX) * scale,
+                    MidpointRounding.AwayFromZero)));
+            m.WriteU32(
+                point + 4u,
+                unchecked((uint)(int)Math.Round(
+                    cameraZ + (z - cameraZ) * scale,
+                    MidpointRounding.AwayFromZero)));
+        }
+
+        // Move the emit-stage far plane with the polygon. Left alone it keeps
+        // rejecting everything the widened polygon adds.
+        const uint farPlaneAddress = 0x1F800000u + 0x98u;
+        uint nativeFarPlane = m.ReadU16(farPlaneAddress);
+        uint farPlane = nativeFarPlane;
+        if (nativeFarPlane > 0u)
+        {
+            farPlane = (uint)Math.Clamp(
+                Math.Round(nativeFarPlane * scale, MidpointRounding.AwayFromZero),
+                nativeFarPlane,
+                60000d);
+            m.WriteU16(farPlaneAddress, (ushort)farPlane);
+        }
+
+        if (!_terrainRangeLogged)
+        {
+            _terrainRangeLogged = true;
+            Console.Error.WriteLine(
+                $"[V82TerrainRange] scale={scale:F3} vertices={count} " +
+                $"camera={cameraX:F1},{cameraZ:F1} " +
+                $"farPlane={nativeFarPlane}->{farPlane}");
+        }
+    }
+
+    /// <summary>
+    /// Fits the completed terrain traversal polygon to the widened Enhanced
+    /// horizontal field of view.
+    ///
+    /// func_8001C158 builds the polygon from four camera-space corner rays and
+    /// then projects the result onto the world XZ plane. That projection is not
+    /// the frustum's angular sector: a corner ray's vertical component rotates
+    /// partly into the horizontal plane whenever the camera is pitched, so each
+    /// far corner gains forward distance while its lateral offset stays at the
+    /// authored half-width. The footprint corner therefore sits at a narrower
+    /// apparent angle than the frustum edge it came from, and simply scaling
+    /// gp+0xEDC by the aspect ratio - which is the correct angular widening -
+    /// still leaves a wedge of unvisited terrain against the outer 16:9 edges.
+    ///
+    /// Restore the invariant directly: measure every vertex in the camera's
+    /// horizontal basis and push it out until its lateral offset covers the
+    /// widened half-angle at its own forward distance. Vertices that already
+    /// satisfy the ratio, and the camera-origin vertex, are left untouched, so
+    /// this only ever adds terrain and never moves the polygon forward, back,
+    /// or across the camera.
+    /// </summary>
+    public static void ExpandTerrainTraversalWideFit(
+        CpuContext c,
+        IMemory m)
+    {
+        if (!TerrainWideFit ||
+            TerrainOmnidirectional ||
+            TerrainAspectPolygon ||
+            !ConfigManager.View.HighResolution3D ||
+            !ConfigManager.View.Widescreen ||
+            !GpuHle.GameplayActive ||
+            GpuHle.WideAspect <= GpuHle.BaseAspect + 0.001f)
+            return;
+
+        int count = unchecked((int)c.A1);
+        uint points = c.A0;
+        uint byteCount = (uint)Math.Max(0, count * 8);
+        bool retailRam =
+            points >= 0x80000000u &&
+            points <= 0x801FFFFFu - byteCount;
+        bool scratchpad =
+            points >= 0x1F800000u &&
+            points <= 0x1F800400u - byteCount;
+        if (count < 3 ||
+            count > 32 ||
+            (!retailRam && !scratchpad))
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+
+        // gp+0xED8 is the projection distance the native camera shares with the
+        // GTE H register, and gp+0xEDC is the authored horizontal extent.
+        // ExpandTerrainFrustum has already replaced the latter for this
+        // traversal, so prefer the value it saved.
+        double projection = unchecked((int)m.ReadU32(c.GP + 0xED8u));
+        double nativeWidth = _terrainFrustumNativeWidth != 0u
+            ? _terrainFrustumNativeWidth
+            : unchecked((int)m.ReadU32(c.GP + 0xEDCu));
+        if (projection < 1d || nativeWidth < 1d)
+            return;
+
+        double halfWidth = nativeWidth * 0.5d;
+        double wideHalfWidth =
+            halfWidth + GpuHle.WideMargin((int)Math.Round(nativeWidth));
+        double tangent = wideHalfWidth / projection;
+        if (!double.IsFinite(tangent) || tangent <= 0d)
+            return;
+
+        uint matrix = c.GP + 0xF28u;
+        double rightX = unchecked((short)m.ReadU16(matrix));
+        double rightZ = unchecked((short)m.ReadU16(matrix + 12u));
+        double forwardX = unchecked((short)m.ReadU16(matrix + 4u));
+        double forwardZ = unchecked((short)m.ReadU16(matrix + 16u));
+        double rightLength = Math.Sqrt(rightX * rightX + rightZ * rightZ);
+        double forwardLength =
+            Math.Sqrt(forwardX * forwardX + forwardZ * forwardZ);
+        if (rightLength < 1d || forwardLength < 1d)
+            return;
+        rightX /= rightLength;
+        rightZ /= rightLength;
+        forwardX /= forwardLength;
+        forwardZ /= forwardLength;
+
+        uint translation = c.GP + 0xF3Cu;
+        double cameraX = unchecked((int)m.ReadU32(translation)) / 256d;
+        double cameraZ = unchecked((int)m.ReadU32(translation + 8u)) / 256d;
+
+        // One terrain cell of slack absorbs the walker's inward per-row cell
+        // rounding, which otherwise discards the partially covered boundary
+        // cell along the whole outer edge.
+        double margin = TerrainWideFitMarginCells * 1024d;
+
+        // Work out one factor for the whole polygon rather than moving each
+        // vertex to its own target. Per-vertex fitting is not a linear map: it
+        // can reorder neighbouring vertices and leave the polygon non-convex
+        // or wound the wrong way, and the walker then fills nothing for that
+        // frame. That showed up as terrain flickering out while driving, which
+        // no still capture and no windowed average can see - see
+        // tools/recompone-v8-2/analyze_terrain_flicker.py. Scaling the lateral
+        // component uniformly is linear, so convexity and winding are
+        // preserved by construction.
+        double factor = 1d;
+        for (int index = 0; index < count; index++)
+        {
+            uint point = points + (uint)(index * 8);
+            double dx = unchecked((int)m.ReadU32(point)) - cameraX;
+            double dz = unchecked((int)m.ReadU32(point + 4u)) - cameraZ;
+            double forward = dx * forwardX + dz * forwardZ;
+            double lateral = Math.Abs(dx * rightX + dz * rightZ);
+            // Vertices near the view axis carry no lateral information and
+            // would demand an unbounded factor.
+            if (forward <= 0d || lateral < 1024d)
+                continue;
+            factor = Math.Max(factor, (forward * tangent + margin) / lateral);
+        }
+        factor = Math.Min(factor, MaximumTerrainWideFitFactor);
+        if (factor <= 1.0001d)
+            return;
+
+        // The walker turns these into cell indices with an arithmetic shift and
+        // walks rows between them. A vertex outside the authored grid makes it
+        // select almost nothing for that frame, which is a total terrain
+        // dropout rather than a smaller one, so keep every widened vertex
+        // inside the grid.
+        const double gridLimit = TerrainGridExtentCells * 1024d - 1d;
+        for (int index = 0; index < count; index++)
+        {
+            uint point = points + (uint)(index * 8);
+            double x = unchecked((int)m.ReadU32(point));
+            double z = unchecked((int)m.ReadU32(point + 4u));
+            double dx = x - cameraX;
+            double dz = z - cameraZ;
+            double forward = dx * forwardX + dz * forwardZ;
+            double lateral = dx * rightX + dz * rightZ;
+            double widened = lateral * factor;
+            double newX = cameraX + forwardX * forward + rightX * widened;
+            double newZ = cameraZ + forwardZ * forward + rightZ * widened;
+            m.WriteU32(
+                point,
+                unchecked((uint)(int)Math.Round(
+                    Math.Clamp(newX, 0d, gridLimit),
+                    MidpointRounding.AwayFromZero)));
+            m.WriteU32(
+                point + 4u,
+                unchecked((uint)(int)Math.Round(
+                    Math.Clamp(newZ, 0d, gridLimit),
+                    MidpointRounding.AwayFromZero)));
+        }
+
+        if (!_terrainWideFitLogged)
+        {
+            _terrainWideFitLogged = true;
+            Console.Error.WriteLine(
+                $"[V82WideTerrainFit] vertices={count} factor={factor:F4} " +
+                $"tangent={tangent:F6} halfWidth={wideHalfWidth:F1} " +
+                $"projection={projection:F0} marginCells=" +
+                $"{TerrainWideFitMarginCells:F2} " +
+                $"camera={cameraX:F1},{cameraZ:F1} " +
+                $"forward={forwardX:F6},{forwardZ:F6} " +
+                $"right={rightX:F6},{rightZ:F6}");
+        }
+    }
+
+    public static void ExpandTerrainTraversalAspect(
+        CpuContext c,
+        IMemory m)
+    {
+        if (!TerrainAspectPolygon ||
+            !ConfigManager.View.HighResolution3D ||
+            !ConfigManager.View.Widescreen ||
+            !GpuHle.GameplayActive ||
+            GpuHle.WideAspect <= GpuHle.BaseAspect + 0.001f)
+            return;
+
+        int count = unchecked((int)c.A1);
+        uint points = c.A0;
+        uint byteCount = (uint)Math.Max(0, count * 8);
+        bool retailRam =
+            points >= 0x80000000u &&
+            points <= 0x801FFFFFu - byteCount;
+        bool scratchpad =
+            points >= 0x1F800000u &&
+            points <= 0x1F800400u - byteCount;
+        if (count < 3 ||
+            count > 32 ||
+            (!retailRam && !scratchpad))
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint translation = c.GP + 0xF3Cu;
+        double cameraX =
+            unchecked((int)m.ReadU32(translation)) / 256d;
+        double cameraZ =
+            unchecked((int)m.ReadU32(translation + 8u)) / 256d;
+        uint matrix = c.GP + 0xF28u;
+        double rightX = unchecked((short)m.ReadU16(matrix));
+        double rightZ = unchecked((short)m.ReadU16(matrix + 12u));
+        double rightLength = Math.Sqrt(
+            rightX * rightX + rightZ * rightZ);
+        if (rightLength < 1d)
+            return;
+        rightX /= rightLength;
+        rightZ /= rightLength;
+        double aspectScale =
+            (double)GpuHle.WideAspect / GpuHle.BaseAspect;
+
+        for (int index = 0; index < count; index++)
+        {
+            uint point = points + (uint)(index * 8);
+            double x = unchecked((int)m.ReadU32(point));
+            double z = unchecked((int)m.ReadU32(point + 4u));
+            double side =
+                (x - cameraX) * rightX +
+                (z - cameraZ) * rightZ;
+            double extraSide = side * (aspectScale - 1d);
+            m.WriteU32(
+                point,
+                unchecked((uint)(int)Math.Round(
+                    x + rightX * extraSide,
+                    MidpointRounding.AwayFromZero)));
+            m.WriteU32(
+                point + 4u,
+                unchecked((uint)(int)Math.Round(
+                    z + rightZ * extraSide,
+                    MidpointRounding.AwayFromZero)));
+        }
+
+        if (!_terrainAspectPolygonLogged)
+        {
+            _terrainAspectPolygonLogged = true;
+            Console.Error.WriteLine(
+                $"[V82TerrainAspectPolygon] vertices={count} " +
+                $"camera={cameraX:F1},{cameraZ:F1} " +
+                $"right={rightX:F6},{rightZ:F6} " +
+                $"scale={aspectScale:F6}");
+        }
+    }
+
+    public static void ExpandTerrainRowSpan(CpuContext c, IMemory m)
+    {
+        if (TerrainRowCellPadding <= 0 ||
+            !ConfigManager.View.HighResolution3D ||
+            !ConfigManager.View.Widescreen ||
+            !GpuHle.GameplayActive ||
+            c.A1 <= c.A0)
+            return;
+
+        const uint terrainGridExtent = 2048u;
+        uint padding = (uint)TerrainRowCellPadding * 4u;
+        uint originalStart = c.A0;
+        uint originalEnd = c.A1;
+        c.A0 = originalStart > padding
+            ? originalStart - padding
+            : 0u;
+        c.A1 = Math.Min(terrainGridExtent, originalEnd + padding);
+
+        if (!_terrainRowCellPaddingLogged)
+        {
+            _terrainRowCellPaddingLogged = true;
+            Console.Error.WriteLine(
+                $"[V82WideTerrainRows] cells={TerrainRowCellPadding} " +
+                $"first={originalStart}..{originalEnd} " +
+                $"expanded={c.A0}..{c.A1} row={c.A2}");
+        }
+    }
+
+    public static void BeginTerrainRoutePacketWrites(
+        CpuContext c,
+        IMemory m)
+    {
+        GpuHle.BeginTerrainRoutePacketWrites();
+        Gte.BeginTerrainProjection();
+        _terrainCellsSubmitted++;
+        // A2 is the packet cursor handed to func_800288E0; it returns the new
+        // cursor in V0, which only advances when the cell emitted something.
+        _terrainCellPacketCursor = c.A2;
+        if (!TraceTerrainCells)
+            return;
+
+        int frame = GpuHle.DebugGameplayTick;
+        if (_terrainCellFrame is null || _terrainCellFrame.Frame != frame)
+        {
+            FlushTerrainCellFrame();
+            _terrainCellFrame = new TerrainCellFrameStats { Frame = frame };
+        }
+
+        TerrainCellScopes.Push(new TerrainCellScope(
+            frame,
+            c.A0,
+            c.A1,
+            c.A2));
+    }
+
+    public static void EndTerrainRoutePacketWrites(
+        CpuContext c,
+        IMemory m)
+    {
+        GpuHle.EndTerrainRoutePacketWrites();
+        Gte.EndTerrainProjection();
+        if (c.V0 > _terrainCellPacketCursor)
+            _terrainCellsEmitted++;
+        if (!TraceTerrainCells || TerrainCellScopes.Count == 0)
+            return;
+
+        TerrainCellScope scope = TerrainCellScopes.Pop();
+        TerrainCellFrameStats? stats = _terrainCellFrame;
+        if (stats is null || stats.Frame != scope.Frame)
+            return;
+
+        uint packetEnd = c.V0;
+        bool emitted = packetEnd > scope.PacketStart;
+        stats.Calls++;
+        stats.MinX = Math.Min(stats.MinX, scope.X);
+        stats.MaxX = Math.Max(stats.MaxX, scope.X);
+        stats.MinZ = Math.Min(stats.MinZ, scope.Z);
+        stats.MaxZ = Math.Max(stats.MaxZ, scope.Z);
+        if (!emitted)
+        {
+            if (stats.Rejected.Count < 24)
+                stats.Rejected.Add($"{scope.X},{scope.Z}");
+            return;
+        }
+
+        stats.Emitted++;
+        stats.PacketBytes += packetEnd - scope.PacketStart;
+        stats.EmittedMinX = Math.Min(stats.EmittedMinX, scope.X);
+        stats.EmittedMaxX = Math.Max(stats.EmittedMaxX, scope.X);
+        stats.EmittedMinZ = Math.Min(stats.EmittedMinZ, scope.Z);
+        stats.EmittedMaxZ = Math.Max(stats.EmittedMaxZ, scope.Z);
+        GpuHle.RegisterPacketOwnerRange(
+            scope.PacketStart,
+            packetEnd,
+            $"terrain-cell={scope.X},{scope.Z},frame={scope.Frame}");
+    }
+
+    static void FlushTerrainCellFrame()
+    {
+        TerrainCellFrameStats? stats = _terrainCellFrame;
+        if (stats is null || stats.Calls == 0 || _terrainCellFramesLogged >= 120)
+            return;
+
+        _terrainCellFramesLogged++;
+        string submittedBounds = stats.MinX == uint.MaxValue
+            ? "none"
+            : $"{stats.MinX}..{stats.MaxX},{stats.MinZ}..{stats.MaxZ}";
+        string emittedBounds = stats.EmittedMinX == uint.MaxValue
+            ? "none"
+            : $"{stats.EmittedMinX}..{stats.EmittedMaxX}," +
+              $"{stats.EmittedMinZ}..{stats.EmittedMaxZ}";
+        Console.Error.WriteLine(
+            $"[V82TerrainCells] frame={stats.Frame} " +
+            $"submitted={stats.Calls} emitted={stats.Emitted} " +
+            $"packetBytes={stats.PacketBytes} " +
+            $"submittedBounds={submittedBounds} " +
+            $"emittedBounds={emittedBounds} " +
+            $"rejectedSample={string.Join(';', stats.Rejected)}");
+    }
+
+    /// <summary>
+    /// Widens the per-object visibility test to the widescreen field of view.
+    ///
+    /// func_8002E22C tests an object against three planes built for the
+    /// authored 4:3 frustum: each plane distance must be under the object's
+    /// bounding radius. Widescreen shows a third more view to each side, so an
+    /// object whose centre has left the 4:3 frustum is still on screen, and
+    /// the engine culls it - it vanishes at the left or right edge. The effect
+    /// is worst up close, where an object covers a lot of screen while its
+    /// centre is already outside.
+    ///
+    /// The planes themselves are rebuilt every frame by func_8002DFF0, so this
+    /// grants the test the equivalent slack instead: the extra lateral reach a
+    /// widened frustum has at the object's own distance. Objects are only ever
+    /// kept, never dropped, and the far cull is unaffected.
+    /// </summary>
+    public static void WidenObjectVisibilityTest(CpuContext c, IMemory m)
+    {
+        RecordObjectVisibilityInputs(c, m);
+        if (!WideObjectCull ||
+            !ConfigManager.View.HighResolution3D ||
+            !ConfigManager.View.Widescreen ||
+            !GpuHle.GameplayActive ||
+            GpuHle.WideAspect <= GpuHle.BaseAspect + 0.001f)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint position = c.A0;
+        if (position < 0x80000000u || position > 0x807FFFF0u)
+            return;
+
+        double dx = unchecked((int)m.ReadU32(position)) -
+            unchecked((int)m.ReadU32(c.GP + 0xF3Cu));
+        double dy = unchecked((int)m.ReadU32(position + 4u)) -
+            unchecked((int)m.ReadU32(c.GP + 0xF40u));
+        double dz = unchecked((int)m.ReadU32(position + 8u)) -
+            unchecked((int)m.ReadU32(c.GP + 0xF44u));
+        double distance = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        if (!double.IsFinite(distance) || distance <= 0d)
+            return;
+
+        // Lateral reach of the widened frustum minus the authored one, per
+        // unit of distance, taken from the same half-width and projection the
+        // terrain traversal uses.
+        double projection = unchecked((int)m.ReadU32(c.GP + 0xED8u));
+        double nativeWidth = _terrainFrustumNativeWidth != 0u
+            ? _terrainFrustumNativeWidth
+            : unchecked((int)m.ReadU32(c.GP + 0xEDCu));
+        if (projection < 1d || nativeWidth < 1d)
+            return;
+
+        double halfWidth = nativeWidth * 0.5d;
+        double wideHalfWidth =
+            halfWidth + GpuHle.WideMargin((int)Math.Round(nativeWidth));
+        // The planes measure perpendicular distance, not lateral offset, so
+        // the extra reach has to be divided by the cosine of the frustum's
+        // half angle. Measured against the objects that were still being
+        // rejected: the required slack per unit of distance is 0.221 to 0.253,
+        // where the uncorrected figure gives 0.211 and this gives 0.249.
+        // The 1.05 keeps the marginal cases - every one that still failed was
+        // short by only a few percent.
+        double planeScale =
+            Math.Sqrt(halfWidth * halfWidth + projection * projection) /
+            projection;
+        double slack =
+            (wideHalfWidth - halfWidth) / projection * distance *
+            planeScale * ObjectCullSlackScale;
+        if (slack <= 0d)
+            return;
+
+        long widened = c.A1 + (long)Math.Round(
+            slack, MidpointRounding.AwayFromZero);
+        // The callee shifts this right by 8 and compares it against saturated
+        // GTE output, so keep it inside that range.
+        c.A1 = (uint)Math.Clamp(widened, 0L, 0x007FFFFFL);
+
+        if (!_objectVisibilityLogged)
+        {
+            _objectVisibilityLogged = true;
+            Console.Error.WriteLine(
+                $"[V82WideObjectCull] halfWidth={halfWidth:F1}->" +
+                $"{wideHalfWidth:F1} projection={projection:F0} " +
+                $"slackPerUnit={(wideHalfWidth - halfWidth) / projection:F4}");
+        }
+    }
+
+    /// <summary>
+    /// Extends how far arena objects remain visible - but only as far as the
+    /// ground beneath them is drawn.
+    ///
+    /// The retail object cull distance is paired with the terrain walker's
+    /// reach. Extending objects on their own makes arena props stand past the
+    /// last terrain row with nothing under them: on Route 66 the roadside
+    /// diner and Super Donuts stand visibly hang in the sky. Terrain cannot be
+    /// pushed out to meet them - the walker stops selecting new cells beyond
+    /// roughly twice its stock range whatever the traversal polygon says - so
+    /// the two are kept locked together instead.
+    /// </summary>
     public static void ExtendObjectDrawDistance(CpuContext c, IMemory m)
     {
-        if (!ConfigManager.View.ExtendedDrawDistance || c.RA != 0x8002DA34u)
+        if (!ConfigManager.View.ExtendedDrawDistance ||
+            EffectiveTerrainRangeScale() <= 1.0001d ||
+            c.RA != 0x8002DA34u)
             return;
 
         m = Dispatcher.UnwrapMemory(m);
@@ -2390,6 +4175,9 @@ public static class V82Compat
         }
     }
 
+    public static int SelectorVramReservationCount =>
+        SelectorVramReservations.Count;
+
     /// <summary>
     /// Retires a stale host-side view after an external allocator reset. Normal
     /// selector preview teardown must call ReleaseSelectorVramReservation so
@@ -2424,28 +4212,43 @@ public static class V82Compat
             $"s3=0x{c.S3:X8}");
     }
 
-    public static void TraceResultFormat(
+    public static bool TraceResultFormat(
         CpuContext c, IMemory m)
     {
         if (c.RA < 0x80012800u || c.RA >= 0x80013300u)
-            return;
+            return true;
 
         // func_80012930 builds "Shared\\%s.xa" at this call site. Its native
-        // table has only the 18 retail types; imported stable types (64+) must
-        // resolve through the vehicle registry instead of indexing past it.
+        // table has only the 18 retail types; imported stable types (64+) map
+        // to the original V8 outcome bank and roster-ordered XA channel.
         if (c.RA == 0x80013268u)
         {
             int player = checked((int)c.S2);
             if ((uint)player < 2u)
             {
                 int type = (sbyte)m.ReadU8(c.GP + 0x1104u + (uint)player);
-                uint pointer = V82VehicleRegistry.ResultVoicePointer(m, type);
-                if (pointer != 0u)
+                // The retail result player adds this byte to its XA-channel
+                // choice. Zero is the defeated branch; one is the winner
+                // branch. Preserve that native outcome bit while replacing
+                // only the imported driver's file bank and channel.
+                bool defeated = m.ReadU8(c.GP + 0x33u) == 0;
+                if (V82VehicleRegistry.WriteResultVoicePath(
+                    m,
+                    type,
+                    defeated,
+                    c.A0,
+                    out string path))
                 {
                     Console.Error.WriteLine(
                         $"[V82ResultString] imported type={type} " +
-                        $"resolved native XA stem=0x{pointer:X8}");
-                    c.A2 = pointer;
+                        $"wrote original V8 XA path='{path}'");
+                    c.V0 = checked((uint)path.Length);
+                    // The host has produced exactly the string the retail
+                    // sprintf call would have written. Skipping that call
+                    // avoids borrowing permanent PS1 memory for a host-only
+                    // stem while preserving the caller's native buffer and
+                    // subsequent CD/audio lifecycle.
+                    return false;
                 }
             }
         }
@@ -2455,7 +4258,18 @@ public static class V82Compat
             $"destination=0x{c.A0:X8} format=0x{c.A1:X8} " +
             $"a2=0x{c.A2:X8} a3=0x{c.A3:X8} sp=0x{c.SP:X8} " +
             $"s2=0x{c.S2:X8}");
+        return true;
     }
+
+    public static bool OverrideResultVoiceChannel(
+        CpuContext c,
+        IMemory m) =>
+        V82VehicleRegistry.OverrideResultVoiceChannel(c, m);
+
+    public static bool ResolveOriginalResultVoiceFile(
+        CpuContext c,
+        IMemory m) =>
+        V82VehicleRegistry.ResolveOriginalResultVoiceFile(c, m);
 
     public static void ReleaseGuestVramReservation(CpuContext c, IMemory m)
     {

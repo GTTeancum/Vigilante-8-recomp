@@ -9,6 +9,7 @@ public sealed class GlDisplayRt
     public uint Tex, Fbo, Depth, MsaaFbo, MsaaColor, MsaaDepth;
     public int Samples;
     public bool Dirty;
+    public bool NeedsResolve;
     public long Stamp;
     public long LastDrawFrame;
 
@@ -82,11 +83,30 @@ public sealed class GlDisplayRt
 
     public void Resolve(GL gl)
     {
-        if (MsaaFbo == 0) return;
+        if (MsaaFbo == 0 || !NeedsResolve) return;
         gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, MsaaFbo);
         gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, Fbo);
         gl.BlitFramebuffer(0, 0, TexW, TexH, 0, 0, TexW, TexH,
             ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+        NeedsResolve = false;
+    }
+
+    public void ResolveRegion(GL gl, int x0, int y0, int x1, int y1)
+    {
+        if (MsaaFbo == 0 || !NeedsResolve || x0 >= x1 || y0 >= y1) return;
+        int s = GlVram.Scale;
+        x0 = Math.Clamp(x0 * s, 0, TexW);
+        y0 = Math.Clamp(y0 * s, 0, TexH);
+        x1 = Math.Clamp(x1 * s, 0, TexW);
+        y1 = Math.Clamp(y1 * s, 0, TexH);
+        if (x0 >= x1 || y0 >= y1) return;
+        gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, MsaaFbo);
+        gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, Fbo);
+        gl.BlitFramebuffer(
+            x0, y0, x1, y1,
+            x0, y0, x1, y1,
+            ClearBufferMask.ColorBufferBit,
+            BlitFramebufferFilter.Nearest);
     }
 
     public void CopyResolveToMsaa(GL gl)
@@ -96,6 +116,26 @@ public sealed class GlDisplayRt
         gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, MsaaFbo);
         gl.BlitFramebuffer(0, 0, TexW, TexH, 0, 0, TexW, TexH,
             ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+        NeedsResolve = false;
+    }
+
+    public void CopyRegionToMsaa(
+        GL gl, int x0, int y0, int x1, int y1)
+    {
+        if (MsaaFbo == 0 || x0 >= x1 || y0 >= y1) return;
+        int s = GlVram.Scale;
+        x0 = Math.Clamp(x0 * s, 0, TexW);
+        y0 = Math.Clamp(y0 * s, 0, TexH);
+        x1 = Math.Clamp(x1 * s, 0, TexW);
+        y1 = Math.Clamp(y1 * s, 0, TexH);
+        if (x0 >= x1 || y0 >= y1) return;
+        gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, Fbo);
+        gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, MsaaFbo);
+        gl.BlitFramebuffer(
+            x0, y0, x1, y1,
+            x0, y0, x1, y1,
+            ClearBufferMask.ColorBufferBit,
+            BlitFramebufferFilter.Nearest);
     }
 
     public void ClearDepth(GL gl)
@@ -116,5 +156,6 @@ public sealed class GlDisplayRt
         if (Depth != 0) gl.DeleteRenderbuffer(Depth);
         if (Tex != 0) gl.DeleteTexture(Tex);
         Fbo = Tex = Depth = MsaaFbo = MsaaColor = MsaaDepth = 0;
+        NeedsResolve = false;
     }
 }

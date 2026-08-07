@@ -13,12 +13,23 @@ public sealed partial class Gpu
     static readonly (int Start, int End)? TraceGameplayTicks =
         ParseTraceGameplayTicks(
             Environment.GetEnvironmentVariable("RECOMPONE_TRACE_GAMEPLAY_TICKS"));
+    static readonly bool TracePacketOwners =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PACKET_OWNERS") == "1";
+    static readonly bool TraceMeshes =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1";
+    static readonly bool TraceImportedShadowAtlas =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_IMPORTED_SHADOW_ATLAS") == "1";
+    static readonly HashSet<string> TracedImportedShadowAtlasRegions = [];
     static int _terrainPrimTraceCount;
     static bool _terrainCellTraced;
     bool DitherEnabled => _dither && ConfigManager.View.Ps1Dithering;
     int _currentOtDepth;
     uint _currentOtPacketAddress;
     bool _currentOtPacketVehicle;
+    bool _currentOtPacketImportedVehicle;
+    bool _currentOtPacketDreamlandWater;
+    bool _currentOtPacketTerrainRoute;
     int _traceVehiclePacketHits;
     int _traceVehicleTriangles;
     int _tracePacketOwnershipLookups;
@@ -72,8 +83,14 @@ public sealed partial class Gpu
     {
         _currentOtPacketAddress = address;
         _currentOtPacketVehicle = GpuHle.IsVehiclePacket(address);
+        _currentOtPacketImportedVehicle =
+            GpuHle.IsImportedVehiclePacket(address);
+        _currentOtPacketDreamlandWater =
+            GpuHle.IsDreamlandWaterPacket(address);
+        _currentOtPacketTerrainRoute =
+            GpuHle.IsTerrainRoutePacket(address);
         if (GpuHle.GameplayActive &&
-            Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PACKET_OWNERS") == "1" &&
+            TracePacketOwners &&
             wordCount != 0)
         {
             string owner = GpuHle.DescribePacketOwner(address);
@@ -84,10 +101,12 @@ public sealed partial class Gpu
                     $"[EnhancedPacketOwner] address=0x{address:X8} " +
                     $"words={wordCount} " +
                     $"vehicle={(_currentOtPacketVehicle ? 1 : 0)} " +
+                    $"imported={(_currentOtPacketImportedVehicle ? 1 : 0)} " +
+                    $"terrain-route={(_currentOtPacketTerrainRoute ? 1 : 0)} " +
                     $"owner={owner}");
         }
         if (GpuHle.GameplayActive && _currentOtPacketVehicle &&
-            Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1" &&
+            TraceMeshes &&
             _traceVehiclePacketHits++ < 32)
             Console.Error.WriteLine($"[V8VehiclePacketHit] address=0x{address:X8}");
     }
@@ -97,6 +116,9 @@ public sealed partial class Gpu
         _currentOtDepth = 0;
         _currentOtPacketAddress = 0;
         _currentOtPacketVehicle = false;
+        _currentOtPacketImportedVehicle = false;
+        _currentOtPacketDreamlandWater = false;
+        _currentOtPacketTerrainRoute = false;
         _projectiveDepthCache.Clear();
     }
 
@@ -139,9 +161,26 @@ public sealed partial class Gpu
         bool gouraud = false)
     {
         HleMaterialKind material;
-        if (_currentOtPacketVehicle)
+        if (_currentOtPacketTerrainRoute)
+            material = HleMaterialKind.TerrainRoute;
+        else if (_currentOtPacketVehicle)
             material = semi && tex
-                ? HleMaterialKind.Glass
+                ? _blendMode switch
+                {
+                    // Vehicle render scopes also emit stock projected
+                    // shadows and emissive effects. Their tpage blend mode is
+                    // the native material contract; treating every
+                    // semitransparent vehicle packet as glass made the
+                    // subtractive 0x04A shadow atlas into an opaque floor
+                    // card beneath imported previews.
+                    1 => HleMaterialKind.Additive,
+                    2 => _currentOtPacketImportedVehicle
+                        ? HleMaterialKind.ImportedShadow
+                        : HleMaterialKind.Subtractive,
+                    _ => _currentOtPacketImportedVehicle
+                        ? HleMaterialKind.ImportedGlass
+                        : HleMaterialKind.Glass,
+                }
                 : tex
                     ? HleMaterialKind.AlphaTest
                     : HleMaterialKind.Opaque;
@@ -168,8 +207,118 @@ public sealed partial class Gpu
             OtIndex = _currentOtDepth,
             PacketAddress = _currentOtPacketAddress,
             Vehicle = _currentOtPacketVehicle,
+            DreamlandWater = _currentOtPacketDreamlandWater,
+            TerrainRoute = _currentOtPacketTerrainRoute,
             Material = material,
         };
+    }
+
+    void TraceImportedShadowSource(
+        in Vert a,
+        in Vert b,
+        in Vert c,
+        in PrimFlags flags)
+    {
+        if (!TraceImportedShadowAtlas ||
+            flags.Material != HleMaterialKind.ImportedShadow)
+            return;
+        TraceImportedShadowSource(
+            a, b, c, flags.TPage, flags.Clut, readHleVram: true);
+    }
+
+    void TraceImportedShadowSourceSoftware(
+        in Vert a,
+        in Vert b,
+        in Vert c,
+        int clut)
+    {
+        if (!TraceImportedShadowAtlas ||
+            !_currentOtPacketImportedVehicle ||
+            _blendMode != 2)
+            return;
+        TraceImportedShadowSource(
+            a, b, c, (ushort)CurTPage(), (ushort)clut,
+            readHleVram: false);
+    }
+
+    void TraceImportedShadowSource(
+        in Vert a,
+        in Vert b,
+        in Vert c,
+        ushort tpage,
+        ushort clut,
+        bool readHleVram)
+    {
+        int minU = Math.Min(a.U, Math.Min(b.U, c.U));
+        int maxU = Math.Max(a.U, Math.Max(b.U, c.U));
+        int minV = Math.Min(a.V, Math.Min(b.V, c.V));
+        int maxV = Math.Max(a.V, Math.Max(b.V, c.V));
+        int texelsPerWord = _texDepth switch
+        {
+            0 => 4,
+            1 => 2,
+            _ => 1,
+        };
+        int firstWordU = minU / texelsPerWord;
+        int lastWordU = maxU / texelsPerWord;
+        int wordWidth = lastWordU - firstWordU + 1;
+        int height = maxV - minV + 1;
+        int paletteSize = _texDepth switch
+        {
+            0 => 16,
+            1 => 256,
+            _ => 0,
+        };
+        string signature =
+            $"{tpage:X3}:{clut:X4}:{_texDepth}:" +
+            $"{minU},{minV},{maxU},{maxV}";
+        if (!TracedImportedShadowAtlasRegions.Add(signature))
+            return;
+
+        ushort[] palette = new ushort[paletteSize];
+        if (paletteSize != 0)
+        {
+            int clutX = (clut & 0x3F) * 16;
+            int clutY = (clut >> 6) & 0x1FF;
+            if (readHleVram)
+                GpuHle.Backend!.ReadVram(
+                    clutX, clutY, paletteSize, 1, palette);
+            else
+                Array.Copy(
+                    Vram, clutY * VramWidth + clutX,
+                    palette, 0, paletteSize);
+        }
+        ushort[] words = new ushort[wordWidth * height];
+        if (readHleVram)
+            GpuHle.Backend!.ReadVram(
+                _texPageX + firstWordU,
+                _texPageY + minV,
+                wordWidth,
+                height,
+                words);
+        else
+            for (int row = 0; row < height; row++)
+                Array.Copy(
+                    Vram,
+                    (_texPageY + minV + row) * VramWidth +
+                        _texPageX + firstWordU,
+                    words, row * wordWidth, wordWidth);
+        byte[] paletteBytes = new byte[palette.Length * 2];
+        byte[] wordBytes = new byte[words.Length * 2];
+        Buffer.BlockCopy(
+            palette, 0, paletteBytes, 0, paletteBytes.Length);
+        Buffer.BlockCopy(words, 0, wordBytes, 0, wordBytes.Length);
+        Console.Error.WriteLine(
+            "[ImportedShadowAtlas] " +
+            $"source={(readHleVram ? "enhanced" : "software")} " +
+            $"tpage=0x{tpage:X3} clut=0x{clut:X4} " +
+            $"depth={_texDepth} page={_texPageX},{_texPageY} " +
+            $"uv={minU},{minV},{maxU},{maxV} " +
+            $"word-u={firstWordU} word-size={wordWidth},{height} " +
+            $"vertex-rgb={a.R},{a.G},{a.B};" +
+            $"{b.R},{b.G},{b.B};{c.R},{c.G},{c.B} " +
+            $"palette={Convert.ToBase64String(paletteBytes)} " +
+            $"texels={Convert.ToBase64String(wordBytes)}");
     }
 
     void HleTri(in Vert a, in Vert b, in Vert c, bool tex, bool gouraud, bool semi, bool raw, int clut)
@@ -259,6 +408,7 @@ public sealed partial class Gpu
         var be = GpuHle.Backend!;
         be.SetDrawEnv(CurEnv());
         PrimFlags flags = PrimOf(tex, semi, raw, clut, gouraud);
+        TraceImportedShadowSource(a, b, c, flags);
         bool hasWorldProjection =
             a.HasViewSpace || b.HasViewSpace || c.HasViewSpace ||
             a.HasGteZ || b.HasGteZ || c.HasGteZ ||
@@ -295,7 +445,20 @@ public sealed partial class Gpu
         be.SetDrawEnv(CurEnv());
         PrimFlags flags = PrimOf(tex, semi, raw, clut);
         flags.Material = HleMaterialKind.Ui;
-        be.DrawRect(new HleRect { X = x, Y = y, W = w, H = h, U = (short)u, V = (short)v, R = (byte)r, G = (byte)g, B = (byte)b },
+        be.DrawRect(new HleRect
+        {
+            X = x,
+            Y = y,
+            W = w,
+            H = h,
+            U = (short)u,
+            V = (short)v,
+            R = (byte)r,
+            G = (byte)g,
+            B = (byte)b,
+            FlipX = _texFlipX,
+            FlipY = _texFlipY,
+        },
             flags);
     }
 

@@ -16,6 +16,9 @@ from run_reference_soak import capture_managed_stack, stop_process
 
 
 REPO = Path(__file__).resolve().parents[2]
+BLENDER_PYTHON = Path(
+    r"C:\Program Files\Blender Foundation\Blender 4.5\4.5\python\bin\python.exe"
+)
 DEFAULT_EXE = REPO / "V8_2_LOOSE" / "Vigilante82PC.exe"
 DEFAULT_LOOSE = REPO / "V8_2_LOOSE"
 DEFAULT_INPUT = (
@@ -59,6 +62,16 @@ def main() -> int:
     fixture = args.input.resolve()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    for stale in (
+        *output.glob("*.ppm"),
+        output / "stdout.log",
+        output / "stderr.log",
+        output / "acceptance.json",
+        output / "all-guests-contact.bmp",
+        output / "vehicle-materials.json",
+    ):
+        if stale.is_file():
+            stale.unlink()
     if not exe.is_file():
         raise FileNotFoundError(exe)
     if not (loose / "SLUS_008.68").is_file():
@@ -84,6 +97,7 @@ def main() -> int:
             "RECOMPONE_CAPTURE_NATIVE_GUEST_SELECTOR": "1",
             "RECOMPONE_CAPTURE_V82_SELECTOR_TURNS": "0",
             "RECOMPONE_CAPTURE_DIR": str(output),
+            "RECOMPONE_TRACE_VEHICLE_MATERIALS": "1",
         }
     )
     env.pop("RECOMPONE_HEADLESS", None)
@@ -175,6 +189,51 @@ def main() -> int:
     if not reason and not clean_exit:
         reason = f"process exit was not clean: {process.returncode}"
 
+    guest_images = [
+        output
+        / (
+            f"recompone_present_native_guest_{index:02}_"
+            "1280x720_fxaa.ppm"
+        )
+        for index in range(12)
+    ]
+    contact_sheet = output / "all-guests-contact.bmp"
+    material_report = output / "vehicle-materials.json"
+    material_exit = subprocess.run(
+        [
+            str(BLENDER_PYTHON),
+            str(Path(__file__).with_name(
+                "analyze_vehicle_material_trace.py")),
+            str(stderr_path),
+            "--output",
+            str(material_report),
+        ],
+        check=False,
+    ).returncode
+    if material_exit != 0:
+        reason = (
+            "vehicle material audit found a subtractive effect "
+            "classified as glass"
+        )
+        passed = False
+    if all(image.is_file() for image in guest_images):
+        subprocess.run(
+            [
+                str(BLENDER_PYTHON),
+                str(Path(__file__).with_name("ppm_contact_sheet.py")),
+                "--columns",
+                "4",
+                "--cell-width",
+                "480",
+                str(contact_sheet),
+                *map(str, guest_images),
+            ],
+            check=True,
+        )
+    if not reason and not contact_sheet.is_file():
+        reason = "full-roster visual contact sheet was not produced"
+        passed = False
+
     report = {
         "schema": 1,
         "passed": passed,
@@ -188,10 +247,15 @@ def main() -> int:
         "clean_exit": clean_exit,
         "elapsed_seconds": round(time.monotonic() - started, 3),
         "hang_stack": str(hang_stack) if hang_stack else None,
+        "visual_contact_sheet": str(contact_sheet),
+        "vehicle_material_report": str(material_report),
+        "vehicle_materials_passed": material_exit == 0,
     }
     (output / "acceptance.json").write_text(
         json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
+    for capture in output.glob("*.ppm"):
+        capture.unlink()
     return 0 if passed else 1
 
 

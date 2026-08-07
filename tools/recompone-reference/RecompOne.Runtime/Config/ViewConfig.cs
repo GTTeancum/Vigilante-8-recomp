@@ -9,6 +9,9 @@ public class PanelState
 
 public class ViewConfig
 {
+    public const int MaximumWorldTextureClass = 512;
+    public const int MaximumUiTextureClass = 1024;
+
     static bool IsV82 =>
         Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal);
 
@@ -45,6 +48,17 @@ public class ViewConfig
     {
         get => GetBool("Fullscreen");
         set => SetBool("Fullscreen", value);
+    }
+
+    /// <summary>
+    /// Start with the window maximized. Distinct from <see cref="Fullscreen"/>,
+    /// which is borderless and hides the menu bar; maximized keeps the window
+    /// chrome and simply fills the screen.
+    /// </summary>
+    public bool StartMaximized
+    {
+        get => GetBool("StartMaximized", true);
+        set => SetBool("StartMaximized", value);
     }
 
     public bool HighResolution3D

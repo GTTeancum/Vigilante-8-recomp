@@ -223,6 +223,7 @@ public sealed class PSMemory : IMemory
         uint phys = MemoryMap.ToPhysical(address);
         InvalidatePreciseGteVertex(phys, 4);
         TraceWatchedWrite(phys, value);
+        RecompOne.Runtime.Hle.GpuHle.ObserveTerrainRoutePacketWrite(phys);
         TrackWrite(phys, 4);
         if (phys == 0x1F801810u) { _gpu.WriteGp0(value); return; }
         if (phys == 0x1F801814u) { _gpu.WriteGp1(value); return; }

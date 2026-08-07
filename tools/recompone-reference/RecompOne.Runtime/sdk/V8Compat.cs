@@ -178,7 +178,15 @@ public static class V8Compat
     static string _activeMeshRender = "none";
     static string _activeMeshIdentity = "unresolved";
     static bool _activeMeshIsVehicle;
+    static bool _activeMeshIsDreamlandWater;
+    static uint _activeMeshAddress;
+    static uint _activeMeshObject;
+    static uint _activeMeshPacketBytes;
     static readonly Dictionary<(uint Mesh, uint Object), int> _meshRenderCounts = new();
+    static uint _terrainFrustumWidthAddress;
+    static uint _terrainFrustumNativeWidth;
+    static bool _terrainFrustumAdjusted;
+    static bool _terrainFrustumLogged;
     static readonly Dictionary<(uint Mesh, uint Object), uint> _meshRenderLastSpatialNode = new();
     static readonly Dictionary<(uint Mesh, uint Object), string> _meshRenderLastSpatialPath = new();
     static readonly Dictionary<(uint Mesh, uint Object), uint> _meshRenderLastFrame = new();
@@ -929,6 +937,7 @@ public static class V8Compat
         }
         uint objectAddress = c.S0;
         bool vehicleMesh = false;
+        bool dreamlandWaterMesh = IsDreamlandWaterMesh(m, c.A0);
         var visitedParents = new HashSet<uint>();
         while (IsRetailRamRange(objectAddress, 0x40u) &&
                visitedParents.Add(objectAddress))
@@ -938,30 +947,46 @@ public static class V8Compat
                 vehicleMesh = true;
                 break;
             }
+            // The converted EXP's named DreamlandWater HEAD is bank 2,
+            // slot 0 with persistent animated-water flags 0x00018005 and
+            // an exact root translation of (882.5, *, 1354.0). Renderable
+            // patch children retain a native link to that model-free root.
+            if (m.ReadU32(objectAddress + 0x48u) == 57835520u &&
+                m.ReadU32(objectAddress + 0x50u) == 88735744u)
+                dreamlandWaterMesh = true;
             objectAddress = m.ReadU32(objectAddress + 0x3Cu);
         }
         _activeMeshIsVehicle = vehicleMesh;
+        _activeMeshIsDreamlandWater = dreamlandWaterMesh;
+        _activeMeshAddress = c.A0;
+        _activeMeshObject = c.S0;
+        _activeMeshPacketBytes = m.ReadU16(c.A0 + 2u);
         if (_tracePacketOwners)
             _activeMeshIdentity =
-                $"object=0x{c.S0:X8},mesh=0x{c.A0:X8}," +
-                $"model=0x{m.ReadU32(c.S0 + 0x30u):X8}," +
-                $"parent=0x{m.ReadU32(c.S0 + 0x3Cu):X8}," +
-                $"pos={ReadVec3(m, c.S0 + 0x48u)}";
+                $"{(dreamlandWaterMesh ? "dreamland-water," : "")}" +
+                $"mesh=0x{c.A0:X8}," +
+                $"vertices=0x{m.ReadU32(c.A0 + 8u):X8}," +
+                $"vertexCount={m.ReadU32(c.A0 + 4u)}," +
+                $"polygonCount={m.ReadU32(c.A0 + 0x14u)}," +
+                $"textureCount={m.ReadU16(c.A0 + 0x26u)}";
 
         bool traceOt =
             Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OT") == "1";
         if (!traceOt && !_traceMeshes)
             return;
-        if (_traceMeshes && _loggedMeshObjects.Add(c.S0))
+        if (_traceMeshes && _loggedMeshObjects.Add(c.A0))
         {
+            uint vertexCount = m.ReadU32(c.A0 + 4u);
+            uint vertices = m.ReadU32(c.A0 + 8u);
+            ulong vertexHash = MeshVertexHash(m, vertices, vertexCount);
             Console.Error.WriteLine(
-                $"[V8Mesh] object=0x{c.S0:X8} mesh=0x{c.A0:X8} " +
-                $"flags=0x{m.ReadU32(c.S0):X8} " +
-                $"kind={m.ReadU8(c.S0 + 4u)} " +
-                $"pos={ReadVec3(m, c.S0 + 0x48u)} " +
-                $"model=0x{m.ReadU32(c.S0 + 0x30u):X8} " +
-                $"parent=0x{m.ReadU32(c.S0 + 0x3Cu):X8} " +
-                $"callback=0x{m.ReadU32(c.S0 + 0x64u):X8}");
+                $"[V8Mesh] mesh=0x{c.A0:X8} flags=0x{m.ReadU16(c.A0):X4} " +
+                $"packetBytes={m.ReadU16(c.A0 + 2u)} " +
+                $"vertices=0x{vertices:X8} vertexCount={vertexCount} " +
+                $"vertexHash=0x{vertexHash:X16} " +
+                $"polygonCount={m.ReadU32(c.A0 + 0x14u)} " +
+                $"textureCount={m.ReadU16(c.A0 + 0x26u)} " +
+                $"callerS0=0x{c.S0:X8}");
         }
         if (!traceOt)
             return;
@@ -997,16 +1022,29 @@ public static class V8Compat
             $"objectCallback=0x{m.ReadU32(c.S0 + 0x64u):X8}";
     }
 
+    public static void BeginTerrainRoutePacketWrites(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Hle.GpuHle.BeginTerrainRoutePacketWrites();
+    }
+
+    public static void EndTerrainRoutePacketWrites(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Hle.GpuHle.EndTerrainRoutePacketWrites();
+    }
+
     public static void TraceMeshRenderPost(CpuContext c, IMemory m)
     {
         m = Dispatcher.UnwrapMemory(m);
-        if (_activeMeshIsVehicle)
+        uint bufferIndex = m.ReadU32(0x80065308u);
+        uint packetStart = IsRetailRamRange(_activeMeshAddress, 0x24u)
+            ? m.ReadU32(
+                _activeMeshAddress +
+                (bufferIndex << 2) +
+                0x1Cu)
+            : 0u;
+        uint packetEnd = packetStart + _activeMeshPacketBytes;
+        if (_activeMeshIsVehicle && packetStart != 0u)
         {
-            uint bufferIndex = m.ReadU32(0x80065308u);
-            uint packetStart = IsRetailRamRange(c.S0, 0x24u)
-                ? m.ReadU32(c.S0 + (bufferIndex << 2) + 0x1Cu)
-                : 0u;
-            uint packetEnd = c.S2;
             RecompOne.Runtime.Hle.GpuHle.RegisterVehiclePacketRange(
                 packetStart,
                 packetEnd);
@@ -1015,10 +1053,78 @@ public static class V8Compat
                     $"[V8VehiclePackets] start=0x{packetStart:X8} " +
                     $"end=0x{packetEnd:X8}");
         }
+        if (_activeMeshIsDreamlandWater && packetStart != 0u)
+        {
+            RecompOne.Runtime.Hle.GpuHle.RegisterDreamlandWaterPacketRange(
+                packetStart,
+                packetEnd);
+            RecompOne.Runtime.Hle.GpuHle.RegisterPacketOwnerRange(
+                packetStart,
+                packetEnd,
+                _activeMeshIdentity);
+            if (_tracePacketOwners)
+                Console.Error.WriteLine(
+                    $"[V8DreamlandWaterPackets] " +
+                    $"object=0x{_activeMeshObject:X8} " +
+                    $"mesh=0x{_activeMeshAddress:X8} " +
+                    $"start=0x{packetStart:X8} end=0x{packetEnd:X8}");
+        }
         _activeMeshIsVehicle = false;
+        _activeMeshIsDreamlandWater = false;
+        _activeMeshAddress = 0u;
+        _activeMeshObject = 0u;
+        _activeMeshPacketBytes = 0u;
         _activeMeshIdentity = "unresolved";
         if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OT") == "1")
             _activeMeshRender = "none";
+    }
+
+    private static bool IsDreamlandWaterMesh(IMemory m, uint mesh)
+    {
+        if (V8ArenaRegistry.SelectedStableId != "n64.super_dreamland_64" ||
+            !IsRetailRamRange(mesh, 0x28u))
+            return false;
+
+        uint vertexCount = m.ReadU32(mesh + 4u);
+        uint polygonCount = m.ReadU32(mesh + 0x14u);
+        if (!((vertexCount == 16u && polygonCount == 32u) ||
+              (vertexCount == 8u && polygonCount == 16u)) ||
+            m.ReadU16(mesh + 0x26u) != 10u)
+            return false;
+
+        uint vertices = m.ReadU32(mesh + 8u);
+        uint byteCount = vertexCount * 8u;
+        if (!IsRetailRamRange(vertices, byteCount))
+            return false;
+
+        // FNV-1a over the exact native vertex tables authored by
+        // _dreamland_water_group. The four hashes represent the 8x8, 5x8,
+        // 8x4 and 5x4 edge-patch dimensions in the converted XOBF bank.
+        ulong hash = MeshVertexHash(m, vertices, vertexCount);
+        return hash is
+            0x9D297A2FD42648A5ul or
+            0x9C703016A3102885ul or
+            0xB69EA7EBF285D9A5ul or
+            0xC11410461BCA7265ul;
+    }
+
+    private static ulong MeshVertexHash(
+        IMemory m,
+        uint vertices,
+        uint vertexCount)
+    {
+        uint byteCount = vertexCount * 8u;
+        if (vertexCount == 0u ||
+            vertexCount > 4096u ||
+            !IsRetailRamRange(vertices, byteCount))
+            return 0u;
+        ulong hash = 14695981039346656037ul;
+        for (uint offset = 0; offset < byteCount; offset++)
+        {
+            hash ^= m.ReadU8(vertices + offset);
+            hash *= 1099511628211ul;
+        }
+        return hash;
     }
 
     public static void RegisterMeshPrimitive(CpuContext c, IMemory m)
@@ -1031,6 +1137,8 @@ public static class V8Compat
             _activeMeshIdentity);
         if (_activeMeshIsVehicle)
             RecompOne.Runtime.Hle.GpuHle.RegisterVehiclePacket(c.A2);
+        if (_activeMeshIsDreamlandWater)
+            RecompOne.Runtime.Hle.GpuHle.RegisterDreamlandWaterPacket(c.A2);
     }
 
     public static string DescribeActiveMeshRender() => _activeMeshRender;
@@ -1229,41 +1337,67 @@ public static class V8Compat
 
     public static bool DrawMaxTerrainLod(CpuContext c, IMemory m)
     {
-        if (!MaxLevelOfDetailEnabled())
+        // Terrain visibility and submission order are authored by the native
+        // camera-dependent BSP walker.  The former "Maximum" implementation
+        // bypassed it and rendered every leaf in fixed tree order.  Besides
+        // being prohibitively expensive, that changed the PS1 ordering-table
+        // contract, processed off-camera animated objects, and exposed water
+        // and terrain in an order the game never produces.  Maximum LOD may
+        // select each object's high-detail mesh below; it must never replace
+        // the native spatial hierarchy.
+        // Extend the native camera-dependent BSP range itself for a wider
+        // viewport.  gp+0x6d8 is the horizontal projection-plane extent used
+        // by FUN_80021460 to construct its two normalized side vectors; the
+        // game then rotates those vectors and derives the exact X/Z bounds
+        // passed to the native BSP walker.  Scaling that one input by the
+        // viewport aspect ratio preserves the original traversal and painter
+        // order while including the additional side pixels.
+        _terrainFrustumAdjusted = false;
+        if (!ConfigManager.View.HighResolution3D ||
+            !Hle.GpuHle.GameplayActive ||
+            Hle.GpuHle.WideAspect <= Hle.GpuHle.BaseAspect + 0.001f)
             return true;
 
         m = Dispatcher.UnwrapMemory(m);
-        uint root = m.ReadU32(c.GP + 0x6FCu);
-        if (IsRetailRamRange(root, 16u))
+        uint address = c.GP + 0x6D8u;
+        uint nativeWidth = m.ReadU32(address);
+        int signedWidth = unchecked((int)nativeWidth);
+        if (signedWidth <= 0 || signedWidth > 0x10000)
+            return true;
+
+        int wideWidth = checked((int)Math.Round(
+            signedWidth *
+            (double)Hle.GpuHle.WideAspect /
+            Hle.GpuHle.BaseAspect,
+            MidpointRounding.AwayFromZero));
+        if (wideWidth <= signedWidth)
+            return true;
+
+        _terrainFrustumWidthAddress = address;
+        _terrainFrustumNativeWidth = nativeWidth;
+        _terrainFrustumAdjusted = true;
+        m.WriteU32(address, unchecked((uint)wideWidth));
+        if (!_terrainFrustumLogged)
         {
-            var saved = c.Snapshot();
-            DrawAllTerrainLeaves(c, m, root, new HashSet<uint>());
-            c.Restore(saved);
+            _terrainFrustumLogged = true;
+            Console.Error.WriteLine(
+                $"[V8WideTerrainFrustum] native={signedWidth} " +
+                $"wide={wideWidth} " +
+                $"aspect={Hle.GpuHle.WideAspect:F6}");
         }
-        return false;
+        return true;
     }
 
-    static void DrawAllTerrainLeaves(
-        CpuContext c, IMemory m, uint node, HashSet<uint> visited)
+    public static void RestoreTerrainFrustum(CpuContext c, IMemory m)
     {
-        if (!IsRetailRamRange(node, 16u) || !visited.Add(node))
+        if (!_terrainFrustumAdjusted)
             return;
 
-        uint kind = m.ReadU32(node);
-        if (kind == 0u)
-        {
-            var saved = c.Snapshot();
-            c.A0 = node + 4u;
-            Dispatcher.Call(c, m, 0x800206F0u);
-            c.Restore(saved);
-            return;
-        }
-
-        if (kind is 1u or 2u)
-        {
-            DrawAllTerrainLeaves(c, m, m.ReadU32(node + 8u), visited);
-            DrawAllTerrainLeaves(c, m, m.ReadU32(node + 12u), visited);
-        }
+        m = Dispatcher.UnwrapMemory(m);
+        m.WriteU32(
+            _terrainFrustumWidthAddress,
+            _terrainFrustumNativeWidth);
+        _terrainFrustumAdjusted = false;
     }
 
     public static void ApplyModelLevelOfDetail(CpuContext c, IMemory m) =>
@@ -1378,6 +1512,7 @@ public static class V8Compat
         if (matchMode is not (1 or 3 or 4) && !arenaTransition)
             return;
 
+        Hle.GpuHle.GameplayActive = true;
         uint frameCounter = m.ReadU32(c.GP + 0x0Cu);
         if (frameCounter == _lastGameplayFrameCounter)
             return;
@@ -2722,6 +2857,7 @@ public static class V8Compat
         {
             _gameplayStage = false;
             _vehiclePhysicsTick = 0;
+            Hle.GpuHle.GameplayActive = false;
         }
         if (stage != null &&
             (!_gameplayStage || stage.StartsWith("pause_", StringComparison.Ordinal)))
@@ -2813,6 +2949,7 @@ public static class V8Compat
         if (quit)
         {
             _gameplayStage = false;
+            Hle.GpuHle.GameplayActive = false;
             InputManager.SignalScriptStage("pause_quit");
         }
         else

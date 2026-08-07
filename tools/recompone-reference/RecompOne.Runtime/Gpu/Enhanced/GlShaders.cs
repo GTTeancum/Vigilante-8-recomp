@@ -90,6 +90,7 @@ internal static class GlShaders
         flat out int   vHudPlate;
         flat out int   vHealthPlate;
         flat out int   vVehicle;
+        flat out int   vTerrainDebug;
         flat out int   vMaterial;
         flat out ivec4 vUvBounds;
         noperspective out vec3 vBary;
@@ -152,6 +153,7 @@ internal static class GlShaders
             vHudPlate = (inTexpage >> 17) & 1;
             vHealthPlate = (inTexpage >> 18) & 1;
             vVehicle = (inTexpage >> 19) & 1;
+            vTerrainDebug = (inTexpage >> 20) & 1;
             vMaterial = inMaterial;
             vLongestEdge = inClut;
             vUvBounds = ivec4(round(inUvBounds));
@@ -189,6 +191,7 @@ internal static class GlShaders
         flat in int   vHudPlate;
         flat in int   vHealthPlate;
         flat in int   vVehicle;
+        flat in int   vTerrainDebug;
         flat in int   vMaterial;
         flat in ivec4 vUvBounds;
         noperspective in vec3 vBary;
@@ -211,6 +214,8 @@ internal static class GlShaders
         uniform int   uEnhancedShadows;
         uniform int   uEnhancedParticles;
         uniform int   uEnhancedFog;
+        uniform vec3  uFogColor;
+        uniform int   uFogColorValid;
         uniform int   uPerspectiveCorrectTextures;
         uniform int   uPerspectiveCorrectColors;
         uniform int   uTrueColor;
@@ -354,7 +359,7 @@ internal static class GlShaders
             vec2 origin = vRadar != 0
                 ? vec2(0.0, 0.0)
                 : (vHealthPlate != 0
-                    ? vec2(672.0, 440.0)
+                    ? vec2(736.0, 440.0)
                     : vec2(0.0, 440.0));
             vec2 atlasPixel = origin + p * 8.0;
             return texture(uHudSvg, (atlasPixel + vec2(0.5)) / 1024.0);
@@ -383,18 +388,33 @@ internal static class GlShaders
             // modulation. The previous textured-only pre-modulation haze was
             // undone by bright vertex colours and skipped meshes without an
             // exact GTE SZ, leaving distant buildings fully saturated.
-            float amount = smoothstep(2600.0, 8500.0, vDepth) * 0.76;
-            float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
-            // Converge bright props and dark terrain toward the same bounded
-            // atmospheric range. Keeping the source luminance unbounded made
-            // white/red distant buildings remain conspicuous against already
-            // fogged terrain even though their saturation had been reduced.
-            float atmosphericLum = clamp(mix(lum, 0.58, 0.70), 0.48, 0.68);
-            float warmth = clamp((rgb.r - rgb.b) * 0.25 + 0.10, 0.0, 0.22);
-            vec3 cool = vec3(0.98, 1.00, 1.04) * atmosphericLum;
-            vec3 warm = vec3(1.06, 1.00, 0.90) * atmosphericLum;
-            vec3 atmosphere = mix(cool, warm, warmth);
-            return clamp(mix(rgb, atmosphere, amount), 0.0, 1.0);
+            //
+            // Converge on the arena's own backdrop colour. The former target
+            // was a synthesized mid-grey haze, which is not where distance
+            // takes anything: geometry approaching the terrain draw limit went
+            // grey while the sky behind it stayed bright and warm, so the
+            // horizon read as a hard cut instead of a fade, and distant props
+            // never stopped standing out. Blend all the way to that colour at
+            // the far limit so the last terrain row is the sky.
+            if (uFogColorValid == 0) {
+                // No backdrop colour available - either none has been seen yet
+                // or the A/B control disabled the harvest. Reproduce the
+                // previous synthesized haze exactly.
+                float amount = smoothstep(2600.0, 8500.0, vDepth) * 0.76;
+                float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
+                float atmosphericLum = clamp(mix(lum, 0.58, 0.70), 0.48, 0.68);
+                float warmth = clamp((rgb.r - rgb.b) * 0.25 + 0.10, 0.0, 0.22);
+                vec3 cool = vec3(0.98, 1.00, 1.04) * atmosphericLum;
+                vec3 warm = vec3(1.06, 1.00, 0.90) * atmosphericLum;
+                return clamp(
+                    mix(rgb, mix(cool, warm, warmth), amount), 0.0, 1.0);
+            }
+
+            // The terrain walker stops at roughly 20000 camera units, so the
+            // curve has to be complete there. The 0.62 exponent brings haze in
+            // over the middle distance without washing out near geometry.
+            float amount = pow(smoothstep(2200.0, 20500.0, vDepth), 0.62);
+            return clamp(mix(rgb, uFogColor, amount), 0.0, 1.0);
         }
         vec3 stockPaintCorrection8(ivec3 c8) {
             return stockPaintCorrection(vec3(c8) / 255.0);
@@ -410,6 +430,11 @@ internal static class GlShaders
         }
         void main() {
             if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
+            if (vTerrainDebug != 0) {
+                FragColor = vec4(1.0, 0.0, 1.0, uSetMask);
+                BlendColor = uBlendOpaque;
+                return;
+            }
 
             if (texMode == 4) {
                 vec4 vertexColor = uPerspectiveCorrectColors != 0
@@ -450,20 +475,25 @@ internal static class GlShaders
             vec4 texel = uTextureSmoothing != 0 && vSmooth != 0
                 ? filteredTexture(sampleUV, nearestTexel)
                 : nearestTexel;
-            bool vehicleGlass = vMaterial == 3;
+            bool vehicleGlass = vMaterial == 3 || vMaterial == 4;
+            bool importedVehicleGlass = vMaterial == 4;
+            bool importedProjectedShadow = vMaterial == 11;
             bool vectorFont =
                 vUiTexture != 0 && vParticle != 0 && uVectorFonts != 0;
             bool vectorIcon =
                 vUiTexture != 0 && vShadow != 0 && uVectorIcons != 0;
             bool enhancedParticle =
                 vUiTexture == 0 && vParticle != 0 && uEnhancedParticles != 0;
+            bool enhancedImportedShadow =
+                importedProjectedShadow && uEnhancedShadows != 0;
             bool svgHud = vHudPlate != 0 && uVectorIcons != 0;
             vec2 hudLocal = sampleUV - vec2(vUvBounds.xy);
             float hudCoverage = 1.0;
             float contourCoverage = 1.0;
             float contourStp = nearestTexel.a;
 
-            if ((vectorFont || vectorIcon || enhancedParticle) && !svgHud) {
+            if ((vectorFont || vectorIcon || enhancedParticle ||
+                 enhancedImportedShadow) && !svgHud) {
                 texel = contourTexture(sampleUV, contourCoverage, contourStp);
                 if (vectorIcon && vHudPlate == 0)
                     texel.rgb = nearestTexel.rgb;
@@ -486,7 +516,9 @@ internal static class GlShaders
                 // UI draws do not have a usable alpha blend and doing so
                 // creates dark halos. Particle sprites are semitransparent and
                 // can safely reconstruct their edge coverage.
-                bool filteredEdge = vectorFont || vectorIcon || enhancedParticle;
+                bool filteredEdge =
+                    vectorFont || vectorIcon || enhancedParticle ||
+                    enhancedImportedShadow;
                 if (!svgHud && !filteredEdge) discard;
             }
             if (svgHud) {
@@ -515,7 +547,9 @@ internal static class GlShaders
                     : vec3(0.18, 0.25, 0.29);
                 FragColor = vec4(
                     distanceFog(glassTint),
-                    authored > 0.02 ? 0.46 : 0.34);
+                    importedVehicleGlass
+                        ? (authored > 0.02 ? 0.88 : 0.78)
+                        : (authored > 0.02 ? 0.46 : 0.34));
                 BlendColor = vec4(1.0);
                 return;
             }
@@ -531,6 +565,27 @@ internal static class GlShaders
                 BlendColor = vec4(
                     analyticBlend.rgb * hudCoverage,
                     mix(1.0, analyticBlend.a, hudCoverage));
+            } else if (enhancedImportedShadow) {
+                // The PS1 shadow texture is a subtractive intensity field,
+                // not a binary silhouette.  STP may be set on black palette
+                // entries, but subtracting black is still a no-op.  Using
+                // contour occupancy alone therefore turns the full projected
+                // rectangle into an opaque-looking card.  Reconstruct a
+                // bounded relative shadow from the decoded texel intensity
+                // and the packet's authored 0x80 modulation instead.
+                float textureIntensity = dot(
+                    texel.rgb,
+                    vec3(0.299, 0.587, 0.114));
+                float vertexIntensity = dot(
+                    vertexColor.rgb,
+                    vec3(0.299, 0.587, 0.114));
+                float shadowCoverage = contourCoverage * clamp(
+                    textureIntensity * vertexIntensity * 0.72,
+                    0.0,
+                    0.20);
+                if (shadowCoverage <= 0.001) discard;
+                FragColor = vec4(0.0, 0.0, 0.0, shadowCoverage);
+                BlendColor = vec4(1.0);
             } else if (enhancedParticle && contourCoverage < 0.999) {
                 if (contourStp >= 0.5) {
                     BlendColor = vec4(

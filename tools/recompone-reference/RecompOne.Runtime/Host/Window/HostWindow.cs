@@ -62,7 +62,11 @@ internal static class HostWindow
             Environment.GetEnvironmentVariable(
                 "RECOMPONE_PRESENTATION_CAPTURE_BURST_FRAMES"),
             out int burstFrames)
-            ? Math.Clamp(burstFrames, 0, 600)
+            // A native result screen can consume roughly 600 presented
+            // frames before the shell reload begins.  Permit enough
+            // diagnostic headroom to capture that boundary and a stable
+            // post-return menu in one continuous sequence.
+            ? Math.Clamp(burstFrames, 0, 1800)
             : 0;
     static readonly string? _presentationCaptureBurstLabel =
         Environment.GetEnvironmentVariable(
@@ -70,6 +74,23 @@ internal static class HostWindow
     static string? _activePresentationBurstLabel;
     static int _activePresentationBurstFrame;
     static int _activePresentationBurstRemaining;
+    static readonly bool _captureComposedPresentation =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_COMPOSED_PRESENTATION_CAPTURE") == "1";
+    static readonly bool _captureSourcePresentationBurst =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_SOURCE_PRESENTATION_CAPTURE") != "0";
+    static readonly int _composedCaptureStride = Math.Max(
+        1,
+        int.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_COMPOSED_PRESENTATION_CAPTURE_STRIDE"),
+            out int composedCaptureStride)
+            ? composedCaptureStride
+            : 1);
+    static string? _activeComposedBurstLabel;
+    static int _activeComposedBurstFrame;
+    static int _activeComposedBurstRemaining;
     static readonly bool _windowVisible =
         Environment.GetEnvironmentVariable("RECOMPONE_WINDOW_VISIBLE") != "0";
     static readonly bool _forceHeadless =
@@ -131,7 +152,11 @@ internal static class HostWindow
                 VSync = false,
                 UpdatesPerSecond = 0,
                 FramesPerSecond = 0,
-                WindowState = ConfigManager.View.Fullscreen ? WindowState.Fullscreen : WindowState.Normal,
+                WindowState = ConfigManager.View.Fullscreen
+                    ? WindowState.Fullscreen
+                    : ConfigManager.View.StartMaximized
+                        ? WindowState.Maximized
+                        : WindowState.Normal,
                 API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default, new APIVersion(4, 5)),
             };
             _window = Silk.NET.Windowing.Window.Create(options);
@@ -314,10 +339,20 @@ internal static class HostWindow
                      _presentationCaptureBurstLabel,
                      StringComparison.OrdinalIgnoreCase)))
             {
-                _activePresentationBurstLabel = sanitized;
-                _activePresentationBurstFrame = 0;
-                _activePresentationBurstRemaining =
-                    _presentationCaptureBurstFrames;
+                if (_captureSourcePresentationBurst)
+                {
+                    _activePresentationBurstLabel = sanitized;
+                    _activePresentationBurstFrame = 0;
+                    _activePresentationBurstRemaining =
+                        _presentationCaptureBurstFrames;
+                }
+                if (_captureComposedPresentation)
+                {
+                    _activeComposedBurstLabel = sanitized;
+                    _activeComposedBurstFrame = 0;
+                    _activeComposedBurstRemaining =
+                        _presentationCaptureBurstFrames;
+                }
             }
         }
     }
@@ -368,6 +403,11 @@ internal static class HostWindow
             Environment.GetEnvironmentVariable("RECOMPONE_TEXTURE_SMOOTHING");
         if (smoothingOverride is "0" or "1")
             ConfigManager.View.TextureSmoothing = smoothingOverride == "1";
+        string? msaaOverride =
+            Environment.GetEnvironmentVariable("RECOMPONE_MSAA_SAMPLES");
+        if (int.TryParse(msaaOverride, out int msaaSamples) &&
+            msaaSamples is 0 or 2 or 4 or 8)
+            ConfigManager.View.MsaaSamples = msaaSamples;
 
         bool hleActive = UseEnhancedRenderer();
         Enhanced.GlVram.Scale = ConfigManager.View.HighResolution3D
@@ -407,7 +447,6 @@ internal static class HostWindow
         PanelManager.Register(new CdDebugPanel());
         PanelManager.Register(new ConsolePanel());
         PanelManager.Register(new OverlayEventsPanel());
-        PanelManager.Register(new SettingsPopup());
         PanelManager.Register(new Modding.ModsPopup());
         PanelManager.Register(new AboutPopup());
         PanelManager.Register(GuestVehicleMenu.PackagePanel);
@@ -445,6 +484,19 @@ internal static class HostWindow
         var gl = _gl!;
         ApplyGraphicsView();
         _imgui!.Update((float)dt);
+
+        // F9 records the frame the player is looking at: the presentation
+        // image and, from the same frame, every drawn triangle. That pairing
+        // is what makes an artifact locatable - a screenshot alone cannot say
+        // which geometry is missing, and a geometry dump alone cannot say
+        // which frame showed the defect.
+        if (ImGui.IsKeyPressed(ImGuiKey.F9, false))
+        {
+            _pendingPresentationCapture = "seam";
+            RecompOne.Runtime.Enhanced.EnhancedGlBackend
+                .RequestGeometryDump();
+            Console.WriteLine("[Host] F9: capturing frame + geometry dump");
+        }
     
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         var fbDef = _window!.FramebufferSize;
@@ -460,6 +512,20 @@ internal static class HostWindow
         var gpu = _gpu;
         if (gpu != null)
         {
+            if (Hle.GpuHle.WidescreenMenuReturnPending)
+            {
+                int discardedTargets = 0;
+                if (Hle.GpuHle.Active &&
+                    _enhancedRenderer is { Ready: true })
+                    discardedTargets =
+                        _enhancedRenderer.DiscardWidescreenDisplayTargets();
+                OutputPanel.InvalidateWidescreenPresentation();
+                Hle.GpuHle.WidescreenMenuReturnPending = false;
+                Console.Error.WriteLine(
+                    "[WidescreenMenuReturn] invalidated stale 16:9 output " +
+                    $"and discarded expanded targets={discardedTargets}; " +
+                    "native 4:3 VRAM preserved");
+            }
 
             if (Hle.GpuHle.Active &&
                 _enhancedRenderer is { Ready: true } &&
@@ -505,6 +571,145 @@ internal static class HostWindow
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         gl.Viewport(0, 0, (uint)fbDef.X, (uint)fbDef.Y);
         _imgui.Render();
+        if (_activeComposedBurstRemaining > 0 &&
+            _activeComposedBurstLabel != null)
+        {
+            string label =
+                $"{_activeComposedBurstLabel}_" +
+                $"{_activeComposedBurstFrame:000}";
+            _activeComposedBurstFrame++;
+            _activeComposedBurstRemaining--;
+            bool writeCapture =
+                _activeComposedBurstFrame == 1 ||
+                _activeComposedBurstFrame % _composedCaptureStride == 0 ||
+                _activeComposedBurstRemaining == 0;
+            if (_activeComposedBurstRemaining == 0)
+                _activeComposedBurstLabel = null;
+            CaptureComposedPresentation(
+                gl, fbDef.X, fbDef.Y, label, writeCapture);
+        }
+    }
+
+    static void CaptureComposedPresentation(
+        GL gl,
+        int width,
+        int height,
+        string label,
+        bool writeCapture)
+    {
+        if (width <= 0 || height <= 0)
+            return;
+        byte[] bottomUp = new byte[width * height * 3];
+        byte[] topDown = new byte[bottomUp.Length];
+        gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, 0);
+        gl.PixelStore(PixelStoreParameter.PackAlignment, 1);
+        gl.ReadPixels(
+            0, 0, (uint)width, (uint)height,
+            PixelFormat.Rgb, PixelType.UnsignedByte,
+            bottomUp.AsSpan());
+        int stride = width * 3;
+        for (int y = 0; y < height; y++)
+            System.Buffer.BlockCopy(
+                bottomUp,
+                (height - 1 - y) * stride,
+                topDown,
+                y * stride,
+                stride);
+
+        if (OutputPanel.TryGetCompositionLayout(
+            out Vector2 availableMin,
+            out Vector2 availableSize,
+            out Vector2 imageMin,
+            out Vector2 imageSize))
+        {
+            static (int Maximum, int Nonblack, int Pixels) Metrics(
+                byte[] pixels,
+                int framebufferWidth,
+                int framebufferHeight,
+                int x,
+                int y,
+                int w,
+                int h)
+            {
+                int x0 = Math.Clamp(x, 0, framebufferWidth);
+                int y0 = Math.Clamp(y, 0, framebufferHeight);
+                int x1 = Math.Clamp(x + w, x0, framebufferWidth);
+                int y1 = Math.Clamp(y + h, y0, framebufferHeight);
+                int maximum = 0;
+                int nonblack = 0;
+                for (int py = y0; py < y1; py++)
+                for (int px = x0; px < x1; px++)
+                {
+                    int offset = (py * framebufferWidth + px) * 3;
+                    int value = Math.Max(
+                        pixels[offset],
+                        Math.Max(pixels[offset + 1], pixels[offset + 2]));
+                    maximum = Math.Max(maximum, value);
+                    if (value > 2)
+                        nonblack++;
+                }
+                return (maximum, nonblack, (x1 - x0) * (y1 - y0));
+            }
+            int ax = (int)MathF.Round(availableMin.X);
+            int ay = (int)MathF.Round(availableMin.Y);
+            int aw = (int)MathF.Round(availableSize.X);
+            int ah = (int)MathF.Round(availableSize.Y);
+            int ix = (int)MathF.Round(imageMin.X);
+            int iy = (int)MathF.Round(imageMin.Y);
+            int iw = (int)MathF.Round(imageSize.X);
+            int ih = (int)MathF.Round(imageSize.Y);
+            const int outerChromeInset = 20;
+            const int imageEdgeInset = 2;
+            var left = Metrics(
+                topDown, width, height,
+                ax + outerChromeInset,
+                ay,
+                ix - ax - outerChromeInset - imageEdgeInset,
+                ah);
+            int rightX = ix + iw;
+            var right = Metrics(
+                topDown, width, height,
+                rightX + imageEdgeInset,
+                ay,
+                ax + aw - rightX - outerChromeInset - imageEdgeInset,
+                ah);
+            var image = Metrics(topDown, width, height, ix, iy, iw, ih);
+            Console.WriteLine(
+                $"[HostCompositionMetrics] label={label} " +
+                $"left-max={left.Maximum} right-max={right.Maximum} " +
+                $"left-width=" +
+                $"{Math.Max(0, ix - ax - outerChromeInset - imageEdgeInset)} " +
+                $"right-width=" +
+                $"{Math.Max(0, ax + aw - rightX - outerChromeInset - imageEdgeInset)} " +
+                $"image-nonblack={image.Nonblack}/" +
+                $"{Math.Max(1, image.Pixels)}");
+            string path = "none";
+            if (writeCapture)
+            {
+                path =
+                    $"recompone_composed_{label}_{width}x{height}.ppm";
+                if (!string.IsNullOrWhiteSpace(_captureDirectory))
+                {
+                    string directory = Path.GetFullPath(_captureDirectory);
+                    Directory.CreateDirectory(directory);
+                    path = Path.Combine(
+                        directory,
+                        Path.GetFileName(path));
+                }
+                using var output = File.Create(path);
+                byte[] header = System.Text.Encoding.ASCII.GetBytes(
+                    $"P6\n{width} {height}\n255\n");
+                output.Write(header);
+                output.Write(topDown);
+            }
+            Console.WriteLine(
+                $"[HostComposition] label={label} " +
+                $"framebuffer={width},{height} " +
+                $"available={availableMin.X:F0},{availableMin.Y:F0}," +
+                $"{availableSize.X:F0},{availableSize.Y:F0} " +
+                $"image={imageMin.X:F0},{imageMin.Y:F0}," +
+                $"{imageSize.X:F0},{imageSize.Y:F0} path={path}");
+        }
     }
 
     static void DrawDockspace()

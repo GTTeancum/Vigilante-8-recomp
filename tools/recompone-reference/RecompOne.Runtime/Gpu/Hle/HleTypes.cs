@@ -23,16 +23,20 @@ public enum HleMaterialKind : byte
     Opaque,
     AlphaTest,
     Glass,
+    ImportedGlass,
     Particle,
     Additive,
     Subtractive,
     Ui,
     ScreenEffect,
+    TerrainRoute,
+    ImportedShadow,
 }
 
 public struct PrimFlags
 {
     public bool Textured, SemiTrans, RawTexture, Gouraud, Vehicle;
+    public bool DreamlandWater, TerrainRoute;
     public HleMaterialKind Material;
     public ushort TPage; 
     public ushort Clut; 
@@ -42,6 +46,13 @@ public struct PrimFlags
     public readonly int BlendMode => (TPage >> 5) & 3;
 }
 
-public struct HleRect { public float X, Y; public int W, H; public short U, V; public byte R, G, B; }
+public struct HleRect
+{
+    public float X, Y;
+    public int W, H;
+    public short U, V;
+    public byte R, G, B;
+    public bool FlipX, FlipY;
+}
 public struct HleDrawEnv { public int ClipX0, ClipY0, ClipX1, ClipY1; public int TwMaskX, TwMaskY, TwOffX, TwOffY; public bool SetMask, CheckMask, Dither; }
 public struct HleDispEnv { public int X, Y, W, H; public bool Rgb24, Interlace; }

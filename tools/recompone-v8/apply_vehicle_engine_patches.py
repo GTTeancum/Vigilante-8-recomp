@@ -39,22 +39,44 @@ PATCHES = (
 
 REPLACEMENTS = (
     (
-        """        c.A0 = m.ReadU32((c.FP + 0x34u));
+        (
+            """        c.A0 = m.ReadU32((c.FP + 0x34u));
         c.A1 = c.S0 + 0u;
 """,
-        """        c.A0 = m.ReadU32((c.FP + 0x34u));
+            """        c.LoadWord(4, m, (c.FP + 0x34u));
+        c.CopyRegister(5, 16);
+""",
+        ),
+        (
+            """        c.A0 = m.ReadU32((c.FP + 0x34u));
         c.A0 = RecompOne.Runtime.Sdk.V8VehicleRegistry.WheelBankForObject(m, c.S3, c.A0);
         c.A1 = c.S0 + 0u;
 """,
+            """        c.LoadWord(4, m, (c.FP + 0x34u));
+        c.A0 = RecompOne.Runtime.Sdk.V8VehicleRegistry.WheelBankForObject(m, c.S3, c.A0);
+        c.CopyRegister(5, 16);
+""",
+        ),
     ),
     (
-        """        c.V0 = m.ReadU32((c.FP + 0x34u));
+        (
+            """        c.V0 = m.ReadU32((c.FP + 0x34u));
         c.A0 = c.S6 + 0u;
 """,
-        """        c.V0 = m.ReadU32((c.FP + 0x34u));
+            """        c.LoadWord(2, m, (c.FP + 0x34u));
+        c.CopyRegister(4, 22);
+""",
+        ),
+        (
+            """        c.V0 = m.ReadU32((c.FP + 0x34u));
         c.V0 = RecompOne.Runtime.Sdk.V8VehicleRegistry.WheelBankForObject(m, c.S3, c.V0);
         c.A0 = c.S6 + 0u;
 """,
+            """        c.LoadWord(2, m, (c.FP + 0x34u));
+        c.V0 = RecompOne.Runtime.Sdk.V8VehicleRegistry.WheelBankForObject(m, c.S3, c.V0);
+        c.CopyRegister(4, 22);
+""",
+        ),
     ),
 )
 
@@ -77,11 +99,20 @@ def main() -> int:
         if patched in text:
             continue
         missing.append((signature, hook))
-    missing_replacements = [
-        (old, new)
-        for old, new in REPLACEMENTS
-        if new not in text
-    ]
+    missing_replacements = []
+    for old_variants, new_variants in REPLACEMENTS:
+        if any(new in text for new in new_variants):
+            continue
+        matching = [
+            (old, new)
+            for old, new in zip(old_variants, new_variants)
+            if old in text
+        ]
+        if len(matching) != 1:
+            raise SystemExit(
+                "V8 wheel-bank patch site is missing or ambiguous"
+            )
+        missing_replacements.append(matching[0])
     if not missing and not missing_replacements:
         print("V8 independent-vehicle seams: present")
         return 0
@@ -98,9 +129,7 @@ def main() -> int:
         text = text.replace(signature, signature + hook)
     for old, new in missing_replacements:
         if text.count(old) != 1:
-            raise SystemExit(
-                "V8 wheel-bank patch site is missing or ambiguous"
-            )
+            raise SystemExit("V8 wheel-bank patch site is ambiguous")
         text = text.replace(old, new, 1)
     args.file.write_text(text, encoding="utf-8")
     print(f"V8 independent-vehicle seams: applied {len(missing)}")

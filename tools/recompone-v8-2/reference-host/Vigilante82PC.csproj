@@ -27,6 +27,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\tools\recompone-reference\RecompOne.Runtime\RecompOne.Runtime.csproj" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\V82NativeControlOptions.cs"
+             Link="V82NativeControlOptions.cs" />
   </ItemGroup>
   <ItemGroup Condition="'$(PublishTrimmed)' == 'true'">
     <!-- Silk discovers input backends through assembly attributes. Keep that
@@ -40,5 +42,6 @@
           Condition="Exists('$(MSBuildProjectDirectory)\main.cs')">
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\apply_vehicle_engine_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\apply_native_selector_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot;" />
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\apply_native_options_patches.py&quot; --shell-source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot; --main-source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
   </Target>
 </Project>

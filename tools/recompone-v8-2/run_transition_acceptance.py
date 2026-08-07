@@ -13,6 +13,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from dataclasses import asdict, dataclass
@@ -38,22 +39,22 @@ FIXTURE = (
     / "tools"
     / "recompone-v8-2"
     / "input-scripts"
-    / "native_arcade_defeat_quit_stock.txt"
+    / "native_arcade_defeat_voice_full.txt"
 )
 
 GUESTS = (
-    ("chassey_blue", "guest.v8.chassey_blue", 64, "CHASSEY"),
-    ("slick_clyde", "guest.v8.slick_clyde", 65, "CLYDE"),
-    ("sheila", "guest.v8.sheila", 66, "SHEILA"),
-    ("john_torque", "guest.v8.john_torque", 67, "TORQUE"),
-    ("dave", "guest.v8.dave", 68, "CULTSMEN"),
-    ("convoy", "guest.v8.convoy", 69, "CONVOY"),
-    ("loki", "guest.v8.loki", 70, "BOBO"),
-    ("houston_3", "guest.v8.houston_3", 71, "HOUSTON"),
-    ("boogie", "guest.v8.boogie", 72, "BOOGIE"),
-    ("beezwax", "guest.v8.beezwax", 73, "GARBAGE"),
-    ("molo", "guest.v8.molo", 74, "MOLO"),
-    ("sid_burn", "guest.v8.sid_burn", 75, "DUSTY"),
+    ("chassey_blue", "guest.v8.chassey_blue", 64, "V8VOICE/D00"),
+    ("slick_clyde", "guest.v8.slick_clyde", 65, "V8VOICE/D01"),
+    ("sheila", "guest.v8.sheila", 66, "V8VOICE/D02"),
+    ("john_torque", "guest.v8.john_torque", 67, "V8VOICE/D03"),
+    ("dave", "guest.v8.dave", 68, "V8VOICE/D04"),
+    ("convoy", "guest.v8.convoy", 69, "V8VOICE/D05"),
+    ("loki", "guest.v8.loki", 70, "V8VOICE/D06"),
+    ("houston_3", "guest.v8.houston_3", 71, "V8VOICE/D07"),
+    ("boogie", "guest.v8.boogie", 72, "V8VOICE/D08"),
+    ("beezwax", "guest.v8.beezwax", 73, "V8VOICE/D09"),
+    ("molo", "guest.v8.molo", 74, "V8VOICE/D10"),
+    ("sid_burn", "guest.v8.sid_burn", 75, "V8VOICE/D11"),
 )
 
 
@@ -75,6 +76,7 @@ def run_case(
     exe: Path,
     loose: Path,
     output: Path,
+    executable_sha256: str,
     case: str,
     stable_id: str | None,
     expected_type: int | None,
@@ -93,7 +95,7 @@ def run_case(
             "RECOMPONE_HEADLESS": "1",
             "RECOMPONE_GPU_HLE": "1",
             "RECOMPONE_V82_TEST_DEFEAT_FRAME": "120",
-            "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS": "5300",
+            "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS": "6000",
             "RECOMPONE_V82_UNLOCK_ROSTER": "1",
             "RECOMPONE_SUPPRESS_RUMBLE": "1",
             "RECOMPONE_MUTE": "1",
@@ -147,22 +149,49 @@ def run_case(
         "menu_music_after_return":
             "[CDDA] loose track=2 source=music/track02.ogg streaming" in combined,
         "replay_completed":
-            "[Input] deterministic replay completed at poll 5300" in combined,
+            "[Input] deterministic replay completed at poll 6000" in combined,
         "no_fatal":
             "[Fatal]" not in combined and "Unhandled exception" not in combined,
     }
     if stable_id is not None:
+        xa_path = loose / "SHARED" / f"{expected_xa}.XA"
+        xa_bytes = xa_path.stat().st_size
+        if xa_bytes % (2336 * 8):
+            raise ValueError(
+                f"{xa_path} is not an eight-sector-cadence XA file"
+            )
+        expected_audio_sectors = xa_bytes // (2336 * 8)
+        expected_duration = expected_audio_sectors * 4032 / 37800
+        stream_end = re.search(
+            rf"\[CdStream\] end 'SHARED/{re.escape(expected_xa)}\.XA' "
+            rf"reason=file-end frames=0 xa=(\d+) last=-1 elapsed=([\d.]+)s",
+            combined,
+        )
         checks["guest_selected"] = (
             f"selected guest type={expected_type}" in combined
         )
         checks["guest_created"] = (
             f"created {stable_id} identity={expected_type}" in combined
         )
-        checks["guest_result_proxy"] = (
-            f"imported type={expected_type} resolved native XA stem=" in combined
+        checks["guest_result_voice"] = (
+            f"outcome=defeat channel={expected_type - 64} "
+            f"stem={expected_xa.replace('/', chr(92))}" in combined
         )
+        checks["guest_result_native_path"] = (
+            f"wrote original V8 XA path="
+            f"'Shared{chr(92)}{expected_xa.replace('/', chr(92))}.xa'"
+            in combined
+        )
+        # Imported paths are written directly into the retail caller's result
+        # buffer, so the skipped sprintf has no trace line of its own.
+        checks["result_built"] = checks["guest_result_native_path"]
         checks["guest_result_xa_opened"] = (
             f"start 'SHARED/{expected_xa}.XA'" in combined
+        )
+        checks["guest_result_full_voice"] = (
+            stream_end is not None
+            and int(stream_end.group(1)) == expected_audio_sectors
+            and float(stream_end.group(2)) >= expected_duration - 0.15
         )
 
     # These are automatically requested by native stage signaling. The
@@ -171,7 +200,7 @@ def run_case(
     for capture in case_dir.glob("*.ppm"):
         capture.unlink()
 
-    return Result(
+    result = Result(
         case=case,
         stable_id=stable_id,
         expected_type=expected_type,
@@ -183,6 +212,48 @@ def run_case(
         stdout=str(stdout_path),
         stderr=str(stderr_path),
     )
+    case_report = {
+        "schema": 1,
+        "executable_sha256": executable_sha256,
+        "loose_root": str(loose),
+        "result": asdict(result),
+    }
+    (case_dir / "result.json").write_text(
+        json.dumps(case_report, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return result
+
+
+def load_checkpoint(
+    output: Path,
+    executable_sha256: str,
+    loose: Path,
+    case: str,
+    stable_id: str | None,
+    expected_type: int | None,
+    expected_xa: str | None,
+) -> Result | None:
+    path = output / case / "result.json"
+    if not path.is_file():
+        return None
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+        result = Result(**report["result"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if (
+        report.get("schema") != 1
+        or report.get("executable_sha256") != executable_sha256
+        or report.get("loose_root") != str(loose)
+        or result.case != case
+        or result.stable_id != stable_id
+        or result.expected_type != expected_type
+        or result.expected_xa != expected_xa
+        or not result.passed
+    ):
+        return None
+    return result
 
 
 def main() -> int:
@@ -192,6 +263,20 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=180.0)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "reuse passed per-case checkpoints only when the staged "
+            "executable hash and loose root match exactly"
+        ),
+    )
+    parser.add_argument(
+        "--case",
+        action="append",
+        dest="selected_cases",
+        help="run only the named case (repeatable)",
+    )
     args = parser.parse_args()
 
     exe = args.exe.resolve()
@@ -204,11 +289,43 @@ def main() -> int:
     if not FIXTURE.is_file():
         raise FileNotFoundError(FIXTURE)
     output.mkdir(parents=True, exist_ok=True)
+    executable_sha256 = hashlib.sha256(exe.read_bytes()).hexdigest().upper()
 
     cases = [("stock", None, None, None), *GUESTS]
+    if args.selected_cases:
+        requested = set(args.selected_cases)
+        known = {case[0] for case in cases}
+        unknown = sorted(requested - known)
+        if unknown:
+            raise ValueError(f"unknown transition case(s): {', '.join(unknown)}")
+        cases = [case for case in cases if case[0] in requested]
     results: list[Result] = []
+    pending_cases = cases
+    if args.resume:
+        pending_cases = []
+        for case, stable_id, expected_type, expected_xa in cases:
+            checkpoint = load_checkpoint(
+                output,
+                executable_sha256,
+                loose,
+                case,
+                stable_id,
+                expected_type,
+                expected_xa,
+            )
+            if checkpoint is None:
+                pending_cases.append(
+                    (case, stable_id, expected_type, expected_xa)
+                )
+                continue
+            results.append(checkpoint)
+            print(
+                f"[TransitionAcceptance] case={case} "
+                "pass=True source=checkpoint",
+                flush=True,
+            )
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=max(1, min(args.workers, len(cases)))
+        max_workers=max(1, min(args.workers, max(1, len(pending_cases))))
     ) as executor:
         futures = {
             executor.submit(
@@ -216,13 +333,14 @@ def main() -> int:
                 exe,
                 loose,
                 output,
+                executable_sha256,
                 case,
                 stable_id,
                 expected_type,
                 expected_xa,
                 args.timeout,
             ): case
-            for case, stable_id, expected_type, expected_xa in cases
+            for case, stable_id, expected_type, expected_xa in pending_cases
         }
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
@@ -241,8 +359,7 @@ def main() -> int:
         "cases_passed": sum(result.passed for result in results),
         "cases_total": len(results),
         "executable": str(exe),
-        "executable_sha256":
-            hashlib.sha256(exe.read_bytes()).hexdigest().upper(),
+        "executable_sha256": executable_sha256,
         "loose_root": str(loose),
         "results": [asdict(result) for result in results],
     }

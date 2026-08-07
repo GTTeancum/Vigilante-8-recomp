@@ -705,6 +705,7 @@ def run_one(
         process = subprocess.Popen(
             [
                 str(exe),
+                *source_args,
                 *(
                     ["--guest-vehicle", guest_vehicle]
                     if guest_vehicle is not None
@@ -715,7 +716,6 @@ def run_one(
                     if guest_arena is not None
                     else []
                 ),
-                *source_args,
             ],
             cwd=str(exe.parent),
             env=env,

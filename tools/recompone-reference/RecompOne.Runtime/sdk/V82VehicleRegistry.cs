@@ -47,8 +47,14 @@ public static class V82VehicleRegistry
     const uint SelectorVehicleNameReturn = 0x80106B14u;
     const uint SelectorPortraitBaseReturn = 0x801069ECu;
     const uint SelectorPortraitPoseReturn = 0x80106A00u;
+    const uint SelectorPlayerHeaderReturn = 0x8010689Cu;
+    const uint SelectorPlayerHeaderText = 0x80100860u;
     const uint SelectorEnemyHeaderReturn = 0x80107A1Cu;
     const uint SelectorEnemyHeaderText = 0x801008E8u;
+    const uint SelectorSoundBankAddress = 0x80116738u;
+    const uint NativeSoundPlayerAddress = 0x8001E28Cu;
+    const int OriginalV8SelectionVoiceBase = 14;
+    const int OriginalV8SelectionVoiceCount = 12;
     const int SelectorPortraitWidth = 260;
     const int SelectorPortraitHeight = 422;
     const uint ShellDisplayXAddress = 0x8006B7C0u;
@@ -101,30 +107,7 @@ public static class V82VehicleRegistry
         "'66 School Bus",
         "'69 Manta",
     ];
-    // The retail result screen indexes an 18-entry table of native V8:2
-    // character/vehicle/audio stems. Imported types intentionally live outside
-    // that range, so feeding their stable type IDs into the retail table reads
-    // unrelated memory. Each legacy V8 driver uses the closest existing V8:2
-    // character record for result-screen XA playback until a package supplies
-    // an independently authored result-audio record. Exact returning
-    // characters reuse their own native sequel record.
-    static readonly IReadOnlyDictionary<string, int> ResultVoiceProxySlots =
-        new Dictionary<string, int>(StringComparer.Ordinal)
-        {
-            ["guest.v8.chassey_blue"] = 15,
-            ["guest.v8.slick_clyde"] = 9,
-            ["guest.v8.sheila"] = 0,
-            ["guest.v8.john_torque"] = 1,
-            ["guest.v8.dave"] = 5,
-            ["guest.v8.convoy"] = 4,
-            ["guest.v8.loki"] = 12,
-            ["guest.v8.houston_3"] = 3,
-            ["guest.v8.boogie"] = 11,
-            ["guest.v8.beezwax"] = 13,
-            ["guest.v8.molo"] = 8,
-            ["guest.v8.sid_burn"] = 17,
-        };
-    const uint ResultVoiceTableAddress = 0x8006383Cu;
+    static int _pendingResultVoiceChannel = -1;
     static readonly string? DefaultReplacementStableId =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_V82_DEFAULT_REPLACEMENT");
@@ -137,6 +120,9 @@ public static class V82VehicleRegistry
     static readonly bool CaptureNativeSelectorTurns =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_CAPTURE_V82_SELECTOR_TURNS") != "0";
+    static readonly bool CaptureSelectorGenerations =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_CAPTURE_SELECTOR_GENERATIONS") == "1";
     static readonly bool TraceNativeSelectorInput =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_V82_SELECTOR") == "1";
@@ -159,6 +145,172 @@ public static class V82VehicleRegistry
 
     public static bool IsVehicleObject(uint objectAddress) =>
         ObjectEntries.ContainsKey(objectAddress);
+
+    public readonly record struct ImportedRenderGroupInfo(
+        string StableId,
+        string BankKind,
+        int GroupIndex,
+        bool DistanceLod);
+
+    /// <summary>
+    /// Resolves the native model descriptor passed to func_80021F70 back to
+    /// the authored imported bank/group.  The native loader relocates the BIN
+    /// tables in place, so this deliberately follows runtime pointers instead
+    /// of guessing from texture pages, packet colours, or screen position.
+    /// </summary>
+    public static bool TryDescribeImportedRenderGroup(
+        IMemory m,
+        uint descriptor,
+        out ImportedRenderGroupInfo info)
+    {
+        foreach (VehicleEntry entry in Entries)
+        {
+            if (TryDescribeRenderGroupInBank(
+                    m,
+                    entry,
+                    "body",
+                    entry.BodyRuntime,
+                    descriptor,
+                    out info) ||
+                TryDescribeRenderGroupInBank(
+                    m,
+                    entry,
+                    "transform",
+                    entry.TransformRuntime,
+                    descriptor,
+                    out info) ||
+                TryDescribeRenderGroupInBank(
+                    m,
+                    entry,
+                    "selector",
+                    entry.SelectorPreviewRuntime,
+                    descriptor,
+                    out info) ||
+                TryDescribeRenderGroupInBank(
+                    m,
+                    entry,
+                    "selector-transform",
+                    entry.SelectorTransformRuntime,
+                    descriptor,
+                    out info))
+                return true;
+        }
+        info = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Diagnostic for an unresolved func_80021F70 descriptor.  It reports
+    /// structural relationships to imported group-table entries without
+    /// assigning material ownership from proximity or texture signatures.
+    /// </summary>
+    public static string DescribeImportedRenderGroupMiss(
+        IMemory m,
+        uint descriptor)
+    {
+        string closest = "none";
+        ulong closestDistance = ulong.MaxValue;
+        foreach (VehicleEntry entry in Entries)
+        {
+            foreach ((string Kind, uint Runtime) bank in new[]
+            {
+                ("body", entry.BodyRuntime),
+                ("transform", entry.TransformRuntime),
+                ("selector", entry.SelectorPreviewRuntime),
+                ("selector-transform", entry.SelectorTransformRuntime),
+            })
+            {
+                if (bank.Runtime == 0u)
+                    continue;
+                uint bin = m.ReadU32(bank.Runtime + 4u);
+                if (bin == 0u)
+                    continue;
+                uint groupCount = m.ReadU32(bin);
+                uint groupTable = m.ReadU32(bin + 4u);
+                if (groupCount > 4096u || groupTable == 0u)
+                    continue;
+                for (uint group = 0; group < groupCount; group++)
+                {
+                    uint groupDescriptor =
+                        m.ReadU32(groupTable + group * 4u);
+                    if (groupDescriptor == 0u)
+                        continue;
+                    ulong distance = descriptor >= groupDescriptor
+                        ? descriptor - groupDescriptor
+                        : groupDescriptor - descriptor;
+                    if (distance < closestDistance)
+                    {
+                        closestDistance = distance;
+                        closest =
+                            $"{entry.StableId}/{bank.Kind}/g{group} " +
+                            $"group=0x{groupDescriptor:X8} " +
+                            $"delta={(long)descriptor - groupDescriptor}";
+                    }
+                    for (uint offset = 0u; offset <= 0x80u; offset += 4u)
+                    {
+                        uint field = m.ReadU32(groupDescriptor + offset);
+                        if (field != descriptor)
+                            continue;
+                        return
+                            $"{entry.StableId}/{bank.Kind}/g{group} " +
+                            $"group=0x{groupDescriptor:X8} " +
+                            $"pointer-field=+0x{offset:X}";
+                    }
+                }
+            }
+        }
+        return closest;
+    }
+
+    static bool TryDescribeRenderGroupInBank(
+        IMemory m,
+        VehicleEntry entry,
+        string bankKind,
+        uint runtime,
+        uint descriptor,
+        out ImportedRenderGroupInfo info)
+    {
+        info = default;
+        if (runtime == 0u || descriptor == 0u)
+            return false;
+
+        uint bin = m.ReadU32(runtime + 4u);
+        if (bin == 0u)
+            return false;
+        uint groupCount = m.ReadU32(bin);
+        uint groupTable = m.ReadU32(bin + 4u);
+        if (groupCount > 4096u || groupTable == 0u)
+            return false;
+
+        for (uint group = 0; group < groupCount; group++)
+        {
+            if (m.ReadU32(groupTable + group * 4u) != descriptor)
+                continue;
+            bool distanceLod = false;
+            uint slotCount = m.ReadU32(bin + 0x18u);
+            if (slotCount <= 4096u)
+            {
+                for (uint slot = 0; slot < slotCount; slot++)
+                {
+                    ushort renderKey =
+                        m.ReadU16(bin + 0x1Cu + slot * 0x1Cu);
+                    if ((renderKey & 0xF000) == 0xC000 &&
+                        (renderKey & 0x07FF) == group)
+                    {
+                        distanceLod = true;
+                        break;
+                    }
+                }
+            }
+            info = new ImportedRenderGroupInfo(
+                entry.StableId,
+                bankKind,
+                checked((int)group),
+                distanceLod);
+            return true;
+        }
+        return false;
+    }
 
     public static VehicleRosterItem[] Roster()
     {
@@ -212,6 +364,7 @@ public static class V82VehicleRegistry
     public static void BeginNativeSelector(CpuContext c, IMemory m)
     {
         V82Compat.ReleaseSelectorVramReservation(c, m);
+        ReleaseAllSelectorRuntimes(c, Dispatcher.UnwrapMemory(m), "selector-begin");
         _selectorGuestIndex = -1;
         _selectorPreviousSlot = -1;
         _selectorFirstRetailSlot = 0;
@@ -254,8 +407,9 @@ public static class V82VehicleRegistry
         _selectorAcceptedGuest = -1;
         _selectorAcceptedProxySlot = -1;
         _selectorPreviousSlot = -1;
-        _selectorPreviewObject = 0u;
         V82Compat.ReleaseSelectorVramReservation(c, m);
+        ReleaseAllSelectorRuntimes(c, Dispatcher.UnwrapMemory(m), "selector-end");
+        _selectorPreviewObject = 0u;
         _selectorContext = uint.MaxValue;
     }
 
@@ -325,7 +479,6 @@ public static class V82VehicleRegistry
             {
                 _selectorGuestIndex = -1;
                 _selectorPreviousSlot = _selectorFirstRetailSlot;
-                V82Compat.ReleaseSelectorVramReservation(c, m);
                 return checked((uint)_selectorFirstRetailSlot);
             }
         }
@@ -340,7 +493,6 @@ public static class V82VehicleRegistry
             {
                 _selectorGuestIndex = -1;
                 _selectorPreviousSlot = _selectorLastRetailSlot;
-                V82Compat.ReleaseSelectorVramReservation(c, m);
                 return checked((uint)_selectorLastRetailSlot);
             }
         }
@@ -349,8 +501,6 @@ public static class V82VehicleRegistry
             current = _selectorProxySlot;
         }
 
-        if (guest != previousGuest)
-            V82Compat.ReleaseSelectorVramReservation(c, m);
         _selectorGuestIndex = guest;
         _selectorPreviousSlot = current;
         if (_selectorStableGuest != guest)
@@ -383,8 +533,7 @@ public static class V82VehicleRegistry
                 Console.Error.WriteLine(
                     $"[V82Selector] guest={guest} input=0x{input:X8}");
         }
-        if (guest < 0 || guest >= Entries.Count ||
-            SelectorProofCaptured.Contains(guest))
+        if (guest < 0 || guest >= Entries.Count)
             return true;
 
         int frame = ++_selectorStableFrames;
@@ -392,6 +541,16 @@ public static class V82VehicleRegistry
             frame <= 220)
             TraceSelectorPhysics(m, guest, frame, _selectorPreviewObject);
         if (!CaptureNativeSelectorProof)
+            return true;
+        // Keep lifecycle captures on a distinct frame from the ordinary
+        // guest proof at frame 80. HostWindow owns a single pending capture
+        // slot, so scheduling both in the same frame silently replaced the
+        // generation-labelled evidence.
+        if (CaptureSelectorGenerations && frame == 82)
+            HostWindow.RequestDisplayCapture(
+                $"native_guest_{guest:00}_generation_" +
+                $"{Entries[guest].SelectorGeneration:000}");
+        if (SelectorProofCaptured.Contains(guest))
             return true;
         if (CaptureNativeSelectorSettle && frame <= 64 && frame % 2 == 0)
             HostWindow.RequestDisplayCapture(
@@ -416,8 +575,14 @@ public static class V82VehicleRegistry
     /// </summary>
     public static void ObserveNativeSelectorCall(CpuContext c, IMemory m)
     {
-        if (_selectorEnemyPhase ||
-            c.RA != SelectorEnemyHeaderReturn ||
+        if (_selectorEnemyPhase)
+        {
+            if (c.RA == SelectorPlayerHeaderReturn &&
+                c.A1 == SelectorPlayerHeaderText)
+                ResumePlayerSelectorAfterEnemyBack(c, m);
+            return;
+        }
+        if (c.RA != SelectorEnemyHeaderReturn ||
             c.A1 != SelectorEnemyHeaderText ||
             _selectorContext is not (1u or 2u))
             return;
@@ -428,6 +593,7 @@ public static class V82VehicleRegistry
 
         _selectorAcceptedGuest = guest;
         _selectorAcceptedProxySlot = _selectorProxySlot;
+        PlayOriginalV8SelectionVoice(c, m, guest);
         _selectorEnemyPhase = true;
         _selectorEnemyFrames = 0;
         _selectorGuestIndex = -1;
@@ -439,9 +605,95 @@ public static class V82VehicleRegistry
             $"guest={guest}; stock portraits and previews restored");
     }
 
+    /// <summary>
+    /// Plays the original V8 driver-accept line through V8:2's native shell
+    /// SND bank, voice allocator, SPU transfer, mixer, and lifetime handling.
+    /// The loose shell bank appends the twelve byte-exact V8 samples at
+    /// indices 14..25 in original roster order.
+    /// </summary>
+    static void PlayOriginalV8SelectionVoice(
+        CpuContext c, IMemory m, int guest)
+    {
+        if ((uint)guest >= OriginalV8SelectionVoiceCount)
+            throw new InvalidOperationException(
+                $"V8 selector voice guest index {guest} is invalid");
+        if (Environment.GetEnvironmentVariable(
+                "RECOMPONE_DISABLE_V8_SELECTION_VOICE") == "1")
+        {
+            Console.Error.WriteLine(
+                $"[V82SelectionVoice] diagnostic suppression guest={guest}");
+            return;
+        }
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint bank = m.ReadU32(SelectorSoundBankAddress);
+        if (bank == 0u)
+            throw new InvalidOperationException(
+                "V8:2 selector SND bank is not loaded");
+        int sample = OriginalV8SelectionVoiceBase + guest;
+        int count = m.ReadU16(bank);
+        if (count <= sample)
+            throw new InvalidDataException(
+                $"V8:2 selector SND bank has {count} entries; " +
+                $"original V8 voice {sample} is unavailable");
+
+        var state = c.Snapshot();
+        try
+        {
+            // Retail V8 reserves voices 3/4 for the two selector players.
+            // Preserve that native ownership convention instead of borrowing
+            // a host mixer channel.
+            c.A0 = checked((uint)(3 + _selectorPlayer));
+            c.A1 = bank;
+            c.A2 = checked((uint)sample);
+            c.RA = CustomDispatchAddress;
+            Dispatcher.Call(c, m, NativeSoundPlayerAddress);
+        }
+        finally
+        {
+            c.Restore(state);
+        }
+        Console.Error.WriteLine(
+            $"[V82SelectionVoice] guest={guest} " +
+            $"stable={Entries[guest].StableId} sample={sample} " +
+            $"native_voice={3 + _selectorPlayer} " +
+            $"audio_frame={Audio.MixedFrames}");
+    }
+
+    static void ResumePlayerSelectorAfterEnemyBack(
+        CpuContext c, IMemory m)
+    {
+        int guest = _selectorAcceptedGuest;
+        int proxySlot = _selectorAcceptedProxySlot;
+        _selectorEnemyPhase = false;
+        _selectorEnemyFrames = 0;
+        _selectorGuestIndex =
+            guest >= 0 && guest < Entries.Count ? guest : -1;
+        _selectorProxySlot = Math.Max(0, proxySlot);
+        _selectorPreviousSlot = _selectorProxySlot;
+        _selectorStableGuest = _selectorGuestIndex;
+        _selectorStableFrames = 0;
+        _selectorAcceptedGuest = -1;
+        _selectorAcceptedProxySlot = -1;
+        _selectorPreviewObject = 0u;
+        InputManager.SignalScriptStage("choose_player");
+        Console.Error.WriteLine(
+            $"[V82Vehicles] resumed native player selector after enemy back " +
+            $"guest={_selectorGuestIndex} proxy={_selectorProxySlot} " +
+            $"pc_allocations={V82Compat.PcAllocationCount} " +
+            $"vram_reservations={V82Compat.SelectorVramReservationCount}");
+    }
+
     static void ReleaseSelectorPreviewForEnemyPhase(CpuContext c, IMemory m)
     {
         V82Compat.ReleaseSelectorVramReservation(c, m);
+        if (_selectorAcceptedGuest >= 0 &&
+            _selectorAcceptedGuest < Entries.Count)
+            ReleaseSelectorRuntime(
+                Entries[_selectorAcceptedGuest],
+                c,
+                Dispatcher.UnwrapMemory(m),
+                "enemy-selector-transition");
         _selectorPreviewObject = 0u;
     }
 
@@ -639,8 +891,18 @@ public static class V82VehicleRegistry
     {
         if (_selectorPreviewObject == pointer)
         {
+            VehicleEntry? selectorEntry = null;
+            if (ObjectEntries.TryGetValue(pointer, out int local) &&
+                (uint)local < (uint)Entries.Count)
+                selectorEntry = Entries[local];
             _selectorPreviewObject = 0u;
             V82Compat.ReleaseSelectorVramReservation(c, m);
+            if (selectorEntry != null)
+                ReleaseSelectorRuntime(
+                    selectorEntry,
+                    c,
+                    Dispatcher.UnwrapMemory(m),
+                    "preview-object-free");
         }
         ObjectEntries.Remove(pointer);
         ObjectUpgradeStatus.Remove(pointer);
@@ -859,34 +1121,124 @@ public static class V82VehicleRegistry
     }
 
     /// <summary>
-    /// Resolves the native result-screen XA stem for an imported vehicle
-    /// without allowing its out-of-range stable type to index the retail
-    /// 18-entry table. Unknown third-party packages deliberately fall back to
-    /// slot zero, which is a valid native record and keeps the unchanged result
-    /// flow alive while providing deterministic audio.
+    /// Maps the original V8 result banks into V8:2's unchanged XA search,
+    /// stream, filter, SPU, and callback lifecycle. The original banks carry
+    /// one character per XA channel in roster order; outcome selects the bank.
     /// </summary>
-    public static uint ResultVoicePointer(IMemory m, int type)
+    public static string? ResultVoiceStem(
+        int type,
+        bool defeated)
     {
         if (!TryEntryForType(unchecked((uint)type), out VehicleEntry? entry) ||
             entry == null)
-            return 0u;
+            return null;
 
-        int slot = ResultVoiceProxySlots.TryGetValue(
-            entry.StableId, out int mappedSlot)
-                ? mappedSlot
-                : 0;
-        if ((uint)slot >= RetailVehicleCount)
+        int channel = type - FirstCustomType;
+        if ((uint)channel >= 12u)
             throw new InvalidOperationException(
-                $"result voice proxy slot {slot} for {entry.StableId} is invalid");
+                $"result voice channel {channel} for {entry.StableId} is invalid");
 
+        string stem =
+            $"V8VOICE\\{(defeated ? "D" : "V")}{channel:00}";
+        // The original channel was extracted losslessly into a native-style
+        // per-driver file and normalized to channel zero.
+        _pendingResultVoiceChannel = 0;
+        Console.Error.WriteLine(
+            $"[V82ResultVoice] {entry.StableId} " +
+            $"outcome={(defeated ? "defeat" : "victory")} " +
+            $"channel={channel} stem={stem}");
+        return stem;
+    }
+
+    public static bool WriteResultVoicePath(
+        IMemory m,
+        int type,
+        bool defeated,
+        uint destination,
+        out string path)
+    {
+        string? stem = ResultVoiceStem(type, defeated);
+        if (stem == null)
+        {
+            path = string.Empty;
+            return false;
+        }
+
+        path = $"Shared\\{stem}.xa";
         m = Dispatcher.UnwrapMemory(m);
-        uint pointer = m.ReadU32(
-            ResultVoiceTableAddress + checked((uint)(slot * 16)));
-        if (pointer < 0x80010000u || pointer >= 0x80200000u)
-            throw new InvalidOperationException(
-                $"result voice proxy for {entry.StableId} resolved invalid " +
-                $"pointer 0x{pointer:X8}");
-        return pointer;
+        byte[] bytes = Encoding.ASCII.GetBytes(path);
+        for (int index = 0; index < bytes.Length; index++)
+            m.WriteU8(destination + (uint)index, bytes[index]);
+        m.WriteU8(destination + (uint)bytes.Length, 0);
+        return true;
+    }
+
+    public static bool OverrideResultVoiceChannel(CpuContext c, IMemory m)
+    {
+        if (c.RA != 0x80013294u || _pendingResultVoiceChannel < 0)
+            return true;
+
+        uint nativeChannel = c.A1;
+        c.A1 = checked((uint)_pendingResultVoiceChannel);
+        Console.Error.WriteLine(
+            $"[V82ResultVoice] native outcome channel={nativeChannel} " +
+            $"original V8 XA filter channel={c.A1}");
+        _pendingResultVoiceChannel = -1;
+        return true;
+    }
+
+    public static bool ResolveOriginalResultVoiceFile(
+        CpuContext c,
+        IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        string path = ReadResultVoicePath(m, c.A0, 96);
+        if (!path.Contains("V8VOICE", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (Runtime.Cd == null ||
+            !Runtime.Cd.Fs.Locate(path, out int lba, out uint size))
+        {
+            Console.Error.WriteLine(
+                $"[V82ResultVoice] native file lookup failed '{path}'");
+            c.V0 = 0u;
+            return false;
+        }
+
+        // func_80018210 is being replaced before it allocates its 0x28-byte
+        // frame. Its caller consumes only fields +0x0C/+0x10, synchronously,
+        // before restoring SP. Put the transient native descriptor in that
+        // otherwise-unused callee frame instead of borrowing the extended
+        // guest-vehicle arena.
+        uint entry = c.SP - 0x20u;
+        for (uint offset = 0; offset < 0x20u; offset += 4u)
+            m.WriteU32(entry + offset, 0u);
+        m.WriteU32(entry + 0x0Cu, checked((uint)lba));
+        m.WriteU32(entry + 0x10u, size);
+        c.V0 = entry;
+        Console.Error.WriteLine(
+            $"[V82ResultVoice] native file lookup '{path}' " +
+            $"lba={lba} logicalSize={size} " +
+            $"entry=0x{entry:X8}");
+        return false;
+    }
+
+    static string ReadResultVoicePath(
+        IMemory m,
+        uint address,
+        int maximum)
+    {
+        var text = new StringBuilder();
+        for (int index = 0; index < maximum; index++)
+        {
+            byte value = m.ReadU8(address + (uint)index);
+            if (value == 0)
+                break;
+            if (value < 0x20 || value > 0x7Eu)
+                return string.Empty;
+            text.Append((char)value);
+        }
+        return text.ToString();
     }
 
     public static bool IsCustomType(uint type)
@@ -946,6 +1298,11 @@ public static class V82VehicleRegistry
                 PointerInBank(
                     m,
                     entry.TransformRuntime,
+                    Banks[entry.TransformArchiveIndex].BinLength,
+                    source) ||
+                PointerInBank(
+                    m,
+                    entry.SelectorTransformRuntime,
                     Banks[entry.TransformArchiveIndex].BinLength,
                     source) ||
                 (
@@ -1018,6 +1375,9 @@ public static class V82VehicleRegistry
             entry.BodyRuntime = 0u;
             entry.TransformRuntime = 0u;
             entry.SelectorPreviewRuntime = 0u;
+            entry.SelectorTransformRuntime = 0u;
+            entry.SelectorPreviewAllocation = null;
+            entry.SelectorTransformAllocation = null;
             entry.StatsRuntime = 0u;
             entry.TransformTableRuntime = 0u;
             entry.PowerupTableRuntime = 0u;
@@ -1204,19 +1564,29 @@ public static class V82VehicleRegistry
         if (entry == null &&
             !TryEntryForObject(m, vehicle, out entry))
             return retailPointer;
-        if (entry.TransformRuntime == 0u)
+        bool selector = _constructingSelectorPreview ||
+            vehicle == _selectorPreviewObject;
+        uint runtime = selector
+            ? entry.SelectorTransformRuntime
+            : entry.TransformRuntime;
+        if (runtime == 0u)
             throw new InvalidOperationException(
-                $"custom vehicle 0x{vehicle:X8} has no owned wheel bank");
-        return entry.TransformRuntime;
+                $"custom vehicle 0x{vehicle:X8} has no owned " +
+                $"{(selector ? "selector " : "")}wheel bank");
+        return runtime;
     }
 
     public static uint TransformBankForObject(
         IMemory m, uint vehicle, uint retailPointer)
     {
-        return TryEntryForObject(m, vehicle, out VehicleEntry? entry) &&
-               entry.TransformRuntime != 0u
-            ? entry.TransformRuntime
-            : retailPointer;
+        if (!TryEntryForObject(m, vehicle, out VehicleEntry? entry) ||
+            entry == null)
+            return retailPointer;
+        bool selector = vehicle == _selectorPreviewObject;
+        uint runtime = selector
+            ? entry.SelectorTransformRuntime
+            : entry.TransformRuntime;
+        return runtime != 0u ? runtime : retailPointer;
     }
 
     public static uint TransformTableForObject(
@@ -1338,7 +1708,8 @@ public static class V82VehicleRegistry
     static void EnsureSelectorRuntime(
         VehicleEntry entry, CpuContext c, IMemory m)
     {
-        if (entry.SelectorPreviewRuntime != 0u)
+        if (entry.SelectorPreviewRuntime != 0u &&
+            entry.SelectorTransformRuntime != 0u)
             return;
         if (entry.SelectorPreviewArchiveIndex == NoArchiveIndex)
             throw new InvalidDataException(
@@ -1349,15 +1720,24 @@ public static class V82VehicleRegistry
         {
             if (entry.StatsRuntime == 0u)
                 entry.StatsRuntime = AllocateBytes(c, m, entry.Stats);
-            if (entry.TransformRuntime == 0u)
-                entry.TransformRuntime =
-                    BuildNativeBank(c, m, Banks[entry.TransformArchiveIndex]);
-            entry.SelectorPreviewRuntime = BuildNativeBank(
+            if (entry.SelectorTransformRuntime == 0u)
+            {
+                entry.SelectorTransformAllocation = BuildOwnedNativeBank(
+                    c, m, Banks[entry.TransformArchiveIndex]);
+                entry.SelectorTransformRuntime =
+                    entry.SelectorTransformAllocation.Runtime;
+            }
+            entry.SelectorPreviewAllocation = BuildOwnedNativeBank(
                 c, m, Banks[entry.SelectorPreviewArchiveIndex]);
+            entry.SelectorPreviewRuntime =
+                entry.SelectorPreviewAllocation.Runtime;
+            entry.SelectorGeneration++;
             Console.Error.WriteLine(
                 $"[V82Vehicles] built {entry.StableId} selector=" +
                 $"0x{entry.SelectorPreviewRuntime:X8} wheels=" +
-                $"0x{entry.TransformRuntime:X8}");
+                $"0x{entry.SelectorTransformRuntime:X8} " +
+                $"selector_live_pointers={SelectorOwnedLivePointerCount()} " +
+                $"pc_allocations={V82Compat.PcAllocationCount}");
         }
         finally
         {
@@ -1811,6 +2191,10 @@ public static class V82VehicleRegistry
 
     static uint BuildNativeBank(
         CpuContext c, IMemory m, NativeVehicleBankSource bank)
+        => BuildOwnedNativeBank(c, m, bank).Runtime;
+
+    static NativeBankAllocation BuildOwnedNativeBank(
+        CpuContext c, IMemory m, NativeVehicleBankSource bank)
     {
         byte[] binSource = bank.ReadBin();
         byte[]? animationSource = bank.ReadAnimation();
@@ -1842,7 +2226,95 @@ public static class V82VehicleRegistry
             throw new OutOfMemoryException("native V8:2 object-bank build failed");
         Console.Error.WriteLine(
             $"[V82Bank] built runtime=0x{c.V0:X8}");
-        return c.V0;
+        return new NativeBankAllocation(c.V0, bin, animation);
+    }
+
+    static void ReleaseAllSelectorRuntimes(
+        CpuContext c, IMemory m, string reason)
+    {
+        foreach (VehicleEntry entry in Entries)
+            ReleaseSelectorRuntime(entry, c, m, reason);
+    }
+
+    static void ReleaseSelectorRuntime(
+        VehicleEntry entry,
+        CpuContext c,
+        IMemory m,
+        string reason)
+    {
+        NativeBankAllocation? preview = entry.SelectorPreviewAllocation;
+        NativeBankAllocation? wheels = entry.SelectorTransformAllocation;
+        if (preview == null && wheels == null)
+        {
+            entry.SelectorPreviewRuntime = 0u;
+            entry.SelectorTransformRuntime = 0u;
+            return;
+        }
+
+        var state = c.Snapshot();
+        try
+        {
+            ReleaseOwnedNativeBank(preview, c, m);
+            ReleaseOwnedNativeBank(wheels, c, m);
+        }
+        finally
+        {
+            c.Restore(state);
+        }
+        entry.SelectorPreviewAllocation = null;
+        entry.SelectorTransformAllocation = null;
+        entry.SelectorPreviewRuntime = 0u;
+        entry.SelectorTransformRuntime = 0u;
+        Console.Error.WriteLine(
+            $"[V82SelectorResources] released={entry.StableId} " +
+            $"reason={reason} pc_allocations={V82Compat.PcAllocationCount} " +
+            $"vram_reservations={V82Compat.SelectorVramReservationCount} " +
+            $"selector_live_pointers={SelectorOwnedLivePointerCount()}");
+    }
+
+    static int SelectorOwnedLivePointerCount()
+    {
+        int count = 0;
+        foreach (VehicleEntry entry in Entries)
+        foreach (NativeBankAllocation? allocation in new[]
+                 {
+                     entry.SelectorPreviewAllocation,
+                     entry.SelectorTransformAllocation,
+                 })
+        {
+            if (allocation == null)
+                continue;
+            foreach (uint pointer in new[]
+                     {
+                         allocation.Runtime,
+                         allocation.Animation,
+                         allocation.Bin,
+                     })
+                if (pointer != 0u && V82Compat.IsPcAllocationLive(pointer))
+                    count++;
+        }
+        return count;
+    }
+
+    static void ReleaseOwnedNativeBank(
+        NativeBankAllocation? allocation,
+        CpuContext c,
+        IMemory m)
+    {
+        if (allocation == null)
+            return;
+        foreach (uint pointer in new[]
+                 {
+                     allocation.Runtime,
+                     allocation.Animation,
+                     allocation.Bin,
+                 })
+        {
+            if (pointer == 0u || !V82Compat.IsPcAllocationLive(pointer))
+                continue;
+            c.A0 = pointer;
+            V82Compat.PcFree(c, m);
+        }
     }
 
     static uint AllocateTransformTable(
@@ -2253,8 +2725,17 @@ public static class V82VehicleRegistry
         public uint BodyRuntime { get; set; }
         public uint TransformRuntime { get; set; }
         public uint SelectorPreviewRuntime { get; set; }
+        public uint SelectorTransformRuntime { get; set; }
+        public int SelectorGeneration { get; set; }
+        public NativeBankAllocation? SelectorPreviewAllocation { get; set; }
+        public NativeBankAllocation? SelectorTransformAllocation { get; set; }
         public uint StatsRuntime { get; set; }
         public uint TransformTableRuntime { get; set; }
         public uint PowerupTableRuntime { get; set; }
     }
+
+    sealed record NativeBankAllocation(
+        uint Runtime,
+        uint Bin,
+        uint Animation);
 }

@@ -440,12 +440,7 @@ public sealed class CueFs : IDisposable
         }
         foreach (var pair in _looseFiles
                      .Where(pair =>
-                         pair.Key.StartsWith(
-                             "TERRAIN/", StringComparison.OrdinalIgnoreCase) &&
-                         (pair.Key.EndsWith(
-                              ".DLL", StringComparison.OrdinalIgnoreCase) ||
-                          pair.Key.EndsWith(
-                              ".EXP", StringComparison.OrdinalIgnoreCase)) &&
+                         IsAppendOnlyLooseAsset(pair.Key) &&
                          !discFiles.Contains(pair.Key))
                      .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
         {
@@ -511,11 +506,20 @@ public sealed class CueFs : IDisposable
             }
             if (entry.LogicalSize > file.Size)
             {
+                int retailLba = entry.Lba;
                 entry = entry with
                 {
                     Lba = virtualLba,
                     DiscSize = entry.LogicalSize,
                 };
+                // Some games cache file LBAs in their own data tables instead
+                // of resolving the path through CdSearchFile every time. Keep
+                // the retail starting LBA as a direct-file-read alias so those
+                // readers can consume an expanded loose file byte-for-byte.
+                // Sector reads intentionally use only _looseByLba and therefore
+                // remain isolated to the relocated virtual extent; the larger
+                // file can never overlap the following retail asset.
+                _looseByStartLba[retailLba] = entry;
                 _virtualLooseEntries[discPath] = new Entry(
                     virtualLba,
                     entry.LogicalSize,
@@ -540,12 +544,7 @@ public sealed class CueFs : IDisposable
         // streaming API without replacing any retail directory entry.
         foreach (var pair in _looseFiles
                      .Where(pair =>
-                         pair.Key.StartsWith(
-                             "TERRAIN/", StringComparison.OrdinalIgnoreCase) &&
-                         (pair.Key.EndsWith(
-                              ".DLL", StringComparison.OrdinalIgnoreCase) ||
-                          pair.Key.EndsWith(
-                              ".EXP", StringComparison.OrdinalIgnoreCase)) &&
+                         IsAppendOnlyLooseAsset(pair.Key) &&
                          !_manifestFiles.ContainsKey(pair.Key))
                      .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
         {
@@ -596,6 +595,20 @@ public sealed class CueFs : IDisposable
         string extension = Path.GetExtension(path);
         return extension.Equals(".STR", StringComparison.OrdinalIgnoreCase) ||
             extension.Equals(".XA", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAppendOnlyLooseAsset(string path)
+    {
+        bool arena =
+            path.StartsWith(
+                "TERRAIN/", StringComparison.OrdinalIgnoreCase) &&
+            (path.EndsWith(".DLL", StringComparison.OrdinalIgnoreCase) ||
+             path.EndsWith(".EXP", StringComparison.OrdinalIgnoreCase));
+        bool legacyVoice =
+            path.StartsWith(
+                "SHARED/V8VOICE/", StringComparison.OrdinalIgnoreCase) &&
+            path.EndsWith(".XA", StringComparison.OrdinalIgnoreCase);
+        return arena || legacyVoice;
     }
 
     private bool TryGetLoose(int startLba, out LooseEntry entry) =>
