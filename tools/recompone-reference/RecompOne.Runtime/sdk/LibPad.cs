@@ -80,6 +80,7 @@ public static class LibPad
             Controller.RightX, Controller.RightY, Controller.LeftX, Controller.LeftY);
         if (_buf2 != 0) WritePad(m, _buf2, Controller.State2, Controller.Connected2,
             Controller.RightX2, Controller.RightY2, Controller.LeftX2, Controller.LeftY2);
+        V82Compat.TraceReverse(m);
     }
 
     static bool IsPort1(uint port) => (port & 0x10u) == 0;

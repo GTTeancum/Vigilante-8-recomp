@@ -332,10 +332,10 @@ internal static unsafe class InputManager
         for (int b = 0; b < (int)GameControllerButton.Max; b++)
             if (_sdl.GameControllerGetButton(ctrl, (GameControllerButton)b) != 0)
                 return b;
-        if (Pressed(ctrl, LeftTrigger)) return LeftTrigger;
-        if (Pressed(ctrl, RightTrigger)) return RightTrigger;
+        if (Pressed(ctrl, LeftTrigger, pad, latch: false)) return LeftTrigger;
+        if (Pressed(ctrl, RightTrigger, pad, latch: false)) return RightTrigger;
         for (int b = LeftStickLeft; b <= RightStickDown; b++)
-            if (Pressed(ctrl, b)) return b;
+            if (Pressed(ctrl, b, pad, latch: false)) return b;
         return null;
     }
 
@@ -464,7 +464,7 @@ internal static unsafe class InputManager
                 ConfigManager.Game.Pad,
                 GpuHle.GameplayActive,
                 _nativeGameplayMenuPolls > 0);
-            Controller.State = PadState(_pad0, pad, Controller.State);
+            Controller.State = PadState(_pad0, pad, Controller.State, 0);
             Controller.LeftX = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Leftx));
             Controller.LeftY = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Lefty));
             Controller.RightX = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Rightx));
@@ -478,7 +478,7 @@ internal static unsafe class InputManager
                 ConfigManager.Game.Pad2,
                 GpuHle.GameplayActive,
                 _nativeGameplayMenuPolls > 0);
-            Controller.State2 = PadState(_pad1, pad, Controller.State2);
+            Controller.State2 = PadState(_pad1, pad, Controller.State2, 1);
             Controller.LeftX2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Leftx));
             Controller.LeftY2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Lefty));
             Controller.RightX2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Rightx));
@@ -490,47 +490,78 @@ internal static unsafe class InputManager
         }
     }
 
-    static ushort PadState(GameController* ctrl, GamepadBindings pad, ushort s)
+    static ushort PadState(
+        GameController* ctrl, GamepadBindings pad, ushort s, int padIndex)
     {
-        s = Apply(ctrl, pad.Cross,    Controller.Cross,    s);
-        s = Apply(ctrl, pad.Circle,   Controller.Circle,   s);
-        s = Apply(ctrl, pad.Square,   Controller.Square,   s);
-        s = Apply(ctrl, pad.Triangle, Controller.Triangle, s);
-        s = Apply(ctrl, pad.L1,       Controller.L1,       s);
-        s = Apply(ctrl, pad.R1,       Controller.R1,       s);
-        s = Apply(ctrl, pad.L2,       Controller.L2,       s);
-        s = Apply(ctrl, pad.R2,       Controller.R2,       s);
-        s = Apply(ctrl, pad.L3,       Controller.L3,       s);
-        s = Apply(ctrl, pad.R3,       Controller.R3,       s);
-        s = Apply(ctrl, pad.Start,    Controller.Start,    s);
-        s = Apply(ctrl, pad.Select,   Controller.Select,   s);
-        s = Apply(ctrl, pad.Up,       Controller.Up,       s);
-        s = Apply(ctrl, pad.Down,     Controller.Down,     s);
-        s = Apply(ctrl, pad.Left,     Controller.Left,     s);
-        s = Apply(ctrl, pad.Right,    Controller.Right,    s);
+        s = Apply(ctrl, pad.Cross,    Controller.Cross,    s, padIndex);
+        s = Apply(ctrl, pad.Circle,   Controller.Circle,   s, padIndex);
+        s = Apply(ctrl, pad.Square,   Controller.Square,   s, padIndex);
+        s = Apply(ctrl, pad.Triangle, Controller.Triangle, s, padIndex);
+        s = Apply(ctrl, pad.L1,       Controller.L1,       s, padIndex);
+        s = Apply(ctrl, pad.R1,       Controller.R1,       s, padIndex);
+        s = Apply(ctrl, pad.L2,       Controller.L2,       s, padIndex);
+        s = Apply(ctrl, pad.R2,       Controller.R2,       s, padIndex);
+        s = Apply(ctrl, pad.L3,       Controller.L3,       s, padIndex);
+        s = Apply(ctrl, pad.R3,       Controller.R3,       s, padIndex);
+        s = Apply(ctrl, pad.Start,    Controller.Start,    s, padIndex);
+        s = Apply(ctrl, pad.Select,   Controller.Select,   s, padIndex);
+        s = Apply(ctrl, pad.Up,       Controller.Up,       s, padIndex);
+        s = Apply(ctrl, pad.Down,     Controller.Down,     s, padIndex);
+        s = Apply(ctrl, pad.Left,     Controller.Left,     s, padIndex);
+        s = Apply(ctrl, pad.Right,    Controller.Right,    s, padIndex);
         return s;
     }
 
-    static ushort Apply(GameController* ctrl, int[] bindings, ushort bit, ushort s)
+    static ushort Apply(
+        GameController* ctrl, int[] bindings, ushort bit, ushort s, int pad)
     {
+        // Every binding is evaluated, not just up to the first hit, so the
+        // latch state of the others stays current.
+        bool pressed = false;
         foreach (var binding in bindings)
-            if (Pressed(ctrl, binding))
-                return (ushort)(s & ~bit);
-        return s;
+            if (Pressed(ctrl, binding, pad)) pressed = true;
+        return pressed ? (ushort)(s & ~bit) : s;
     }
 
-    static bool Pressed(GameController* ctrl, int binding)
+    // Analog bindings latch with hysteresis. A bare threshold compare makes a
+    // trigger or stick held near the boundary chatter the command on and off
+    // frame to frame, and the commands that matter most here are the ones the
+    // engine requires to be held unbroken: brake/reverse only engages after
+    // the car has been held stationary, so a single dropped frame restarts it.
+    // Press at the full threshold, release at three quarters of it.
+    const int ReleaseNumerator = 3;
+    const int ReleaseDenominator = 4;
+    static readonly bool[,] _analogLatched = new bool[2, 128];
+
+    static bool AnalogLatch(int pad, int binding, int value, int threshold, bool latch)
+    {
+        if (!latch || binding < 0 || binding >= 128) return value > threshold;
+        int release = threshold * ReleaseNumerator / ReleaseDenominator;
+        bool pressed = value > (_analogLatched[pad, binding] ? release : threshold);
+        _analogLatched[pad, binding] = pressed;
+        return pressed;
+    }
+
+    // latch:false is for the rebinding capture UI, which only asks "is this
+    // input active right now" and must not disturb the gameplay latch state.
+    static bool Pressed(
+        GameController* ctrl, int binding, int pad = 0, bool latch = true)
     {
         if (_sdl == null) return false;
         if (binding == LeftTrigger)
-            return _sdl.GameControllerGetAxis(ctrl, GameControllerAxis.Triggerleft) > AxisThreshold;
+            return AnalogLatch(pad, binding,
+                _sdl.GameControllerGetAxis(ctrl, GameControllerAxis.Triggerleft),
+                AxisThreshold, latch);
         if (binding == RightTrigger)
-            return _sdl.GameControllerGetAxis(ctrl, GameControllerAxis.Triggerright) > AxisThreshold;
+            return AnalogLatch(pad, binding,
+                _sdl.GameControllerGetAxis(ctrl, GameControllerAxis.Triggerright),
+                AxisThreshold, latch);
         if (IsStickBinding(binding))
         {
             var (axis, positive) = AxisBinding(binding);
             short v = _sdl.GameControllerGetAxis(ctrl, axis);
-            return positive ? v > StickThreshold : v < -StickThreshold;
+            return AnalogLatch(pad, binding,
+                positive ? v : -v, StickThreshold, latch);
         }
         return _sdl.GameControllerGetButton(ctrl, (GameControllerButton)binding) != 0;
     }

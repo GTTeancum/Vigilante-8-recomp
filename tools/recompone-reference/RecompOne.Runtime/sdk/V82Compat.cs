@@ -565,6 +565,53 @@ public static class V82Compat
             PoolDropped++;
     }
 
+    // TO-DO #1 (no reverse). The measurement that matters is not pixels or
+    // camera drift but the vehicle's own fields, per include/structs.h:
+    //   +0x20 i16 inputLong  -- longitudinal-input scalar; negative == reverse
+    //                           requested. This isolates input decode from
+    //                           physics: if it never goes negative, the pad
+    //                           path never asks for reverse at all.
+    //   +0x80 i32 velX/Y/Z   -- world velocity
+    //   +0x10 3x3 i16        -- rotation; third column is the local Z axis, so
+    //                           dot(vel, thatAxis) is signed forward speed.
+    public static readonly bool ReverseTrace =
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_REVERSE_TRACE") == "1";
+    const uint PadBuffer1 = 0x800B5298u;
+    static int _reverseTraceFrame;
+
+    public static void TraceReverse(IMemory m)
+    {
+        if (!ReverseTrace || !GpuHle.GameplayActive) return;
+        _reverseTraceFrame++;
+        if (_reverseTraceFrame % 5 != 0) return;
+        m = Dispatcher.UnwrapMemory(m);
+        ushort buttons = (ushort)(m.ReadU8(PadBuffer1 + 2) |
+                                  (m.ReadU8(PadBuffer1 + 3) << 8));
+        uint p = _playerVehicle;
+        string state = " player=none";
+        if (p >= PcHeapBase && p < PcHeapEnd - 0x200u)
+        {
+            short inputLong = unchecked((short)m.ReadU16(p + 0x20u));
+            short inputLat = unchecked((short)m.ReadU16(p + 0x14u));
+            int vx = unchecked((int)m.ReadU32(p + 0x80u));
+            int vy = unchecked((int)m.ReadU32(p + 0x84u));
+            int vz = unchecked((int)m.ReadU32(p + 0x88u));
+            int speed = unchecked((int)m.ReadU32(p + 0x8Cu));
+            short fx = unchecked((short)m.ReadU16(p + 0x10u + 4));
+            short fy = unchecked((short)m.ReadU16(p + 0x10u + 10));
+            short fz = unchecked((short)m.ReadU16(p + 0x10u + 16));
+            long fwd = ((long)vx * fx + (long)vy * fy + (long)vz * fz) / 4096;
+            state =
+                $" inputLong={inputLong} inputLat={inputLat} " +
+                $"speed={speed} fwd={fwd}";
+        }
+        Console.Error.WriteLine(
+            $"[Reverse] f={_reverseTraceFrame} btn=0x{buttons:X4} " +
+            $"id=0x{m.ReadU8(PadBuffer1 + 1):X2} mode={m.ReadU16(0x800B4A68u)} " +
+            $"ry={m.ReadU8(PadBuffer1 + 5)} lx={m.ReadU8(PadBuffer1 + 6)} " +
+            $"ly={m.ReadU8(PadBuffer1 + 7)}{state}");
+    }
+
     public static void RecordCameraPose(CpuContext c, IMemory m)
     {
         m = Dispatcher.UnwrapMemory(m);
@@ -711,6 +758,10 @@ public static class V82Compat
             ? Math.Max(0, teardownFrame)
             : 0;
     static bool _soakTeardownSignaled;
+    // Probes that need to drive the car themselves cannot do it while the soak
+    // automation is also holding the gas and steering.
+    static readonly bool _soakNoAutoInput =
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_SOAK_NO_AUTOINPUT") == "1";
     static ushort _soakAutomationInput;
     static int _soakInputPhase;
     static int _soakWeaponKind = -1;
@@ -3479,7 +3530,8 @@ public static class V82Compat
                 _ => 0,
             });
         }
-        _soakAutomationInput = (ushort)(movement | action);
+        _soakAutomationInput =
+            _soakNoAutoInput ? (ushort)0 : (ushort)(movement | action);
         _soakInputPhase = phase;
 
         if (_graphicsShowcaseCaptures && frame is 64 or 68 or 72 or 90 or 96)
