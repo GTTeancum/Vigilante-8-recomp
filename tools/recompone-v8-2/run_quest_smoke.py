@@ -13,12 +13,12 @@ A hang shows up as a run that never reports gameplay, or one whose process has
 to be killed. Both are reported per character so the failure can be narrowed to
 specific slots rather than "quest mode is broken".
 
-Only the fifteen playable types are smoked. The engine's type table at
-0x8006383C runs to twenty-one entries, but types 5, 11 and 17 are Cultsmen,
-Boogie and Dusty -- NPC types the retail carousel never offers -- and 18-20 are
-past the end of the table. Injecting one of those as the player reaches a quest
-briefing with no record behind it, which is a property of the injection, not a
-bug in quest mode.
+Only the fifteen Quest-capable characters are smoked. The engine's type table
+at 0x8006383C runs to twenty-one entries: types 5, 11 and 17 are Cultsmen,
+Boogie and Dusty, the three unlockables, which have no Quest campaign and so no
+briefing record; 18-20 are past the end of the table. Installing one of those
+as the Quest player reaches a briefing with a NULL record behind it, which is a
+property of the injection rather than a bug in quest mode.
 """
 from __future__ import annotations
 
@@ -33,8 +33,9 @@ REPO = Path(__file__).resolve().parents[2]
 TOOLS = REPO / "tools/recompone-v8-2"
 GAMEPLAY = re.compile(r"gameplay reached")
 
-# Playable character types, in engine type order. The three gaps (5 Cultsmen,
-# 11 Boogie, 17 Dusty) are NPC types with no quest-briefing record.
+# Quest-capable character types, in engine type order. The three gaps
+# (5 Cultsmen, 11 Boogie, 17 Dusty) are the unlockables, which have no Quest
+# campaign and therefore no quest-briefing record.
 PLAYABLE = (
     (0, "Sheila"), (1, "Torque"), (2, "Trio"), (3, "Houston"),
     (4, "Convoy"), (6, "Dallas"), (7, "Nina"), (8, "Molo"),

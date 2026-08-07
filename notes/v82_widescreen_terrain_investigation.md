@@ -2003,7 +2003,7 @@ Note the earlier hypothesis in this file's working notes — that
 is wrong. That branch only runs when the caller passes NULL, and a dump hook
 placed on it never fired.
 
-### Why the record is NULL: those three types are not characters
+### Why the record is NULL: those three are unlockables
 
 Dumping the record table for a failing slot (5) and a passing slot (4) gives
 byte-identical output, so this is not an artifact of the harness injecting the
@@ -2025,15 +2025,22 @@ same type byte) names them:
 [18] Easy     [19..20] past the end of the table
 ```
 
-Cultsmen, Boogie and Dusty are NPC types. The retail carousel never offers
-them, so the game correctly ships no quest briefing for them. Reading each
-record's first string confirms the other fifteen are the real playable roster
-("Whoa, this ol' trucker..." for Convoy at 4, "Chassey is still somewhat
+Cultsmen, Boogie and Dusty are the three **unlockable** characters, which is
+why the roster is 15 + 3 = 18. They have no Quest campaign, so the game ships
+no briefing record for them, and the NULL is authored rather than missing.
+Reading each record's first string confirms the other fifteen are the base
+roster ("Whoa, this ol' trucker..." for Convoy at 4, "Chassey is still somewhat
 bitter about her fall from grace in Hollywood" at 15, and so on).
 
-So there was no data defect. The smoke harness was injecting NPC types as the
-player, which retail cannot do, and the game then dereferenced a NULL record.
-`run_quest_smoke.py` now smokes only the fifteen playable types by name.
+So there was no data defect. The smoke harness was installing an unlockable as
+the Quest player through `RECOMPONE_V82_PLAYER_TYPE`, and quest mode then
+dereferenced the NULL record. `run_quest_smoke.py` now smokes the fifteen
+Quest-capable characters by name.
+
+Worth keeping in mind: if Quest mode does let a player pick an unlockable once
+it is unlocked, this same path is reachable in normal play. The `PSMemory` read
+fix means it no longer kills the process -- the briefing renders blank instead.
+That has not been tested through the real carousel.
 
 ### Mitigation shipped
 
