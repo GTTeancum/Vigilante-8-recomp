@@ -16,12 +16,6 @@ Status: AUTONOMOUS WORK EXHAUSTED - AWAITING USER SIGN-OFF
 8. "advanced" (PS2 era) lighting options. Bettter lights generally, but also shadows
 9. Game will occasionally freeze for 2-4 seconds
 
-10. Quest briefing screen is completely blank (no portrait, no text) for character slots 5, 11 and 17.
-    The quest-text record table holds 15 contiguous records indexed by 18 pointer slots, so those three
-    are NULL by construction. Establish whether retail's Quest carousel simply never reaches them and
-    this project's extended roster exposes them, or whether the slot-to-record mapping is wrong.
-    See notes/v82_widescreen_terrain_investigation.md T74.
-
 ## Closed
 
 - Fix PS1 texture projection

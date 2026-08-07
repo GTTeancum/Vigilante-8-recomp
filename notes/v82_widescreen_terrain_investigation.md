@@ -2003,42 +2003,37 @@ Note the earlier hypothesis in this file's working notes — that
 is wrong. That branch only runs when the caller passes NULL, and a dump hook
 placed on it never fired.
 
-### Why the record is NULL
+### Why the record is NULL: those three types are not characters
 
-Dumping the whole record table for a failing slot (5) and a passing slot (4)
-gives byte-identical output, so this is **not** an artifact of the harness
-injecting the character through `RECOMPONE_V82_PLAYER_TYPE`:
+Dumping the record table for a failing slot (5) and a passing slot (4) gives
+byte-identical output, so this is not an artifact of the harness injecting the
+character through `RECOMPONE_V82_PLAYER_TYPE`. The table declares
+`count = 18` with NULL at 5, 11 and 17, and the relocation loop that populates
+it (main.cs:123231) **explicitly skips zero entries**, so the zeros come
+straight from the authored data file.
+
+Dumping the engine's type table at `0x8006383C` (stride 0x10, indexed by the
+same type byte) names them:
 
 ```
-[QuestTable] base=0x807F4580 recIndex=5
-[ 0] 0x807F47C4   [ 1] 0x807F4824   [ 2] 0x807F4884   [ 3] 0x807F48E4
-[ 4] 0x807F4944   [ 5] 0x00000000 <== NULL
-[ 6] 0x807F49A4   [ 7] 0x807F4A04   [ 8] 0x807F4A64   [ 9] 0x807F4AC4
-[10] 0x807F4B24   [11] 0x00000000 <== NULL
-[12] 0x807F4B84   [13] 0x807F4BE4   [14] 0x807F4C44   [15] 0x807F4CA4
-[16] 0x807F4D04   [17] 0x00000000 <== NULL
+[ 0] Sheila   [ 1] Torque   [ 2] Trio     [ 3] Houston  [ 4] Convoy
+[ 5] Cultsmen <== no briefing
+[ 6] Dallas   [ 7] Nina     [ 8] Molo     [ 9] Clyde    [10] Obake
+[11] Boogie   <== no briefing
+[12] BobO     [13] Garbage  [14] Chase    [15] Chassey  [16] Padre
+[17] Dusty    <== no briefing
+[18] Easy     [19..20] past the end of the table
 ```
 
-`recIndex` is `(sbyte)[gp+0x1104]` and tracks the character slot directly
-(slot 4 -> 4, slot 5 -> 5). The records are contiguous 0x60-byte entries with
-**no gap in memory** — `0x807F4944 + 0x60 == 0x807F49A4` — so the array holds
-15 records that 18 pointer slots index, and slots 5, 11 and 17 are NULL by
-construction rather than by a failed load. The data was authored with 15
-briefings for 18 selectable slots.
+Cultsmen, Boogie and Dusty are NPC types. The retail carousel never offers
+them, so the game correctly ships no quest briefing for them. Reading each
+record's first string confirms the other fifteen are the real playable roster
+("Whoa, this ol' trucker..." for Convoy at 4, "Chassey is still somewhat
+bitter about her fall from grace in Hollywood" at 15, and so on).
 
-### Visible effect
-
-`artifacts/quest-smoke/quest_briefing_slot4_vs_slot5.png` is the briefing
-screen for slot 4 (left) and slot 5 (right) at the same frame. Slot 4 shows the
-character portrait and the full briefing paragraph; slot 5 shows **no portrait
-and no text at all**. So the missing record costs the entire briefing, not one
-line.
-
-Most likely reading: the three NULL slots are positions the retail carousel
-never reaches in Quest mode, and this project's integrated roster (which
-`run_reference_soak.py:248-252` notes "deliberately extends the retail
-carousel") makes them selectable. Confirming that needs a carousel-walking run,
-which the smoke harness deliberately avoids. Tracked as its own TO-DO item.
+So there was no data defect. The smoke harness was injecting NPC types as the
+player, which retail cannot do, and the game then dereferenced a NULL record.
+`run_quest_smoke.py` now smokes only the fifteen playable types by name.
 
 ### Mitigation shipped
 
@@ -2053,3 +2048,11 @@ With that in place all 18 slots complete a full quest run. The failing two each
 log exactly one `[Memory] unmapped read at 0x24020D0E size=1; returning zero`;
 the zero terminates the string, so the affected line renders blank instead of
 killing the process.
+
+### On the original report
+
+The TO-DO entry was "Game froze when starting Chassey Blue's quest". Chassey is
+type 15 and has a valid briefing record, so the NULL-record crash found here is
+not reachable through her. Her quest starts and runs clean in the smoke. The
+crash that was fixed is in exactly that briefing code path, but whether it is
+the same freeze that was originally observed cannot be established from here.

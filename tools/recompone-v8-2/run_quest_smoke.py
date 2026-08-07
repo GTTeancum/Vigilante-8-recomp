@@ -12,6 +12,13 @@ counting carousel presses, exactly as the arcade path does.
 A hang shows up as a run that never reports gameplay, or one whose process has
 to be killed. Both are reported per character so the failure can be narrowed to
 specific slots rather than "quest mode is broken".
+
+Only the fifteen playable types are smoked. The engine's type table at
+0x8006383C runs to twenty-one entries, but types 5, 11 and 17 are Cultsmen,
+Boogie and Dusty -- NPC types the retail carousel never offers -- and 18-20 are
+past the end of the table. Injecting one of those as the player reaches a quest
+briefing with no record behind it, which is a property of the injection, not a
+bug in quest mode.
 """
 from __future__ import annotations
 
@@ -25,6 +32,15 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 TOOLS = REPO / "tools/recompone-v8-2"
 GAMEPLAY = re.compile(r"gameplay reached")
+
+# Playable character types, in engine type order. The three gaps (5 Cultsmen,
+# 11 Boogie, 17 Dusty) are NPC types with no quest-briefing record.
+PLAYABLE = (
+    (0, "Sheila"), (1, "Torque"), (2, "Trio"), (3, "Houston"),
+    (4, "Convoy"), (6, "Dallas"), (7, "Nina"), (8, "Molo"),
+    (9, "Clyde"), (10, "Obake"), (12, "BobO"), (13, "Garbage"),
+    (14, "Chase"), (15, "Chassey"), (16, "Padre"),
+)
 RESULT = re.compile(r"^\[soak\] (PASS|FAIL).*reason=(.*)$", re.M)
 
 
@@ -37,7 +53,8 @@ def quest_script(slot: int, character_slot: int = 0) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--characters", type=int, default=18)
+    ap.add_argument("--characters", type=int, default=len(PLAYABLE),
+                    help="how many of the playable types to smoke")
     ap.add_argument("--frames", type=int, default=600)
     ap.add_argument("--map", type=int, default=0)
     ap.add_argument("--timeout", type=int, default=420)
@@ -46,7 +63,7 @@ def main() -> int:
     args = ap.parse_args()
 
     results = []
-    for character in range(args.characters):
+    for character, name in PLAYABLE[:args.characters]:
         out = args.output / f"c{character:02d}"
         out.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ)
@@ -75,14 +92,15 @@ def main() -> int:
                    else "no gameplay" if not reached
                    else found.group(1) if found else "unknown")
         reason = found.group(2) if found and not hung else ""
-        results.append((character, verdict, reason))
-        print(f"  character {character:2d}: {verdict} {reason}", flush=True)
+        results.append((character, name, verdict, reason))
+        print(f"  {name:<8} (type {character:2d}): {verdict} {reason}",
+              flush=True)
 
     print("\nsummary")
-    bad = [r for r in results if r[1] not in ("PASS",)]
-    for character, verdict, reason in results:
+    bad = [r for r in results if r[2] != "PASS"]
+    for character, name, verdict, reason in results:
         mark = "" if verdict == "PASS" else "   <=="
-        print(f"  {character:2d}  {verdict}{mark}")
+        print(f"  {name:<8} (type {character:2d})  {verdict}{mark}")
     print(f"\n{len(results) - len(bad)}/{len(results)} characters completed "
           f"a quest run")
     return 1 if bad else 0
