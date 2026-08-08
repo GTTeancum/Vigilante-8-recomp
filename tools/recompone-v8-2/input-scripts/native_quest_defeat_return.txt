@@ -1,0 +1,24 @@
+# Enter the retail Quest branch, accept the default character/map flow, force
+# native lethal damage, capture the result prompt, then use its stock X-to-quit
+# action and prove the shell remains interactive after the transition.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+3=DOWN
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+2220+2=SELECT
+2280+3=CROSS
+2400+2=SELECT
+2460+3=CROSS
+2580+2=SELECT
+2640+3=CROSS
+# Harmless proof checkpoint while the authored Quest loading card is active.
+2900+2=SELECT
+[defeated]
+700+2=SELECT
+1000+30=CROSS
+1400+12=UP
+1600+12=DOWN

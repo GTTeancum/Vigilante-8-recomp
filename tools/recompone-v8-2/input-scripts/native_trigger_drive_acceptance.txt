@@ -1,0 +1,33 @@
+540+3=START
+900+3=START
+960+3=DOWN
+1020+3=DOWN
+1080+3=CROSS
+
+[v82_options_game_status]
+20+3=DOWN
+[v82_options_memory_card]
+30+3=DOWN
+[v82_options_difficulty]
+20+3=DOWN
+[v82_options_controller]
+90+2500=CROSS
+
+[v82_options_native_controls]
+# Select Trigger Drive from the native Preset row.
+30+3=DOWN
+60+3=RIGHT
+# Leave a clean preset checkpoint with Gas / Accept -> RT visible.
+90+3=DOWN
+120+3=UP
+# Select the action row and reach both face-button weapon actions.
+150+3=DOWN
+180+3=DOWN
+210+3=RIGHT
+240+3=RIGHT
+270+3=RIGHT
+300+3=RIGHT
+330+3=RIGHT
+360+3=RIGHT
+390+3=RIGHT
+450+3=TRIANGLE

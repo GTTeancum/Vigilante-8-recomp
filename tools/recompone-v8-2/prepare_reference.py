@@ -227,6 +227,17 @@ EXTRA_OVERLAY_FUNCTIONS = {
 }
 
 PROVEN_PATCHES = [
+    # A VIDEO row appended to the retail Options list. The row count in
+    # func_80108B48 is a compiled constant, but the loop needs no replacing:
+    # at its exit the text object, layout rect and selection index are all
+    # still live, so an eighth row is drawn there. See V82NativeVideoOption.
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "80108C90",
+        "target": "V82NativeVideoOption.AppendRow",
+        "mode": "inline",
+        "position": "before",
+    },
     # Widescreen terrain traversal. Six calls stack at the entry of
     # func_8001BECC; "pre" cannot express that because PreHookTarget is a
     # single field and each would clobber the last, so they are inline seams

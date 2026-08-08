@@ -1,0 +1,32 @@
+# Enter Arcade using the requested stock/imported player. Defeat is injected
+# through the retail damage function by the opt-in test seam. Unlike the short
+# crash regression, leave the native result screen untouched long enough for
+# the longest imported V8 defeat line (53 mono XA sectors) to reach file end,
+# then traverse the stock result/quit/menu-return path.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+650+3=CROSS
+900+3=CROSS
+1150+3=CROSS
+
+[choose_enemies]
+220+3=CROSS
+470+3=CROSS
+
+[defeated]
+# Leave 7.5 seconds at the native result cadence before dismissal.  The
+# longest imported defeat bank is 53 accepted 37.8 kHz sectors (5.65 s);
+# 1800 polls also covers the observed result-screen startup variance when
+# several headless cases execute concurrently.
+1800+2=SELECT
+2200+30=CROSS
+2600+12=UP
+2800+12=DOWN

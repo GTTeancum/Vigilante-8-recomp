@@ -1,0 +1,16 @@
+# Enter the native V8:2 player selector and dwell on the default stock
+# vehicle before wrapping left once to imported Sid Burn. The renderer trace
+# compares both previews through the same stock selector code path.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+# Default V8:2 preview dwell.
+2600+2=SELECT
+# Wrap to the first imported V8 preview and dwell again.
+2820+2=LEFT
+3300+2=SELECT

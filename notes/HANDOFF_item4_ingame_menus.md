@@ -43,15 +43,47 @@ Credits`. Note the sub-page *titles* are drawn by different functions and in
 different casing (`CONTROLLER` vs `Controllers`); do not confuse the two --
 `TraceNativeOptionsText` sees the titles, not the rows.
 
+## Correction to the phase 0 premise
+
+The claim that the controls page was one regeneration from being lost was
+**wrong**, and the commits b83ee34 / 7671d2b overstate it. `Vigilante82PC.csproj`
+runs Python scripts before every compile that re-apply patches to the generated
+sources, and they are idempotent (`if new in text: return 0`):
+
+```
+apply_vehicle_engine_patches.py    main.cs          (BeginTextureDecode)
+apply_native_selector_patches.py   SHELL_SHELL.cs   (ResolveNativeSelectorSlot)
+apply_native_options_patches.py    both             (TryDraw, UpdateState,
+                                                     OverrideNativeSelectorText)
+```
+
+So five hooks were already protected. The phase 0 work is still net correct for
+the rest: the terrain-traversal chain, the late/sky/scenery pass brackets,
+`RecordPoolLink` and `RecordObjectVisibility` appear in no script and genuinely
+had no durable representation. Declaring hooks in the manifest also beats text
+substitution at build time. And because the scripts are idempotent, the overlap
+between the two mechanisms does not double-apply.
+
+## Phase 1: the VIDEO row draws
+
+Done and verified. `V82NativeVideoOption.AppendRow` is an inline hook at
+`0x80108C90`, the loop exit of `func_80108B48`, where the text object, layout
+rect and selection index are all still live. It writes a "Video" string to
+scratch at `0x8011AE80`, mirrors the loop's own colour selection so the row
+highlights and greys like the retail seven, and draws through the same
+`func_8001A3B0` call.
+
+Verified by regeneration (the hook lands exactly at the loop exit) and at
+runtime: the row list now reads `Game Status, Memory Card, Difficulty,
+Controllers, Audio, Back Story, Credits, Video`.
+
+Note both `Vigilante82PC.csproj` files needed the new file added -- the staged
+one and the host template in `reference-host/`, which uses a different relative
+path.
+
 ## Next step
 
-The row count is a compiled constant, so an inline hook cannot extend it.
-Use `"mode": "replace"` on `func_80108B48` and reimplement the loop in C#:
-draw the seven retail strings from `0x80115E60` plus a `Video` row. The
-existing page is only ~120 lines of generated code and the text call it uses is
-already reachable.
-
-Then find the **selection** handler that maps the chosen row index to a page,
+The row now draws, so what remains is **selection**: find the **selection** handler that maps the chosen row index to a page,
 and route index 7 to a new video page. Model that page on
 `V82NativeControlOptions` (`tools/recompone-v8-2/V82NativeControlOptions.cs`),
 which already does retail-native drawing, cursor, footer prompts and pad input

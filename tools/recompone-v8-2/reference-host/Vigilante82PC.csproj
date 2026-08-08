@@ -29,6 +29,8 @@
     <ProjectReference Include="..\..\..\tools\recompone-reference\RecompOne.Runtime\RecompOne.Runtime.csproj" />
     <Compile Include="$(MSBuildThisFileDirectory)..\V82NativeControlOptions.cs"
              Link="V82NativeControlOptions.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\V82NativeVideoOption.cs"
+             Link="V82NativeVideoOption.cs" />
   </ItemGroup>
   <ItemGroup Condition="'$(PublishTrimmed)' == 'true'">
     <!-- Silk discovers input backends through assembly attributes. Keep that

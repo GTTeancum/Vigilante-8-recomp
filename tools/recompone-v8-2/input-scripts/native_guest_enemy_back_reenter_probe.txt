@@ -1,0 +1,18 @@
+# Enter the imported Sid preview, accept into SELECT ENEMIES, back out through
+# the retail path, dwell on the rebuilt Sid preview, then leave the selector.
+# Distinct generation captures prove the post-back preview is newly built.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+2160+2=LEFT
+2380+3=CROSS
+# Triangle first removes the highlighted opponent; the next press follows the
+# retail back path to SELECT PLAYER. Dwell there so the imported preview is
+# rebuilt, settled, and captured as a distinct lifecycle generation.
+2700+3=TRIANGLE
+2820+3=TRIANGLE

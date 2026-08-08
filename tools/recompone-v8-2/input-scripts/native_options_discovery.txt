@@ -1,0 +1,29 @@
+# Deterministic native V8:2 Options discovery.  Absolute boot inputs skip the
+# authored logo/intro streams, select Options from the retail 1P/2P/Options
+# page, and then leave the screen resident long enough for exact captures.
+540+3=START
+900+3=START
+960+3=DOWN
+1020+3=DOWN
+1080+3=CROSS
+
+[v82_options_game_status]
+40+3=DOWN
+
+[v82_options_memory_card]
+80+3=DOWN
+
+[v82_options_difficulty]
+40+3=DOWN
+
+[v82_options_controller]
+120+3=DOWN
+
+[v82_options_audio]
+80+3=DOWN
+
+[v82_options_back_story]
+80+3=DOWN
+
+[v82_options_credits]
+120+2=SELECT

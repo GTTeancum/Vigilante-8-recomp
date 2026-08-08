@@ -1,0 +1,20 @@
+# Deterministic selector ownership probe. Exercise three imported V8 preview
+# banks in both directions, revisit the first two, then leave the native player
+# selector so the final preview must be torn down before the replay completes.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+120+2=LEFT
+240+2=LEFT
+360+2=LEFT
+480+2=RIGHT
+600+2=RIGHT
+720+2=LEFT
+840+3=TRIANGLE
