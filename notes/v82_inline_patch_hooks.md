@@ -128,9 +128,28 @@ appear as literals in the overlay's generated C#, so they are data rather than
 inline constants, and the descriptor `S7` points at needs tracing back to its
 producer before a row can be appended.
 
-Next step is to log `S7` and the bytes around `[S7 + 0x10]` while the Options
-page is open, using the same probe approach as the pause-menu work, then walk
-back to whoever populates it. If that table turns out to be fixed-size or
-awkward to extend, the fallback recorded in the plan stands: turn the existing
-page reached from CONTROLLER into a tabbed PC SETUP with Controls / Video /
-Audio, which needs no retail-menu surgery at all.
+Dumped it (`RECOMPONE_V82_TRACE_OPTIONS_TABLE=1`, one shot from
+`V82NativeControlOptions.UpdateState`, driven by
+`input-scripts/native_options_discovery.txt`):
+
+```
+[OptTable] S7=0x80775FF8
+[OptTable] [S7-12] 0x80775FEC = 0x80776158
+[OptTable] [S7+16] 0x80776008 = 0x80775F48   <== [S7+0x10] row item
+[OptTable] [S7+64] 0x80776038 = 0x80775FD0
+```
+
+**The rows are not a static table.** `S7` is at `0x807xxxxx`, in the heap
+rather than overlay data, and the words around it are pointers into
+neighbouring heap objects. The Options list is a UI object tree built at
+runtime, in the same shape as the rest of the shell's objects.
+
+That is the better outcome for item 4: a fixed-size table in overlay data would
+have been awkward to extend, but a runtime-built list can simply be given one
+more row by calling the same construction path once more. The fallback of
+turning the CONTROLLER page into a tabbed PC SETUP is probably not needed.
+
+Next step is to find the producer -- the code that builds these row objects --
+by breaking on writes to `[S7 + 0x10]` or by walking back from the shell UI
+root, then adding a VIDEO row alongside the existing seven. The inline patch
+mode from this document is what such a call would be registered with.
