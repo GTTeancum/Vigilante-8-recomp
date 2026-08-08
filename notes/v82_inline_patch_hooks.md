@@ -89,17 +89,23 @@ declares address `8001C89C`, which matches no function start.
 
 ## Remaining exposure
 
-Comparing hooks present in the working tree against a regenerated tree, eleven
+Comparing hooks in the working tree against a regenerated tree, after
+registering the widescreen terrain-traversal chain and the selector slot, four
 are still hand edits with no declaration:
 
-```
-BeginTextureDecode          RepairObjectTerrainQuery    RestoreTerrainFrustum
-ExpandTerrainTraversalAspect / Lateral / Omnidirectional / Polygon / WideFit
-ScaleTerrainTraversalRange  OverrideNativeSelectorText  ResolveNativeSelectorSlot
-```
+| hook | why it is not declared |
+|------|------------------------|
+| `BeginTextureDecode` | captures a local (`v82TextureDecodeCallerSp`) across the call |
+| `RestoreTerrainFrustum` | its declared address `8001C89C` matches no function start, and the real seam is mid-routine with no nearby label or call to anchor on |
+| `RepairObjectTerrainQuery` | same, no derivable anchor |
+| `OverrideNativeSelectorText` | same |
 
-These are mostly the widescreen terrain-traversal work, and several likely
-need the same treatment as `BeginTextureDecode` -- they read or write locals
-around the call rather than simply being called -- so the inline mechanism as
-built does not cover them. Registering them is its own task; until then a
-regeneration silently drops widescreen terrain traversal.
+The inline mechanism anchors on an instruction address, and an address can only
+be read back out of generated C# where a label or a return address appears.
+These four sit where neither does, so pinning them needs the disassembly rather
+than the generated text. That is a separate task; the widescreen terrain work
+that previously vanished on a regeneration is now safe.
+
+Worth noting the terrain chain could not be `pre` hooks: six calls stack at the
+entry of `func_8001BECC`, and `PreHookTarget` is a single field, so each would
+have clobbered the last. Inline hooks are a list and emit in declaration order.

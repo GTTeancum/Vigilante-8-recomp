@@ -227,6 +227,59 @@ EXTRA_OVERLAY_FUNCTIONS = {
 }
 
 PROVEN_PATCHES = [
+    # Widescreen terrain traversal. Six calls stack at the entry of
+    # func_8001BECC; "pre" cannot express that because PreHookTarget is a
+    # single field and each would clobber the last, so they are inline seams
+    # on the first instruction and emit in declaration order.
+    {
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ScaleTerrainTraversalRange",
+        "mode": "inline",
+        "position": "before",
+    },
+    {
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalWideFit",
+        "mode": "inline",
+        "position": "before",
+    },
+    {
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalAspect",
+        "mode": "inline",
+        "position": "before",
+    },
+    {
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalOmnidirectional",
+        "mode": "inline",
+        "position": "before",
+    },
+    {
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalLateral",
+        "mode": "inline",
+        "position": "before",
+    },
+    {
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalPolygon",
+        "mode": "inline",
+        "position": "before",
+    },
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "80106800",
+        "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.ResolveNativeSelectorSlot",
+        "mode": "inline",
+        "position": "before",
+    },
     # Render-pass brackets and the object-visibility record. These were hand
     # edits to generated output, which is rebuilt from the disc and therefore
     # dropped them; each sits at a function boundary and is an ordinary
