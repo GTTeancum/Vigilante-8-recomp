@@ -42,8 +42,13 @@ public sealed class CueFs : IDisposable
                 $"root={Path.GetFullPath(looseRoot!)}");
     }
 
-    private CueFs(string looseRoot)
+    // Offline tooling reads code out of an extracted disc; it never streams
+    // media, so the STR/XA sector-form requirement is not its problem.
+    bool _codeOnly;
+
+    private CueFs(string looseRoot, bool codeOnly = false)
     {
+        _codeOnly = codeOnly;
         string root = Path.GetFullPath(looseRoot);
         if (!Directory.Exists(root))
             throw new DirectoryNotFoundException($"Loose asset root not found: {root}");
@@ -52,7 +57,9 @@ public sealed class CueFs : IDisposable
             _manifestFiles[NormalizeDiscPath(file.Path)] = file;
         IndexLooseFiles(root);
         _looseByLba = IndexStandaloneFiles();
-        _looseCdda = new LooseCdda(root, _manifest.Tracks);
+        // Nullable and already guarded at every use; tooling has no need for
+        // redbook audio and an extracted disc often has none.
+        _looseCdda = codeOnly ? null : new LooseCdda(root, _manifest.Tracks);
         Console.WriteLine(
             $"[CD] standalone loose files={_looseByLba.Length} " +
             $"volume={_manifest.Volume} root={root}");
@@ -64,6 +71,13 @@ public sealed class CueFs : IDisposable
         new(CueBin.Open(cuePath), looseRoot);
 
     public static CueFs OpenLoose(string looseRoot) => new(looseRoot);
+
+    /// <summary>
+    /// Open an extracted disc directory for tools that only read executables
+    /// and overlays. Streaming media is indexed leniently so a project whose
+    /// original CUE/BIN is gone can still be rebuilt from what was extracted.
+    /// </summary>
+    public static CueFs OpenLooseCodeOnly(string looseRoot) => new(looseRoot, true);
 
     public int LooseOverrideCount => _looseByLba.Length;
     public bool IsStandaloneLoose => _manifest != null;
@@ -566,7 +580,11 @@ public sealed class CueFs : IDisposable
             throw new FileNotFoundException(
                 "Standalone loose install is missing required assets (no BIN/CUE fallback): " +
                 string.Join(", ", missing));
-        if (malformedStreams.Count > 0)
+        if (malformedStreams.Count > 0 && _codeOnly)
+            Console.WriteLine(
+                $"[CD] ignoring {malformedStreams.Count} non-sector-form " +
+                "STR/XA file(s); code-only open");
+        else if (malformedStreams.Count > 0)
             throw new InvalidDataException(
                 "Loose STR/XA files must contain 2336-byte Mode 2 sectors: " +
                 string.Join(", ", malformedStreams));

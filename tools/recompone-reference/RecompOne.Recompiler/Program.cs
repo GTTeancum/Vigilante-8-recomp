@@ -38,6 +38,20 @@ foreach (var overlay in config.Overlays)
     overlay.HostFile = ResolvePath(overlay.HostFile);
 }
 
+CueFs fs;
+if (!string.IsNullOrEmpty(config.Loose))
+{
+    string loosePath = Path.GetFullPath(Path.Combine(configDir, config.Loose));
+    if (!Directory.Exists(loosePath))
+    {
+        Console.Error.WriteLine($"extracted disc directory not found: {loosePath}");
+        return 1;
+    }
+    Console.WriteLine($"[RecompOne] Disc directory: {loosePath}");
+    fs = CueFs.OpenLooseCodeOnly(loosePath);
+}
+else
+{
 string cuePath = Path.GetFullPath(Path.Combine(configDir, config.Cue));
 
 if (!File.Exists(cuePath))
@@ -49,7 +63,9 @@ if (!File.Exists(cuePath))
 Console.WriteLine($"[RecompOne] Game: {config.Game.Name} ({config.Game.Id})");
 Console.WriteLine($"[RecompOne] Disc file: {cuePath}");
 
-var fs = CueFs.Open(cuePath);
+    fs = CueFs.Open(cuePath);
+}
+
 string outDir = Path.GetFullPath(Path.Combine(configDir, config.Game.Output));
 Directory.CreateDirectory(outDir);
 

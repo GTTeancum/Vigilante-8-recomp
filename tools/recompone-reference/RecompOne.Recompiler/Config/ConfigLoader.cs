@@ -7,6 +7,10 @@ public sealed class RecompOneConfig
 {
     [JsonPropertyName("game")] public GameConfig Game { get; set; } = new();
     [JsonPropertyName("cue")] public string Cue { get; set; } = "";
+    // An extracted disc directory may stand in for the disc image. Some
+    // projects no longer have the original CUE/BIN, and the recompiler only
+    // ever needs to read files out of the filesystem.
+    [JsonPropertyName("loose")] public string Loose { get; set; } = "";
     [JsonPropertyName("elf")] public string? Elf { get; set; }
     [JsonPropertyName("map")] public string? Map { get; set; }
     [JsonPropertyName("funcMap")] public string? FuncMap { get; set; }

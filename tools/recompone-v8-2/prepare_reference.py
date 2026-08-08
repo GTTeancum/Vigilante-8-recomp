@@ -1183,6 +1183,12 @@ def discover_overlays(disc_root: Path) -> list[dict[str, object]]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cue", type=Path, default=DEFAULT_CUE)
+    parser.add_argument(
+        "--loose-disc",
+        type=Path,
+        default=None,
+        help="use an extracted disc directory instead of the CUE/BIN image",
+    )
     parser.add_argument("--disc-root", type=Path, default=DEFAULT_DISC)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
@@ -1190,7 +1196,13 @@ def main() -> int:
     cue = args.cue.resolve()
     disc_root = args.disc_root.resolve()
     output = args.output.resolve()
-    if not cue.is_file():
+    # The extracted disc directory is a complete stand-in for the image; the
+    # recompiler only reads files out of it. Projects that no longer have the
+    # original CUE/BIN can still regenerate from what was extracted.
+    loose_disc = args.loose_disc.resolve() if args.loose_disc else None
+    if loose_disc is not None and not loose_disc.is_dir():
+        raise FileNotFoundError(f"extracted disc directory is missing: {loose_disc}")
+    if loose_disc is None and not cue.is_file():
         raise FileNotFoundError(f"retail CUE is missing: {cue}")
     if not (disc_root / "SYSTEM.CNF").is_file():
         raise FileNotFoundError(f"extracted disc root is missing SYSTEM.CNF: {disc_root}")
@@ -1205,7 +1217,11 @@ def main() -> int:
             "title": "Vigilante 8: 2nd Offense PC",
             "output": "recompiled",
         },
-        "cue": relative_posix(cue, output),
+        **(
+            {"loose": relative_posix(loose_disc, output)}
+            if loose_disc is not None
+            else {"cue": relative_posix(cue, output)}
+        ),
         "debug": False,
         "linearSweep": True,
         "functions": [{"address": address} for address in EXTRA_MAIN_FUNCTIONS],

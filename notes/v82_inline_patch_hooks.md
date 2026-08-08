@@ -63,11 +63,43 @@ Addresses were verified against the generated output: `8010AE8C` is the
 instruction immediately after label `L8010AE8C`, and `8010B210` is the return
 address of the `func_80015540` call the hook follows.
 
-## Not yet verified
+## Regenerating without the disc image
 
-End to end, by regenerating. `prepare_reference.py` requires the retail CUE and
-`V8_2_BINCUE/` is absent from this tree -- only the extracted disc root
-(`V8_2_WORK/disc`) and the loose files are present. The recompiler builds and
-the patch list loads, but nothing has re-emitted `SHELL_SHELL.cs` from these
-declarations. That check should run before item 4 builds anything further on
-this mechanism.
+The retail CUE/BIN is gone. The recompiler only ever reads files out of the
+disc, and `CueFs.OpenLoose` already existed, so the extracted disc root at
+`V8_2_WORK/disc` is a complete stand-in. Two things blocked it, both runtime
+concerns the recompiler has no use for: standalone STR/XA files must be in
+2336-byte Mode 2 sector form, and loose CDDA tracks must be present.
+`CueFs.OpenLooseCodeOnly` relaxes exactly those two and nothing else.
+
+```
+python tools/recompone-v8-2/prepare_reference.py --loose-disc V8_2_WORK/disc --output <dir>
+dotnet .../recompone.dll <dir>/v82.recompone.json
+```
+
+Verified: 131 of 132 patches applied, and all eight newly registered hooks
+re-emit from their declarations -- the three inline seams as
+`if (V82NativeControlOptions.TryDraw(c, m)) goto L8010B1EC;`,
+`V82NativeControlOptions.UpdateState(c, m)` and the visibility record, the
+four entry hooks as `PreHook.Run(...)`, and the three exit hooks as post
+wrappers.
+
+One pre-existing warning is unrelated to this work: `RestoreTerrainFrustum`
+declares address `8001C89C`, which matches no function start.
+
+## Remaining exposure
+
+Comparing hooks present in the working tree against a regenerated tree, eleven
+are still hand edits with no declaration:
+
+```
+BeginTextureDecode          RepairObjectTerrainQuery    RestoreTerrainFrustum
+ExpandTerrainTraversalAspect / Lateral / Omnidirectional / Polygon / WideFit
+ScaleTerrainTraversalRange  OverrideNativeSelectorText  ResolveNativeSelectorSlot
+```
+
+These are mostly the widescreen terrain-traversal work, and several likely
+need the same treatment as `BeginTextureDecode` -- they read or write locals
+around the call rather than simply being called -- so the inline mechanism as
+built does not cover them. Registering them is its own task; until then a
+regeneration silently drops widescreen terrain traversal.
