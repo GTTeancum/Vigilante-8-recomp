@@ -44,7 +44,10 @@ public static class V82Compat
 
         if (GpuHle.GameplayActive &&
             text is "PAUSED" or "QUEST OBJECTIVES" or "ARE YOU SURE?")
+        {
             InputManager.SignalNativeGameplayMenu();
+            GpuHle.SignalNativeModal();
+        }
 
         if (TraceNativeOptions && SeenNativeOptionText.Add(text))
         {

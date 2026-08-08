@@ -10,6 +10,19 @@ public static class GpuHle
     public static bool NativeResolution { get; set; }
     public static bool GameplayActive { get; set; }
     public static bool WidescreenMenuReturnPending { get; set; }
+
+    // Set for the frame in which the retail PAUSED / QUEST OBJECTIVES /
+    // ARE YOU SURE? overlay is drawn. Those are centred modals, not HUD, and
+    // must not be pulled toward the screen edge by widescreen HUD anchoring:
+    // their pieces straddle the anchor's top-of-screen test, so part of the
+    // panel moves and part does not, which tears the layout apart.
+    // Held for a few frames rather than a single flag: the game builds a
+    // frame's packets during logic and the backend draws them after the next
+    // frame boundary, so a flag set by the text hook and cleared at that
+    // boundary is always false by the time the rectangles are emitted.
+    public static int NativeModalHold { get; set; }
+    public static bool NativeModalActive => NativeModalHold > 0;
+    public static void SignalNativeModal() => NativeModalHold = 4;
     public static float TargetAspect { get; set; } = 4f / 3f;
     public static string? DebugCaptureLabel { get; set; }
     public static int DebugGameplayTick { get; set; }

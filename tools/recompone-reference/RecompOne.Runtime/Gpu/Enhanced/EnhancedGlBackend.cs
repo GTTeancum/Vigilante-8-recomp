@@ -91,6 +91,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             StringSplitOptions.RemoveEmptyEntries |
             StringSplitOptions.TrimEntries)
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    static int _modalRectLines;
+    static int _modalTriLines;
+    static readonly bool TraceModalRects =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MODAL_RECTS") == "1";
     static readonly bool TraceRectangles =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_RECTANGLES") == "1";
     static readonly bool TraceHud =
@@ -1356,6 +1360,17 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
         if (ClipAgainstNearPlane(a, b, c, f)) return;
+        if (TraceModalRects && GpuHle.NativeModalActive && _modalTriLines++ < 300)
+        {
+            float lo = Math.Min(a.X, Math.Min(b.X, c.X));
+            float hi = Math.Max(a.X, Math.Max(b.X, c.X));
+            float ty = Math.Min(a.Y, Math.Min(b.Y, c.Y));
+            Console.Error.WriteLine(
+                $"[V82ModalTri] x={lo:F0}..{hi:F0} y={ty:F0} " +
+                $"tex={(f.Textured ? 1 : 0)} semi={(f.SemiTrans ? 1 : 0)} " +
+                $"tpage=0x{f.TPage:X3} ot={f.OtIndex} " +
+                $"owner=\"{GpuHle.DescribePacketOwner(f.PacketAddress)}\"");
+        }
         float spanX =
             Math.Max(a.X, Math.Max(b.X, c.X)) -
             Math.Min(a.X, Math.Min(b.X, c.X));
@@ -1863,6 +1878,14 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             // Which engine subsystem submitted this packet. The object gates
             // demonstrably do not affect the arena walls, so naming the
             // submitter is the thing that decides where to look next.
+            // Record the operands of the cull test that let this triangle
+            // through, next to the packet it produced. Comparing the two
+            // establishes whether the renderer sees the same vertex order the
+            // engine's test did.
+            dump.Append("nclip=")
+                .Append(Gte.NclipX0).Append(',').Append(Gte.NclipY0).Append(';')
+                .Append(Gte.NclipX1).Append(',').Append(Gte.NclipY1).Append(';')
+                .Append(Gte.NclipX2).Append(',').Append(Gte.NclipY2).Append(' ');
             dump.Append(f.PacketAddress.ToString("X8")).Append(' ')
                 .Append(GpuHle.DescribePacketOwner(f.PacketAddress)
                     .Replace(' ', '_')).Append(' ')
@@ -2355,7 +2378,23 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             drawU -= 6;
         }
         float anchor = 0f;
-        if (ConfigManager.View.HudAnchoring && GpuHle.GameplayActive && _kTarget is { Margin: > 0 } target)
+        if (TraceModalRects && GpuHle.NativeModalActive &&
+            _kTarget is { } modalTarget && _modalRectLines++ < 400)
+            Console.Error.WriteLine(
+                $"[V82Modal] x={r.X} w={r.W} y={r.Y} h={r.H} " +
+                $"tex={(f.Textured ? 1 : 0)} tpage=0x{f.TPage:X3} " +
+                $"clut=0x{f.Clut:X4} " +
+                $"target=({modalTarget.X},{modalTarget.Y}," +
+                $"{modalTarget.W}x{modalTarget.H}) margin={modalTarget.Margin}");
+        // The retail modal's panel, caption and entries are authored centred
+        // on the same x as its border (both measure centre 160 in target
+        // space, at either aspect), so they need no shift to line up. What
+        // tore the panel apart was HUD anchoring applying -margin per piece:
+        // the caption and entries sit high enough to pass the top-of-screen
+        // test and moved, while the border, drawn lower and as triangles
+        // rather than rectangles, stayed. Leave the whole modal alone.
+        if (ConfigManager.View.HudAnchoring && GpuHle.GameplayActive &&
+            !GpuHle.NativeModalActive && _kTarget is { Margin: > 0 } target)
         {
             float localCenter = drawX + drawW * 0.5f - target.X;
             float localTop = r.Y - target.Y;
@@ -3275,6 +3314,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         ReportSeveredGeometry();
         ReportSegmentPops();
         _frame++;
+        // Re-armed each frame the modal is drawn, so it follows the overlay
+        // rather than lingering after it closes.
+        if (GpuHle.NativeModalHold > 0) GpuHle.NativeModalHold--;
         string? captureLabel = GpuHle.DebugCaptureLabel;
         _probeTriangleHistory.Enqueue(
             (_frame, _pendingProbeTriangles.ToArray()));
