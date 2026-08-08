@@ -233,6 +233,13 @@ PROVEN_PATCHES = [
     # still live, so an eighth row is drawn there. See V82NativeVideoOption.
     {
         "overlay": "SHELL_SHELL",
+        "address": "80108C1C",
+        "target": "V82NativeVideoOption.AdjustLayout",
+        "mode": "inline",
+        "position": "after",
+    },
+    {
+        "overlay": "SHELL_SHELL",
         "address": "80108C90",
         "target": "V82NativeVideoOption.AppendRow",
         "mode": "inline",

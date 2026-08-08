@@ -41,6 +41,26 @@ public static partial class Vigilante82PC
 
         static bool _stringWritten;
 
+        // The retail list is laid out for seven rows: X=40, Y=172, stride 34,
+        // written into the layout rect at SP+0x10 just before the loop. An
+        // eighth row runs off the bottom of the panel, so lift the start by
+        // one row height. Both are tunable while the surrounding art is being
+        // redesigned.
+        static readonly int StartY = EnvInt("RECOMPONE_V82_OPTIONS_START_Y", 138);
+        static readonly int RowStride = EnvInt("RECOMPONE_V82_OPTIONS_ROW_STRIDE", 34);
+
+        static int EnvInt(string name, int fallback) =>
+            int.TryParse(Environment.GetEnvironmentVariable(name), out int v)
+                ? v : fallback;
+
+        /// <summary>Runs once, immediately before the row loop.</summary>
+        public static void AdjustLayout(CpuContext c, IMemory m)
+        {
+            IMemory raw = Dispatcher.UnwrapMemory(m);
+            raw.WriteU16(c.SP + 0x12u, (ushort)StartY);
+            raw.WriteU16(c.SP + 0x16u, (ushort)RowStride);
+        }
+
         static void EnsureString(IMemory m)
         {
             if (_stringWritten) return;

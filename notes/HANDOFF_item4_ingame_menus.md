@@ -81,6 +81,40 @@ Note both `Vigilante82PC.csproj` files needed the new file added -- the staged
 one and the host template in `reference-host/`, which uses a different relative
 path.
 
+## Row plate and colour: were clipping, not missing
+
+A first capture showed `Video` as bare white text below the panel border, and
+that was reported as three defects: overflow, a missing row plate, and wrong
+colour. Two of the three had the same cause. Only one call runs per row
+(`func_8001A3B0`), so it draws the plate and the text together; the eighth row
+simply fell outside the panel's clip, which kept the plate and left the text
+visible. Lifting the list fixed all three at once -- `Video` now has its
+rounded plate and the same gold as the other seven, and the colour mirror in
+`AppendRow` needed no change.
+
+Worth remembering as a general point: "element missing" in this shell usually
+means clipped, because so much is drawn through one call per row.
+
+## Layout levers
+
+The row loop's layout rect sits on the stack and is written just before the
+loop: X at `[SP+0x10]` (40), start Y at `[SP+0x12]` (172), a width-ish field
+at `[SP+0x14]` (16) and the row stride at `[SP+0x16]` (34).
+`V82NativeVideoOption.AdjustLayout`, an inline hook at `0x80108C1C`, rewrites
+the start Y and stride once before the loop. Both are tunable without a
+rebuild:
+
+```
+RECOMPONE_V82_OPTIONS_START_Y      default 138 (retail 172)
+RECOMPONE_V82_OPTIONS_ROW_STRIDE   default 34  (retail 34)
+```
+
+At 138/34 all eight rows sit inside the panel. The first row now overlaps the
+Vigilante 8 logo, which is the open art question -- the user intends to
+redesign that area. Tightening the stride instead of raising the start is the
+alternative if the logo is to be preserved: seven rows spanned 238px, so a
+stride of 29-30 fits eight in the same space.
+
 ## Next step
 
 The row now draws, so what remains is **selection**: find the **selection** handler that maps the chosen row index to a page,
