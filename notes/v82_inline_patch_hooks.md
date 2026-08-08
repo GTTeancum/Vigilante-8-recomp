@@ -109,3 +109,28 @@ that previously vanished on a regeneration is now safe.
 Worth noting the terrain chain could not be `pre` hooks: six calls stack at the
 entry of `func_8001BECC`, and `PreHookTarget` is a single field, so each would
 have clobbered the last. Inline hooks are a list and emit in declaration order.
+
+## Phase 1 spike: adding a row to the retail Options list (in progress)
+
+The goal is a real VIDEO entry in Options rather than hiding video settings
+under CONTROLLER.
+
+What is known so far. The Options page is `func_8010A5BC` in SHELL_SHELL; it
+draws the page and services its input in one body, and both existing PC-page
+seams live inside it. It is data driven: the draw path reads a descriptor
+through `S7`, taking the item at `[S7 + 0x10]` into `S0` and skipping the row
+when that is null (`SHELL_SHELL.cs:11231`). Row strings are drawn as text --
+GAME STATUS, MEMORY CARD, DIFFICULTY, CONTROLLER, AUDIO, BACK STORY, CREDITS --
+and are what `V82Compat.TraceNativeOptionsText` keys its stage names on.
+
+Not yet found: the table those seven entries come from. The strings do not
+appear as literals in the overlay's generated C#, so they are data rather than
+inline constants, and the descriptor `S7` points at needs tracing back to its
+producer before a row can be appended.
+
+Next step is to log `S7` and the bytes around `[S7 + 0x10]` while the Options
+page is open, using the same probe approach as the pause-menu work, then walk
+back to whoever populates it. If that table turns out to be fixed-size or
+awkward to extend, the fallback recorded in the plan stands: turn the existing
+page reached from CONTROLLER into a tabbed PC SETUP with Controls / Video /
+Audio, which needs no retail-menu surgery at all.
