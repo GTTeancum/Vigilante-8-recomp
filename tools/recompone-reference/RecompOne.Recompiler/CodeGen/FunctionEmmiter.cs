@@ -70,6 +70,8 @@ public static class FunctionEmitter
             if (ctx.Labels.Contains(instr.Vram))
                 sb.AppendLine($"        L{instr.Vram:X8}: ;");
 
+            EmitInlineHooks(sb, func, instr.Vram, after: false, ind);
+
             if (instr.HasDelaySlot)
             {
                 var delaySlot = i + 1 < instrs.Length ? instrs[i + 1] : null;
@@ -80,6 +82,8 @@ public static class FunctionEmitter
                 if (!string.IsNullOrEmpty(line))
                     sb.AppendLine($"{ind}{line}");
             }
+
+            EmitInlineHooks(sb, func, instr.Vram, after: true, ind);
         }
 
         if (FallsThrough(instrs))
@@ -93,6 +97,20 @@ public static class FunctionEmitter
 
         sb.AppendLine("    }");
         return sb.ToString();
+    }
+
+    static void EmitInlineHooks(
+        System.Text.StringBuilder sb, MipsFunction func, uint vram,
+        bool after, string ind)
+    {
+        if (func.InlineHooks.Count == 0) return;
+        foreach (var hook in func.InlineHooks)
+        {
+            if (hook.Address != vram || hook.After != after) continue;
+            sb.AppendLine(hook.BranchTo is uint label
+                ? $"{ind}if ({hook.Target}(c, m)) goto L{label:X8};"
+                : $"{ind}{hook.Target}(c, m);");
+        }
     }
 
     //some hand-written asm (crt0 stubs, etc) has no jr/j/branch at its declared end at all and just

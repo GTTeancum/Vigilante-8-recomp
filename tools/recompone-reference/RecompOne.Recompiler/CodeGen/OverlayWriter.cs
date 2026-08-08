@@ -486,6 +486,30 @@ public static class OverlayWriter
         {
             uint? addr = string.IsNullOrEmpty(patch.Address) ? null : Convert.ToUInt32(patch.Address, 16);
             int matched = 0;
+            // An inline patch names an instruction inside a function rather
+            // than the function itself, so it matches on containment.
+            if (string.Equals(patch.Mode, "inline", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!addr.HasValue)
+                {
+                    Console.WriteLine($"[Recompiler] WARNING: inline patch '{patch.Target}' has no address");
+                    continue;
+                }
+                uint? branchTo = string.IsNullOrEmpty(patch.BranchTo)
+                    ? null : Convert.ToUInt32(patch.BranchTo, 16);
+                bool after = string.Equals(patch.Position, "after", StringComparison.OrdinalIgnoreCase);
+                foreach (var func in funcs)
+                {
+                    if (!string.IsNullOrEmpty(patch.Overlay) && !string.Equals(func.OverlayName, patch.Overlay, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (addr.Value < func.Start || addr.Value >= func.End) continue;
+                    func.InlineHooks.Add(new Analysis.InlineHook(addr.Value, patch.Target, after, branchTo));
+                    matched++;
+                    applied++;
+                }
+                if (matched == 0)
+                    Console.WriteLine($"[Recompiler] WARNING: inline patch '{patch.Target}' matched no function containing 0x{addr.Value:X8}");
+                continue;
+            }
             foreach (var func in funcs)
             {
                 if (!string.IsNullOrEmpty(patch.Overlay) && !string.Equals(func.OverlayName, patch.Overlay, StringComparison.OrdinalIgnoreCase)) continue;

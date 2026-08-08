@@ -227,6 +227,82 @@ EXTRA_OVERLAY_FUNCTIONS = {
 }
 
 PROVEN_PATCHES = [
+    # Render-pass brackets and the object-visibility record. These were hand
+    # edits to generated output, which is rebuilt from the disc and therefore
+    # dropped them; each sits at a function boundary and is an ordinary
+    # pre/post hook, except the visibility record which is genuinely
+    # mid-routine and uses an inline seam.
+    {
+        "overlay": "main",
+        "address": "8001C910",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginLatePass",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8001C910",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndLatePass",
+        "mode": "post",
+    },
+    {
+        "overlay": "main",
+        "address": "8001D414",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.RecordPoolLink",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8003150C",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginSkyPass",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8003150C",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndSkyPass",
+        "mode": "post",
+    },
+    {
+        "overlay": "main",
+        "address": "80050B38",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginSceneryPass",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "80050B38",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndSceneryPass",
+        "mode": "post",
+    },
+    {
+        "overlay": "main",
+        "address": "8002E2E0",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.RecordObjectVisibility",
+        "mode": "inline",
+        "position": "after",
+    },
+    # The PC controls page lives inside the retail Options routine
+    # (func_8010A5BC), which draws the page and services its input in one long
+    # body. There is no function boundary to hang a pre/post hook on, so these
+    # two seams are spliced in by instruction address. Without them the page
+    # exists only as hand edits to generated output, which is rebuilt from the
+    # disc and would silently drop the feature.
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "8010AE8C",
+        "target": "V82NativeControlOptions.TryDraw",
+        "mode": "inline",
+        "position": "before",
+        # Taking over the draw means skipping the retail page body.
+        "branchTo": "8010B1EC",
+    },
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "8010B210",
+        "target": "V82NativeControlOptions.UpdateState",
+        "mode": "inline",
+        "position": "before",
+    },
     # Retail PsyQ SDK routines identified by instruction-exact comparison
     # against the symbolized Vigilante 8 executable.
     {

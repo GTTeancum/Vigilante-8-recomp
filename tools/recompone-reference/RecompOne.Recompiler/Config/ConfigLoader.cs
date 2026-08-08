@@ -27,6 +27,10 @@ public sealed class PatchEntry
     [JsonPropertyName("address")] public string Address { get; set; } = "";
     [JsonPropertyName("target")] public string Target { get; set; } = "";
     [JsonPropertyName("mode")] public string Mode { get; set; } = "replace";
+    // "inline" mode only: which side of the instruction the call goes, and an
+    // optional label to jump to when the call returns true.
+    [JsonPropertyName("position")] public string Position { get; set; } = "before";
+    [JsonPropertyName("branchTo")] public string BranchTo { get; set; } = "";
 }
 
 public sealed class GameConfig
