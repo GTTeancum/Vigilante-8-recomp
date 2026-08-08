@@ -16,16 +16,16 @@ Status: AUTONOMOUS WORK EXHAUSTED - AWAITING USER SIGN-OFF
 8. Quest mode completion: each of the fifteen quests must be playable to the end and must unlock the
    character it awards. Entering quest mode is verified for all fifteen (see notes T74); stage-by-stage
    progression and the unlock itself are not started.
-9. Pause menu is not centred in widescreen. The overlap/misalignment is fixed (widescreen HUD
-   anchoring was moving the caption and entries but not the border; modals are now exempt), and
-   both aspects are verified headlessly. What remains is that the whole modal sits right of centre
-   by exactly one widescreen margin (+12.6% of width). Fixing that means moving the border, which
-   is drawn as triangles with no reliable way to separate them from world geometry, so it belongs
-   with item 1. See notes/v82_pause_menu_widescreen.md.
-10. Port Y the Alien from the original Vigilante 8. (Assigned to Codex, not this agent.)
+9. Port Y the Alien from the original Vigilante 8. (Assigned to Codex, not this agent.)
 
 ## Closed
 
+- Pause menu layout broken in widescreen: entries offset from the border and overlapping, and the
+  whole modal off-centre. Widescreen HUD anchoring was moving whatever passed its top-of-screen
+  test and leaving the border, which is drawn as flat 2D triangles rather than rectangles. Modals
+  are now exempt from anchoring and their border is shifted by one margin. Verified headlessly at
+  both aspects: 16:9 reproduces the 4:3 layout to within half a percent of border width, border
+  centred. See notes/v82_pause_menu_widescreen.md.
 - Vehicles will not reverse; brakes stop but do not reverse. The engine's reverse was never broken.
   `settings.json` resolved against the launch directory, so the bindings in force depended on where
   the game was started from; a Classic copy leaves brake/reverse on the stick and D-pad only, with

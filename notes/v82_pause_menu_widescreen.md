@@ -54,17 +54,39 @@ the caption and both rows inside the border, and 4:3 is unchanged (margin is
 zero there, so the anchoring path was already inert).
 `artifacts/pause/pause_menu_fix.png`.
 
-## Still open: the menu is not centred in 16:9
+## Centring the modal
 
-The border and its contents now move together, but the group sits right of
-screen centre by +12.6% of width. The widescreen margin is 54 against a
-428-wide frame -- 12.6% exactly -- so the whole modal is displaced by precisely
-one margin.
+Exempting the modal left it internally consistent but sitting +12.6% of width
+right of screen centre -- the widescreen margin is 54 against a 428-wide frame,
+12.6% exactly, so the whole thing was displaced by precisely one margin.
 
-This is not fixed here, and deliberately so. Correcting it means shifting the
-border, which is drawn as triangles, and there is no reliable way to tell the
-modal's triangles from world geometry: `PrimFlags` has no UI marker, and during
-the modal the ordering-table index is a 2654..4096 continuum shared with the
-scene behind it. Keying on that would risk shifting world geometry to fix a
-menu. It belongs with widescreen support (item 1), where the 2D overlay origin
-can be settled once for every element rather than guessed at per screen.
+The border is drawn as triangles, so the question was how to move it without
+touching the world still being rendered behind the pause (~3900 triangles a
+frame, against ~38 for the menu). `PrimFlags` has no UI marker and the
+ordering-table index is a 2654..4096 continuum shared with the scene, so
+neither separates them. What does: the modal's border comes straight from a
+packet and never touches the GTE, so its vertices carry neither view space nor
+a GTE Z, while every world triangle carries both. That test picks out exactly
+the ~38 flat 2D triangles.
+
+Which primitive to move was then measured rather than guessed, using the green
+selector arrows as a landmark and normalising by border width:
+
+| shift (rect, tri) | border off-centre | content vs border |
+|-------------------|-------------------|-------------------|
+| 4:3 reference     | -0.5 px           | +10.8%            |
+| (0, 0)            | +161 px           | -13.6%            |
+| (-margin, -margin)| +3 px             | -14.2%            |
+| **(0, -margin)**  | **+3 px**         | **+10.4%**        |
+
+Moving both together centred the border but carried the content with it, so
+the relative error never changed. Only the border needed correcting. The
+rectangles were already right once HUD anchoring stopped moving them per
+piece.
+
+## Result
+
+16:9 reproduces the 4:3 layout to within half a percent of border width, with
+the border centred. 4:3 is unchanged -- margin is zero there, so both the
+anchoring path and the triangle shift are inert.
+`artifacts/pause/pause_menu_fix.png`.

@@ -287,6 +287,17 @@ public static class Gte
 
     public static uint CurrentFlags => FLAG;
     public static int CurrentMac0 => MAC0;
+
+    /// <summary>
+    /// The operands NCLIP actually used, captured at the instruction. Renderer
+    /// side culling has to agree with the engine on which three vertices form
+    /// the triangle; packets may store them in a different order than the GTE
+    /// register file holds them, and a mismatch makes any winding test wrong
+    /// for part of the scene.
+    /// </summary>
+    public static int NclipX0, NclipY0, NclipX1, NclipY1, NclipX2, NclipY2;
+    public static int NclipResult;
+    public static long NclipCount;
     static readonly uint[] RGB = new uint[3];
     // GPU packets contain only projected XY coordinates, so enhanced texture
     // projection correlates them with the GTE's most recent screen/depth
@@ -1409,6 +1420,11 @@ public static class Gte
                         (long)SX[1] * (SY[2] - SY[0]) +
                         (long)SX[2] * (SY[0] - SY[1]));
                 }
+                NclipX0 = SX[0]; NclipY0 = SY[0];
+                NclipX1 = SX[1]; NclipY1 = SY[1];
+                NclipX2 = SX[2]; NclipY2 = SY[2];
+                NclipResult = MAC0;
+                NclipCount++;
                 break;
             case 0x2D:
                 MAC0 = (int)CheckMac0((long)ZSF3 * (SZ[1] + SZ[2] + SZ[3]));

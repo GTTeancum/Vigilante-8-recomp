@@ -1346,9 +1346,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         try
         {
             if (count >= 3)
-                DrawTri(kept[0], kept[1], kept[2], f);
+                DrawTriCore(kept[0], kept[1], kept[2], f);
             if (count == 4)
-                DrawTri(kept[0], kept[2], kept[3], f);
+                DrawTriCore(kept[0], kept[2], kept[3], f);
         }
         finally
         {
@@ -1357,7 +1357,28 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         return true;
     }
 
+    // The retail modal's border is drawn as flat 2D polygons, not rectangles,
+    // so it never reaches the rectangle path. Its vertices come straight from
+    // the packet and never touch the GTE, which separates them cleanly from
+    // the world still being drawn behind the pause: of ~3900 triangles in a
+    // paused frame only ~38 carry neither view space nor a GTE Z.
     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
+    {
+        if (GpuHle.NativeModalActive && _kTarget is { Margin: > 0 } modalTri &&
+            !a.HasViewSpace && !b.HasViewSpace && !c.HasViewSpace &&
+            !a.HasGteZ && !b.HasGteZ && !c.HasGteZ)
+        {
+            HleVertex sa = a, sb = b, sc = c;
+            sa.X -= modalTri.Margin;
+            sb.X -= modalTri.Margin;
+            sc.X -= modalTri.Margin;
+            DrawTriCore(sa, sb, sc, f);
+            return;
+        }
+        DrawTriCore(a, b, c, f);
+    }
+
+    void DrawTriCore(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
         if (ClipAgainstNearPlane(a, b, c, f)) return;
         if (TraceModalRects && GpuHle.NativeModalActive && _modalTriLines++ < 300)
@@ -2386,15 +2407,16 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 $"clut=0x{f.Clut:X4} " +
                 $"target=({modalTarget.X},{modalTarget.Y}," +
                 $"{modalTarget.W}x{modalTarget.H}) margin={modalTarget.Margin}");
-        // The retail modal's panel, caption and entries are authored centred
-        // on the same x as its border (both measure centre 160 in target
-        // space, at either aspect), so they need no shift to line up. What
-        // tore the panel apart was HUD anchoring applying -margin per piece:
-        // the caption and entries sit high enough to pass the top-of-screen
-        // test and moved, while the border, drawn lower and as triangles
-        // rather than rectangles, stayed. Leave the whole modal alone.
-        if (ConfigManager.View.HudAnchoring && GpuHle.GameplayActive &&
-            !GpuHle.NativeModalActive && _kTarget is { Margin: > 0 } target)
+        // The modal's rectangles -- panel, caption, entries, arrows -- already
+        // sit where they belong once HUD anchoring stops moving them per
+        // piece. Only its border needs correcting, and that is drawn as flat
+        // 2D triangles; see DrawTri. Measured against the 4:3 layout, content
+        // sits +10.8% of border width right of the border centre, and this
+        // pairing reproduces it (+9.7%) with the border itself centred.
+        if (GpuHle.NativeModalActive && _kTarget is { Margin: > 0 })
+            anchor = 0f;
+        else if (ConfigManager.View.HudAnchoring && GpuHle.GameplayActive &&
+            _kTarget is { Margin: > 0 } target)
         {
             float localCenter = drawX + drawW * 0.5f - target.X;
             float localTop = r.Y - target.Y;
