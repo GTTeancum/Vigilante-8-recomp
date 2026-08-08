@@ -27,10 +27,19 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\tools\recompone-reference\RecompOne.Runtime\RecompOne.Runtime.csproj" />
-    <Compile Include="$(MSBuildThisFileDirectory)..\V82NativeControlOptions.cs"
+    <!-- prepare_reference.py copies this file into
+         reference-v8-2/generated/recompiled/, so every path here has to
+         resolve from both that directory and this one. Both sit three levels
+         below the repository root, which is what the ProjectReference above
+         already relies on; the hand-written seams use the same form so a
+         regeneration cannot overwrite the staged project with paths that
+         only worked from the template's own directory. -->
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeControlOptions.cs"
              Link="V82NativeControlOptions.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)..\V82NativeVideoOption.cs"
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeVideoOption.cs"
              Link="V82NativeVideoOption.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeVideoPage.cs"
+             Link="V82NativeVideoPage.cs" />
   </ItemGroup>
   <ItemGroup Condition="'$(PublishTrimmed)' == 'true'">
     <!-- Silk discovers input backends through assembly attributes. Keep that
@@ -42,8 +51,8 @@
   <Target Name="EnsureGeneratedVehicleSeams"
           BeforeTargets="CoreCompile"
           Condition="Exists('$(MSBuildProjectDirectory)\main.cs')">
-    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\apply_vehicle_engine_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
-    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\apply_native_selector_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot;" />
-    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\apply_native_options_patches.py&quot; --shell-source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot; --main-source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_vehicle_engine_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_selector_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot;" />
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_options_patches.py&quot; --shell-source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot; --main-source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
   </Target>
 </Project>

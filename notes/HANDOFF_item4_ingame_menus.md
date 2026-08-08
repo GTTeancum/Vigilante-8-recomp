@@ -81,6 +81,94 @@ Note both `Vigilante82PC.csproj` files needed the new file added -- the staged
 one and the host template in `reference-host/`, which uses a different relative
 path.
 
+## Phase 2: the row selects, and the Video page runs
+
+Done and verified. `func_8010EA88` is the Options screen's outer loop. It
+redraws the row list, dispatches the selected index through a **seven-entry
+jump table at `0x80101180`** guarded by `sltiu v0, s1, 7` at `0x8010EC58`, then
+reads the pad to move the cursor. `S1` is the selected index throughout.
+
+| index | page |
+|-------|------|
+| 0 | `func_80108D90` Game Status |
+| 1 | `func_8010CF98` Memory Card |
+| 2 | `func_80109C60` Difficulty |
+| 3 | `func_8010A5BC` Controllers |
+| 4 | `func_8010B84C` Audio |
+| 5 | `func_8010EA60` Back Story |
+| 6 | `func_8010EA38` Credits |
+
+Two compiled constants confine the screen to seven rows, and each needs its own
+seam:
+
+- `slti v0, s1, 6` at **`0x8010ED20`** clamps the cursor. That is a *delay
+  slot*, and `FunctionEmmiter` skips delay slots in its emit loop, so an inline
+  hook declared on it is never emitted. `V82NativeVideoOption.ExtendCursorRange`
+  goes on the `and v0, v0, v1` at **`0x8010ED18`** instead, where `V0` is
+  non-zero exactly when the next-row input is down. Stepping the cursor onto row
+  seven there leaves the retail clamp to decline a second step, so the two never
+  both fire -- and it needs no knowledge of which pad bit means "down".
+- `sltiu v0, s1, 7` at **`0x8010EC58`** guards the table.
+  `V82NativeVideoPage.Dispatch` is an inline hook there with
+  `branchTo: 8010ECE0`, claiming the row and skipping the retail dispatch.
+
+### The outer loop is not a frame loop
+
+The thing that cost the most time. `func_8010EA88` contains no VSync: **every
+retail sub-page owns its own inner frame loop** and returns only when the pad
+carries a bit that moves the row cursor or leaves the screen. Audio's runs
+`0x8010B9AC`-`0x8010C17C`; Back Story/Credits' runs inside `func_8010E854` and
+exits on `0x50900000`. Branching past the dispatch without supplying a loop
+does not crash -- the game simply stops presenting, `HostWindow.Present` is
+never reached, scripted input freezes and it looks like a hang.
+
+The minimal pump a settings page turns on is two calls:
+
+```
+func_80054C4C(a0 = 0)   VSync -- this is what reaches Runtime.PresentFrame
+func_80015540()         per-frame pad service; returns the processed word
+```
+
+### Processed pad word bit order
+
+`0x8006B4EC` does **not** use `Controller`'s bit order in either half. Observed
+directly: pressing Triangle yields `0x00100010`, so the shell's bit 4 is
+Triangle. The masks that matter, in shell order:
+
+| mask | meaning |
+|------|---------|
+| `0x10000000` | previous row |
+| `0x40000000` | next row |
+| `0x00900000` | leave Options (bit 4 is Triangle) |
+| `0x50900000` | the three together -- what a sub-page exits on |
+
+Read `Controller.State` for the page's own controls, as the controls page does,
+and use these only for handing the frame back.
+
+### Shape of the page
+
+`V82NativeVideoPage` browses and edits:
+
+- **Browsing** draws the settings read-only and returns on `0x50900000`, so the
+  row cursor behaves exactly as it does on every retail row. CROSS enters
+  editing.
+- **Editing** owns up/down/left/right, consumes the handled bits out of the
+  processed word so the outer loop cannot also act, and TRIANGLE returns to
+  browsing. Because TRIANGLE is also the leave-Options bit, returning disarms
+  the exit until the mask is seen clear -- otherwise the same press does both.
+
+Sixteen rows, six visible, scrolled with an "N more below" hint. Verified
+headless with `input-scripts/native_options_video_row.txt`.
+
+## Row plates: the missing one is at the top
+
+The capture settles it. With `START_Y=138` the eight text rows land at
+138,172,...,376 and the seven plates stay at the retail 172,...,376, so rows
+two through eight sit on plates one through seven and **`Game Status` is the
+row without a plate** -- not `Video`. `Game Status` also overlaps the V8:2 logo
+at that start Y. Both go away together if the logo shrinks and the list returns
+to its retail span, but an eighth plate is still needed either way.
+
 ## Row plates are a separate draw -- correction
 
 An earlier version of this document, and commit 2958f56, claimed the row plate
@@ -148,25 +236,69 @@ master volume and mute -- it has not been examined.
 When the Video sub-menu is built, present its contents as a bulleted list
 first; the user intends to trim it.
 
+## Two mechanisms were fighting over the same lines
+
+Phase 0 declared three seams in the manifest that the build-time Python scripts
+already owned. The scripts anchor on generated text, so once the recompiler
+emitted its own version of a line neither anchor matched and the script raised.
+That was invisible because the staged `Vigilante82PC.csproj` is gitignored and
+was being overwritten on every regeneration by the `reference-host` template,
+whose relative paths did not resolve from the staged directory -- so the
+pre-build scripts were simply not running. Fixed together:
+
+- Both csproj forms now use `..\..\..\tools\recompone-v8-2\`, which resolves
+  from the template's directory *and* from the staged one (both sit three
+  levels below the repo root, which is what the `ProjectReference` already
+  relied on). The `Exec` paths too.
+- `ResolveNativeSelectorSlot` returns the slot and the caller must store it to
+  `FP`. An inline patch emits a bare call, so declaring the resolver directly
+  **silently discarded the value** and the packaged-roster carousel seam did
+  nothing. `ApplyNativeSelectorSlot` is a void wrapper that stores it; the
+  manifest points at that and the script no longer touches L80106800.
+- `TryDraw` and `UpdateState` are correctly declared, so
+  `apply_native_options_patches.py` no longer applies them.
+- `PreHookTarget` is a single field: two `pre` patches on `func_8001A3B0`
+  meant the second silently replaced the first, and
+  `OverrideNativeSelectorText` was being lost. Only that one is declared now;
+  the script appends `TraceNativeOptionsText` as the second pre-hook.
+
+A recompiler warning when a `pre` patch overwrites an existing `PreHookTarget`
+would have caught the last one immediately, and is worth adding.
+
 ## Next step
 
-The row now draws, so what remains is **selection**: find the **selection** handler that maps the chosen row index to a page,
-and route index 7 to a new video page. Model that page on
-`V82NativeControlOptions` (`tools/recompone-v8-2/V82NativeControlOptions.cs`),
-which already does retail-native drawing, cursor, footer prompts and pad input
-for the controls page -- it is the working precedent and its seams are now
-declared, so it survives a regeneration.
+**An eighth row plate**, still not located -- see the two plate sections above.
+The row loop issues only the text call, so it comes from one of
+`func_80019294`, `func_8001AAFC`, `func_8002DE5C`, `func_8002DE84` (x2). The
+two `func_8002DE84` calls take colour-like arguments and pointers at
+`0x801006DC` and `0x801009B8` and remain the strongest candidates; if those
+turn out to be backdrop layers out of OPTIONS.PSX then the plates are art and
+an eighth needs a new primitive rather than a widened count.
 
-## Curated option set (draft, user to confirm the borderline ones)
+After that: **the curated option set needs trimming** (below), and the Audio
+page still has not been examined for whether master volume and mute fit on it.
 
-In: graphics preset, output resolution, fullscreen, widescreen, internal 3D
-resolution, anti-aliasing + MSAA, anisotropic filtering, texture smoothing,
-mipmaps, level of detail, extended draw distance, fog, shadows, particles,
-HUD anchoring. Audio page: master volume, mute.
+## Curated option set (built as the draft; user still to trim)
+
+The page ships the draft "in" list, sixteen rows in this order: Preset,
+Resolution, Fullscreen, Widescreen, Internal 3D, Anti-aliasing, MSAA,
+Anisotropic, Texture smoothing, Mipmaps, Level of detail, Draw distance, Fog,
+Shadows, Particles, HUD anchoring. Audio page (not built): master volume, mute.
+
+Every row maps onto an existing `ViewConfig` property and saves through
+`ConfigManager.SaveView`, so a change made here and one made in the ImGui
+Display section take the identical path. Resolution and fullscreen apply live
+through `HostWindow.SetOutputResolution` / `SetFullscreen`, reached from the
+recompiled project through new public wrappers on `V82Compat` because
+`HostWindow` is internal.
 
 Out (diagnostics): dithering, geometry correction, precise culling,
 perspective-correct textures/colours, enhanced depth buffer. Borderline and
-unconfirmed: true-colour output, vector fonts, vector icons, high-resolution 3D.
+unconfirmed: true-colour output, vector fonts, vector icons, high-resolution 3D
+(the last is currently driven implicitly by Internal 3D > 1x).
+
+Trimming is one edit to the `Rows` array; six rows are visible at a time, so
+dropping four would remove one page of scrolling.
 
 ## Known risk
 

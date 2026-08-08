@@ -19,15 +19,10 @@ DEFAULT_SOURCE = (
 )
 
 REPLACEMENTS = (
-    (
-        """        L80106800: ;
-        c.RA = 0x80106808u;
-""",
-        """        L80106800: ;
-        c.FP = RecompOne.Runtime.Sdk.V82VehicleRegistry.ResolveNativeSelectorSlot(c, m);
-        c.RA = 0x80106808u;
-""",
-    ),
+    # The carousel slot seam at L80106800 is no longer here: it is declared in
+    # prepare_reference.py as an inline patch on ApplyNativeSelectorSlot, which
+    # the recompiler emits directly. Two mechanisms writing the same line meant
+    # neither anchor matched after a regeneration.
     (
         """        c.V0 = c.FP + c.V0;
         c.V0 = m.ReadU8(c.V0);

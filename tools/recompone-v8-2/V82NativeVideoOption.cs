@@ -61,6 +61,23 @@ public static partial class Vigilante82PC
             raw.WriteU16(c.SP + 0x16u, (ushort)RowStride);
         }
 
+        /// <summary>
+        /// Runs after the <c>and v0, v0, v1</c> at 0x8010ED18 in the Options
+        /// frame loop, where V0 is non-zero exactly when the cursor's
+        /// next-row input is down and S1 holds the selected index.
+        ///
+        /// The clamp on the next instruction is <c>slti v0, s1, 6</c>, a
+        /// compiled constant that stops the cursor at the seventh row. Rather
+        /// than decode which bit of the shell's processed pad word means
+        /// "down", step onto the appended row here: the retail clamp then
+        /// declines to step again, so the two can never both fire.
+        /// </summary>
+        public static void ExtendCursorRange(CpuContext c, IMemory m)
+        {
+            if (c.V0 != 0u && (int)c.S1 == RowIndex - 1)
+                c.S1 = (uint)RowIndex;
+        }
+
         static void EnsureString(IMemory m)
         {
             if (_stringWritten) return;

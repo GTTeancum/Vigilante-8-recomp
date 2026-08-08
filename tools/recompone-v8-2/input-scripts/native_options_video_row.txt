@@ -1,0 +1,50 @@
+# Deterministic walk onto the appended VIDEO row and through its page.
+#
+# The boot prefix and the per-page DOWN presses are the discovery fixture's:
+# each retail Options sub-page signals a stage as its title is drawn, so the
+# cursor is stepped one row per stage rather than on absolute frames. Credits
+# is the last retail row, so the DOWN under it exercises the widened cursor
+# bound and reaches the appended row.
+540+3=START
+900+3=START
+960+3=DOWN
+1020+3=DOWN
+1080+3=CROSS
+
+[v82_options_game_status]
+40+3=DOWN
+
+[v82_options_memory_card]
+80+3=DOWN
+
+[v82_options_difficulty]
+40+3=DOWN
+
+[v82_options_controller]
+120+3=DOWN
+
+[v82_options_audio]
+80+3=DOWN
+
+[v82_options_back_story]
+80+3=DOWN
+
+[v82_options_credits]
+120+3=DOWN
+
+# Browsing shows the settings read-only and leaves the row cursor with the
+# outer loop. CROSS takes the page into editing, the DOWN run walks its own
+# list far enough to scroll the window, TRIANGLE returns to browsing without
+# also leaving Options, LEFT is inert there, and UP hands the row cursor back.
+[v82_options_native_video]
+60+3=CROSS
+120+3=DOWN
+180+3=DOWN
+240+3=DOWN
+300+3=DOWN
+360+3=DOWN
+420+3=DOWN
+480+3=DOWN
+540+3=TRIANGLE
+600+3=LEFT
+660+3=UP

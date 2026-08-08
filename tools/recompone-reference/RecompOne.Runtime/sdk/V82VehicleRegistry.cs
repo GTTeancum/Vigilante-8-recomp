@@ -414,6 +414,15 @@ public static class V82VehicleRegistry
     }
 
     /// <summary>
+    /// Manifest form of <see cref="ResolveNativeSelectorSlot"/>. An inline
+    /// patch can only emit a bare call, so a hook that returns a value has to
+    /// be declared through a wrapper that stores it; declaring the resolver
+    /// directly silently discards the slot it computed.
+    /// </summary>
+    public static void ApplyNativeSelectorSlot(CpuContext c, IMemory m) =>
+        c.FP = ResolveNativeSelectorSlot(c, m);
+
+    /// <summary>
     /// Extends the native 18-entry carousel without replacing it. The retail
     /// selector still performs all input repeat, transition, and availability
     /// handling; this seam inserts the packaged V8 entries only at the wrap.

@@ -4,6 +4,7 @@ using RecompOne.Runtime.Dispatch;
 using RecompOne.Runtime.Hardware;
 using RecompOne.Runtime.Hle;
 using RecompOne.Runtime.Host;
+using RecompOne.Runtime.Host.Window;
 using RecompOne.Runtime.Memory;
 
 namespace RecompOne.Runtime.Sdk;
@@ -35,6 +36,25 @@ public static class V82Compat
         InputManager.SignalScriptStage(
             "v82_options_native_controls", captureDelayPolls: 12);
     }
+
+    public static void SignalNativeVideoPage()
+    {
+        InputManager.SignalScriptStage(
+            "v82_options_native_video", captureDelayPolls: 12);
+    }
+
+    // HostWindow is internal to this assembly, so the native Video page in the
+    // recompiled project reaches display state through these wrappers. They
+    // are the same entry points the ImGui Display section uses, so a change
+    // made from the in-game menu and one made from the host panel take effect
+    // by the identical path.
+    public static void SetFullscreen(bool on) => HostWindow.SetFullscreen(on);
+
+    public static void SetOutputResolution(string resolution) =>
+        HostWindow.SetOutputResolution(resolution);
+
+    public static void ApplyGraphicsConfiguration() =>
+        HostWindow.ApplyGraphicsConfiguration();
 
     public static void TraceNativeOptionsText(CpuContext c, IMemory m)
     {

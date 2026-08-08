@@ -245,6 +245,32 @@ PROVEN_PATCHES = [
         "mode": "inline",
         "position": "before",
     },
+    # Selecting the appended row. func_8010EA88 is the Options frame loop: it
+    # redraws the list, dispatches the selected index through a seven-entry
+    # jump table at 0x80101180, then reads the pad to move the cursor. Two
+    # compiled constants confine that to seven rows.
+    #
+    # 0x8010ED18 is the `and` whose result decides whether the next-row input
+    # is down; stepping the cursor onto row seven there leaves the following
+    # `slti v0, s1, 6` to decline a second step.
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "8010ED18",
+        "target": "V82NativeVideoOption.ExtendCursorRange",
+        "mode": "inline",
+        "position": "after",
+    },
+    # 0x8010EC58 is `sltiu v0, s1, 7`, the jump table's bound check. Row seven
+    # has no table entry, so the hook claims the frame and branches to the
+    # loop's common continuation instead of letting the dispatch run.
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "8010EC58",
+        "target": "V82NativeVideoPage.Dispatch",
+        "mode": "inline",
+        "position": "before",
+        "branchTo": "8010ECE0",
+    },
     # Widescreen terrain traversal. Six calls stack at the entry of
     # func_8001BECC; "pre" cannot express that because PreHookTarget is a
     # single field and each would clobber the last, so they are inline seams
@@ -294,7 +320,10 @@ PROVEN_PATCHES = [
     {
         "overlay": "SHELL_SHELL",
         "address": "80106800",
-        "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.ResolveNativeSelectorSlot",
+        # The wrapper, not the resolver: an inline patch emits a bare call, so
+        # declaring the value-returning resolver here dropped the slot it
+        # computed and left the carousel seam doing nothing.
+        "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.ApplyNativeSelectorSlot",
         "mode": "inline",
         "position": "before",
     },
@@ -923,15 +952,13 @@ PROVEN_PATCHES = [
         "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.OverrideNativeSelectorText",
         "mode": "pre",
     },
-    {
-        # Observe the retail SHELL text renderer rather than introducing a
-        # host-side menu. This supplies deterministic stage/capture points for
-        # the unmodified V8:2 Options pages and native PC extensions.
-        "overlay": "main",
-        "address": "8001A3B0",
-        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceNativeOptionsText",
-        "mode": "pre",
-    },
+    # The retail SHELL text renderer is observed too, rather than introducing a
+    # host-side menu, which supplies deterministic stage/capture points for the
+    # unmodified V8:2 Options pages and the native PC extensions. That second
+    # pre-hook on func_8001A3B0 is NOT declared here: PreHookTarget is a single
+    # field, so a second "pre" entry on the same address silently replaces the
+    # first and the selector override above is lost. apply_native_options_
+    # patches.py appends it to the generated source instead.
     {
         # Gameplay pause/objective prompts use the sibling formatted-text
         # renderer. Observe that stock seam as well so context-sensitive PC
