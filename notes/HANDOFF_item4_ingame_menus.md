@@ -81,19 +81,40 @@ Note both `Vigilante82PC.csproj` files needed the new file added -- the staged
 one and the host template in `reference-host/`, which uses a different relative
 path.
 
-## Row plate and colour: were clipping, not missing
+## Row plates are a separate draw -- correction
 
-A first capture showed `Video` as bare white text below the panel border, and
-that was reported as three defects: overflow, a missing row plate, and wrong
-colour. Two of the three had the same cause. Only one call runs per row
-(`func_8001A3B0`), so it draws the plate and the text together; the eighth row
-simply fell outside the panel's clip, which kept the plate and left the text
-visible. Lifting the list fixed all three at once -- `Video` now has its
-rounded plate and the same gold as the other seven, and the colour mirror in
-`AppendRow` needed no change.
+An earlier version of this document, and commit 2958f56, claimed the row plate
+and its text come from one call and that the eighth row's plate was merely
+clipped. **That is wrong.** Plate and text are drawn independently.
 
-Worth remembering as a general point: "element missing" in this shell usually
-means clipped, because so much is drawn through one call per row.
+What misled it: the retail list starts at Y=172 with a stride of 34, and the
+first attempt lifted the start to 138. `172 - 34 == 138`, exactly one stride,
+so every text row landed on the *previous* row's plate. Rows two through eight
+looked perfect, `Video` sat on the `Credits` plate, and only `Game Status` had
+no plate above it -- which reads exactly like a clipped top edge. Setting
+`RECOMPONE_V82_OPTIONS_START_Y=158`, which is not offset by a whole stride,
+separates them visibly: text high, plates low, every row struck through.
+
+So the true state is **seven plates at fixed positions and eight text rows**.
+An eighth plate has to be drawn.
+
+When debugging this, keep the start Y off a multiple of the stride or the
+coincidence hides the problem again.
+
+## Where the plates come from
+
+Not yet identified. The row loop issues exactly one call per row
+(`func_8001A3B0`, the text), so the plates are emitted before it, by one of:
+
+```
+func_80019294   func_8001AAFC   func_8002DE5C   func_8002DE84 (x3)
+```
+
+The three `func_8002DE84` calls take colour-like arguments
+(`0x00FF0000|0xFFFF`, `0x003F0000|0x3F3F`, `0x00400000|0x4080`) and pointers at
+`0x801006DC` and `0x801009B8`, so they are the strongest candidates. Whichever
+draws the plates will have its own count of seven, in the same shape as the row
+loop's, and extending it is the same kind of change as `AppendRow`.
 
 ## Layout levers
 
@@ -109,11 +130,23 @@ RECOMPONE_V82_OPTIONS_START_Y      default 138 (retail 172)
 RECOMPONE_V82_OPTIONS_ROW_STRIDE   default 34  (retail 34)
 ```
 
-At 138/34 all eight rows sit inside the panel. The first row now overlaps the
-Vigilante 8 logo, which is the open art question -- the user intends to
-redesign that area. Tightening the stride instead of raising the start is the
-alternative if the logo is to be preserved: seven rows spanned 238px, so a
-stride of 29-30 fits eight in the same space.
+At 138/34 all eight text rows sit inside the panel, but see the correction
+above -- that particular value aligns text against the wrong plates. The user
+intends to shrink the V8:2 logo to make room, so the start Y can rise once the
+art changes and an eighth plate exists. Tightening the stride is the
+alternative if the logo is kept: seven rows spanned 238px, so 29-30 fits eight
+in the retail span.
+
+## Scope of this screen
+
+`Video` is the only new row needed. The curated set maps onto existing rows
+otherwise: audio settings extend the retail `Audio` row, bindings extend
+`Controllers` (already built as `V82NativeControlOptions`). The one thing that
+could force a ninth row is the retail Audio page turning out to be unusable for
+master volume and mute -- it has not been examined.
+
+When the Video sub-menu is built, present its contents as a bulleted list
+first; the user intends to trim it.
 
 ## Next step
 
