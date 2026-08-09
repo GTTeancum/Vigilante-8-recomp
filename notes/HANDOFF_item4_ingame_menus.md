@@ -243,15 +243,33 @@ What is known:
   own frame pump calls.
 - `func_80015540` consumes an **eight-slot ring of pad samples**: `gp+0xD08` is
   a write cursor, `gp+0xCF8` a read cursor, samples at 0x800B52E0 stride 20. It
-  advances the write cursor **only when the two differ**, so if they meet, it
-  keeps re-reading one stale slot and yields no edges. That is exactly the
-  observed symptom, and it would be permanent if nothing advances the read
-  cursor afterwards.
+  advances the write cursor only when the two differ, so if they met it would
+  re-read one stale slot forever.
+- **That ring is not the cause.** Probed directly: throughout the Video page
+  the two cursors advance in lockstep at a constant gap of two, and at the
+  instant Back Story is entered they read r=3 w=1 -- healthy. The theory was
+  wrong and is recorded here so nobody spends the time twice.
+- Frames keep presenting and the page's content stays on screen, so the text
+  page is looping; it simply never satisfies
+  `func_800117C0() & 0x50900000`. The next probe to write is one inside
+  `func_8010E854`'s own loop, logging what func_80015540 returns there.
 
-The likely fix is to stop running an independent frame loop: rebuild the Video
-page on a retail page's loop the way `V82NativeControlOptions` does, taking
-over only the drawing and never calling the pad service itself. That is the
-pattern already proven in this codebase and it avoids the ring entirely.
+The intended fix is still to stop running an independent frame loop: rebuild
+the Video page on a retail page's loop the way `V82NativeControlOptions` does,
+taking over only the drawing and never pumping frames or reading the pad. Two
+obstacles found while scoping it:
+
+- Borrowing the **Controllers** page (`func_8010A5BC`) is the cleanest fit
+  because its seams already exist and are proven -- `TryDraw` at `L8010AE8C`
+  with `branchTo: 8010B1EC` skips the body but keeps the tail that owns VSync
+  and the pad. But its title and player emblems are drawn in the *prologue*,
+  before the loop, so a Video page hosted there would say CONTROLLER. That
+  needs a title override on `func_8001A3B0`, which is at least precedented by
+  `OverrideNativeSelectorText`.
+- Borrowing the **Audio** page (`func_8010B84C`) fits structurally -- body,
+  then `VSync(0)` and func_80015540 at 0x8010BD80, then input, then loop -- but
+  the point to branch to (0x8010BD80) is not a branch target anywhere, so the
+  recompiler emits no label for it and `branchTo` has nothing to name.
 
 ## Correction: the earlier "missing plate" readings
 
