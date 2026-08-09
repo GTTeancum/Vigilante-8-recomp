@@ -227,23 +227,19 @@ EXTRA_OVERLAY_FUNCTIONS = {
 }
 
 PROVEN_PATCHES = [
-    # A VIDEO row appended to the retail Options list. The row count in
-    # func_80108B48 is a compiled constant, but the loop needs no replacing:
-    # at its exit the text object, layout rect and selection index are all
-    # still live, so an eighth row is drawn there. See V82NativeVideoOption.
+    # A VIDEO row added to the retail Options list. The row count in
+    # func_80108B48 is a compiled constant and the seven row plates behind the
+    # text are panel geometry, so an eighth row cannot simply be drawn on the
+    # end. The loop renders seven rows from wherever S2 points, though, so the
+    # hook points it into an eight-entry table and slides the window by one
+    # when the cursor reaches the appended row. 0x80108C1C is the instruction
+    # that loads the retail table, with the selected index live in S4.
     {
         "overlay": "SHELL_SHELL",
         "address": "80108C1C",
         "target": "V82NativeVideoOption.AdjustLayout",
         "mode": "inline",
         "position": "after",
-    },
-    {
-        "overlay": "SHELL_SHELL",
-        "address": "80108C90",
-        "target": "V82NativeVideoOption.AppendRow",
-        "mode": "inline",
-        "position": "before",
     },
     # Selecting the appended row. func_8010EA88 is the Options frame loop: it
     # redraws the list, dispatches the selected index through a seven-entry

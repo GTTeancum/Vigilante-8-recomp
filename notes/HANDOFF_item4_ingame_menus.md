@@ -66,20 +66,14 @@ between the two mechanisms does not double-apply.
 
 ## Phase 1: the VIDEO row draws
 
-Done and verified. `V82NativeVideoOption.AppendRow` is an inline hook at
-`0x80108C90`, the loop exit of `func_80108B48`, where the text object, layout
-rect and selection index are all still live. It writes a "Video" string to
-scratch at `0x8011AE80`, mirrors the loop's own colour selection so the row
-highlights and greys like the retail seven, and draws through the same
-`func_8001A3B0` call.
-
-Verified by regeneration (the hook lands exactly at the loop exit) and at
-runtime: the row list now reads `Game Status, Memory Card, Difficulty,
-Controllers, Audio, Back Story, Credits, Video`.
+Done. The first version of this was `V82NativeVideoOption.AppendRow`, an inline
+hook at the loop exit `0x80108C90` that drew an eighth row below the retail
+seven. Phase 3 replaced it with the scrolling window described below, which
+puts every row on a plate, so `AppendRow` and its patch entry are gone.
 
 Note both `Vigilante82PC.csproj` files needed the new file added -- the staged
-one and the host template in `reference-host/`, which uses a different relative
-path.
+one and the host template in `reference-host/`. They used *different* relative
+paths, which turned out to be a bug in its own right; see below.
 
 ## Phase 2: the row selects, and the Video page runs
 
@@ -155,75 +149,93 @@ and use these only for handing the frame back.
 - **Editing** owns up/down/left/right, consumes the handled bits out of the
   processed word so the outer loop cannot also act, and TRIANGLE returns to
   browsing. Because TRIANGLE is also the leave-Options bit, returning disarms
-  the exit until the mask is seen clear -- otherwise the same press does both.
+  the exit until the button is seen released -- otherwise the same press does
+  both, and the screen drops to the main menu.
+
+  Arming has to watch `Controller.State`, **not** the processed word: leaving
+  editing consumes that word, so it reads clear on the next frame while the
+  button is still down, the exit arms, and the frame after that the still-held
+  press fires it. That failure looked exactly like "UP exits Options" and cost
+  a while to pin on TRIANGLE.
+
+Its own row list rebuild runs every frame (`func_80108B48` direct, not
+`func_80108D1C`, which would also reset the footer). The outer loop only draws
+the list once per iteration, and this page holds the frame for many.
 
 Sixteen rows, six visible, scrolled with an "N more below" hint. Verified
 headless with `input-scripts/native_options_video_row.txt`.
 
-## Row plates: the missing one is at the top
+## Row plates: eight rows through seven plates
 
-The capture settles it. With `START_Y=138` the eight text rows land at
-138,172,...,376 and the seven plates stay at the retail 172,...,376, so rows
-two through eight sit on plates one through seven and **`Game Status` is the
-row without a plate** -- not `Video`. `Game Status` also overlaps the V8:2 logo
-at that start Y. Both go away together if the logo shrinks and the list returns
-to its retail span, but an eighth plate is still needed either way.
+The plates are art, not code -- see the evidence section below. There is no
+eighth plate and none can be produced from the shell. Eight rows do not need
+eight plates, though: the row loop draws seven rows from wherever S2 points, so
+`AdjustLayout` points it into an eight-entry table of its own and slides the
+window by one when the cursor reaches the appended row.
 
-## Row plates are a separate draw -- correction
+Rows zero through six render **byte-identical to stock** -- verified by
+differing the row strip of all seven retail sub-page captures against a stock
+build, zero pixels. On row seven the list scrolls a single step: Game Status
+leaves the top and Video occupies the last plate, every row on a plate at its
+retail position, the logo untouched.
+
+`RECOMPONE_V82_OPTIONS_START_Y` and `_ROW_STRIDE` now default to the retail
+172/34 and are only debugging levers.
+
+### The panel is never repainted
+
+This cost the most time after the frame loop. Nothing redraws the Options panel
+between builds: the shell draws it once and leaves it, which is why the retail
+seven can be written over themselves forever without anyone noticing. A window
+that changes which label sits in which slot *is* noticed -- the old text stays
+under the new one, and no amount of rebuilding clears it, because
+`func_80019294` mallocs a transient object and `func_80019320` frees it again.
+
+So `ErasePlateText` repaints the plate interiors with `func_8001ADF8` first,
+the same primitive every page repaints its content field with. The box is
+X=39..207, Y=181..201 stepping 34, in colour 0x182018, all measured off a stock
+capture: the gold border sits at X=28..31 and 212..217 with a bevel either
+side, and the corners are rounded, so the fill is inset to clear them. It runs
+only when the window has actually moved, which is what keeps the retail rows
+bit-exact.
+
+## Correction: the earlier "missing plate" readings
 
 An earlier version of this document, and commit 2958f56, claimed the row plate
 and its text come from one call and that the eighth row's plate was merely
-clipped. **That is wrong.** Plate and text are drawn independently.
+clipped. That is wrong -- plate and text are drawn independently. A later
+version then said the missing plate was `Game Status`'s. Also wrong, in the
+sense that mattered: there was never a missing plate, only a list one row too
+long for the seven that exist.
 
-What misled it: the retail list starts at Y=172 with a stride of 34, and the
-first attempt lifted the start to 138. `172 - 34 == 138`, exactly one stride,
-so every text row landed on the *previous* row's plate. Rows two through eight
-looked perfect, `Video` sat on the `Credits` plate, and only `Game Status` had
-no plate above it -- which reads exactly like a clipped top edge. Setting
-`RECOMPONE_V82_OPTIONS_START_Y=158`, which is not offset by a whole stride,
-separates them visibly: text high, plates low, every row struck through.
+What misled the first reading: the retail list starts at Y=172 with a stride of
+34, and the first attempt lifted the start to 138. `172 - 34 == 138`, exactly
+one stride, so every text row landed on the *previous* row's plate. Rows two
+through eight looked perfect and only `Game Status` had no plate above it,
+which reads exactly like a clipped top edge. When debugging anything in this
+area, keep the start Y off a multiple of the stride or the coincidence hides
+the problem again.
 
-So the true state is **seven plates at fixed positions and eight text rows**.
-An eighth plate has to be drawn.
+## Where the plates come from -- settled
 
-When debugging this, keep the start Y off a multiple of the stride or the
-coincidence hides the problem again.
+Nowhere in code. Ruled out, in order:
 
-## Where the plates come from
+- The two `func_8002DE84` calls, the strongest earlier candidates, are
+  **lights**: their pointer arguments hold 4.12 unit vectors (`0x801006DC` is
+  `(0, 0, -4096)`, `0x801009B8` is `(0, -4096, 0)`) and the third argument is
+  the colour.
+- No table of Y values stepping 34 from 172 exists anywhere in SHELL.DLL, at
+  any stride -- scanned exhaustively as halfwords.
+- No seven-iteration draw loop exists besides the row loop. The only other
+  `< 7` comparisons in the overlay are the jump-table bound, the pages' own
+  loops, and a glyph-class helper.
+- A GPU primitive trace over the row strip shows the panel arriving as a mesh
+  of small skewed textured quads, and moving the loop's layout leaves the
+  plates where they were. They are geometry on the transformed panel.
 
-Not yet identified. The row loop issues exactly one call per row
-(`func_8001A3B0`, the text), so the plates are emitted before it, by one of:
-
-```
-func_80019294   func_8001AAFC   func_8002DE5C   func_8002DE84 (x3)
-```
-
-The three `func_8002DE84` calls take colour-like arguments
-(`0x00FF0000|0xFFFF`, `0x003F0000|0x3F3F`, `0x00400000|0x4080`) and pointers at
-`0x801006DC` and `0x801009B8`, so they are the strongest candidates. Whichever
-draws the plates will have its own count of seven, in the same shape as the row
-loop's, and extending it is the same kind of change as `AppendRow`.
-
-## Layout levers
-
-The row loop's layout rect sits on the stack and is written just before the
-loop: X at `[SP+0x10]` (40), start Y at `[SP+0x12]` (172), a width-ish field
-at `[SP+0x14]` (16) and the row stride at `[SP+0x16]` (34).
-`V82NativeVideoOption.AdjustLayout`, an inline hook at `0x80108C1C`, rewrites
-the start Y and stride once before the loop. Both are tunable without a
-rebuild:
-
-```
-RECOMPONE_V82_OPTIONS_START_Y      default 138 (retail 172)
-RECOMPONE_V82_OPTIONS_ROW_STRIDE   default 34  (retail 34)
-```
-
-At 138/34 all eight text rows sit inside the panel, but see the correction
-above -- that particular value aligns text against the wrong plates. The user
-intends to shrink the V8:2 logo to make room, so the start Y can rise once the
-art changes and an eighth plate exists. Tightening the stride is the
-alternative if the logo is kept: seven rows spanned 238px, so 29-30 fits eight
-in the retail span.
+Incidental: the jump table at `0x80101180` is immediately followed by the
+string `Shell\Cursor.PSX`, so there was no room to extend it in place -- the
+hook was the only option.
 
 ## Scope of this screen
 
@@ -288,41 +300,15 @@ within ten minutes on `native_chassey_gameplay_camera_proof.txt`, which stops
 at `choose_enemies`. This restores the pre-phase-0 state rather than
 introducing anything, and the shell and selector paths run clean.
 
-## Row plates are art, not code -- settled
-
-The producer is not in the shell overlay. Ruled out:
-
-- The two `func_8002DE84` calls, the strongest earlier candidates, are
-  **lights**: their pointer arguments hold 4.12 unit vectors (`0x801006DC` is
-  `(0, 0, -4096)`, `0x801009B8` is `(0, -4096, 0)`) and the third argument is
-  the colour. Nothing to do with plates.
-- No table of Y values stepping 34 from 172 exists anywhere in SHELL.DLL, at
-  any stride -- scanned exhaustively as halfwords.
-- No seven-iteration draw loop exists other than the row loop itself. The only
-  other `< 7` comparisons in the overlay are the jump-table bound, the pages'
-  own loops, and a glyph-class helper.
-- The plates skew and scale with the panel during the screen transition, so
-  they are geometry or texture on the transformed 3D panel, not a 2D backdrop.
-
-So an eighth plate needs an art change or a 2D quad that only lines up when the
-panel is at rest. That fits the intent to shrink the V8:2 logo: worth doing in
-one pass with the layout rather than bolting on a primitive now.
-
-Incidental: the jump table at `0x80101180` is immediately followed by the
-string `Shell\Cursor.PSX`, so there is no room to extend it in place -- the
-hook was the only option.
-
 ## Next step
 
-**The list layout and the eighth plate, together with the logo art.** The plate
-producer is settled (see above): it is art, so the row list, the logo and the
-plates want one combined pass rather than a code-side patch. Until then
-`RECOMPONE_V82_OPTIONS_START_Y=138` leaves `Game Status` plateless and
-overlapping the logo.
+**Trim the curated option set** (below) -- the only thing still waiting on the
+user. Then examine the Audio page for whether master volume and mute fit on it;
+that remains the only thing that could force a ninth row, which the window
+would absorb without needing anything new.
 
-Then: **trim the curated option set** (below), and examine the Audio page for
-whether master volume and mute fit on it -- still the only thing that could
-force a ninth row.
+The logo/layout art change is now optional rather than blocking: the list fits
+its plates as it stands.
 
 ## Curated option set (built as the draft; user still to trim)
 

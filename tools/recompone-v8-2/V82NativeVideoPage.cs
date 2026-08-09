@@ -88,6 +88,12 @@ public static partial class Vigilante82PC
         // Credits exit on exactly this mask.
         const uint PageExitMask = 0x50900000u;
 
+        // The same four controls on the runtime's own pad. Arming has to watch
+        // these rather than the processed word: leaving editing consumes that
+        // word, so it reads clear for a frame while the button is still down,
+        // and the exit would arm and then immediately fire on the same press.
+        const uint ExitButtons = Up | Down | Triangle | Square;
+
         static bool _editing;
         static bool _exitArmed;
         static int _row;
@@ -129,6 +135,7 @@ public static partial class Vigilante82PC
 
             while (true)
             {
+                RedrawRowList(c, m);
                 DrawPage(c, m);
                 uint pad = PumpFrame(c, m);
 
@@ -141,7 +148,7 @@ public static partial class Vigilante82PC
                     // Browsing: the row list still owns the cursor, so hand
                     // the frame back and let the outer loop act on the press.
                     if (!_exitArmed)
-                        _exitArmed = (pad & PageExitMask) == 0u;
+                        _exitArmed = (input & ExitButtons) == 0u;
                     else if ((pad & PageExitMask) != 0u)
                     {
                         SetFooter(c, m, 4, RetailFooterStrings);
@@ -181,6 +188,29 @@ public static partial class Vigilante82PC
                 // to it. Clear them from the processed word so the outer loop
                 // cannot also move the row cursor or leave the screen.
                 ConsumeNativePadWord(m);
+            }
+        }
+
+        /// <summary>
+        /// The outer loop draws the row list once per iteration, and this page
+        /// holds the frame for many, so the list has to be rebuilt here or the
+        /// window shift that puts Video on the last plate stays half-applied.
+        /// func_80108B48 direct, not func_80108D1C, because the latter also
+        /// resets the footer to the retail prompts.
+        /// </summary>
+        static void RedrawRowList(CpuContext c, IMemory m)
+        {
+            var snapshot = c.Snapshot();
+            try
+            {
+                c.A0 = 0u;
+                c.A1 = (uint)V82NativeVideoOption.RowIndex;
+                c.RA = ReturnAddress;
+                func_80108B48(c, m);
+            }
+            finally
+            {
+                c.Restore(snapshot);
             }
         }
 

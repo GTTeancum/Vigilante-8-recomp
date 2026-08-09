@@ -46,5 +46,8 @@
 420+3=DOWN
 480+3=DOWN
 540+3=TRIANGLE
-600+3=LEFT
+# UP hands the cursor back to Credits, whose title redraw re-fires the
+# v82_options_credits stage -- that capture is the return-path evidence, so no
+# extra pulse is needed. (Nothing here is safe to use as an inert filler: LEFT
+# is part of the shell's leave-Options mask and drops out to the main menu.)
 660+3=UP
