@@ -106,7 +106,7 @@ public static partial class Vigilante82PC
         /// </summary>
         public static bool Dispatch(CpuContext c, IMemory m)
         {
-            if ((int)c.S1 != V82NativeVideoOption.RowIndex)
+            if ((int)c.S1 != V82NativeVideoOption.VideoRowIndex)
                 return false;
 
             var snapshot = c.Snapshot();
@@ -204,7 +204,7 @@ public static partial class Vigilante82PC
             try
             {
                 c.A0 = 0u;
-                c.A1 = (uint)V82NativeVideoOption.RowIndex;
+                c.A1 = (uint)V82NativeVideoOption.VideoRowIndex;
                 c.RA = ReturnAddress;
                 func_80108B48(c, m);
             }

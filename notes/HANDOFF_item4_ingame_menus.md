@@ -199,6 +199,60 @@ side, and the corners are rounded, so the fill is inset to clear them. It runs
 only when the window has actually moved, which is what keeps the retail rows
 bit-exact.
 
+## Row order: Video sits under Audio
+
+Decided with the user. The list is Game Status, Memory Card, Difficulty,
+Controllers, Audio, **Video**, Back Story, Credits -- the two audio/video pages
+together, the informational rows last.
+
+Splicing it in at five needs the page dispatch remapped as well as the strings.
+`func_8010EA88` dispatches with `v0 = [s3 + s1*4]`, so `WidenDispatch` biases
+S3 by one entry for indices above five: six and seven then read the retail
+entries five and six, Back Story and Credits. Nothing is copied and nothing is
+written to guest memory, so the entries stay whatever the loader relocated them
+to. It also has to admit the eighth index -- `sltiu v0, s1, 7` at 0x8010EC58
+would otherwise drop Credits entirely.
+
+The scroll rule is unchanged, but it now bites on Credits rather than Video:
+`top` is one only at index seven. Sitting on Video the list does not scroll at
+all, so the plate erase never runs there.
+
+Note the retail row strip is **no longer byte-identical to stock** -- it cannot
+be, because two of the seven visible labels genuinely changed. The differing
+pixel count is 2411 and it is entirely the two relabelled slots.
+
+## KNOWN DEFECT: the page you land on after Video goes deaf
+
+Leaving the Video page hands the cursor back correctly and the list redraws
+correctly, but the retail text page the cursor then lands on stops responding
+to input. Frames keep presenting; DOWN, UP and TRIANGLE are all ignored, and
+the only way out is to quit.
+
+**This is not caused by the row reorder.** It reproduces in the previous build
+too, where UP from Video lands on Credits and the next DOWN does nothing --
+verified in that build's own log. It was missed because no fixture pressed
+anything after the return.
+
+What is known:
+
+- The outer loop stops iterating entirely once the text page is resident,
+  proven by an inline probe in `WidenDispatch` that logs once per iteration and
+  fired exactly once.
+- Those pages exit on `func_800117C0() & 0x50900000`, and `func_800117C0` is a
+  one-line wrapper around `func_80015540` -- the same routine the Video page's
+  own frame pump calls.
+- `func_80015540` consumes an **eight-slot ring of pad samples**: `gp+0xD08` is
+  a write cursor, `gp+0xCF8` a read cursor, samples at 0x800B52E0 stride 20. It
+  advances the write cursor **only when the two differ**, so if they meet, it
+  keeps re-reading one stale slot and yields no edges. That is exactly the
+  observed symptom, and it would be permanent if nothing advances the read
+  cursor afterwards.
+
+The likely fix is to stop running an independent frame loop: rebuild the Video
+page on a retail page's loop the way `V82NativeControlOptions` does, taking
+over only the drawing and never calling the pad service itself. That is the
+pattern already proven in this codebase and it avoids the ring entirely.
+
 ## Correction: the earlier "missing plate" readings
 
 An earlier version of this document, and commit 2958f56, claimed the row plate

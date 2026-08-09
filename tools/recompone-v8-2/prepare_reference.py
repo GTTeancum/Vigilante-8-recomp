@@ -256,9 +256,10 @@ PROVEN_PATCHES = [
         "mode": "inline",
         "position": "after",
     },
-    # 0x8010EC58 is `sltiu v0, s1, 7`, the jump table's bound check. Row seven
-    # has no table entry, so the hook claims the frame and branches to the
-    # loop's common continuation instead of letting the dispatch run.
+    # 0x8010EC58 is `sltiu v0, s1, 7`, the jump table's bound check. The
+    # appended row has no table entry, so the hook claims the frame and
+    # branches to the loop's common continuation instead of letting the
+    # dispatch run.
     {
         "overlay": "SHELL_SHELL",
         "address": "8010EC58",
@@ -266,6 +267,17 @@ PROVEN_PATCHES = [
         "mode": "inline",
         "position": "before",
         "branchTo": "8010ECE0",
+    },
+    # After the same instruction, and before S3 is added to the scaled index:
+    # admit the eighth index, or Credits never dispatches, and repoint S3 at a
+    # remapped table, because Video sits at five and pushes Back Story and
+    # Credits onto the retail entries five and six.
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "8010EC58",
+        "target": "V82NativeVideoOption.WidenDispatch",
+        "mode": "inline",
+        "position": "after",
     },
     # Widescreen terrain traversal. Six calls stack at the entry of
     # func_8001BECC; "pre" cannot express that because PreHookTarget is a

@@ -2,9 +2,9 @@
 #
 # The boot prefix and the per-page DOWN presses are the discovery fixture's:
 # each retail Options sub-page signals a stage as its title is drawn, so the
-# cursor is stepped one row per stage rather than on absolute frames. Credits
-# is the last retail row, so the DOWN under it exercises the widened cursor
-# bound and reaches the appended row.
+# cursor is stepped one row per stage rather than on absolute frames. Video
+# sits under Audio, so the fifth DOWN reaches it; the widened cursor bound and
+# the remapped jump table are then exercised by walking on down to Credits.
 540+3=START
 900+3=START
 960+3=DOWN
@@ -23,19 +23,19 @@
 [v82_options_controller]
 120+3=DOWN
 
+# Video sits directly under Audio, so this DOWN lands on it and Back Story and
+# Credits are the two rows below.
 [v82_options_audio]
 80+3=DOWN
 
-[v82_options_back_story]
-80+3=DOWN
-
-[v82_options_credits]
-120+3=DOWN
-
 # Browsing shows the settings read-only and leaves the row cursor with the
 # outer loop. CROSS takes the page into editing, the DOWN run walks its own
-# list far enough to scroll the window, TRIANGLE returns to browsing without
-# also leaving Options, LEFT is inert there, and UP hands the row cursor back.
+# list far enough to scroll the window, and TRIANGLE returns to browsing
+# without also leaving Options. The DOWN after that hands the row cursor on to
+# Back Story, whose title redraw fires the next stage -- that is the evidence
+# the remapped jump table sends index six to the right page. (Nothing is safe
+# as an inert filler here: LEFT is part of the shell's leave-Options mask and
+# drops out to the main menu.)
 [v82_options_native_video]
 60+3=CROSS
 120+3=DOWN
@@ -46,8 +46,19 @@
 420+3=DOWN
 480+3=DOWN
 540+3=TRIANGLE
-# UP hands the cursor back to Credits, whose title redraw re-fires the
-# v82_options_credits stage -- that capture is the return-path evidence, so no
-# extra pulse is needed. (Nothing here is safe to use as an inert filler: LEFT
-# is part of the shell's leave-Options mask and drops out to the main menu.)
-660+3=UP
+660+3=DOWN
+
+# Index seven, the row the window scrolls for. Reaching Credits at all proves
+# the widened bound, and its title proves the remap; UP then walks back.
+# KNOWN DEFECT: nothing below responds. Whichever retail text page the cursor
+# lands on after leaving the Video page stops taking input -- frames keep
+# presenting, but func_80015540 yields no more edges inside it, so DOWN, UP and
+# TRIANGLE are all ignored. This is not caused by the row reorder; the same
+# thing happens in the previous build when UP lands on Credits. See the handoff.
+[v82_options_back_story]
+100+3=DOWN
+160+3=UP
+220+3=TRIANGLE
+
+[v82_options_credits]
+140+3=UP
