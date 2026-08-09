@@ -262,21 +262,67 @@ pre-build scripts were simply not running. Fixed together:
   `OverrideNativeSelectorText` was being lost. Only that one is declared now;
   the script appends `TraceNativeOptionsText` as the second pre-hook.
 
-A recompiler warning when a `pre` patch overwrites an existing `PreHookTarget`
-would have caught the last one immediately, and is worth adding.
+### The guard, and the two more it found
+
+`OverlayWriter.ApplyPatches` now warns when a `pre` or `post` patch replaces a
+target already set on the same function. It found two more live cases on its
+first run:
+
+- **`func_8001BECC`** carried the six widescreen terrain-traversal hooks
+  *twice*: once as the inline seams phase 0 added, and once as the older `pre`
+  entries it forgot to delete. Five of those six were being discarded and the
+  sixth was running an extra time. Behaviour was accidentally correct because
+  the survivor, `TraceTerrainTraversalPolygon`, is not in the inline set.
+  Duplicates deleted; only the trace stays `pre`.
+- **`func_8002D9E0`** had `BeginObjectRender` silently replacing
+  `RepairObjectTerrainQuery`, so that hook had not run since phase 0.
+  `ApplyLevelOfDetail` has exactly one caller and it is inside
+  `RepairObjectTerrainQuery`, so the per-object half of the level-of-detail
+  setting was dead -- including for the Video page's own "Level of detail"
+  row. `BeginObjectRender` is an inline seam now and both run again.
+
+Both hooks there are `void`, and `PreHook.Run(Action, ...)` always returns
+true, so moving one to an inline seam changes nothing except which hooks run.
+Not verified in gameplay: neither Debug nor Release headless reached a match
+within ten minutes on `native_chassey_gameplay_camera_proof.txt`, which stops
+at `choose_enemies`. This restores the pre-phase-0 state rather than
+introducing anything, and the shell and selector paths run clean.
+
+## Row plates are art, not code -- settled
+
+The producer is not in the shell overlay. Ruled out:
+
+- The two `func_8002DE84` calls, the strongest earlier candidates, are
+  **lights**: their pointer arguments hold 4.12 unit vectors (`0x801006DC` is
+  `(0, 0, -4096)`, `0x801009B8` is `(0, -4096, 0)`) and the third argument is
+  the colour. Nothing to do with plates.
+- No table of Y values stepping 34 from 172 exists anywhere in SHELL.DLL, at
+  any stride -- scanned exhaustively as halfwords.
+- No seven-iteration draw loop exists other than the row loop itself. The only
+  other `< 7` comparisons in the overlay are the jump-table bound, the pages'
+  own loops, and a glyph-class helper.
+- The plates skew and scale with the panel during the screen transition, so
+  they are geometry or texture on the transformed 3D panel, not a 2D backdrop.
+
+So an eighth plate needs an art change or a 2D quad that only lines up when the
+panel is at rest. That fits the intent to shrink the V8:2 logo: worth doing in
+one pass with the layout rather than bolting on a primitive now.
+
+Incidental: the jump table at `0x80101180` is immediately followed by the
+string `Shell\Cursor.PSX`, so there is no room to extend it in place -- the
+hook was the only option.
 
 ## Next step
 
-**An eighth row plate**, still not located -- see the two plate sections above.
-The row loop issues only the text call, so it comes from one of
-`func_80019294`, `func_8001AAFC`, `func_8002DE5C`, `func_8002DE84` (x2). The
-two `func_8002DE84` calls take colour-like arguments and pointers at
-`0x801006DC` and `0x801009B8` and remain the strongest candidates; if those
-turn out to be backdrop layers out of OPTIONS.PSX then the plates are art and
-an eighth needs a new primitive rather than a widened count.
+**The list layout and the eighth plate, together with the logo art.** The plate
+producer is settled (see above): it is art, so the row list, the logo and the
+plates want one combined pass rather than a code-side patch. Until then
+`RECOMPONE_V82_OPTIONS_START_Y=138` leaves `Game Status` plateless and
+overlapping the logo.
 
-After that: **the curated option set needs trimming** (below), and the Audio
-page still has not been examined for whether master volume and mute fit on it.
+Then: **trim the curated option set** (below), and examine the Audio page for
+whether master volume and mute fit on it -- still the only thing that could
+force a ninth row.
 
 ## Curated option set (built as the draft; user still to trim)
 

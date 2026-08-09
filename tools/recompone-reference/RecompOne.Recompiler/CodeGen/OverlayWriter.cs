@@ -518,9 +518,16 @@ public static class OverlayWriter
                 switch (patch.Mode.ToLowerInvariant())
                 {
                     case "pre":
+                        // One field, so a second pre patch on the same function
+                        // silently replaces the first. That is always a config
+                        // mistake: say so rather than drop a hook quietly.
+                        WarnOnHookReplacement(
+                            "pre", func, func.PreHookTarget, patch.Target);
                         func.PreHookTarget = patch.Target;
                         break;
                     case "post":
+                        WarnOnHookReplacement(
+                            "post", func, func.PostHookTarget, patch.Target);
                         func.PostHookTarget = patch.Target;
                         break;
                     default:
@@ -535,6 +542,17 @@ public static class OverlayWriter
                 Console.WriteLine($"[Recompiler] WARNING: patch '{patch.Target}' matched nothing (overlay='{patch.Overlay}' function='{patch.Function}' address='{patch.Address}')");
         }
         Console.WriteLine($"[Recompiler] applied {applied} patches");
+    }
+
+    static void WarnOnHookReplacement(
+        string mode, MipsFunction func, string existing, string incoming)
+    {
+        if (existing.Length == 0 || string.Equals(existing, incoming, StringComparison.Ordinal))
+            return;
+        Console.WriteLine(
+            $"[Recompiler] WARNING: '{incoming}' replaces '{existing}' as the " +
+            $"{mode}-hook on {func.OverlayName} 0x{func.Start:X8}; only one " +
+            $"{mode} patch per function is emitted");
     }
 
     static void ApplyStubsAndIgnored(List<MipsFunction> funcs, IEnumerable<string> stubs, IEnumerable<string> ignored)

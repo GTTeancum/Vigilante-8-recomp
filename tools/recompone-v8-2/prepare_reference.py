@@ -686,49 +686,12 @@ PROVEN_PATCHES = [
         "target": "RecompOne.Runtime.Sdk.V82Compat.RepairObjectTerrainQuery",
         "mode": "pre",
     },
-    {
-        # Extended draw distance moves only the object limit, leaving distant
-        # props standing past the last terrain row. Push the traversal polygon
-        # out to match before the walker selects rows.
-        "overlay": "main",
-        "address": "8001BECC",
-        "target": "RecompOne.Runtime.Sdk.V82Compat.ScaleTerrainTraversalRange",
-        "mode": "pre",
-    },
-    {
-        # func_8001C158 hands func_8001BECC the completed world-space traversal
-        # polygon. Its far corners lose lateral reach against the widened 16:9
-        # frustum whenever the camera is pitched, so refit them here before the
-        # walker selects terrain rows.
-        "overlay": "main",
-        "address": "8001BECC",
-        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalWideFit",
-        "mode": "pre",
-    },
-    {
-        "overlay": "main",
-        "address": "8001BECC",
-        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalAspect",
-        "mode": "pre",
-    },
-    {
-        "overlay": "main",
-        "address": "8001BECC",
-        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalOmnidirectional",
-        "mode": "pre",
-    },
-    {
-        "overlay": "main",
-        "address": "8001BECC",
-        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalLateral",
-        "mode": "pre",
-    },
-    {
-        "overlay": "main",
-        "address": "8001BECC",
-        "target": "RecompOne.Runtime.Sdk.V82Compat.ExpandTerrainTraversalPolygon",
-        "mode": "pre",
-    },
+    # The six widescreen terrain-traversal hooks on func_8001BECC used to be
+    # declared here as "pre" as well. Each silently replaced the last, so only
+    # the trace below survived; they are inline seams at the top of this file
+    # now and the duplicates are gone. Extended draw distance moving the object
+    # limit, the pitched-camera lateral refit and the rest are all documented
+    # there.
     {
         "overlay": "main",
         "address": "8001BECC",
@@ -801,10 +764,18 @@ PROVEN_PATCHES = [
     {
         # Capture the native object renderer's exact packet-buffer interval so
         # Enhanced receives vehicle/material ownership before GPU decoding.
+        #
+        # An inline seam, not "pre": RepairObjectTerrainQuery above already
+        # holds this function's single PreHookTarget, and declaring a second
+        # pre patch here silently replaced it -- which also took out the
+        # ApplyLevelOfDetail call it makes, so the level-of-detail setting had
+        # stopped reaching objects entirely. Both hooks are void, so the
+        # function still runs either way; this only fixes which ones run.
         "overlay": "main",
         "address": "8002D9E0",
         "target": "RecompOne.Runtime.Sdk.V82Compat.BeginObjectRender",
-        "mode": "pre",
+        "mode": "inline",
+        "position": "before",
     },
     {
         "overlay": "main",
