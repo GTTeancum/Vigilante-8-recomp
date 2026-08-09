@@ -221,55 +221,52 @@ Note the retail row strip is **no longer byte-identical to stock** -- it cannot
 be, because two of the seven visible labels genuinely changed. The differing
 pixel count is 2411 and it is entirely the two relabelled slots.
 
-## KNOWN DEFECT: the page you land on after Video goes deaf
+## The deaf-text-page defect, and its fix
 
-Leaving the Video page hands the cursor back correctly and the list redraws
-correctly, but the retail text page the cursor then lands on stops responding
-to input. Frames keep presenting; DOWN, UP and TRIANGLE are all ignored, and
-the only way out is to quit.
+Leaving the Video page used to leave the retail text page the cursor landed on
+unable to take any input: frames kept presenting, but DOWN, UP and TRIANGLE
+were all ignored and the only way out was to quit. It reproduced in the build
+before the reorder too -- UP from Video landed on Credits and the next press
+did nothing -- and had been missed only because no fixture pressed anything
+after the return.
 
-**This is not caused by the row reorder.** It reproduces in the previous build
-too, where UP from Video lands on Credits and the next DOWN does nothing --
-verified in that build's own log. It was missed because no fixture pressed
-anything after the return.
+**Fixed** by `V82NativeTextPageInput.SupplyPad`, an inline hook at 0x8010E9D4,
+the instruction after `jal func_800117C0` in `func_8010E854`. That body is
+shared by Back Story and Credits and leaves only when the returned word meets
+`0x50900000`. The hook supplies that word from the runtime's own pad in the
+shell's bit order, and only on frames where the retail read came back empty, so
+a healthy pipeline is untouched and the hook does not participate at all. It
+writes 0x8006B4EC as well, because the Options loop that regains control reads
+the row-cursor bits out of memory and those are just as empty.
 
-What is known:
+### What the fault actually is, and what it is not
 
-- The outer loop stops iterating entirely once the text page is resident,
-  proven by an inline probe in `WidenDispatch` that logs once per iteration and
-  fired exactly once.
-- Those pages exit on `func_800117C0() & 0x50900000`, and `func_800117C0` is a
-  one-line wrapper around `func_80015540` -- the same routine the Video page's
-  own frame pump calls.
-- `func_80015540` consumes an **eight-slot ring of pad samples**: `gp+0xD08` is
-  a write cursor, `gp+0xCF8` a read cursor, samples at 0x800B52E0 stride 20. It
-  advances the write cursor only when the two differ, so if they met it would
-  re-read one stale slot forever.
-- **That ring is not the cause.** Probed directly: throughout the Video page
-  the two cursors advance in lockstep at a constant gap of two, and at the
-  instant Back Story is entered they read r=3 w=1 -- healthy. The theory was
-  wrong and is recorded here so nobody spends the time twice.
-- Frames keep presenting and the page's content stays on screen, so the text
-  page is looping; it simply never satisfies
-  `func_800117C0() & 0x50900000`. The next probe to write is one inside
-  `func_8010E854`'s own loop, logging what func_80015540 returns there.
+Narrowed hard before fixing, so the next person does not redo it:
 
-The intended fix is still to stop running an independent frame loop: rebuild
-the Video page on a retail page's loop the way `V82NativeControlOptions` does,
-taking over only the drawing and never pumping frames or reading the pad. Two
-obstacles found while scoping it:
+- **Not the pad sample ring.** `func_80015540` consumes an eight-slot ring and
+  advances its write cursor only while it differs from the read cursor, which
+  looked like a perfect fit. Probed directly, the cursors were healthy the
+  whole time. Worse, the cursor addresses are `gp`-relative and **the shell
+  overlay's `gp` is not main's**, so cursor readings taken from inside a shell
+  function are meaningless -- that cost a round.
+- **Not IRQ delivery.** `BiosB.IntrEnvInInterruptAddr` stayed at 0x800643BA
+  with handler 0x80055574 and the in-interrupt flag at 0, so the guest VBlank
+  handler kept running every frame.
+- **Not idling.** Sitting on Game Status for 400 polls and then pressing DOWN
+  works. The pipeline does not rot on its own.
+- **Not the whole screen.** Going UP from Video to Audio works, and Audio keeps
+  responding afterwards. Every settings page is fine; only the shared text-page
+  body is affected.
+- **Not the processed-word consumption.** Disabling the Video page's
+  `ConsumeNativePadWord` entirely changes nothing.
+- Re-running `func_80021C24`, and forcing the outer loop's full re-init path by
+  setting S0, both failed to repair it.
 
-- Borrowing the **Controllers** page (`func_8010A5BC`) is the cleanest fit
-  because its seams already exist and are proven -- `TryDraw` at `L8010AE8C`
-  with `branchTo: 8010B1EC` skips the body but keeps the tail that owns VSync
-  and the pad. But its title and player emblems are drawn in the *prologue*,
-  before the loop, so a Video page hosted there would say CONTROLLER. That
-  needs a title override on `func_8001A3B0`, which is at least precedented by
-  `OverrideNativeSelectorText`.
-- Borrowing the **Audio** page (`func_8010B84C`) fits structurally -- body,
-  then `VSync(0)` and func_80015540 at 0x8010BD80, then input, then loop -- but
-  the point to branch to (0x8010BD80) is not a branch target anywhere, so the
-  recompiler emits no label for it and `branchTo` has nothing to name.
+So what remains is that `func_80015540` returns zero to that one call site while
+`Controller.State` is correct and every observable link in the chain is intact.
+The underlying cause is still unknown; the hook compensates for it precisely
+where it bites, and is written so that it disappears the moment the underlying
+behaviour is fixed.
 
 ## Correction: the earlier "missing plate" readings
 
@@ -375,12 +372,16 @@ introducing anything, and the shell and selector paths run clean.
 ## Next step
 
 **Trim the curated option set** (below) -- the only thing still waiting on the
-user. Then examine the Audio page for whether master volume and mute fit on it;
-that remains the only thing that could force a ninth row, which the window
-would absorb without needing anything new.
+user. Everything else on this screen is done: the row draws, selects, sits
+under Audio, has a plate, scrolls when it needs to, and every neighbouring
+retail page navigates correctly.
 
-The logo/layout art change is now optional rather than blocking: the list fits
-its plates as it stands.
+Worth doing at some point, but not blocking: find why `func_80015540` returns
+zero inside `func_8010E854` after a hook-owned page has held the frame, and
+delete `V82NativeTextPageInput` once it does not. And the retail Audio page has
+a mute toggle and two volume sliders already drawn on it, so master volume and
+mute very likely fit there without a ninth row -- worth confirming before
+building anything.
 
 ## Curated option set (built as the draft; user still to trim)
 

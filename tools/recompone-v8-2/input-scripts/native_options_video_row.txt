@@ -46,19 +46,16 @@
 420+3=DOWN
 480+3=DOWN
 540+3=TRIANGLE
+# DOWN hands the row cursor on to Back Story, whose title redraw fires the next
+# stage -- evidence the remapped jump table sends index six to the right page.
 660+3=DOWN
 
-# Index seven, the row the window scrolls for. Reaching Credits at all proves
-# the widened bound, and its title proves the remap; UP then walks back.
-# KNOWN DEFECT: nothing below responds. Whichever retail text page the cursor
-# lands on after leaving the Video page stops taking input -- frames keep
-# presenting, but func_80015540 yields no more edges inside it, so DOWN, UP and
-# TRIANGLE are all ignored. This is not caused by the row reorder; the same
-# thing happens in the previous build when UP lands on Credits. See the handoff.
+# Index seven, the row the window scrolls for. Reaching Credits proves the
+# widened bound and the remap; UP then walks back up through the list. Both of
+# these pages are the shared func_8010E854 body, so they also exercise
+# V82NativeTextPageInput.
 [v82_options_back_story]
-100+3=DOWN
-160+3=UP
-220+3=TRIANGLE
+120+3=DOWN
 
 [v82_options_credits]
 140+3=UP

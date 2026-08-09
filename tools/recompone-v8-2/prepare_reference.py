@@ -268,6 +268,18 @@ PROVEN_PATCHES = [
         "position": "before",
         "branchTo": "8010ECE0",
     },
+    # 0x8010E9D4 is the instruction after `jal func_800117C0` in func_8010E854,
+    # the body shared by Back Story and Credits, with the pad word those pages
+    # test against 0x50900000 live in V0. It stops being answered once a
+    # hook-owned page has held the frame; the hook supplies it from the
+    # runtime's pad, and only when the retail read came back empty.
+    {
+        "overlay": "SHELL_SHELL",
+        "address": "8010E9D4",
+        "target": "V82NativeTextPageInput.SupplyPad",
+        "mode": "inline",
+        "position": "before",
+    },
     # After the same instruction, and before S3 is added to the scaled index:
     # admit the eighth index, or Credits never dispatches, and repoint S3 at a
     # remapped table, because Video sits at five and pushes Back Story and

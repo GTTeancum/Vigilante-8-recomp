@@ -40,6 +40,8 @@
              Link="V82NativeVideoOption.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeVideoPage.cs"
              Link="V82NativeVideoPage.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeTextPageInput.cs"
+             Link="V82NativeTextPageInput.cs" />
   </ItemGroup>
   <ItemGroup Condition="'$(PublishTrimmed)' == 'true'">
     <!-- Silk discovers input backends through assembly attributes. Keep that
