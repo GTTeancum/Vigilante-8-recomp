@@ -368,7 +368,12 @@ public static partial class Vigilante82PC
         static readonly string[] LevelOfDetailModes = ["Stock", "Maximum"];
         static readonly int[] MsaaModes = [0, 2, 4, 8];
         static readonly int[] AnisotropicModes = [1, 2, 4, 8, 16];
-        static readonly int[] InternalScales = [1, 2, 3, 4];
+        // No 1x. It does not drop to the software renderer -- renderer choice
+        // and scale are independent -- but it rasterises the 3D scene at the
+        // PS1's own 320x240 and presents it at 1x, which is the same "put it
+        // back the way it was" offer the graphics preset row was removed for.
+        // It buys nothing in performance either: 2x is 640x480.
+        static readonly int[] InternalScales = [2, 3, 4];
 
         static ViewConfig View => ConfigManager.View;
 

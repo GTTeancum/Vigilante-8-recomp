@@ -276,12 +276,11 @@ on a row. `input-scripts/native_options_video_changes.txt` now does, and with
 `RECOMPONE_TRACE_V82_VIDEO_OPTIONS=1` every change is logged:
 
 ```
-Preset: 'Enhanced' -> 'Original'      Preset: 'Original' -> 'Enhanced'
-Resolution: '1920x1080' -> '2560x1440' -> '3840x2160'
-Fullscreen: 'Off' -> 'On'             Widescreen: 'On' -> 'Off'
-Internal 3D: '3x' -> '4x'             Anti-aliasing: 'FXAA' -> 'Off'
+Resolution: '1920x1080' -> '2560x1440' -> '1920x1080'   (both directions)
+Fullscreen: 'Off' -> 'On' -> 'Off'    Widescreen: 'On' -> 'Off'
+Render scale: '3x' -> '4x'            Anti-aliasing: 'FXAA' -> 'Off'
 MSAA: '2x' -> '4x'                    Anisotropic: '4x' -> '8x'
-Texture smoothing: 'On' -> 'Off'
+Texture smoothing: 'On' -> 'Off'      Mipmaps: 'On' -> 'Off'
 ```
 
 and every one of them lands in interface.ini, including `GraphicsPreset`
@@ -419,24 +418,55 @@ a mute toggle and two volume sliders already drawn on it, so master volume and
 mute very likely fit there without a ninth row -- worth confirming before
 building anything.
 
-## Curated option set (built as the draft; user still to trim)
+## Curated option set
 
-The page ships the draft "in" list, sixteen rows in this order: Preset,
-Resolution, Fullscreen, Widescreen, Internal 3D, Anti-aliasing, MSAA,
-Anisotropic, Texture smoothing, Mipmaps, Level of detail, Draw distance, Fog,
-Shadows, Particles, HUD anchoring. Audio page (not built): master volume, mute.
+Fifteen rows: Resolution, Fullscreen, Widescreen, Render scale, Anti-aliasing,
+MSAA, Anisotropic, Texture smoothing, Mipmaps, Level of detail, Draw distance,
+Fog, Shadows, Particles, HUD anchoring. Audio page (not built): master volume,
+mute.
 
 Every row maps onto an existing `ViewConfig` property and saves through
 `ConfigManager.SaveView`, so a change made here and one made in the ImGui
 Display section take the identical path. Resolution and fullscreen apply live
 through `HostWindow.SetOutputResolution` / `SetFullscreen`, reached from the
-recompiled project through new public wrappers on `V82Compat` because
-`HostWindow` is internal.
+recompiled project through public wrappers on `V82Compat` because `HostWindow`
+is internal.
+
+**No graphics preset row.** Dropped at the user's request: the Original preset
+exists to put the PS1 software renderer back and this port is not going back to
+it, so in a player-facing menu it could only ever make things worse. The host
+ImGui panel still has it, and `GraphicsPreset` still resolves to `Custom` once
+any individual setting is touched.
+
+**"Internal 3D" is now "Render scale", offering 2x/3x/4x.** It is
+`InternalResolutionScale`: the 3D scene rasterises at that multiple of the
+PS1's own 320x240 into the enhanced GL targets (`GlVram` is the 1024x512 VRAM
+shadow times the scale) and is then presented into the window. It has nothing
+to do with the Resolution row, which is the window itself, and the old label
+read like a second output setting sitting right underneath one. It is now the
+page's main quality control -- the only row that changes how much detail is
+rasterised rather than how it is filtered afterwards.
+
+1x was dropped for the same reason the preset row was. It does *not* fall back
+to the software renderer -- `UseEnhancedRenderer` is explicit that renderer
+choice and scale are independent -- but it rasterises at 320x240 and sets
+`GpuHle.NativeResolution`, which forces `presentScale` to 1 as well, so it is
+the same "put it back the way it was" offer. It buys nothing in performance
+either: 2x is 640x480.
+
+**Known ceiling, not addressed.** Scale is hard-clamped to 4 in three places
+(`ViewConfig`, `EnhancedGlBackend.ApplyResolutionScale`, `GlVram`), so the 3D
+area tops out at 1280x960. Every output resolution the Resolution row offers
+except 1280x720 is larger than that, so at 1080p and above the picture is
+always being upscaled even at 4x, and the two rows interact in a way a player
+would not guess. Deriving the scale from the output resolution, or raising the
+cap, is a real improvement and is not done here.
 
 Out (diagnostics): dithering, geometry correction, precise culling,
 perspective-correct textures/colours, enhanced depth buffer. Borderline and
-unconfirmed: true-colour output, vector fonts, vector icons, high-resolution 3D
-(the last is currently driven implicitly by Internal 3D > 1x).
+unconfirmed: true-colour output, vector fonts, vector icons. High-resolution 3D
+is not a row: it is driven implicitly by Render scale, and with 1x gone it is
+now always on.
 
 Trimming is one edit to the `Rows` array; six rows are visible at a time, so
 dropping four would remove one page of scrolling.
