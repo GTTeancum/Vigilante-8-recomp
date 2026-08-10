@@ -123,7 +123,16 @@ public static class ConfigManager
         foreach (var p in panels)
             View.Panels[p.Name] = new PanelState { Open = p.IsOpen };
 
-        var imguiIni = ImGui.SaveIniSettingsToMemory();
+        // The in-game menus save view settings too, and they run in contexts
+        // with no ImGui context at all -- headless, and any launch where the
+        // host window never came up. Asking ImGui to serialise itself there
+        // takes the process down inside native code with no managed exception
+        // to catch. Carry the layout already on disk across instead of writing
+        // an empty section, which would silently discard the window layout of
+        // anyone who changes a setting from the in-game menus.
+        string imguiIni = ImGui.GetCurrentContext() != IntPtr.Zero
+            ? ImGui.SaveIniSettingsToMemory()
+            : ReadStoredImGuiLayout();
         var sb = new StringBuilder();
         sb.AppendLine("[RecompOne]");
         foreach (var (key, value) in View.Values)
@@ -133,6 +142,32 @@ public static class ConfigManager
         sb.AppendLine();
         sb.Append(imguiIni);
         File.WriteAllText(InterfaceFile, sb.ToString());
+    }
+
+    /// <summary>
+    /// Everything in interface.ini from the first section that is not
+    /// [RecompOne] onwards, which is exactly the ImGui layout this writer
+    /// appends after its own key/value block.
+    /// </summary>
+    static string ReadStoredImGuiLayout()
+    {
+        if (!File.Exists(InterfaceFile))
+            return string.Empty;
+        try
+        {
+            string[] lines = File.ReadAllLines(InterfaceFile);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                if (!line.StartsWith('[') ||
+                    line.Equals("[RecompOne]", StringComparison.Ordinal))
+                    continue;
+                return string.Join(Environment.NewLine, lines[i..]) +
+                    Environment.NewLine;
+            }
+        }
+        catch (IOException) { }
+        return string.Empty;
     }
 
     public static void ResetView(IReadOnlyList<IPanel> panels)

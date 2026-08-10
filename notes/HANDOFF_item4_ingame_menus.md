@@ -268,6 +268,42 @@ The underlying cause is still unknown; the hook compensates for it precisely
 where it bites, and is written so that it disappears the moment the underlying
 behaviour is fixed.
 
+## The rows really do change the settings
+
+Worth stating because it was asked and, until it was, only the *rendering* and
+the navigation had been verified -- no fixture had ever pressed LEFT or RIGHT
+on a row. `input-scripts/native_options_video_changes.txt` now does, and with
+`RECOMPONE_TRACE_V82_VIDEO_OPTIONS=1` every change is logged:
+
+```
+Preset: 'Enhanced' -> 'Original'      Preset: 'Original' -> 'Enhanced'
+Resolution: '1920x1080' -> '2560x1440' -> '3840x2160'
+Fullscreen: 'Off' -> 'On'             Widescreen: 'On' -> 'Off'
+Internal 3D: '3x' -> '4x'             Anti-aliasing: 'FXAA' -> 'Off'
+MSAA: '2x' -> '4x'                    Anisotropic: '4x' -> '8x'
+Texture smoothing: 'On' -> 'Off'
+```
+
+and every one of them lands in interface.ini, including `GraphicsPreset`
+flipping to `Custom` once an individual setting is touched.
+
+### Two real bugs that only this test could find
+
+- **Pressing RIGHT hung the game.** `ConfigManager.SaveView` calls
+  `ImGui.SaveIniSettingsToMemory()`, and the in-game menus save from contexts
+  with no ImGui context at all -- headless, or any launch where the host
+  window never came up. That takes the process down inside native code with no
+  managed exception, so it looked like a freeze rather than a crash. Guarded
+  on `ImGui.GetCurrentContext()`.
+- **The first version of that guard silently wiped the window layout.**
+  Writing an empty ImGui section meant anyone changing a setting from the
+  in-game menus lost their whole docking layout. `ReadStoredImGuiLayout`
+  carries the layout already on disk across instead.
+
+Live application of resolution and fullscreen is still unverified: `HostWindow`
+is null headless, so those two calls return immediately. The config side of
+both is confirmed.
+
 ## Correction: the earlier "missing plate" readings
 
 An earlier version of this document, and commit 2958f56, claimed the row plate

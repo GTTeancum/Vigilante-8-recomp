@@ -1,0 +1,48 @@
+# Proves the Video page's rows actually mutate the values they name, rather
+# than only rendering them. Walks to Video, enters editing, and works down the
+# list changing each row: RIGHT cycles forward, LEFT back.
+#
+# Run with RECOMPONE_TRACE_V82_VIDEO_OPTIONS=1 to log every change as
+# "label: 'before' -> 'after'", and diff interface.ini across the run to see
+# the same values persisted.
+540+3=START
+900+3=START
+960+3=DOWN
+1020+3=DOWN
+1080+3=CROSS
+
+[v82_options_game_status]
+40+3=DOWN
+[v82_options_memory_card]
+80+3=DOWN
+[v82_options_difficulty]
+40+3=DOWN
+[v82_options_controller]
+120+3=DOWN
+[v82_options_audio]
+80+3=DOWN
+
+# Preset first, forward then back, so both directions are covered. Then one
+# step down each row: a string list, two bools, an int list, and the rest.
+[v82_options_native_video]
+60+3=CROSS
+120+3=RIGHT
+180+3=LEFT
+240+3=DOWN
+300+3=RIGHT
+360+3=RIGHT
+420+3=DOWN
+480+3=RIGHT
+540+3=DOWN
+600+3=RIGHT
+660+3=DOWN
+720+3=RIGHT
+780+3=DOWN
+840+3=RIGHT
+900+3=DOWN
+960+3=RIGHT
+1020+3=DOWN
+1080+3=RIGHT
+1140+3=DOWN
+1200+3=RIGHT
+1260+3=TRIANGLE

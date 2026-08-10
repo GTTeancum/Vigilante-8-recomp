@@ -482,7 +482,19 @@ public static partial class Vigilante82PC
             }),
         ];
 
-        static void Change(int direction) => Rows[_row].Change(direction);
+        static readonly bool TraceChanges =
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_TRACE_V82_VIDEO_OPTIONS") == "1";
+
+        static void Change(int direction)
+        {
+            Row row = Rows[_row];
+            string before = TraceChanges ? row.Value() : "";
+            row.Change(direction);
+            if (TraceChanges)
+                Console.Error.WriteLine(
+                    $"[V82Video] {row.Label}: '{before}' -> '{row.Value()}'");
+        }
 
         static string OnOff(bool value) => value ? "On" : "Off";
 
