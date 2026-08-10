@@ -462,6 +462,31 @@ always being upscaled even at 4x, and the two rows interact in a way a player
 would not guess. Deriving the scale from the output resolution, or raising the
 cap, is a real improvement and is not done here.
 
+### Render scale and Resolution are independent, in both directions
+
+Nothing clamps one against the other, and the interesting case is the one that
+looks like a mistake. At 4x the 3D area rasterises at 1280x960 (wider with
+Widescreen on, which grows `w1x`), and the smallest output the Resolution row
+offers is 1280x720 -- so that pairing renders *above* the output and the final
+sample is a **downscale**. That is real supersampling and the best-looking
+combination on the page, not an error. `_presentTex` is Linear-filtered
+whenever `NativeResolution` is false, which it now always is, so the reduction
+is filtered rather than point-sampled. There are no mipmaps, so a reduction
+much beyond 2x would start to alias, but nothing the menu can select gets
+there.
+
+Every other pairing upscales: 1080p and above are all larger than 1280x960.
+
+**Gotcha worth fixing at some point:** `SetOutputResolution` returns early when
+`View.Fullscreen` is set, and `SetFullscreen(true)` just takes the desktop
+resolution. So while fullscreen is on, the Resolution row changes the stored
+value and nothing else -- it is inert, with no indication in the menu. Greying
+it, or applying it as a fullscreen mode change, would both be improvements.
+
+Not verified at runtime: headless runs report `hle=False`, so the enhanced GL
+backend never initialises and none of the present path above executes. All of
+this is read from the code, not observed.
+
 Out (diagnostics): dithering, geometry correction, precise culling,
 perspective-correct textures/colours, enhanced depth buffer. Borderline and
 unconfirmed: true-colour output, vector fonts, vector icons. High-resolution 3D
