@@ -22,8 +22,8 @@
 [v82_options_audio]
 80+3=DOWN
 
-# Preset first, forward then back, so both directions are covered. Then one
-# step down each row: a string list, two bools, an int list, and the rest.
+# Resolution first, forward then back, so both directions are covered. Then
+# one step down each row: two bools, an int list, and the rest.
 [v82_options_native_video]
 60+3=CROSS
 120+3=RIGHT

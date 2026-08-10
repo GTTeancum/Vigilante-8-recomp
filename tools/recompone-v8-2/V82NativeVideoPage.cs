@@ -362,7 +362,6 @@ public static partial class Vigilante82PC
 
         sealed record Row(string Label, Func<string> Value, Action<int> Change);
 
-        static readonly string[] Presets = ["Original", "Enhanced"];
         static readonly string[] Resolutions =
             ["1280x720", "1920x1080", "2560x1440", "3840x2160"];
         static readonly string[] AntiAliasingModes = ["Off", "FXAA"];
@@ -375,20 +374,10 @@ public static partial class Vigilante82PC
 
         static readonly Row[] Rows =
         [
-            new("Preset", () => View.ResolveGraphicsPreset(), direction =>
-            {
-                // "Custom" is a reported state, not a selectable one, so
-                // cycling out of it lands on a real preset rather than
-                // re-applying the values the player just chose.
-                int index = Array.IndexOf(
-                    Presets, View.ResolveGraphicsPreset());
-                index = index < 0
-                    ? (direction > 0 ? 0 : Presets.Length - 1)
-                    : Wrap(index + direction, Presets.Length);
-                View.ApplyGraphicsPreset(Presets[index]);
-                V82Compat.ApplyGraphicsConfiguration();
-                SaveView();
-            }),
+            // No graphics preset row. The Original preset exists to put the
+            // PS1 software renderer back, and this port is not going back to
+            // it, so offering the choice in the player-facing menu would only
+            // ever be a way to make things worse. The host panel still has it.
             new("Resolution", () => View.OutputResolution, direction =>
             {
                 View.OutputResolution =
@@ -407,7 +396,13 @@ public static partial class Vigilante82PC
                 View.Widescreen = !View.Widescreen;
                 SaveCustom();
             }),
-            new("Internal 3D", () => $"{View.InternalResolutionScale}x",
+            // Supersampling for the 3D scene: it renders at this multiple of
+            // the PS1's native 320x240 into the enhanced GL targets and is
+            // then presented into the window. Nothing to do with the
+            // Resolution row above, which is the window itself -- hence the
+            // name, because "Internal 3D" next to "Resolution" reads like a
+            // second output setting.
+            new("Render scale", () => $"{View.InternalResolutionScale}x",
             direction =>
             {
                 int scale = Cycle(
