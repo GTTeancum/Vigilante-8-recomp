@@ -98,6 +98,20 @@ public static class ConfigManager
             View = view;
             _pendingImGuiIni = imguiIni;
         }
+
+        // V8:2 has no render-scale choice in its in-game menu, because the
+        // scale caps at 4x and that is 1280x960 -- below every output
+        // resolution the menu offers except 720p. Anything lower is strictly
+        // worse with nothing to show for it: the fill rate at that size is
+        // negligible and VRAM readback is scale-independent, because ReadRect
+        // blits down to an unscaled staging target before reading. So the
+        // port pins it, and MSAA remains the knob for a slow GPU. The host
+        // panel can still change it for the rest of a session.
+        if (Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal))
+        {
+            View.InternalResolutionScale = 4;
+            View.HighResolution3D = true;
+        }
     }
 
     

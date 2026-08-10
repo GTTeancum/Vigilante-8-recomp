@@ -420,9 +420,9 @@ building anything.
 
 ## Curated option set
 
-Fifteen rows: Resolution, Fullscreen, Widescreen, Render scale, Anti-aliasing,
-MSAA, Anisotropic, Texture smoothing, Mipmaps, Level of detail, Draw distance,
-Fog, Shadows, Particles, HUD anchoring. Audio page (not built): master volume,
+Fourteen rows: Resolution, Fullscreen, Widescreen, Anti-aliasing, MSAA,
+Anisotropic, Texture smoothing, Mipmaps, Level of detail, Draw distance, Fog,
+Shadows, Particles, HUD anchoring. Audio page (not built): master volume,
 mute.
 
 Every row maps onto an existing `ViewConfig` property and saves through
@@ -438,29 +438,39 @@ it, so in a player-facing menu it could only ever make things worse. The host
 ImGui panel still has it, and `GraphicsPreset` still resolves to `Custom` once
 any individual setting is touched.
 
-**"Internal 3D" is now "Render scale", offering 2x/3x/4x.** It is
-`InternalResolutionScale`: the 3D scene rasterises at that multiple of the
-PS1's own 320x240 into the enhanced GL targets (`GlVram` is the 1024x512 VRAM
-shadow times the scale) and is then presented into the window. It has nothing
-to do with the Resolution row, which is the window itself, and the old label
-read like a second output setting sitting right underneath one. It is now the
-page's main quality control -- the only row that changes how much detail is
-rasterised rather than how it is filtered afterwards.
+**No render-scale row either, and the scale is pinned at 4x.** What was
+"Internal 3D" is `InternalResolutionScale`: the 3D scene rasterises at that
+multiple of the PS1's own 320x240 into the enhanced GL targets and is then
+presented into the window. It has nothing to do with the Resolution row, which
+is the window itself, and the old label read like a second output setting
+sitting right underneath one.
 
-1x was dropped for the same reason the preset row was. It does *not* fall back
-to the software renderer -- `UseEnhancedRenderer` is explicit that renderer
-choice and scale are independent -- but it rasterises at 320x240 and sets
-`GpuHle.NativeResolution`, which forces `presentScale` to 1 as well, so it is
-the same "put it back the way it was" offer. It buys nothing in performance
-either: 2x is 640x480.
+It was briefly renamed "Render scale" with 1x dropped, then removed entirely.
+The reasoning, and the measurement that settled it:
 
-**Known ceiling, not addressed.** Scale is hard-clamped to 4 in three places
-(`ViewConfig`, `EnhancedGlBackend.ApplyResolutionScale`, `GlVram`), so the 3D
-area tops out at 1280x960. Every output resolution the Resolution row offers
-except 1280x720 is larger than that, so at 1080p and above the picture is
-always being upscaled even at 4x, and the two rows interact in a way a player
-would not guess. Deriving the scale from the output resolution, or raising the
-cap, is a real improvement and is not done here.
+- The scale is hard-clamped to 4 in three places (`ViewConfig`,
+  `EnhancedGlBackend.ApplyResolutionScale`, `GlVram.ReinitializeScale`), so the
+  3D area tops out at **1280x960** -- below every output resolution the menu
+  offers except 720p. 4x is therefore the right answer essentially always.
+- The obvious objection is that it is the performance knob and removing it
+  strands weak hardware. It is not much of one. Fill rate at 1280x960 is
+  nothing, and **VRAM readback does not scale with it at all**: `ReadRect`
+  blits from the scaled texture down to `_stageFbo`, which is created at the
+  unscaled 1024x512, and reads from *that*. The CPU transfer is the same size
+  at 1x and 4x. What does scale is texture memory (32 MB for the VRAM texture
+  at 4x, plus render targets, multiplied again by MSAA samples).
+- MSAA stays in the menu and is the knob left for a slow GPU.
+
+`ConfigManager.Load` pins it: for V8:2 it sets `InternalResolutionScale = 4`
+and `HighResolution3D = true` after reading interface.ini, so existing configs
+sitting at the old default of 3 are moved up. The host ImGui panel can still
+change it for the rest of a session.
+
+**The ceiling is still the real limitation.** Pinning at 4x does not remove
+it: at 1080p and above the picture is upscaled from 1280x960 no matter what.
+Raising the cap above 4 is the actual improvement, and is not done here --
+it is renderer work with a memory cost, and the GL path cannot be exercised
+headlessly to check it.
 
 ### Render scale and Resolution are independent, in both directions
 

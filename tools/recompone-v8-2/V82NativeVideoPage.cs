@@ -368,12 +368,6 @@ public static partial class Vigilante82PC
         static readonly string[] LevelOfDetailModes = ["Stock", "Maximum"];
         static readonly int[] MsaaModes = [0, 2, 4, 8];
         static readonly int[] AnisotropicModes = [1, 2, 4, 8, 16];
-        // No 1x. It does not drop to the software renderer -- renderer choice
-        // and scale are independent -- but it rasterises the 3D scene at the
-        // PS1's own 320x240 and presents it at 1x, which is the same "put it
-        // back the way it was" offer the graphics preset row was removed for.
-        // It buys nothing in performance either: 2x is 640x480.
-        static readonly int[] InternalScales = [2, 3, 4];
 
         static ViewConfig View => ConfigManager.View;
 
@@ -401,22 +395,14 @@ public static partial class Vigilante82PC
                 View.Widescreen = !View.Widescreen;
                 SaveCustom();
             }),
-            // Supersampling for the 3D scene: it renders at this multiple of
-            // the PS1's native 320x240 into the enhanced GL targets and is
-            // then presented into the window. Nothing to do with the
-            // Resolution row above, which is the window itself -- hence the
-            // name, because "Internal 3D" next to "Resolution" reads like a
-            // second output setting.
-            new("Render scale", () => $"{View.InternalResolutionScale}x",
-            direction =>
-            {
-                int scale = Cycle(
-                    InternalScales, View.InternalResolutionScale, direction);
-                View.InternalResolutionScale = scale;
-                View.HighResolution3D = scale > 1;
-                V82Compat.ApplyGraphicsConfiguration();
-                SaveCustom();
-            }),
+            // No render-scale row. It caps at 4x, which is 1280x960 for the 3D
+            // area -- below every output resolution the Resolution row offers
+            // except 720p -- so 4x is simply the right answer and any lower
+            // value is worse for nothing in return. The fill rate at that size
+            // is negligible, and VRAM readback does not scale with it either,
+            // because ReadRect blits down to an unscaled staging target before
+            // reading. ConfigManager.Load pins it to 4x for this game; MSAA
+            // below is the knob left for a slow GPU.
             new("Anti-aliasing", () => View.AntiAliasing, direction =>
             {
                 View.AntiAliasing =
