@@ -39,7 +39,7 @@ def safe_stem(path: Path) -> str:
 def source_stem(path: Path) -> str:
     stem = safe_stem(path)
     stem = re.sub(r"^[a-z0-9]+_fnt_source_", "", stem)
-    stem = re.sub(r"_4x$", "", stem)
+    stem = re.sub(r"_[0-9]+x$", "", stem)
     return stem or "native_nearest"
 
 
