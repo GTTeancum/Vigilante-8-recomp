@@ -17,6 +17,18 @@ V8_2_LOOSE/
   LEVELS/
   MOVIES/
   music/
+  mods/
+    enhanced_textures_2x/
+      manifest.json
+      README.md
+      images/
+        <content-key>.dds
+        terrain/
+          levels/
+            <level-name>.dds
+        route/
+          levels/
+            <level-route-texture>.dds
 ```
 
 With no command-line arguments, the executable uses this directory as its
@@ -35,6 +47,31 @@ loaded at startup and can be edited without rebuilding the executable. The
 renderer supports the circles, lines, rectangles, polygons, and linear/radial
 gradients used by these three files. If a loose SVG is absent, the executable
 uses its embedded copy.
+
+Enhanced texture replacements are ordinary uncompressed 32-bit DDS files
+under `mods/enhanced_textures_2x/images`. Ordinary world textures are 2x.
+Terrain is 4x and remains one human-readable DDS per level under
+`images/terrain/levels`; for example, Route 66's authored 400x160 XBMP is
+`route66.dds` at 1600x640. XRTP route/road payloads decoded from level EXP
+records are also 4x and live under `images/route/levels`, with names such as
+`route66_xrtp00_tex2.dds`.
+
+The terrain material table selects cells from the per-level terrain source at
+runtime--the pack does not duplicate its overlapping tile windows into hundreds
+of files. Route textures add full-image and quadrant metadata entries so route
+template variants can resolve without duplicating the DDS payloads.
+`manifest.json` associates decoded retail content with those human-editable
+files and preserves indexed-terrain and XRTP route identity; it is metadata,
+not an image archive. The renderer validates and loads the individual DDS files
+at startup, then builds a private GPU atlas in memory. Replace a DDS and
+relaunch to see the change--there is no disc image, executable, or packed
+texture archive to rebuild. The stock-looking in-game `Options > Video >
+High-res textures` row enables or disables the pack.
+
+Terrain, route, and vehicle source images are 4x. Other world textures remain
+2x. Vehicle ownership comes from the stock SHARED banks, the selector's
+`SHELL/VEHICLES.EXP`, and `CUSTOM.EXP`; this keeps gameplay and selector models
+at 4x while preserving their original STP/transparency mask in the renderer.
 
 Standalone mode validates every required path at startup and never falls back
 to a CUE. Useful launch forms are:

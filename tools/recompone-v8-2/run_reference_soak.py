@@ -417,7 +417,8 @@ def run_one(
                 "1" if coverage_profile == "powerups" else "0"
             ),
             "RECOMPONE_DISPLAY_PROBE_INTERVAL": "600",
-            "RECOMPONE_CAPTURE_SCRIPTED_STAGE": "gameplay",
+            "RECOMPONE_CAPTURE_SCRIPTED_STAGE": os.environ.get(
+                "RECOMPONE_CAPTURE_SCRIPTED_STAGE", "gameplay"),
             "RECOMPONE_SUPPRESS_RUMBLE": "1",
             "RECOMPONE_MUTE": "1",
             "RECOMPONE_UNTHROTTLED": "1",

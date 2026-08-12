@@ -429,6 +429,11 @@ public static partial class Vigilante82PC
                 View.TextureSmoothing = !View.TextureSmoothing;
                 SaveCustom();
             }),
+            new("High-res textures", () => OnOff(View.HighResolutionTextures), _ =>
+            {
+                View.HighResolutionTextures = !View.HighResolutionTextures;
+                SaveCustom();
+            }),
             new("Mipmaps", () => OnOff(View.TextureMipmaps), _ =>
             {
                 View.TextureMipmaps = !View.TextureMipmaps;

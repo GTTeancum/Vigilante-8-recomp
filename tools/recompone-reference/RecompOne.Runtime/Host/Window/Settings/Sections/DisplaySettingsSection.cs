@@ -143,6 +143,14 @@ internal sealed class DisplaySettingsSection : ISettingsSection
         }
         ImGui.TextDisabled("Reconstructs in-game PS1 textures without allocating assets over 512x512.");
 
+        bool highResolutionTextures = ConfigManager.View.HighResolutionTextures;
+        if (ImGui.Checkbox("Use high-resolution texture pack", ref highResolutionTextures))
+        {
+            ConfigManager.View.HighResolutionTextures = highResolutionTextures;
+            SaveCustom();
+        }
+        ImGui.TextDisabled("Loads content-matched replacements from the loose textures folder.");
+
         bool mipmaps = ConfigManager.View.TextureMipmaps;
         if (ImGui.Checkbox("3D texture mipmaps", ref mipmaps))
         {

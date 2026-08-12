@@ -14,6 +14,11 @@ internal sealed class PresentationRenderer : IDisposable
         uniform vec2 uSourceSize;
         uniform int uDedither;
         uniform int uDeditherStep;
+        uniform int uLinearFilter;
+        uniform int uLoadingUiRestore;
+        uniform sampler2D uLoadingCard;
+        uniform int uLoadingCardOverlay;
+        uniform vec4 uLoadingCardRect;
         out vec4 oColor;
 
         vec3 sourcePixel(ivec2 p) {
@@ -23,11 +28,72 @@ internal sealed class PresentationRenderer : IDisposable
                 0).rgb;
         }
 
+        vec3 sampleLinear(vec2 uv) {
+            vec2 p = clamp(uv, vec2(0.0), vec2(1.0)) * uSourceSize - 0.5;
+            ivec2 i0 = ivec2(floor(p));
+            vec2 f = fract(p);
+            ivec2 hi = ivec2(uSourceSize) - 1;
+            i0 = clamp(i0, ivec2(0), hi);
+            ivec2 i1 = min(i0 + 1, hi);
+            vec3 a = mix(texelFetch(uSource, ivec2(i0.x, i0.y), 0).rgb,
+                         texelFetch(uSource, ivec2(i1.x, i0.y), 0).rgb, f.x);
+            vec3 b = mix(texelFetch(uSource, ivec2(i0.x, i1.y), 0).rgb,
+                         texelFetch(uSource, ivec2(i1.x, i1.y), 0).rgb, f.x);
+            return mix(a, b, f.y);
+        }
+
         void main() {
             ivec2 size = ivec2(uSourceSize);
             ivec2 p = clamp(ivec2(vUv * uSourceSize), ivec2(0), size - 1);
-            vec3 center = sourcePixel(p);
+            vec3 center = uLinearFilter != 0
+                ? sampleLinear(vUv)
+                : sourcePixel(p);
+            if (uLoadingCardOverlay != 0) {
+                vec2 innerUv = (vUv - uLoadingCardRect.xy) / uLoadingCardRect.zw;
+                if (innerUv.x >= 0.0 && innerUv.x <= 1.0 &&
+                    innerUv.y >= 0.0 && innerUv.y <= 1.0) {
+                    bool preserveTitle =
+                        vUv.x < 0.55 && vUv.y < 0.20;
+                    if (!preserveTitle) {
+                        vec2 cardUv =
+                            vec2(80.0 / 1280.0, 32.0 / 384.0) +
+                            innerUv * vec2(1120.0 / 1280.0, 320.0 / 384.0);
+                        oColor = vec4(texture(uLoadingCard, cardUv).rgb, 1.0);
+                        return;
+                    }
+                }
+            }
             if (uDedither == 0) {
+                if (uLoadingUiRestore != 0) {
+                    vec2 texel = 1.0 / uSourceSize;
+                    vec3 n  = sampleLinear(vUv + vec2( 0.0, -texel.y));
+                    vec3 e  = sampleLinear(vUv + vec2( texel.x,  0.0));
+                    vec3 s  = sampleLinear(vUv + vec2( 0.0,  texel.y));
+                    vec3 w  = sampleLinear(vUv + vec2(-texel.x,  0.0));
+                    vec3 ne = sampleLinear(vUv + vec2( texel.x, -texel.y));
+                    vec3 se = sampleLinear(vUv + vec2( texel.x,  texel.y));
+                    vec3 sw = sampleLinear(vUv + vec2(-texel.x,  texel.y));
+                    vec3 nw = sampleLinear(vUv + vec2(-texel.x, -texel.y));
+
+                    vec3 lo = min(center, min(min(n, e), min(s, w)));
+                    lo = min(lo, min(min(ne, se), min(sw, nw)));
+                    vec3 hi = max(center, max(max(n, e), max(s, w)));
+                    hi = max(hi, max(max(ne, se), max(sw, nw)));
+                    float localRange = max(
+                        hi.r - lo.r,
+                        max(hi.g - lo.g, hi.b - lo.b));
+
+                    vec3 average =
+                        (center * 4.0 + n + e + s + w +
+                         (ne + se + sw + nw) * 0.5) / 10.0;
+                    float restore = 1.0 - smoothstep(0.09, 0.32, localRange);
+                    vec3 denoised = mix(center, average, restore * 0.65);
+                    vec3 blur = (denoised * 4.0 + n + e + s + w) / 8.0;
+                    vec3 sharpened = denoised + (denoised - blur) *
+                        (0.45 * restore);
+                    oColor = vec4(clamp(sharpened, lo - 0.025, hi + 0.025), 1.0);
+                    return;
+                }
                 oColor = vec4(center, 1.0);
                 return;
             }
@@ -117,10 +183,14 @@ internal sealed class PresentationRenderer : IDisposable
     readonly GL _gl;
     uint _vao, _vbo, _upscaleProgram, _fxaaProgram;
     uint _upscaleTexture, _fxaaTexture, _upscaleFbo, _fxaaFbo;
+    uint _loadingCardTexture;
+    int _loadingCardWidth, _loadingCardHeight;
     int _width, _height;
     int _lastSourceWidth, _lastSourceHeight, _lastOutputWidth, _lastOutputHeight;
     bool _lastFxaa;
     int _upscaleSourceSize, _upscaleDedither, _upscaleDeditherStep;
+    int _upscaleLinearFilter, _upscaleLoadingUiRestore;
+    int _upscaleLoadingCardOverlay, _upscaleLoadingCardRect;
     int _fxaaSourceSize, _fxaaInvResolution;
 
     public bool Ready { get; private set; }
@@ -143,11 +213,20 @@ internal sealed class PresentationRenderer : IDisposable
 
         _gl.UseProgram(_upscaleProgram);
         _gl.Uniform1(_gl.GetUniformLocation(_upscaleProgram, "uSource"), 0);
+        _gl.Uniform1(_gl.GetUniformLocation(_upscaleProgram, "uLoadingCard"), 1);
         _upscaleSourceSize = _gl.GetUniformLocation(_upscaleProgram, "uSourceSize");
         _upscaleDedither =
             _gl.GetUniformLocation(_upscaleProgram, "uDedither");
         _upscaleDeditherStep =
             _gl.GetUniformLocation(_upscaleProgram, "uDeditherStep");
+        _upscaleLinearFilter =
+            _gl.GetUniformLocation(_upscaleProgram, "uLinearFilter");
+        _upscaleLoadingUiRestore =
+            _gl.GetUniformLocation(_upscaleProgram, "uLoadingUiRestore");
+        _upscaleLoadingCardOverlay =
+            _gl.GetUniformLocation(_upscaleProgram, "uLoadingCardOverlay");
+        _upscaleLoadingCardRect =
+            _gl.GetUniformLocation(_upscaleProgram, "uLoadingCardRect");
         _gl.UseProgram(_fxaaProgram);
         _gl.Uniform1(_gl.GetUniformLocation(_fxaaProgram, "uSource"), 0);
         _fxaaSourceSize = _gl.GetUniformLocation(_fxaaProgram, "uSourceSize");
@@ -165,6 +244,7 @@ internal sealed class PresentationRenderer : IDisposable
 
         (_upscaleTexture, _upscaleFbo) = CreateTarget();
         (_fxaaTexture, _fxaaFbo) = CreateTarget();
+        LoadLoadingCardOverlay();
         EnsureSize(1, 1);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         Ready = true;
@@ -226,12 +306,45 @@ internal sealed class PresentationRenderer : IDisposable
                 "2nd Offense", StringComparison.Ordinal) &&
             RecompOne.Runtime.Hle.GpuHle.Active &&
             RecompOne.Runtime.Hle.GpuHle.GameplayActive;
+        bool offGameplayV82Ui =
+            ConfigManager.View.HighResolutionTextures &&
+            Runtime.GameTitle.Contains(
+                "2nd Offense", StringComparison.Ordinal) &&
+            RecompOne.Runtime.Hle.GpuHle.Active &&
+            !RecompOne.Runtime.Hle.GpuHle.GameplayActive;
+        bool preTickLoadingCard =
+            ConfigManager.View.HighResolutionTextures &&
+            Runtime.GameTitle.Contains(
+                "2nd Offense", StringComparison.Ordinal) &&
+            RecompOne.Runtime.Hle.GpuHle.Active &&
+            RecompOne.Runtime.Hle.GpuHle.GameplayActive &&
+            RecompOne.Runtime.Hle.GpuHle.DebugGameplayTick == 0 &&
+            sourceWidth >= 1200 && sourceHeight >= 900;
+        bool uiPresentation = offGameplayV82Ui || preTickLoadingCard;
+        bool loadingUiSource =
+            uiPresentation && sourceWidth >= 1200 && sourceHeight >= 900;
         _gl.Uniform1(_upscaleDedither, dedither ? 1 : 0);
         _gl.Uniform1(
             _upscaleDeditherStep,
             ConfigManager.View.HighResolution3D
                 ? ConfigManager.View.InternalResolutionScale
                 : 1);
+        _gl.Uniform1(_upscaleLinearFilter, uiPresentation ? 1 : 0);
+        _gl.Uniform1(_upscaleLoadingUiRestore, loadingUiSource ? 1 : 0);
+        bool loadingCardOverlay = preTickLoadingCard && _loadingCardTexture != 0;
+        _gl.Uniform1(_upscaleLoadingCardOverlay, loadingCardOverlay ? 1 : 0);
+        _gl.Uniform4(
+            _upscaleLoadingCardRect,
+            224f / 1280f,
+            90f / 720f,
+            832f / 1280f,
+            240f / 720f);
+        if (loadingCardOverlay)
+        {
+            _gl.ActiveTexture(TextureUnit.Texture1);
+            _gl.BindTexture(TextureTarget.Texture2D, _loadingCardTexture);
+            _gl.ActiveTexture(TextureUnit.Texture0);
+        }
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
 
         uint finalTexture = _upscaleTexture;
@@ -265,6 +378,117 @@ internal sealed class PresentationRenderer : IDisposable
         _gl.BindVertexArray(_vao);
         _gl.ActiveTexture(TextureUnit.Texture0);
         _gl.BindTexture(TextureTarget.Texture2D, sourceTexture);
+    }
+
+    void LoadLoadingCardOverlay()
+    {
+        string? explicitPath =
+            Environment.GetEnvironmentVariable("RECOMPONE_ROUTE66_LOADING_CARD_PPM");
+        string? looseRoot = Runtime.ResolveLoosePath();
+        string? path = !string.IsNullOrWhiteSpace(explicitPath)
+            ? explicitPath
+            : looseRoot == null
+                ? null
+                : Path.Combine(
+                    looseRoot,
+                    "mods",
+                    "enhanced_textures_2x",
+                    "loading_cards",
+                    "route66_loading_card_4x.ppm");
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+
+        try
+        {
+            (int width, int height, byte[] rgb) = ReadP6Ppm(path);
+            uint texture = _gl.GenTexture();
+            _gl.BindTexture(TextureTarget.Texture2D, texture);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureMinFilter,
+                (int)GLEnum.Linear);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureMagFilter,
+                (int)GLEnum.Linear);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureWrapS,
+                (int)GLEnum.ClampToEdge);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureWrapT,
+                (int)GLEnum.ClampToEdge);
+            _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+            _gl.TexImage2D<byte>(
+                TextureTarget.Texture2D,
+                0,
+                InternalFormat.Rgb8,
+                (uint)width,
+                (uint)height,
+                0,
+                PixelFormat.Rgb,
+                PixelType.UnsignedByte,
+                rgb);
+            _loadingCardTexture = texture;
+            _loadingCardWidth = width;
+            _loadingCardHeight = height;
+            Console.WriteLine(
+                $"[TexturePack] loaded Route 66 loading card overlay " +
+                $"{width}x{height}: {path}");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"[TexturePack] ignored Route 66 loading card overlay " +
+                $"{path}: {ex.Message}");
+        }
+    }
+
+    static (int Width, int Height, byte[] Rgb) ReadP6Ppm(string path)
+    {
+        byte[] data = File.ReadAllBytes(path);
+        int cursor = 0;
+        string magic = NextPpmToken(data, ref cursor);
+        if (magic != "P6")
+            throw new InvalidDataException("not a binary PPM");
+        int width = int.Parse(NextPpmToken(data, ref cursor));
+        int height = int.Parse(NextPpmToken(data, ref cursor));
+        int max = int.Parse(NextPpmToken(data, ref cursor));
+        if (width <= 0 || height <= 0 || max != 255)
+            throw new InvalidDataException("unsupported PPM header");
+        if (cursor >= data.Length || data[cursor] > 32)
+            throw new InvalidDataException("missing PPM header separator");
+        cursor += cursor + 1 < data.Length &&
+            data[cursor] == '\r' &&
+            data[cursor + 1] == '\n'
+                ? 2
+                : 1;
+        int bytes = checked(width * height * 3);
+        if (data.Length - cursor < bytes)
+            throw new InvalidDataException("short PPM payload");
+        byte[] rgb = new byte[bytes];
+        System.Buffer.BlockCopy(data, cursor, rgb, 0, bytes);
+        return (width, height, rgb);
+    }
+
+    static string NextPpmToken(byte[] data, ref int cursor)
+    {
+        while (cursor < data.Length)
+        {
+            byte b = data[cursor];
+            if (b == '#')
+            {
+                while (cursor < data.Length && data[cursor] != '\n') cursor++;
+                continue;
+            }
+            if (b > 32) break;
+            cursor++;
+        }
+        int start = cursor;
+        while (cursor < data.Length && data[cursor] > 32) cursor++;
+        if (start == cursor)
+            throw new InvalidDataException("truncated PPM header");
+        return System.Text.Encoding.ASCII.GetString(data, start, cursor - start);
     }
 
     void CapturePpm(uint fbo, int width, int height, string label, bool fxaa)
@@ -302,6 +526,7 @@ internal sealed class PresentationRenderer : IDisposable
         if (_fxaaProgram != 0) _gl.DeleteProgram(_fxaaProgram);
         if (_upscaleTexture != 0) _gl.DeleteTexture(_upscaleTexture);
         if (_fxaaTexture != 0) _gl.DeleteTexture(_fxaaTexture);
+        if (_loadingCardTexture != 0) _gl.DeleteTexture(_loadingCardTexture);
         if (_upscaleFbo != 0) _gl.DeleteFramebuffer(_upscaleFbo);
         if (_fxaaFbo != 0) _gl.DeleteFramebuffer(_fxaaFbo);
     }

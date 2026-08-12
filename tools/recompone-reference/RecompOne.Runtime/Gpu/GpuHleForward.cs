@@ -20,7 +20,13 @@ public sealed partial class Gpu
     static readonly bool TraceImportedShadowAtlas =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_IMPORTED_SHADOW_ATLAS") == "1";
+    static readonly bool DumpVramLoads =
+        Environment.GetEnvironmentVariable("RECOMPONE_DUMP_VRAM_LOADS") == "1";
+    static readonly string DumpVramLoadDir =
+        Environment.GetEnvironmentVariable("RECOMPONE_VRAM_LOAD_DUMP_DIR") ??
+        "vram_load_dump";
     static readonly HashSet<string> TracedImportedShadowAtlasRegions = [];
+    static int s_vramLoadDumpIndex;
     static int _terrainPrimTraceCount;
     static bool _terrainCellTraced;
     bool DitherEnabled => _dither && ConfigManager.View.Ps1Dithering;
@@ -617,9 +623,47 @@ public sealed partial class Gpu
                     dest[i] = upload[i];
             upload = dest;
         }
+        DumpVramLoad(upload);
         GpuHle.Backend!.WriteVram(
             _loadX, _loadY, _loadW, _loadH,
             upload);
         _hleLoadActive = false;
+    }
+
+    void DumpVramLoad(ReadOnlySpan<ushort> upload)
+    {
+        if (!DumpVramLoads || _loadW <= 0 || _loadH <= 0) return;
+        if (_loadW * _loadH != upload.Length) return;
+
+        Directory.CreateDirectory(DumpVramLoadDir);
+        uint hash = 2166136261u;
+        for (int i = 0; i < upload.Length; i++)
+        {
+            ushort value = upload[i];
+            hash = (hash ^ (byte)value) * 16777619u;
+            hash = (hash ^ (byte)(value >> 8)) * 16777619u;
+        }
+        int index = Interlocked.Increment(ref s_vramLoadDumpIndex) - 1;
+        string path = Path.Combine(
+            DumpVramLoadDir,
+            $"vram_load_{index:0000}_{_loadX}_{_loadY}_{_loadW}x{_loadH}_{hash:X8}.ppm");
+        using var fs = File.Create(path);
+        byte[] header = System.Text.Encoding.ASCII.GetBytes(
+            $"P6\n{_loadW} {_loadH}\n255\n");
+        fs.Write(header);
+        byte[] rgb = new byte[_loadW * _loadH * 3];
+        for (int i = 0; i < upload.Length; i++)
+            WriteRgb555(rgb, i * 3, upload[i]);
+        fs.Write(rgb);
+    }
+
+    static void WriteRgb555(byte[] rgb, int offset, ushort value)
+    {
+        int r = value & 0x1F;
+        int g = (value >> 5) & 0x1F;
+        int b = (value >> 10) & 0x1F;
+        rgb[offset + 0] = (byte)((r << 3) | (r >> 2));
+        rgb[offset + 1] = (byte)((g << 3) | (g >> 2));
+        rgb[offset + 2] = (byte)((b << 3) | (b >> 2));
     }
 }

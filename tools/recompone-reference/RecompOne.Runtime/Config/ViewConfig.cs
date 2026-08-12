@@ -85,6 +85,12 @@ public class ViewConfig
         set => SetBool("TextureSmoothing", value);
     }
 
+    public bool HighResolutionTextures
+    {
+        get => GetBool("HighResolutionTextures", true);
+        set => SetBool("HighResolutionTextures", value);
+    }
+
     public bool PerspectiveCorrectTextures
     {
         get => GetBool("PerspectiveCorrectTextures", true);
@@ -223,6 +229,7 @@ public class ViewConfig
             InternalResolutionScale == (original ? 1 : 3) &&
             Ps1Dithering == original &&
             TextureSmoothing == !original &&
+            HighResolutionTextures == !original &&
             PerspectiveCorrectTextures == !original &&
             GeometryCorrection == !original &&
             PreciseCulling == !original &&
@@ -277,6 +284,7 @@ public class ViewConfig
         InternalResolutionScale = original ? 1 : 3;
         Ps1Dithering = original;
         TextureSmoothing = !original;
+        HighResolutionTextures = !original;
         PerspectiveCorrectTextures = !original;
         GeometryCorrection = !original;
         PreciseCulling = !original;

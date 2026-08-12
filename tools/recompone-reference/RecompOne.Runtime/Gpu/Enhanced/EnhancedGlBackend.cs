@@ -30,6 +30,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         public float ProjectionCenterX, ProjectionCenterY, ProjectionScale;
         public float HasViewSpace;
         public int Material;
+        public float ReplacementX, ReplacementY, ReplacementW, ReplacementH;
+        public float ReplacementScaleR, ReplacementScaleG, ReplacementScaleB;
+        public float ReplacementBiasR, ReplacementBiasG, ReplacementBiasB;
     }
 
     const int MaxVerts = 0x40000;
@@ -40,6 +43,12 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             "RECOMPONE_TRACE_ENHANCED_RENDERER") == "1";
     static readonly bool TraceTerrainVram =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VRAM") == "1";
+    static readonly bool TraceTextureRegions =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_TEXTURE_REGIONS") == "1";
+    static readonly bool TraceVehicleTextureReplacements =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_VEHICLE_TEXTURE_REPLACEMENTS") == "1";
     static readonly bool DisableRasterDepth =
         Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_RASTER_DEPTH") == "1";
     static readonly bool TraceDreamlandWaterOcclusion =
@@ -149,6 +158,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 "RECOMPONE_TRACE_TERRAIN_SCANLINE"));
     readonly GL _gl;
     readonly GlVram _vram;
+    TextureReplacementAtlas? _textureReplacements;
+    readonly HashSet<ulong> _vehicleReplacementHits = [];
+    readonly HashSet<ulong> _vehicleReplacementMisses = [];
     HudSvgAtlas? _hudSvg;
     readonly GlDisplayRt?[] _rts = new GlDisplayRt?[2];
     long _rtStamp;
@@ -599,6 +611,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         }
         _kTarget = null;
         _vram.ReinitializeScale(scale, nativeVram);
+        _textureReplacements?.Reset(nativeVram);
         _readCacheValid = false;
         _presentW = 0;
         _presentH = 0;
@@ -622,6 +635,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _progPresent24 = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.Present24Fs, "present24");
         if (_progPrim == 0 || _progPresent == 0 || _progPresent24 == 0) return;
         _hudSvg = new HudSvgAtlas(_gl);
+        _textureReplacements = new TextureReplacementAtlas(_gl);
 
         _uTexWindow = _gl.GetUniformLocation(_progPrim, "uTexWindow");
         _uBlend = _gl.GetUniformLocation(_progPrim, "uBlend");
@@ -650,6 +664,12 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uVram"), 0);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uDest"), 1);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uHudSvg"), 2);
+        _gl.Uniform1(
+            _gl.GetUniformLocation(_progPrim, "uReplacementAtlas"), 3);
+        _gl.Uniform2(
+            _gl.GetUniformLocation(_progPrim, "uReplacementAtlasSize"),
+            (float)(_textureReplacements?.Width ?? 1),
+            (float)(_textureReplacements?.Height ?? 1));
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uScale"), GlVram.Scale);
         bool stockPaintCorrection =
             !DisableStockPaintCorrection &&
@@ -691,6 +711,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.EnableVertexAttribArray(11); _gl.VertexAttribPointer(11, 3, VertexAttribPointerType.Float, false, stride, (void*)80);
         _gl.EnableVertexAttribArray(12); _gl.VertexAttribPointer(12, 1, VertexAttribPointerType.Float, false, stride, (void*)92);
         _gl.EnableVertexAttribArray(13); _gl.VertexAttribIPointer(13, 1, VertexAttribIType.Int, stride, (void*)96);
+        _gl.EnableVertexAttribArray(14); _gl.VertexAttribPointer(14, 4, VertexAttribPointerType.Float, false, stride, (void*)100);
+        _gl.EnableVertexAttribArray(15); _gl.VertexAttribPointer(15, 3, VertexAttribPointerType.Float, false, stride, (void*)116);
+        _gl.EnableVertexAttribArray(16); _gl.VertexAttribPointer(16, 3, VertexAttribPointerType.Float, false, stride, (void*)128);
 
         // fullscreen quad for present, real vbo since gl_VertexID without arrays does not draw on mesa for some reason?? or i did it wrong?
         _presentVao = _gl.GenVertexArray();
@@ -1357,6 +1380,67 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         return true;
     }
 
+    void ApplyTextureReplacement(
+        ref GlVertex a, ref GlVertex b, ref GlVertex c,
+        in PrimFlags f,
+        float minU, float minV, float maxU, float maxV,
+        bool allowUiReplacement = false)
+    {
+        bool uiMaterial = f.Material is
+            HleMaterialKind.Ui or HleMaterialKind.ScreenEffect;
+        if (!ConfigManager.View.HighResolutionTextures ||
+            !f.Textured || _textureReplacements == null ||
+            f.Material is HleMaterialKind.Particle or
+                HleMaterialKind.Additive or
+                HleMaterialKind.Subtractive or
+                HleMaterialKind.ImportedShadow ||
+            (uiMaterial && !allowUiReplacement))
+            return;
+        TextureReplacementAtlas.Rect rect = _textureReplacements.Resolve(
+            f.TPage, f.Clut,
+            (int)MathF.Floor(minU), (int)MathF.Floor(minV),
+            (int)MathF.Ceiling(maxU), (int)MathF.Ceiling(maxV),
+            _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY,
+            f.Material, out ulong textureKey);
+        if (f.Vehicle && TraceVehicleTextureReplacements)
+        {
+            HashSet<ulong> keys = rect.Valid
+                ? _vehicleReplacementHits
+                : _vehicleReplacementMisses;
+            if (keys.Add(textureKey))
+                Console.WriteLine(
+                    $"[TexturePack] vehicle {(rect.Valid ? "hit" : "miss")} " +
+                    $"key={textureKey:x16} " +
+                    $"size={(int)MathF.Ceiling(maxU) - (int)MathF.Floor(minU) + 1}x" +
+                    $"{(int)MathF.Ceiling(maxV) - (int)MathF.Floor(minV) + 1} " +
+                    $"unique={_vehicleReplacementHits.Count}/" +
+                    $"{_vehicleReplacementHits.Count + _vehicleReplacementMisses.Count}");
+        }
+        if (TraceTextureRegions && f.Material == HleMaterialKind.TerrainRoute)
+        {
+            float x0 = MathF.Min(a.X, MathF.Min(b.X, c.X));
+            float y0 = MathF.Min(a.Y, MathF.Min(b.Y, c.Y));
+            float x1 = MathF.Max(a.X, MathF.Max(b.X, c.X));
+            float y1 = MathF.Max(a.Y, MathF.Max(b.Y, c.Y));
+            Console.WriteLine(
+                $"[TextureRegion] frame={_frame} key={textureKey:x16} " +
+                $"screen={x0:F1},{y0:F1}-{x1:F1},{y1:F1} " +
+                $"uv={minU:F1},{minV:F1}-{maxU:F1},{maxV:F1} " +
+                $"hit={(rect.Valid ? 1 : 0)}");
+        }
+        if (!rect.Valid) return;
+        a.ReplacementX = b.ReplacementX = c.ReplacementX = rect.X;
+        a.ReplacementY = b.ReplacementY = c.ReplacementY = rect.Y;
+        a.ReplacementW = b.ReplacementW = c.ReplacementW = rect.W;
+        a.ReplacementH = b.ReplacementH = c.ReplacementH = rect.H;
+        a.ReplacementScaleR = b.ReplacementScaleR = c.ReplacementScaleR = rect.ColorScale.X;
+        a.ReplacementScaleG = b.ReplacementScaleG = c.ReplacementScaleG = rect.ColorScale.Y;
+        a.ReplacementScaleB = b.ReplacementScaleB = c.ReplacementScaleB = rect.ColorScale.Z;
+        a.ReplacementBiasR = b.ReplacementBiasR = c.ReplacementBiasR = rect.ColorBias.X;
+        a.ReplacementBiasG = b.ReplacementBiasG = c.ReplacementBiasG = rect.ColorBias.Y;
+        a.ReplacementBiasB = b.ReplacementBiasB = c.ReplacementBiasB = rect.ColorBias.Z;
+    }
+
     // The retail modal's border is drawn as flat 2D polygons, not rectangles,
     // so it never reaches the rectangle path. Its vertices come straight from
     // the packet and never touch the GTE, which separates them cleanly from
@@ -1364,18 +1448,34 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     // paused frame only ~38 carry neither view space nor a GTE Z.
     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
+        HleVertex authoredA = a, authoredB = b, authoredC = c;
+        float authoredMinU = MathF.Min(a.U, MathF.Min(b.U, c.U));
+        float authoredMinV = MathF.Min(a.V, MathF.Min(b.V, c.V));
+        float authoredMaxU = MathF.Max(a.U, MathF.Max(b.U, c.U));
+        float authoredMaxV = MathF.Max(a.V, MathF.Max(b.V, c.V));
+        authoredA.HasAuthoredUvBounds =
+            authoredB.HasAuthoredUvBounds =
+            authoredC.HasAuthoredUvBounds = true;
+        authoredA.AuthoredMinU = authoredB.AuthoredMinU =
+            authoredC.AuthoredMinU = authoredMinU;
+        authoredA.AuthoredMinV = authoredB.AuthoredMinV =
+            authoredC.AuthoredMinV = authoredMinV;
+        authoredA.AuthoredMaxU = authoredB.AuthoredMaxU =
+            authoredC.AuthoredMaxU = authoredMaxU;
+        authoredA.AuthoredMaxV = authoredB.AuthoredMaxV =
+            authoredC.AuthoredMaxV = authoredMaxV;
         if (GpuHle.NativeModalActive && _kTarget is { Margin: > 0 } modalTri &&
             !a.HasViewSpace && !b.HasViewSpace && !c.HasViewSpace &&
             !a.HasGteZ && !b.HasGteZ && !c.HasGteZ)
         {
-            HleVertex sa = a, sb = b, sc = c;
+            HleVertex sa = authoredA, sb = authoredB, sc = authoredC;
             sa.X -= modalTri.Margin;
             sb.X -= modalTri.Margin;
             sc.X -= modalTri.Margin;
             DrawTriCore(sa, sb, sc, f);
             return;
         }
-        DrawTriCore(a, b, c, f);
+        DrawTriCore(authoredA, authoredB, authoredC, f);
     }
 
     void DrawTriCore(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
@@ -2126,14 +2226,28 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             else if (vertex.X >= target.X + target.W)
                 vertex.X += target.Margin;
         }
-        float uvMinX = MathF.Min(a.U, MathF.Min(b.U, c.U));
-        float uvMinY = MathF.Min(a.V, MathF.Min(b.V, c.V));
-        float uvMaxX = MathF.Max(a.U, MathF.Max(b.U, c.U));
-        float uvMaxY = MathF.Max(a.V, MathF.Max(b.V, c.V));
+        float uvMinX = a.HasAuthoredUvBounds
+            ? a.AuthoredMinU
+            : MathF.Min(a.U, MathF.Min(b.U, c.U));
+        float uvMinY = a.HasAuthoredUvBounds
+            ? a.AuthoredMinV
+            : MathF.Min(a.V, MathF.Min(b.V, c.V));
+        float uvMaxX = a.HasAuthoredUvBounds
+            ? a.AuthoredMaxU
+            : MathF.Max(a.U, MathF.Max(b.U, c.U));
+        float uvMaxY = a.HasAuthoredUvBounds
+            ? a.AuthoredMaxV
+            : MathF.Max(a.V, MathF.Max(b.V, c.V));
         va.UvMinX = vb.UvMinX = vc.UvMinX = uvMinX;
         va.UvMinY = vb.UvMinY = vc.UvMinY = uvMinY;
         va.UvMaxX = vb.UvMaxX = vc.UvMaxX = uvMaxX;
         va.UvMaxY = vb.UvMaxY = vc.UvMaxY = uvMaxY;
+        ApplyTextureReplacement(
+            ref va, ref vb, ref vc, f,
+            uvMinX, uvMinY, uvMaxX, uvMaxY,
+            allowUiReplacement:
+                f.Material is HleMaterialKind.Ui or
+                    HleMaterialKind.ScreenEffect);
         if (particle) { va.Texpage |= 0x2000; vb.Texpage |= 0x2000; vc.Texpage |= 0x2000; }
         if (shadow)
         {
@@ -2497,7 +2611,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             f.Textured && !fontLike &&
             r.W <= 96 && r.H <= 96 &&
             (!topGameplayHud || hudBackgroundPlate);
-        int uiFlags = fontLike && ConfigManager.View.VectorFonts ? 0x2800 :
+        bool highResolutionUiFonts =
+            fontLike &&
+            (ConfigManager.View.VectorFonts ||
+             ConfigManager.View.HighResolutionTextures);
+        int uiFlags = highResolutionUiFonts ? 0x2800 :
             iconLike && ConfigManager.View.VectorIcons ? 0x4800 : 0;
         if (ConfigManager.View.VectorIcons)
         {
@@ -2552,6 +2670,23 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         va.UvMinY = vb.UvMinY = vc.UvMinY = vd.UvMinY = uvMinY;
         va.UvMaxX = vb.UvMaxX = vc.UvMaxX = vd.UvMaxX = uvMaxX;
         va.UvMaxY = vb.UvMaxY = vc.UvMaxY = vd.UvMaxY = uvMaxY;
+        ApplyTextureReplacement(
+            ref va, ref vb, ref vc, f,
+            uvMinX, uvMinY, uvMaxX, uvMaxY,
+            allowUiReplacement:
+                (f.Material is HleMaterialKind.Ui or
+                    HleMaterialKind.ScreenEffect) &&
+                !topGameplayHud);
+        vd.ReplacementX = va.ReplacementX;
+        vd.ReplacementY = va.ReplacementY;
+        vd.ReplacementW = va.ReplacementW;
+        vd.ReplacementH = va.ReplacementH;
+        vd.ReplacementScaleR = va.ReplacementScaleR;
+        vd.ReplacementScaleG = va.ReplacementScaleG;
+        vd.ReplacementScaleB = va.ReplacementScaleB;
+        vd.ReplacementBiasR = va.ReplacementBiasR;
+        vd.ReplacementBiasG = va.ReplacementBiasG;
+        vd.ReplacementBiasB = va.ReplacementBiasB;
         if (topGameplayHud)
         {
             va.Texpage &= ~0x800;
@@ -2599,6 +2734,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _readCacheValid = false;
         Flush();
         _vram.Fill(x, y, w, h, color15);
+        _textureReplacements?.Fill(x, y, w, h, color15);
         if (x + w > VramShadow.Width ||
             y + h > VramShadow.Height)
         {
@@ -2659,6 +2795,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         Flush();
         WritebackDirtyWrappedIntersecting(sx, sy, w, h);
         _vram.CopyRect(sx, sy, dx, dy, w, h);
+        _textureReplacements?.Copy(sx, sy, dx, dy, w, h);
         SyncWrappedRtsFromVram(dx, dy, w, h);
     }
 
@@ -2667,6 +2804,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _readCacheValid = false;
         Flush();
         _vram.WriteRect(x, y, w, h, px);
+        _textureReplacements?.Write(x, y, w, h, px);
         SyncWrappedRtsFromVram(x, y, w, h);
     }
 
@@ -2995,6 +3133,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.BindTexture(TextureTarget.Texture2D, destTex);
         _gl.ActiveTexture(TextureUnit.Texture2);
         _gl.BindTexture(TextureTarget.Texture2D, _hudSvg?.Texture ?? 0);
+        _gl.ActiveTexture(TextureUnit.Texture3);
+        _gl.BindTexture(
+            TextureTarget.Texture2D,
+            _textureReplacements?.Texture ?? 0);
         _gl.ActiveTexture(TextureUnit.Texture0);
         if (rt != null)
         {
@@ -3027,7 +3169,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 _uPerspectiveCorrectColors,
                 ConfigManager.View.PerspectiveCorrectColors ? 1 : 0);
             _gl.Uniform1(_uTrueColor, ConfigManager.View.TrueColor ? 1 : 0);
-            _gl.Uniform1(_uVectorFonts, ConfigManager.View.VectorFonts ? 1 : 0);
+            _gl.Uniform1(
+                _uVectorFonts,
+                ConfigManager.View.VectorFonts ||
+                ConfigManager.View.HighResolutionTextures ? 1 : 0);
             _gl.Uniform1(_uVectorIcons, ConfigManager.View.VectorIcons ? 1 : 0);
 
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
@@ -3671,6 +3816,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             EmitWaterTraceSummary();
         }
         foreach (var rt in _rts) rt?.Destroy(_gl);
+        _textureReplacements?.Dispose();
         _hudSvg?.Dispose();
         _vram.Dispose();
         if (_vbo != 0) _gl.DeleteBuffer(_vbo);

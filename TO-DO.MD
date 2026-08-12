@@ -1,6 +1,6 @@
 # Vigilante 8 PC Reference - Soak and Coverage Goal
 
-Last updated: 2026-08-02 EDT
+Last updated: 2026-08-11 EDT
 Status: AUTONOMOUS WORK EXHAUSTED - AWAITING USER SIGN-OFF
 
 # User entered list
@@ -8,18 +8,17 @@ Status: AUTONOMOUS WORK EXHAUSTED - AWAITING USER SIGN-OFF
 1. Widescreen support
 2. Support for higher resolution textures. Possibly make UI shapes runtime-drawn instead of textured
 3. Support for modded content, including V8: Second Offense and Star Wars Demolition content, and ports of Interstate 76 cars.
-   Interstate '76 `I76.ZFS` source staging is complete in ignored `I76_ZFS/`; conversion of the 34 inventoried `.vdf` vehicle candidates remains deferred.
-4. Updating of in-game menus so that options like resolution, controls, etc are not externall
-5. Windows detection of controller type (Xbox, PS, etc) and a custom model for each in controls (wishlist)
-6. "advanced" (PS2 era) lighting options. Bettter lights generally, but also shadows
-7. Game will occasionally freeze for 2-4 seconds
-8. Quest mode completion: each of the fifteen quests must be playable to the end and must unlock the
+   Interstate '76 `I76.ZFS` source staging is complete in ignored `I76_ZFS/`; conversion of the 34 inventoried `.vdf` vehicle candidates remains deferred. User has character images for vehicle select screen.
+4. Windows detection of controller type (Xbox, PS, etc) and a custom model for each in controls (wishlist)
+5. "advanced" (PS2 era) lighting options. Bettter lights generally, but also shadows
+6. Quest mode completion: each of the fifteen quests must be playable to the end and must unlock the
    character it awards. Entering quest mode is verified for all fifteen (see notes T74); stage-by-stage
    progression and the unlock itself are not started.
-9. Port Y the Alien from the original Vigilante 8. (Assigned to Codex, not this agent.)
+7. Port Y the Alien from the original Vigilante 8. (Assigned to Codex, not this agent.)
 
 ## Closed
-
+- Updating of in-game menus so that options like resolution, controls, etc are not external
+- Game will occasionally freeze for 2-4 seconds
 - Pause menu layout broken in widescreen: entries offset from the border and overlapping, and the
   whole modal off-centre. Widescreen HUD anchoring was moving whatever passed its top-of-screen
   test and leaving the border, which is drawn as flat 2D triangles rather than rectangles. Modals
@@ -141,6 +140,13 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 
 ### User-found defect remediation
 
+- [ ] Revisit Enhanced-renderer close-range scenery clipping in V8: 2nd
+      Offense. Building and other static-object polygons can disappear or
+      corrupt as the camera approaches them. The 2026-08-11 selective NCLIP/
+      packet-span rescue experiment failed visual verification and is not an
+      accepted fix; resume from a deterministic same-camera reproduction and
+      retain the known-good loose-files build until a replacement passes fresh
+      gameplay proof.
 - [ ] Fix locked-arena standalone loose-file launch for Sand Factory and Secret
       Base. The 2026-07-28 visual-smoke pass still exits before gameplay with
       `unmapped call: 0x00000000` from `FUN_80110c7c` during the SHELL-to-level
@@ -224,6 +230,14 @@ require subjective user evaluation, and leave a short explicit sign-off queue.
 
 ### Future QOL and presentation
 
+- [ ] Trace and upscale Route 66's road/route overlay separately from the 4x
+      terrain atlas. Fresh same-frame A/B proof shows a strong 4x improvement
+      in the surrounding ground while the road changes much less, consistent
+      with an XRTP/route material layer being drawn above the terrain cells.
+      Initial support now decodes XRTP TIM payloads into named 4x route DDS
+      files and quadrant metadata entries in the live texture pack; keep this
+      open until a longer or better-positioned runtime trace proves an actual
+      XRTP route key hit in gameplay.
 - [ ] Add widescreen gameplay support by expanding the horizontal 3D view;
       preserve the original aspect ratio and placement of HUD/UI elements, and
       pillarbox intros and menus rather than stretching them.

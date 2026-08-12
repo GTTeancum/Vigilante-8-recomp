@@ -411,6 +411,11 @@ internal static class HostWindow
             Environment.GetEnvironmentVariable("RECOMPONE_TEXTURE_SMOOTHING");
         if (smoothingOverride is "0" or "1")
             ConfigManager.View.TextureSmoothing = smoothingOverride == "1";
+        string? highResolutionTextureOverride =
+            Environment.GetEnvironmentVariable("RECOMPONE_HIGH_RES_TEXTURES");
+        if (highResolutionTextureOverride is "0" or "1")
+            ConfigManager.View.HighResolutionTextures =
+                highResolutionTextureOverride == "1";
         string? msaaOverride =
             Environment.GetEnvironmentVariable("RECOMPONE_MSAA_SAMPLES");
         if (int.TryParse(msaaOverride, out int msaaSamples) &&
@@ -432,6 +437,8 @@ internal static class HostWindow
             $"[Host] PS1 color dithering={(ConfigManager.View.Ps1Dithering ? "On (fidelity)" : "Off (enhanced default)")}");
         Console.WriteLine(
             $"[Host] PS1 texture smoothing={(ConfigManager.View.TextureSmoothing ? "On (enhanced default)" : "Off (fidelity)")}");
+        Console.WriteLine(
+            $"[Host] 2x texture replacements={(ConfigManager.View.HighResolutionTextures ? "On" : "Off")}");
         Console.WriteLine(
             $"[Host] PS1 texture projection fix={(ConfigManager.View.PerspectiveCorrectTextures ? "On (enhanced default)" : "Off (fidelity)")}");
         Console.WriteLine(

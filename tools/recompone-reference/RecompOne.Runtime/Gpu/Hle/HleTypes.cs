@@ -8,6 +8,7 @@ public struct HleVertex
     public float PerspectiveW;
     public float ViewX, ViewY, ViewZ;
     public float ProjectionCenterX, ProjectionCenterY, ProjectionScale;
+    public float AuthoredMinU, AuthoredMinV, AuthoredMaxU, AuthoredMaxV;
     public byte R, G, B;
     public short U, V;
     public bool HasGteZ;
@@ -15,6 +16,7 @@ public struct HleVertex
     public bool HasProjectiveW;
     public bool HasViewSpace;
     public bool ReconstructedViewSpace;
+    public bool HasAuthoredUvBounds;
 }
 
 public enum HleMaterialKind : byte

@@ -11,6 +11,13 @@ namespace RecompOne.Runtime.Sdk;
 
 public static class V82Compat
 {
+    // Generated sources made during the rejected close-culling experiment may
+    // still contain this instrumentation hook until the next full reference
+    // regeneration. Keep it behavior-free; the experiment itself is gone.
+    public static void RegisterTrianglePacketNclip(CpuContext c, IMemory m)
+    {
+    }
+
     static readonly bool TraceNativeOptions =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_NATIVE_OPTIONS") == "1";
     static readonly HashSet<string> SeenNativeOptionText = [];

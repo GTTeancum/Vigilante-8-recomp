@@ -1,0 +1,31 @@
+# Enter the stock-shell Video page, select High-res textures, and request a
+# deterministic absolute-frame capture once the row has scrolled into view.
+540+3=START
+900+3=START
+960+3=DOWN
+1020+3=DOWN
+1080+3=CROSS
+# Absolute pulses receive automatic display captures. SELECT has no meaning
+# on the Video page, so this records the selected row without changing it.
+2100+1=SELECT
+
+[v82_options_game_status]
+40+3=DOWN
+[v82_options_memory_card]
+80+3=DOWN
+[v82_options_difficulty]
+40+3=DOWN
+[v82_options_controller]
+120+3=DOWN
+[v82_options_audio]
+80+3=DOWN
+
+[v82_options_native_video]
+60+3=CROSS
+120+3=DOWN
+180+3=DOWN
+240+3=DOWN
+300+3=DOWN
+360+3=DOWN
+420+3=DOWN
+480+3=DOWN

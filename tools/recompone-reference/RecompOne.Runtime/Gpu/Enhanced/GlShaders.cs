@@ -72,6 +72,9 @@ internal static class GlShaders
         layout(location = 11) in vec3 inProjection;
         layout(location = 12) in float inHasViewSpace;
         layout(location = 13) in int inMaterial;
+        layout(location = 14) in vec4 inReplacementRect;
+        layout(location = 15) in vec3 inReplacementScale;
+        layout(location = 16) in vec3 inReplacementBias;
 
         out vec4 vColorPerspective;
         noperspective out vec4 vColorAffine;
@@ -92,6 +95,9 @@ internal static class GlShaders
         flat out int   vVehicle;
         flat out int   vTerrainDebug;
         flat out int   vMaterial;
+        flat out vec4  vReplacementRect;
+        flat out vec3  vReplacementScale;
+        flat out vec3  vReplacementBias;
         flat out ivec4 vUvBounds;
         noperspective out vec3 vBary;
         out float vDepth;
@@ -155,6 +161,9 @@ internal static class GlShaders
             vVehicle = (inTexpage >> 19) & 1;
             vTerrainDebug = (inTexpage >> 20) & 1;
             vMaterial = inMaterial;
+            vReplacementRect = inReplacementRect;
+            vReplacementScale = inReplacementScale;
+            vReplacementBias = inReplacementBias;
             vLongestEdge = inClut;
             vUvBounds = ivec4(round(inUvBounds));
             vBary = inBary;
@@ -193,6 +202,9 @@ internal static class GlShaders
         flat in int   vVehicle;
         flat in int   vTerrainDebug;
         flat in int   vMaterial;
+        flat in vec4  vReplacementRect;
+        flat in vec3  vReplacementScale;
+        flat in vec3  vReplacementBias;
         flat in ivec4 vUvBounds;
         noperspective in vec3 vBary;
         in float vDepth;
@@ -203,6 +215,8 @@ internal static class GlShaders
         uniform sampler2D uVram;
         uniform sampler2D uDest;
         uniform sampler2D uHudSvg;
+        uniform sampler2D uReplacementAtlas;
+        uniform vec2  uReplacementAtlasSize;
         uniform ivec4 uTexWindow;
         uniform vec4  uBlend;
         uniform vec4  uBlendOpaque = vec4(1.0, 1.0, 1.0, 0.0);
@@ -314,6 +328,47 @@ internal static class GlShaders
                 smoothedTexture(uvf - axis, nearestTexel).rgb * 0.5 +
                 smoothedTexture(uvf + axis, nearestTexel).rgb * 0.5;
             return vec4(rgb, nearestTexel.a);
+        }
+        vec4 replacementTexture(vec2 uvf) {
+            const int MaterialTerrainRoute = 10;
+            vec2 sourceSize = vec2(
+                max(vUvBounds.z - vUvBounds.x + 1, 1),
+                max(vUvBounds.w - vUvBounds.y + 1, 1));
+            vec2 local =
+                (uvf - vec2(vUvBounds.xy) + vec2(0.5)) / sourceSize;
+            vec2 outputSize = max(vReplacementRect.zw, vec2(1.0));
+            vec2 halfTexel = vec2(0.5) / outputSize;
+            local = clamp(local, halfTexel, vec2(1.0) - halfTexel);
+            vec2 atlasPixel =
+                vReplacementRect.xy + local * vReplacementRect.zw;
+            vec2 atlasSize = max(uReplacementAtlasSize, vec2(1.0));
+            vec2 atlasUv = atlasPixel / atlasSize;
+            vec4 texel = texture(uReplacementAtlas, atlasUv);
+            if (vMaterial == MaterialTerrainRoute) {
+                vec2 minPixel = vReplacementRect.xy + vec2(0.5);
+                vec2 maxPixel = vReplacementRect.xy +
+                    max(vReplacementRect.zw - vec2(0.5), vec2(0.5));
+                vec3 neighbours = (
+                    texture(uReplacementAtlas,
+                        clamp(atlasPixel + vec2(1.0, 0.0), minPixel, maxPixel) /
+                        atlasSize).rgb +
+                    texture(uReplacementAtlas,
+                        clamp(atlasPixel + vec2(-1.0, 0.0), minPixel, maxPixel) /
+                        atlasSize).rgb +
+                    texture(uReplacementAtlas,
+                        clamp(atlasPixel + vec2(0.0, 1.0), minPixel, maxPixel) /
+                        atlasSize).rgb +
+                    texture(uReplacementAtlas,
+                        clamp(atlasPixel + vec2(0.0, -1.0), minPixel, maxPixel) /
+                        atlasSize).rgb) * 0.25;
+                texel.rgb = clamp(
+                    texel.rgb + (texel.rgb - neighbours) * 1.0,
+                    vec3(0.0), vec3(1.0));
+            }
+            texel.rgb = clamp(
+                texel.rgb * vReplacementScale + vReplacementBias,
+                vec3(0.0), vec3(1.0));
+            return texel;
         }
         vec4 contourTexture(vec2 uvf, out float coverage, out float stp) {
             // Reconstruct a continuous silhouette from the four surrounding
@@ -472,9 +527,12 @@ internal static class GlShaders
                 nearestUv = clamp(nearestUv, boundMin, boundMax);
             }
             vec4 nearestTexel = textureTexel(nearestUv);
-            vec4 texel = uTextureSmoothing != 0 && vSmooth != 0
-                ? filteredTexture(sampleUV, nearestTexel)
-                : nearestTexel;
+            bool hasReplacement = vReplacementRect.z > 0.0;
+            vec4 texel = hasReplacement
+                ? replacementTexture(sampleUV)
+                : (uTextureSmoothing != 0 && vSmooth != 0
+                    ? filteredTexture(sampleUV, nearestTexel)
+                    : nearestTexel);
             bool vehicleGlass = vMaterial == 3 || vMaterial == 4;
             bool importedVehicleGlass = vMaterial == 4;
             bool importedProjectedShadow = vMaterial == 11;
@@ -494,10 +552,24 @@ internal static class GlShaders
 
             if ((vectorFont || vectorIcon || enhancedParticle ||
                  enhancedImportedShadow) && !svgHud) {
-                texel = contourTexture(sampleUV, contourCoverage, contourStp);
+                bool replacementFont = vectorFont && hasReplacement;
+                if (replacementFont) {
+                    contourCoverage = clamp(texel.a, 0.0, 1.0);
+                    if (contourCoverage <= 0.01) {
+                        discard;
+                    }
+                    texel.a = 1.0;
+                } else {
+                    texel = contourTexture(sampleUV, contourCoverage, contourStp);
+                }
                 if (vectorIcon && vHudPlate == 0)
                     texel.rgb = nearestTexel.rgb;
-                if (vectorFont || vectorIcon) {
+                if (vectorFont && !replacementFont) {
+                    contourCoverage = smoothstep(0.18, 0.72, contourCoverage);
+                    if (contourCoverage <= 0.01) {
+                        discard;
+                    }
+                } else if (vectorIcon) {
                     // A half-coverage contour gives the original bitmap glyph
                     // or UI plate a stable, resolution-independent high-
                     // resolution edge. Final presentation AA handles the
@@ -586,6 +658,10 @@ internal static class GlShaders
                 if (shadowCoverage <= 0.001) discard;
                 FragColor = vec4(0.0, 0.0, 0.0, shadowCoverage);
                 BlendColor = vec4(1.0);
+            } else if (vectorFont && contourCoverage < 0.999) {
+                BlendColor = vec4(
+                    uBlend.rgb * contourCoverage,
+                    mix(1.0, uBlend.a, contourCoverage));
             } else if (enhancedParticle && contourCoverage < 0.999) {
                 if (contourStp >= 0.5) {
                     BlendColor = vec4(

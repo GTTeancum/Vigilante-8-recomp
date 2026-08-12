@@ -2,6 +2,11 @@ namespace RecompOne.Runtime;
 
 public sealed class Mdec
 {
+    static readonly bool DumpImages = Environment.GetEnvironmentVariable("RECOMPONE_DUMP_MDEC_IMAGES") == "1";
+    static readonly string DumpDir = Environment.GetEnvironmentVariable("RECOMPONE_MDEC_DUMP_DIR") ?? "mdec_dump";
+    static readonly int DumpBlocksWide = int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_MDEC_DUMP_BLOCKS_WIDE"), out int blocksWide) ? blocksWide : 0;
+    static int s_dumpIndex;
+
     static readonly int[] Zigzag =
     {
         0,  1,  8,  16, 9,  2,  3,  10,
@@ -210,6 +215,7 @@ public sealed class Mdec
                 mbCount++;
             }
         }
+        DumpDecodedImage(mbStart, mbCount);
         if (Log.MdecOn)
         {
             uint hash = 2166136261u;
@@ -221,6 +227,66 @@ public sealed class Mdec
             }
             Log.Mdec($"decode depth={_depth} signed={_signed} bit15={_bit15} inHW={_inHalfwords.Count} consumedHW={_readPos} mbs={mbCount} wordsOut={_out.Count - mbStart} outTotal={_out.Count} or=0x{wordOr:X8} hash=0x{hash:X8}");
         }
+    }
+
+    void DumpDecodedImage(int mbStart, int mbCount)
+    {
+        if (!DumpImages || _depth != 3 || mbCount <= 0) return;
+
+        int blocksWide = DumpBlocksWide > 0 ? DumpBlocksWide : GuessBlocksWide(mbCount);
+        if (blocksWide <= 0 || mbCount % blocksWide != 0) return;
+
+        int blocksHigh = mbCount / blocksWide;
+        int width = blocksWide * 16;
+        int height = blocksHigh * 16;
+        int expectedWords = mbCount * 128;
+        uint[] words = _out.Skip(mbStart).Take(expectedWords).ToArray();
+        if (words.Length != expectedWords) return;
+
+        Directory.CreateDirectory(DumpDir);
+        uint hash = 2166136261u;
+        foreach (uint word in words) hash = (hash ^ word) * 16777619u;
+
+        int index = Interlocked.Increment(ref s_dumpIndex) - 1;
+        string path = Path.Combine(DumpDir, $"mdec_{index:0000}_{width}x{height}_{mbCount}mb_{hash:X8}.ppm");
+        using var fs = File.Create(path);
+        byte[] header = System.Text.Encoding.ASCII.GetBytes($"P6\n{width} {height}\n255\n");
+        fs.Write(header);
+
+        byte[] rgb = new byte[width * height * 3];
+        for (int mb = 0; mb < mbCount; mb++)
+        {
+            int baseX = (mb % blocksWide) * 16;
+            int baseY = (mb / blocksWide) * 16;
+            for (int i = 0; i < 128; i++)
+            {
+                uint pair = words[mb * 128 + i];
+                WriteRgb555(rgb, width, baseX, baseY, i * 2, (ushort)pair);
+                WriteRgb555(rgb, width, baseX, baseY, i * 2 + 1, (ushort)(pair >> 16));
+            }
+        }
+        fs.Write(rgb);
+    }
+
+    static int GuessBlocksWide(int mbCount)
+    {
+        if (mbCount % 20 == 0) return 20;
+        if (mbCount % 16 == 0) return 16;
+        if (mbCount % 10 == 0) return 10;
+        return 0;
+    }
+
+    static void WriteRgb555(byte[] rgb, int width, int baseX, int baseY, int pixelInBlock, ushort value)
+    {
+        int x = baseX + (pixelInBlock & 15);
+        int y = baseY + (pixelInBlock >> 4);
+        int o = (x + y * width) * 3;
+        int r = value & 0x1F;
+        int g = (value >> 5) & 0x1F;
+        int b = (value >> 10) & 0x1F;
+        rgb[o + 0] = (byte)((r << 3) | (r >> 2));
+        rgb[o + 1] = (byte)((g << 3) | (g >> 2));
+        rgb[o + 2] = (byte)((b << 3) | (b >> 2));
     }
 
     ushort NextHalfword() => _readPos < _inHalfwords.Count ? _inHalfwords[_readPos++] : (ushort)0xFE00;
