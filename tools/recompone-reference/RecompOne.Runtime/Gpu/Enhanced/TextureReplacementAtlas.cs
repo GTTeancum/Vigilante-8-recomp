@@ -59,12 +59,15 @@ internal sealed class TextureReplacementAtlas : IDisposable
     readonly Dictionary<Signature, Cached> _cache = [];
     readonly Dictionary<ulong, Rect> _entries = [];
     readonly HashSet<ulong> _routeEntries = [];
+    readonly HashSet<ulong> _fontEntries = [];
     readonly List<TerrainAtlas> _terrainAtlases = [];
     TerrainAtlas? _activeTerrainAtlas;
     readonly HashSet<ulong> _dumped = [];
     readonly HashSet<ulong> _loggedTerrain = [];
+    readonly HashSet<ulong> _loggedFonts = [];
     readonly string? _dumpDirectory;
     readonly bool _dumpTerrainOnly;
+    readonly bool _traceFontEntries;
     long _resolves, _hits;
     long _terrainResolves, _terrainAtlasHits;
     ulong _revision = 1;
@@ -83,6 +86,8 @@ internal sealed class TextureReplacementAtlas : IDisposable
             "RECOMPONE_TEXTURE_DUMP_DIR");
         _dumpTerrainOnly = Environment.GetEnvironmentVariable(
             "RECOMPONE_TEXTURE_DUMP_TERRAIN_ONLY") == "1";
+        _traceFontEntries = Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_FONT_TEXTURES") == "1";
         if (!string.IsNullOrWhiteSpace(_dumpDirectory))
             Directory.CreateDirectory(Path.GetFullPath(_dumpDirectory));
         Load();
@@ -134,6 +139,9 @@ internal sealed class TextureReplacementAtlas : IDisposable
             if (pending[^1].Image.StartsWith(
                     "images/route/", StringComparison.OrdinalIgnoreCase))
                 _routeEntries.Add(key);
+            if (pending[^1].Image.Contains(
+                    "_fnt_", StringComparison.OrdinalIgnoreCase))
+                _fontEntries.Add(key);
         }
         var pendingTerrain = new List<PendingTerrainAtlas>();
         if (rootElement.TryGetProperty("terrainAtlases", out JsonElement terrain))
@@ -511,6 +519,14 @@ internal sealed class TextureReplacementAtlas : IDisposable
             ? found
             : default;
         if (rect.Valid) _hits++;
+        if (_traceFontEntries &&
+            rect.Valid && _fontEntries.Contains(hash) &&
+            _loggedFonts.Count < 256 && _loggedFonts.Add(hash))
+            Console.WriteLine(
+                $"[TexturePack] FNT DDS hit key={hash:x16} " +
+                $"size={width}x{height} tpage=0x{tpage:X3} clut=0x{clut:X4} " +
+                $"uv={minU},{minV}-{maxU},{maxV} " +
+                $"window={twAndX:x2},{twAndY:x2},{twOrX:x2},{twOrY:x2}");
         if (material == HleMaterialKind.TerrainRoute &&
             _loggedTerrain.Count < 128 && _loggedTerrain.Add(hash))
             Console.WriteLine(
