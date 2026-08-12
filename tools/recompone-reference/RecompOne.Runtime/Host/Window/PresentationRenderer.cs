@@ -329,7 +329,7 @@ internal sealed class PresentationRenderer : IDisposable
             ConfigManager.View.HighResolution3D
                 ? ConfigManager.View.InternalResolutionScale
                 : 1);
-        _gl.Uniform1(_upscaleLinearFilter, uiPresentation ? 1 : 0);
+        _gl.Uniform1(_upscaleLinearFilter, 0);
         _gl.Uniform1(_upscaleLoadingUiRestore, loadingUiSource ? 1 : 0);
         bool loadingCardOverlay = preTickLoadingCard && _loadingCardTexture != 0;
         _gl.Uniform1(_upscaleLoadingCardOverlay, loadingCardOverlay ? 1 : 0);
@@ -349,7 +349,8 @@ internal sealed class PresentationRenderer : IDisposable
 
         uint finalTexture = _upscaleTexture;
         uint finalFbo = _upscaleFbo;
-        if (fxaa)
+        bool finalFxaa = fxaa && !uiPresentation;
+        if (finalFxaa)
         {
             PreparePass(_fxaaFbo, _fxaaProgram, _upscaleTexture);
             _gl.Uniform2(_fxaaSourceSize, (float)outputWidth, outputHeight);
@@ -360,7 +361,7 @@ internal sealed class PresentationRenderer : IDisposable
         }
 
         if (!string.IsNullOrEmpty(captureLabel))
-            CapturePpm(finalFbo, outputWidth, outputHeight, captureLabel, fxaa);
+            CapturePpm(finalFbo, outputWidth, outputHeight, captureLabel, finalFxaa);
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         return finalTexture;

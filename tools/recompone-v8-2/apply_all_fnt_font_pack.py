@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upscale every loose V8:2 FNT sheet and add it to the texture pack."""
+"""Rebuild every loose V8:2 FNT sheet and add it to the texture pack."""
 
 from __future__ import annotations
 
@@ -68,7 +68,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scale", type=int, default=4)
     parser.add_argument("--proof-out", type=Path, default=PROOF_DIR)
-    parser.add_argument("--skip-esrgan", action="store_true")
+    parser.add_argument("--mode", choices=("crisp", "source", "loading"), default="crisp")
+    parser.add_argument("--game-font", type=Path, default=Path("C:/Windows/Fonts/LTYPEO.TTF"))
+    parser.add_argument("--game-point-size", type=int, default=18)
+    parser.add_argument("--game-width-factor", type=float, default=0.94)
+    parser.add_argument("--game-shadow-alpha", type=int, default=135)
+    parser.add_argument("--slogan-font", type=Path)
+    parser.add_argument("--slogan-point-size", type=int, default=28)
+    parser.add_argument("--slogan-width-factor", type=float, default=1.0)
+    parser.add_argument("--slogan-shadow-alpha", type=int, default=125)
     args = parser.parse_args()
 
     fnt_tool = load_module(
@@ -79,19 +87,63 @@ def main() -> None:
         ROOT / "tools" / "recompone-v8-2" / "apply_game_fnt_font_pack.py",
         "apply_game_fnt_font_pack",
     )
+    base_mode = "source" if args.mode == "source" else "crisp"
     for fnt_path in KNOWN_FNTS:
-        if args.skip_esrgan:
-            upscale = args.proof_out / upscale_name(fnt_path, args.scale)
-            if not upscale.exists():
-                sheet = fnt_tool.decode_fnt(fnt_path)
-                fnt_tool.black_preview(sheet.atlas, args.scale).save(upscale)
-        else:
+        if base_mode == "source":
             upscale = make_upscale(fnt_tool, fnt_path, args.proof_out, args.scale)
+        else:
+            sheet = fnt_tool.decode_fnt(fnt_path)
+            args.proof_out.mkdir(parents=True, exist_ok=True)
+            fnt_tool.black_preview(sheet.atlas, 3).save(
+                args.proof_out / f"{fnt_path.stem.lower()}_fnt_source_atlas_3x.png"
+            )
+            fnt_tool.glyph_sheet(sheet, 4).save(
+                args.proof_out / f"{fnt_path.stem.lower()}_fnt_source_glyph_records_4x.png"
+            )
+            upscale = args.proof_out / upscale_name(fnt_path, args.scale)
         sys.argv = [
             "apply_game_fnt_font_pack.py",
-            "--mode", "source",
+            "--mode", base_mode,
             "--fnt", str(fnt_path),
-            "--source-upscale", str(upscale),
+            "--scale", str(args.scale),
+            "--proof-out", str(args.proof_out),
+        ]
+        if base_mode == "source":
+            sys.argv.extend(["--source-upscale", str(upscale)])
+        pack_tool.main()
+
+    if args.mode != "loading":
+        return
+    if not args.game_font.exists():
+        raise SystemExit(f"GAME.FNT donor font missing: {args.game_font}")
+    if args.slogan_font is None or not args.slogan_font.exists():
+        raise SystemExit("SLOGAN.FNT donor font missing; pass --slogan-font")
+
+    targeted = (
+        (
+            ROOT / "V8_2_LOOSE" / "SHARED" / "GAME.FNT",
+            args.game_font,
+            args.game_point_size,
+            args.game_width_factor,
+            args.game_shadow_alpha,
+        ),
+        (
+            ROOT / "V8_2_LOOSE" / "SHELL" / "SLOGAN.FNT",
+            args.slogan_font,
+            args.slogan_point_size,
+            args.slogan_width_factor,
+            args.slogan_shadow_alpha,
+        ),
+    )
+    for fnt_path, font_path, point_size, width_factor, shadow_alpha in targeted:
+        sys.argv = [
+            "apply_game_fnt_font_pack.py",
+            "--mode", "ttf",
+            "--fnt", str(fnt_path),
+            "--font", str(font_path),
+            "--point-size", str(point_size),
+            "--width-factor", str(width_factor),
+            "--shadow-alpha", str(shadow_alpha),
             "--scale", str(args.scale),
             "--proof-out", str(args.proof_out),
         ]

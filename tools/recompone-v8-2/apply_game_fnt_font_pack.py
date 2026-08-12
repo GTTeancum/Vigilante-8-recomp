@@ -69,7 +69,65 @@ def transparent_font_atlas(image: Image.Image) -> Image.Image:
     return Image.frombytes("RGBA", rgba.size, bytes(pixels))
 
 
-def make_source_atlas(sheet, scale: int, source_upscale: Path | None) -> Image.Image:
+def scale2x(image: Image.Image) -> Image.Image:
+    source = image.convert("RGBA")
+    pixels = source.load()
+    out = Image.new("RGBA", (source.width * 2, source.height * 2), (0, 0, 0, 0))
+    target = out.load()
+    for y in range(source.height):
+        for x in range(source.width):
+            e = pixels[x, y]
+            b = pixels[x, y - 1] if y > 0 else e
+            d = pixels[x - 1, y] if x > 0 else e
+            f = pixels[x + 1, y] if x + 1 < source.width else e
+            h = pixels[x, y + 1] if y + 1 < source.height else e
+            if b != h and d != f:
+                e0 = d if d == b else e
+                e1 = f if b == f else e
+                e2 = d if d == h else e
+                e3 = f if h == f else e
+            else:
+                e0 = e1 = e2 = e3 = e
+            ox = x * 2
+            oy = y * 2
+            target[ox, oy] = e0
+            target[ox + 1, oy] = e1
+            target[ox, oy + 1] = e2
+            target[ox + 1, oy + 1] = e3
+    return out
+
+
+def clean_mask_atlas(image: Image.Image) -> Image.Image:
+    rgba = image.convert("RGBA")
+    pixels = bytearray(rgba.tobytes())
+    for index in range(0, len(pixels), 4):
+        r, g, b, a = pixels[index:index + 4]
+        intensity = max(r, g, b) if a else 0
+        if intensity <= 12:
+            pixels[index:index + 4] = b"\x00\x00\x00\x00"
+        else:
+            alpha = max(0, min(255, int((intensity - 12) * 255 / 243)))
+            if alpha > 220:
+                alpha = 255
+            pixels[index:index + 4] = bytes((255, 255, 255, alpha))
+    return Image.frombytes("RGBA", rgba.size, bytes(pixels))
+
+
+def make_crisp_source_atlas(sheet, scale: int) -> Image.Image:
+    image = clean_mask_atlas(fnt.opaque_crop(sheet.atlas))
+    current_scale = 1
+    while current_scale * 2 <= scale:
+        image = scale2x(image)
+        current_scale *= 2
+    if current_scale != scale:
+        image = image.resize(
+            (sheet.atlas.width * scale, sheet.atlas.height * scale),
+            Image.Resampling.NEAREST,
+        )
+    return image
+
+
+def make_model_source_atlas(sheet, scale: int, source_upscale: Path | None) -> Image.Image:
     target_size = (sheet.atlas.width * scale, sheet.atlas.height * scale)
     if source_upscale is not None and source_upscale.exists():
         image = Image.open(source_upscale).convert("RGBA")
@@ -92,7 +150,7 @@ def strip_previous_generator_suffixes(generator: str, label: str) -> str:
         generator = generator.replace(suffix, "")
     escaped = re.escape(label)
     return re.sub(
-        rf"; {escaped} (?:fitted|source-sheet) [^;]+ font atlas",
+        rf"; {escaped} [^;]+ font atlas",
         "",
         generator,
     )
@@ -139,7 +197,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fnt", type=Path, default=DEFAULT_FNT)
     parser.add_argument("--manifest", type=Path, default=ROOT / "V8_2_LOOSE" / "mods" / "enhanced_textures_2x" / "manifest.json")
-    parser.add_argument("--mode", choices=("source", "ttf"), default="source")
+    parser.add_argument("--mode", choices=("crisp", "source", "ttf"), default="crisp")
     parser.add_argument("--font", type=Path, default=Path("C:/Windows/Fonts/timesbi.ttf"))
     parser.add_argument("--point-size", type=int, default=18)
     parser.add_argument("--width-factor", type=float, default=0.92)
@@ -172,11 +230,15 @@ def main() -> None:
         )
         atlas_label = f"fitted {args.font.stem}"
         atlas_name = f"{prefix}_{safe_stem(args.font)}_{args.scale}x.dds"
-    else:
-        image = make_source_atlas(sheet, args.scale, source_upscale)
+    elif args.mode == "source":
+        image = make_model_source_atlas(sheet, args.scale, source_upscale)
         source_label = source_stem(source_upscale) if source_upscale.exists() else "native_nearest"
         atlas_label = f"source-sheet {source_label}"
         atlas_name = f"{prefix}_source_{source_label}_{args.scale}x.dds"
+    else:
+        image = make_crisp_source_atlas(sheet, args.scale)
+        atlas_label = "crisp source-sheet scale2x"
+        atlas_name = f"{prefix}_source_scale2x_{args.scale}x.dds"
 
     pack_root = args.manifest.parent
     atlas_relative = Path("images") / "ui" / atlas_name
@@ -234,7 +296,7 @@ def main() -> None:
         )
         proof = Image.new("RGB", (max(native.width, scaled.width), native.height + scaled.height + 60), (10, 10, 10))
         draw = ImageDraw.Draw(proof)
-        draw.text((8, 6), "Original GAME.FNT source atlas", fill=(230, 230, 230))
+        draw.text((8, 6), f"Original {font_label(args.fnt)} source atlas", fill=(230, 230, 230))
         proof.paste(native, (0, 24))
         y = native.height + 36
         draw.text((8, y), f"Deployed source-sheet atlas: {atlas_label}", fill=(230, 230, 230))
@@ -255,8 +317,10 @@ def main() -> None:
             f"width_factor={args.width_factor}",
             f"shadow_alpha={args.shadow_alpha}",
         ]
-    else:
+    elif args.mode == "source":
         report[2:2] = [f"source_upscale={source_upscale}"]
+    else:
+        report[2:2] = ["source_upscale=scale2x_from_decoded_fnt"]
     (args.proof_out / f"{proof_prefix}_deployed_font_pack_report.txt").write_text(
         "\n".join(report) + "\n",
         encoding="utf-8",

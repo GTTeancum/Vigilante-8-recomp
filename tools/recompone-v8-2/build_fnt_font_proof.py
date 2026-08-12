@@ -287,7 +287,7 @@ def score_ttf(sheet: FontSheet, font_path: Path, point_size: int) -> float:
 
 def comparison_proof(sheet: FontSheet, candidates: list[tuple[Path, int, float]], scale: int) -> Image.Image:
     native = black_preview(sheet.atlas, scale)
-    panels = [("Original GAME.FNT TIM atlas", native)]
+    panels = [(f"Original {sheet.path.stem.upper()}.FNT TIM atlas", native)]
     for font_path, point_size, score in candidates:
         image = render_ttf_atlas(sheet, font_path, point_size, scale)
         label = f"{font_path.name} {point_size}px mask diff {score:.3f}"
@@ -324,7 +324,7 @@ def fitted_proof(
     out = Image.new("RGB", (width, label_h * 2 + native.height + fitted.height + gap), (10, 10, 10))
     draw = ImageDraw.Draw(out)
     y = 0
-    draw.text((8, y + 5), "Original GAME.FNT source atlas", fill=(230, 230, 230))
+    draw.text((8, y + 5), f"Original {sheet.path.stem.upper()}.FNT source atlas", fill=(230, 230, 230))
     y += label_h
     out.paste(native, (0, y))
     y += native.height + gap
