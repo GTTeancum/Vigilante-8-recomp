@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Rebuild every loose V8:2 FNT sheet and add it to the texture pack."""
+"""Rebuild V8:2 FNT sheets that are safe to replace in the texture pack."""
 
 from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 from pathlib import Path
+import re
 import subprocess
 import sys
-
-from PIL import Image, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,116 +19,7 @@ KNOWN_FNTS = (
     ROOT / "V8_2_LOOSE" / "SHARED" / "GAME.FNT",
     ROOT / "V8_2_LOOSE" / "SHARED" / "HUD.FNT",
     ROOT / "V8_2_LOOSE" / "SHARED" / "KONG.FNT",
-    ROOT / "V8_2_LOOSE" / "SHELL" / "SLOGAN.FNT",
 )
-
-
-def slogan_glyph_mask(sheet, glyph, scale: int) -> Image.Image:
-    crop = sheet.atlas.crop(
-        (glyph.x, glyph.y, glyph.x + glyph.width, glyph.y + sheet.max_height)
-    ).convert("RGBA")
-    pixels = crop.tobytes()
-    alpha = bytearray(glyph.width * sheet.max_height)
-    for index in range(0, len(pixels), 4):
-        r, g, b, a = pixels[index:index + 4]
-        alpha[index // 4] = 255 if a or r or g or b else 0
-    return Image.frombytes(
-        "L",
-        (glyph.width, sheet.max_height),
-        bytes(alpha),
-    ).resize(
-        (glyph.width * scale, sheet.max_height * scale),
-        Image.Resampling.NEAREST,
-    )
-
-
-def render_slogan_text(sheet, text: str, target_w: int, target_h: int) -> Image.Image:
-    glyphs = {glyph.char: glyph for glyph in sheet.glyphs}
-    scale = 8
-    space = 10 * scale
-    width = sum(
-        glyphs[char].advance * scale if char in glyphs else space
-        for char in text
-    )
-    rendered = Image.new(
-        "RGBA",
-        (max(1, width), sheet.max_height * scale),
-        (0, 0, 0, 0),
-    )
-    cursor = 0
-    for char in text:
-        glyph = glyphs.get(char)
-        if glyph is None:
-            cursor += space
-            continue
-        mask = slogan_glyph_mask(sheet, glyph, scale)
-        source = Image.new("RGBA", mask.size, (250, 250, 250, 255))
-        source.putalpha(mask)
-        rendered.alpha_composite(source, (cursor, 0))
-        cursor += glyph.advance * scale
-    return rendered.resize((target_w, target_h), Image.Resampling.LANCZOS)
-
-
-def paste_with_shadow(
-    base: Image.Image,
-    layer: Image.Image,
-    pos: tuple[int, int],
-    shadow: tuple[int, int, int],
-    offset: tuple[int, int],
-) -> None:
-    shadow_layer = Image.new("RGBA", layer.size, shadow + (0,))
-    shadow_layer.putalpha(layer.getchannel("A"))
-    base.alpha_composite(shadow_layer, (pos[0] + offset[0], pos[1] + offset[1]))
-    base.alpha_composite(layer, pos)
-
-
-def add_zigzag(
-    draw: ImageDraw.ImageDraw,
-    x0: int,
-    x1: int,
-    y: int,
-    amp: int = 7,
-    period: int = 44,
-) -> None:
-    points: list[tuple[int, int]] = []
-    x = x0
-    up = True
-    while x <= x1 + period:
-        points.append((x, y + (0 if up else amp)))
-        x += period // 2
-        up = not up
-    draw.line(points, fill=(7, 7, 7, 255), width=4, joint="curve")
-
-
-def make_route66_loading_text_overlay(fnt_tool, out_path: Path) -> None:
-    sheet = fnt_tool.decode_fnt(ROOT / "V8_2_LOOSE" / "SHELL" / "SLOGAN.FNT")
-    overlay = Image.new("RGBA", (1920, 1080), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    strip = (242, 936, 1678, 1018)
-    draw.rectangle(strip, fill=(78, 78, 78, 255))
-    for y in range(strip[1] + 8, strip[3] - 2, 17):
-        add_zigzag(draw, strip[0], strip[2], y)
-
-    paste_with_shadow(
-        overlay,
-        render_slogan_text(sheet, "Meteor Crater", 790, 106),
-        (320, 58),
-        (56, 56, 56),
-        (7, 7),
-    )
-    paste_with_shadow(
-        overlay,
-        render_slogan_text(sheet, "Press X to start...", 680, 64),
-        (456, 943),
-        (46, 46, 46),
-        (4, 4),
-    )
-
-    rgb = Image.new("RGB", overlay.size, (0, 0, 0))
-    rgb.paste(overlay.convert("RGB"), mask=overlay.getchannel("A"))
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    rgb.save(out_path)
 
 
 def load_module(path: Path, name: str):
@@ -174,20 +65,43 @@ def make_upscale(fnt_tool, fnt_path: Path, out_dir: Path, scale: int) -> Path:
     return upscale
 
 
+def remove_fnt_pack_entries(manifest_path: Path, label: str) -> None:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    sources = manifest.setdefault("sources", {})
+    remove_keys = {
+        key for key, source_list in sources.items()
+        if any(str(source).startswith(f"{label} glyph ") for source in source_list)
+    }
+    if remove_keys:
+        manifest["entries"] = [
+            entry for entry in manifest["entries"]
+            if entry.get("key") not in remove_keys
+        ]
+        for key in remove_keys:
+            sources.pop(key, None)
+
+    generator = manifest.get("generator", "")
+    manifest["generator"] = re.sub(
+        rf"; {re.escape(label)} [^;]+ font atlas",
+        "",
+        generator,
+    )
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    pack_root = manifest_path.parent
+    referenced = {entry.get("image", "") for entry in manifest["entries"]}
+    for stale in (pack_root / "images" / "ui").glob(f"{label.lower().replace('.fnt', '')}_fnt_*.dds"):
+        relative = str(stale.relative_to(pack_root)).replace("\\", "/")
+        if relative not in referenced:
+            stale.unlink()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scale", type=int, default=4)
     parser.add_argument("--font-scale", type=int, default=8)
     parser.add_argument("--proof-out", type=Path, default=PROOF_DIR)
     parser.add_argument("--mode", choices=("crisp", "source", "loading"), default="crisp")
-    parser.add_argument("--game-font", type=Path, default=Path("C:/Windows/Fonts/LTYPEO.TTF"))
-    parser.add_argument("--game-point-size", type=int, default=18)
-    parser.add_argument("--game-width-factor", type=float, default=0.94)
-    parser.add_argument("--game-shadow-alpha", type=int, default=0)
-    parser.add_argument("--slogan-font", type=Path)
-    parser.add_argument("--slogan-point-size", type=int, default=28)
-    parser.add_argument("--slogan-width-factor", type=float, default=1.0)
-    parser.add_argument("--slogan-shadow-alpha", type=int, default=0)
     args = parser.parse_args()
 
     fnt_tool = load_module(
@@ -225,46 +139,19 @@ def main() -> None:
 
     if args.mode != "loading":
         return
-    if not args.game_font.exists():
-        raise SystemExit(f"GAME.FNT donor font missing: {args.game_font}")
-    if args.slogan_font is None or not args.slogan_font.exists():
-        raise SystemExit("SLOGAN.FNT donor font missing; pass --slogan-font")
 
-    targeted = (
-        (
-            ROOT / "V8_2_LOOSE" / "SHARED" / "GAME.FNT",
-            args.game_font,
-            args.game_point_size,
-            args.game_width_factor,
-            args.game_shadow_alpha,
-        ),
-        (
-            ROOT / "V8_2_LOOSE" / "SHELL" / "SLOGAN.FNT",
-            args.slogan_font,
-            args.slogan_point_size,
-            args.slogan_width_factor,
-            args.slogan_shadow_alpha,
-        ),
+    remove_fnt_pack_entries(
+        ROOT / "V8_2_LOOSE" / "mods" / "enhanced_textures_2x" / "manifest.json",
+        "SLOGAN.FNT",
     )
-    for fnt_path, font_path, point_size, width_factor, shadow_alpha in targeted:
-        sys.argv = [
-            "apply_game_fnt_font_pack.py",
-            "--mode", "ttf",
-            "--fnt", str(fnt_path),
-            "--font", str(font_path),
-            "--point-size", str(point_size),
-            "--width-factor", str(width_factor),
-            "--shadow-alpha", str(shadow_alpha),
-            "--scale", str(args.font_scale),
-            "--proof-out", str(args.proof_out),
-        ]
-        pack_tool.main()
-
-    make_route66_loading_text_overlay(
-        fnt_tool,
-        ROOT / "V8_2_LOOSE" / "mods" / "enhanced_textures_2x" /
-        "loading_cards" / "route66_loading_text_1920x1080.ppm",
-    )
+    sys.argv = [
+        "apply_game_fnt_font_pack.py",
+        "--mode", "crisp",
+        "--fnt", str(ROOT / "V8_2_LOOSE" / "SHARED" / "GAME.FNT"),
+        "--scale", str(args.font_scale),
+        "--proof-out", str(args.proof_out),
+    ]
+    pack_tool.main()
 
 
 if __name__ == "__main__":

@@ -204,7 +204,7 @@ def donor_text_character(char: str) -> bool:
         "A" <= char <= "Z" or
         "a" <= char <= "z" or
         "0" <= char <= "9" or
-        char in ".,:;!?+-/()[]<>@#$%&*_\\'\" "
+        char in ".,:;!?+-/()'\" "
     )
 
 
@@ -219,10 +219,19 @@ def paste_source_glyph(
             (glyph.x, glyph.y, glyph.x + glyph.width, glyph.y + sheet.max_height)
         )
     )
-    scaled = crop.resize(
+    source = crop.convert("RGBA")
+    pixels = source.tobytes()
+    alpha = bytearray(source.width * source.height)
+    for index in range(0, len(pixels), 4):
+        r, g, b, a = pixels[index:index + 4]
+        alpha[index // 4] = 255 if a or r or g or b else 0
+    mask = Image.frombytes("L", source.size, bytes(alpha))
+    scaled_mask = mask.resize(
         (glyph.width * scale, sheet.max_height * scale),
         Image.Resampling.NEAREST,
     )
+    scaled = Image.new("RGBA", scaled_mask.size, (255, 255, 255, 255))
+    scaled.putalpha(scaled_mask)
     out.alpha_composite(scaled, (glyph.x * scale, glyph.y * scale))
 
 

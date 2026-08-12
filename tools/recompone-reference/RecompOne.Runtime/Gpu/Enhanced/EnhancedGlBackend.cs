@@ -108,6 +108,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_RECTANGLES") == "1";
     static readonly bool TraceHud =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_HUD") == "1";
+    static readonly bool TraceLoadingUiTextures =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_LOADING_UI_TEXTURES") == "1";
     static readonly bool TraceEnhancedFallbacks =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_ENHANCED_FALLBACKS") == "1";
@@ -454,6 +457,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     int _traceMaxOt;
     readonly HashSet<string> _traceRectangleShapes = [];
     readonly HashSet<string> _traceHudPackets = [];
+    readonly HashSet<string> _traceLoadingUiTextures = [];
+    readonly HashSet<string> _traceLoadingUiTextureResolves = [];
     readonly HashSet<string> _traceFallbackShapes = [];
     readonly HashSet<string> _pendingProbeTriangles = [];
     readonly Queue<(long Frame, string[] Triangles)> _probeTriangleHistory = [];
@@ -1415,6 +1420,30 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     $"{(int)MathF.Ceiling(maxV) - (int)MathF.Floor(minV) + 1} " +
                     $"unique={_vehicleReplacementHits.Count}/" +
                     $"{_vehicleReplacementHits.Count + _vehicleReplacementMisses.Count}");
+        }
+        if (TraceLoadingUiTextures &&
+            GpuHle.GameplayActive &&
+            GpuHle.DebugGameplayTick == 0 &&
+            uiMaterial &&
+            _traceLoadingUiTextureResolves.Count < 2048)
+        {
+            float x0 = MathF.Min(a.X, MathF.Min(b.X, c.X));
+            float y0 = MathF.Min(a.Y, MathF.Min(b.Y, c.Y));
+            float x1 = MathF.Max(a.X, MathF.Max(b.X, c.X));
+            float y1 = MathF.Max(a.Y, MathF.Max(b.Y, c.Y));
+            int iu0 = (int)MathF.Floor(minU);
+            int iv0 = (int)MathF.Floor(minV);
+            int iu1 = (int)MathF.Ceiling(maxU);
+            int iv1 = (int)MathF.Ceiling(maxV);
+            string packet =
+                $"frame={_frame} key={textureKey:x16} hit={(rect.Valid ? 1 : 0)} " +
+                $"screen={x0:F1},{y0:F1}-{x1:F1},{y1:F1} " +
+                $"size={iu1 - iu0 + 1}x{iv1 - iv0 + 1} " +
+                $"uv={iu0},{iv0}-{iu1},{iv1} " +
+                $"tpage=0x{f.TPage:X3} clut=0x{f.Clut:X4} " +
+                $"allow-ui={(allowUiReplacement ? 1 : 0)} material={f.Material}";
+            if (_traceLoadingUiTextureResolves.Add(packet))
+                Console.Error.WriteLine($"[V82LoadingUiResolve] {packet}");
         }
         if (TraceTextureRegions && f.Material == HleMaterialKind.TerrainRoute)
         {
@@ -2481,8 +2510,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             if (_traceRectangleShapes.Add(shape))
                 Console.WriteLine($"[V82Rect] {shape}");
         }
+        bool loadingScreenUi =
+            GpuHle.GameplayActive && GpuHle.DebugGameplayTick == 0;
         bool topGameplayHud =
             GpuHle.GameplayActive &&
+            !loadingScreenUi &&
             _kTarget is { } hudTarget &&
             r.Y - hudTarget.Y < hudTarget.H * 0.42f;
         float drawX = r.X;
@@ -2666,6 +2698,24 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         float uvMinY = Math.Min(r.V, drawV1);
         float uvMaxX = Math.Max(drawU, drawU1) - 1f;
         float uvMaxY = Math.Max(r.V, drawV1) - 1f;
+        if (TraceLoadingUiTextures &&
+            GpuHle.GameplayActive &&
+            GpuHle.DebugGameplayTick == 0 &&
+            f.Textured &&
+            _traceLoadingUiTextures.Count < 1024)
+        {
+            string packet =
+                $"frame={_frame} packet=0x{f.PacketAddress:X8} ot={f.OtIndex} " +
+                $"xy={drawX + anchor:F1},{r.Y:F1} wh={drawW}x{r.H} " +
+                $"uv={uvMinX:F1},{uvMinY:F1}-{uvMaxX:F1},{uvMaxY:F1} " +
+                $"raw-uv={r.U},{r.V} tpage=0x{f.TPage:X3} clut=0x{f.Clut:X4} " +
+                $"font-like={(fontLike ? 1 : 0)} icon-like={(iconLike ? 1 : 0)} " +
+                $"large-ui={(largeUiArtwork ? 1 : 0)} " +
+                $"color={r.R},{r.G},{r.B} semi={(f.SemiTrans ? 1 : 0)} " +
+                $"raw={(f.RawTexture ? 1 : 0)} material={f.Material}";
+            if (_traceLoadingUiTextures.Add(packet))
+                Console.Error.WriteLine($"[V82LoadingUiTexture] {packet}");
+        }
         va.UvMinX = vb.UvMinX = vc.UvMinX = vd.UvMinX = uvMinX;
         va.UvMinY = vb.UvMinY = vc.UvMinY = vd.UvMinY = uvMinY;
         va.UvMaxX = vb.UvMaxX = vc.UvMaxX = vd.UvMaxX = uvMaxX;

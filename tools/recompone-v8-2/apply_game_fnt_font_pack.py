@@ -29,12 +29,7 @@ def load_fnt_tool():
 
 
 def useful_character(char: str) -> bool:
-    return (
-        "A" <= char <= "Z" or
-        "a" <= char <= "z" or
-        "0" <= char <= "9" or
-        char in ".,:;!?+-/()[]<>@#$%&*_\\'\""
-    )
+    return ord(char) >= 0x20
 
 
 def safe_stem(path: Path) -> str:
