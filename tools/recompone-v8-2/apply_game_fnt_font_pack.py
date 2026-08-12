@@ -51,7 +51,28 @@ def atlas_prefix(path: Path) -> str:
     return f"{path.stem.lower()}_fnt"
 
 
-def transparent_font_atlas(image: Image.Image) -> Image.Image:
+def transparent_font_atlas(image: Image.Image, threshold: int = 24) -> Image.Image:
+    rgba = image.convert("RGBA")
+    pixels = bytearray(rgba.tobytes())
+    for index in range(0, len(pixels), 4):
+        r, g, b, _a = pixels[index:index + 4]
+        alpha = max(r, g, b)
+        if alpha < threshold:
+            pixels[index:index + 4] = b"\x00\x00\x00\x00"
+        else:
+            alpha = max(
+                0,
+                min(255, int((alpha - threshold) * 255 / (255 - threshold))),
+            )
+            if alpha < 10:
+                alpha = 0
+            if alpha > 232:
+                alpha = 255
+            pixels[index:index + 4] = bytes((255, 255, 255, alpha))
+    return Image.frombytes("RGBA", rgba.size, bytes(pixels))
+
+
+def transparent_source_copy(image: Image.Image) -> Image.Image:
     rgba = image.convert("RGBA")
     pixels = bytearray(rgba.tobytes())
     for index in range(0, len(pixels), 4):
@@ -92,17 +113,22 @@ def scale2x(image: Image.Image) -> Image.Image:
     return out
 
 
-def clean_mask_atlas(image: Image.Image) -> Image.Image:
+def clean_mask_atlas(image: Image.Image, threshold: int = 96) -> Image.Image:
     rgba = image.convert("RGBA")
     pixels = bytearray(rgba.tobytes())
     for index in range(0, len(pixels), 4):
         r, g, b, a = pixels[index:index + 4]
         intensity = max(r, g, b) if a else 0
-        if intensity <= 12:
+        if intensity < threshold:
             pixels[index:index + 4] = b"\x00\x00\x00\x00"
         else:
-            alpha = max(0, min(255, int((intensity - 12) * 255 / 243)))
-            if alpha > 220:
+            alpha = max(
+                0,
+                min(255, int((intensity - threshold) * 255 / (255 - threshold))),
+            )
+            if alpha < 10:
+                alpha = 0
+            if alpha > 232:
                 alpha = 255
             pixels[index:index + 4] = bytes((255, 255, 255, alpha))
     return Image.frombytes("RGBA", rgba.size, bytes(pixels))
@@ -118,6 +144,10 @@ def alpha_only_font_atlas(image: Image.Image) -> Image.Image:
         else:
             pixels[index:index + 4] = b"\xff\xff\xff\xff"
     return Image.frombytes("RGBA", rgba.size, bytes(pixels))
+
+
+def read_deployed_atlas(path: Path) -> Image.Image:
+    return Image.open(path).convert("RGBA")
 
 
 def deployed_font_proof(sheet, image: Image.Image, label: str) -> Image.Image:
@@ -147,8 +177,8 @@ def deployed_font_proof(sheet, image: Image.Image, label: str) -> Image.Image:
     return proof
 
 
-def make_crisp_source_atlas(sheet, scale: int) -> Image.Image:
-    image = clean_mask_atlas(fnt.opaque_crop(sheet.atlas))
+def make_crisp_source_atlas(sheet, scale: int, threshold: int) -> Image.Image:
+    image = clean_mask_atlas(fnt.opaque_crop(sheet.atlas), threshold)
     current_scale = 1
     while current_scale * 2 <= scale:
         image = scale2x(image)
@@ -161,15 +191,20 @@ def make_crisp_source_atlas(sheet, scale: int) -> Image.Image:
     return image
 
 
-def make_model_source_atlas(sheet, scale: int, source_upscale: Path | None) -> Image.Image:
+def make_model_source_atlas(
+    sheet,
+    scale: int,
+    source_upscale: Path | None,
+    threshold: int,
+) -> Image.Image:
     target_size = (sheet.atlas.width * scale, sheet.atlas.height * scale)
     if source_upscale is not None and source_upscale.exists():
         image = Image.open(source_upscale).convert("RGBA")
         if image.size != target_size:
             image = image.resize(target_size, Image.Resampling.LANCZOS)
-        return transparent_font_atlas(image)
+        return transparent_font_atlas(image, threshold)
     source = fnt.opaque_crop(sheet.atlas).resize(target_size, Image.Resampling.NEAREST)
-    return transparent_font_atlas(source)
+    return transparent_source_copy(source)
 
 
 def strip_previous_generator_suffixes(generator: str, label: str) -> str:
@@ -190,7 +225,13 @@ def strip_previous_generator_suffixes(generator: str, label: str) -> str:
     )
 
 
-def crop_hash_entries(sheet, scale: int, variant_radius: int, atlas_name: str):
+def crop_hash_entries(
+    sheet,
+    scale: int,
+    variant_radius: int,
+    atlas_name: str,
+    replacement: Image.Image | None = None,
+):
     seen: set[int] = set()
     for glyph in sheet.glyphs:
         if not useful_character(glyph.char) or glyph.width <= 0:
@@ -210,6 +251,16 @@ def crop_hash_entries(sheet, scale: int, variant_radius: int, atlas_name: str):
                 )
                 if crop.getbbox() is None:
                     continue
+                scaled_box = (
+                    x * scale,
+                    y * scale,
+                    (x + glyph.width) * scale,
+                    (y + sheet.max_height) * scale,
+                )
+                if replacement is not None:
+                    replacement_crop = replacement.crop(scaled_box)
+                    if replacement_crop.getchannel("A").getbbox() is None:
+                        continue
                 key = fnt.runtime_hash(crop)
                 if key in seen:
                     continue
@@ -217,8 +268,8 @@ def crop_hash_entries(sheet, scale: int, variant_radius: int, atlas_name: str):
                 yield {
                     "key": f"{key:016x}",
                     "image": f"images/ui/{atlas_name}",
-                    "x": x * scale,
-                    "y": y * scale,
+                    "x": scaled_box[0],
+                    "y": scaled_box[1],
                     "width": glyph.width * scale,
                     "height": sheet.max_height * scale,
                 }, (
@@ -237,6 +288,7 @@ def main() -> None:
     parser.add_argument("--width-factor", type=float, default=0.92)
     parser.add_argument("--shadow-alpha", type=int, default=0)
     parser.add_argument("--scale", type=int, default=4)
+    parser.add_argument("--threshold", type=int, default=96)
     parser.add_argument("--variant-radius", type=int, default=2)
     parser.add_argument("--proof-out", type=Path, default=ROOT / "build" / "v82_font_source_investigation")
     parser.add_argument(
@@ -266,13 +318,18 @@ def main() -> None:
         atlas_label = f"hard-mask fitted {args.font.stem}"
         atlas_name = f"{prefix}_{safe_stem(args.font)}_{args.scale}x.dds"
     elif args.mode == "source":
-        image = make_model_source_atlas(sheet, args.scale, source_upscale)
+        image = make_model_source_atlas(
+            sheet,
+            args.scale,
+            source_upscale,
+            args.threshold,
+        )
         source_label = source_stem(source_upscale) if source_upscale.exists() else "native_nearest"
-        atlas_label = f"source-sheet {source_label}"
+        atlas_label = f"source-sheet {source_label} threshold{args.threshold}"
         atlas_name = f"{prefix}_source_{source_label}_{args.scale}x.dds"
     else:
-        image = make_crisp_source_atlas(sheet, args.scale)
-        atlas_label = "crisp source-sheet scale2x"
+        image = make_crisp_source_atlas(sheet, args.scale, args.threshold)
+        atlas_label = f"cutoff-alpha source-sheet threshold{args.threshold}"
         atlas_name = f"{prefix}_source_scale2x_{args.scale}x.dds"
 
     pack_root = args.manifest.parent
@@ -280,9 +337,18 @@ def main() -> None:
     atlas_path = pack_root / atlas_relative
     atlas_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(atlas_path)
+    deployed_image = read_deployed_atlas(atlas_path)
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    generated = list(crop_hash_entries(sheet, args.scale, args.variant_radius, atlas_name))
+    generated = list(
+        crop_hash_entries(
+            sheet,
+            args.scale,
+            args.variant_radius,
+            atlas_name,
+            deployed_image,
+        )
+    )
     font_entries = [entry for entry, _source in generated]
     font_keys = {entry["key"] for entry in font_entries}
     superseded = [
@@ -318,16 +384,17 @@ def main() -> None:
 
     args.proof_out.mkdir(parents=True, exist_ok=True)
     proof_prefix = atlas_prefix(args.fnt)
-    image.save(args.proof_out / f"{proof_prefix}_deployed_font_atlas_4x.png")
+    deployed_image.save(args.proof_out / f"{proof_prefix}_deployed_font_atlas_4x.png")
     deployed_font_proof(
         sheet,
-        image,
-        f"Deployed atlas: {atlas_label}",
+        deployed_image,
+        f"Final DDS readback: {atlas_label}",
     ).save(args.proof_out / f"{proof_prefix}_deployed_font_atlas_proof.png")
     report = [
         f"mode={args.mode}",
         f"font_atlas={atlas_path}",
         f"scale={args.scale}",
+        f"threshold={args.threshold}",
         f"variant_radius={args.variant_radius}",
         f"entries_added_or_replaced={len(font_entries)}",
         f"unique_keys={len(font_keys)}",
