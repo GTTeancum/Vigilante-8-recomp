@@ -113,6 +113,45 @@ def clean_mask_atlas(image: Image.Image) -> Image.Image:
     return Image.frombytes("RGBA", rgba.size, bytes(pixels))
 
 
+def alpha_only_font_atlas(image: Image.Image) -> Image.Image:
+    rgba = image.convert("RGBA")
+    pixels = bytearray(rgba.tobytes())
+    for index in range(0, len(pixels), 4):
+        alpha = pixels[index + 3]
+        if alpha < 96:
+            pixels[index:index + 4] = b"\x00\x00\x00\x00"
+        else:
+            pixels[index:index + 4] = b"\xff\xff\xff\xff"
+    return Image.frombytes("RGBA", rgba.size, bytes(pixels))
+
+
+def deployed_font_proof(sheet, image: Image.Image, label: str) -> Image.Image:
+    native = fnt.black_preview(sheet.atlas, 3)
+    scaled = fnt.black_preview(image, 1).resize(
+        (sheet.atlas.width * 3, sheet.atlas.height * 3),
+        Image.Resampling.LANCZOS,
+    )
+    width = max(native.width, scaled.width)
+    label_h = 24
+    gap = 12
+    proof = Image.new(
+        "RGB",
+        (width, label_h * 2 + native.height + scaled.height + gap),
+        (10, 10, 10),
+    )
+    draw = ImageDraw.Draw(proof)
+    draw.text(
+        (8, 6),
+        f"Original {font_label(sheet.path)} source atlas",
+        fill=(230, 230, 230),
+    )
+    proof.paste(native, (0, label_h))
+    y = label_h + native.height + gap
+    draw.text((8, y + 5), label, fill=(230, 230, 230))
+    proof.paste(scaled, (0, y + label_h))
+    return proof
+
+
 def make_crisp_source_atlas(sheet, scale: int) -> Image.Image:
     image = clean_mask_atlas(fnt.opaque_crop(sheet.atlas))
     current_scale = 1
@@ -201,7 +240,7 @@ def main() -> None:
     parser.add_argument("--font", type=Path, default=Path("C:/Windows/Fonts/timesbi.ttf"))
     parser.add_argument("--point-size", type=int, default=18)
     parser.add_argument("--width-factor", type=float, default=0.92)
-    parser.add_argument("--shadow-alpha", type=int, default=185)
+    parser.add_argument("--shadow-alpha", type=int, default=0)
     parser.add_argument("--scale", type=int, default=4)
     parser.add_argument("--variant-radius", type=int, default=2)
     parser.add_argument("--proof-out", type=Path, default=ROOT / "build" / "v82_font_source_investigation")
@@ -228,7 +267,8 @@ def main() -> None:
             width_factor=args.width_factor,
             shadow_alpha=args.shadow_alpha,
         )
-        atlas_label = f"fitted {args.font.stem}"
+        image = alpha_only_font_atlas(image)
+        atlas_label = f"hard-mask fitted {args.font.stem}"
         atlas_name = f"{prefix}_{safe_stem(args.font)}_{args.scale}x.dds"
     elif args.mode == "source":
         image = make_model_source_atlas(sheet, args.scale, source_upscale)
@@ -284,24 +324,11 @@ def main() -> None:
     args.proof_out.mkdir(parents=True, exist_ok=True)
     proof_prefix = atlas_prefix(args.fnt)
     image.save(args.proof_out / f"{proof_prefix}_deployed_font_atlas_4x.png")
-    if args.mode == "ttf":
-        fnt.fitted_proof(sheet, args.font, args.point_size, 3).save(
-            args.proof_out / f"{proof_prefix}_deployed_font_atlas_proof.png"
-        )
-    else:
-        native = fnt.black_preview(sheet.atlas, 3)
-        scaled = image.convert("RGB").resize(
-            (sheet.atlas.width * 3, sheet.atlas.height * 3),
-            Image.Resampling.LANCZOS,
-        )
-        proof = Image.new("RGB", (max(native.width, scaled.width), native.height + scaled.height + 60), (10, 10, 10))
-        draw = ImageDraw.Draw(proof)
-        draw.text((8, 6), f"Original {font_label(args.fnt)} source atlas", fill=(230, 230, 230))
-        proof.paste(native, (0, 24))
-        y = native.height + 36
-        draw.text((8, y), f"Deployed source-sheet atlas: {atlas_label}", fill=(230, 230, 230))
-        proof.paste(scaled, (0, y + 24))
-        proof.save(args.proof_out / f"{proof_prefix}_deployed_font_atlas_proof.png")
+    deployed_font_proof(
+        sheet,
+        image,
+        f"Deployed atlas: {atlas_label}",
+    ).save(args.proof_out / f"{proof_prefix}_deployed_font_atlas_proof.png")
     report = [
         f"mode={args.mode}",
         f"font_atlas={atlas_path}",

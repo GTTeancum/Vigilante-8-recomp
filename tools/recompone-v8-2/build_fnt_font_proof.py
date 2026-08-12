@@ -7,6 +7,7 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 import sys
+import unicodedata
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
@@ -180,6 +181,9 @@ def render_ttf_atlas(sheet: FontSheet, font_path: Path, point_size: int, scale: 
     draw = ImageDraw.Draw(out)
     font = ImageFont.truetype(str(font_path), point_size * scale)
     for glyph in sheet.glyphs:
+        if not donor_text_character(glyph.char):
+            paste_source_glyph(out, sheet, glyph, scale)
+            continue
         x = glyph.x * scale
         y = (glyph.y - 5 + glyph.offset) * scale
         char = glyph.char
@@ -191,6 +195,35 @@ def render_ttf_atlas(sheet: FontSheet, font_path: Path, point_size: int, scale: 
         )
         draw.text((x, y), char, font=font, fill=(247, 247, 247, 255))
     return out
+
+
+def donor_text_character(char: str) -> bool:
+    if unicodedata.category(char)[0] == "C":
+        return False
+    return ord(char) >= 0xA0 or (
+        "A" <= char <= "Z" or
+        "a" <= char <= "z" or
+        "0" <= char <= "9" or
+        char in ".,:;!?+-/()[]<>@#$%&*_\\'\" "
+    )
+
+
+def paste_source_glyph(
+    out: Image.Image,
+    sheet: FontSheet,
+    glyph: GlyphRecord,
+    scale: int,
+) -> None:
+    crop = opaque_crop(
+        sheet.atlas.crop(
+            (glyph.x, glyph.y, glyph.x + glyph.width, glyph.y + sheet.max_height)
+        )
+    )
+    scaled = crop.resize(
+        (glyph.width * scale, sheet.max_height * scale),
+        Image.Resampling.NEAREST,
+    )
+    out.alpha_composite(scaled, (glyph.x * scale, glyph.y * scale))
 
 
 def glyph_ink_box(image: Image.Image) -> tuple[int, int, int, int] | None:
@@ -227,6 +260,9 @@ def render_fitted_ttf_atlas(
     )
     font = ImageFont.truetype(str(font_path), point_size * scale)
     for glyph in sheet.glyphs:
+        if not donor_text_character(glyph.char):
+            paste_source_glyph(out, sheet, glyph, scale)
+            continue
         source_box = glyph_ink_box(
             sheet.atlas.crop(
                 (glyph.x, glyph.y, glyph.x + glyph.width, glyph.y + sheet.max_height)

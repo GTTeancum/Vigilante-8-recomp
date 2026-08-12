@@ -343,7 +343,16 @@ internal static class GlShaders
                 vReplacementRect.xy + local * vReplacementRect.zw;
             vec2 atlasSize = max(uReplacementAtlasSize, vec2(1.0));
             vec2 atlasUv = atlasPixel / atlasSize;
-            vec4 texel = texture(uReplacementAtlas, atlasUv);
+            bool exactUiReplacement = vUiTexture != 0;
+            vec4 texel = exactUiReplacement
+                ? texelFetch(
+                    uReplacementAtlas,
+                    ivec2(clamp(
+                        floor(atlasPixel),
+                        vReplacementRect.xy,
+                        vReplacementRect.xy + vReplacementRect.zw - vec2(1.0))),
+                    0)
+                : texture(uReplacementAtlas, atlasUv);
             if (vMaterial == MaterialTerrainRoute) {
                 vec2 minPixel = vReplacementRect.xy + vec2(0.5);
                 vec2 maxPixel = vReplacementRect.xy +
@@ -558,6 +567,7 @@ internal static class GlShaders
                     if (contourCoverage <= 0.01) {
                         discard;
                     }
+                    texel.rgb = vec3(1.0);
                     texel.a = 1.0;
                 } else {
                     texel = contourTexture(sampleUV, contourCoverage, contourStp);

@@ -17,7 +17,9 @@ internal sealed class PresentationRenderer : IDisposable
         uniform int uLinearFilter;
         uniform int uLoadingUiRestore;
         uniform sampler2D uLoadingCard;
+        uniform sampler2D uLoadingText;
         uniform int uLoadingCardOverlay;
+        uniform int uLoadingTextOverlay;
         uniform vec4 uLoadingCardRect;
         out vec4 oColor;
 
@@ -42,29 +44,33 @@ internal sealed class PresentationRenderer : IDisposable
             return mix(a, b, f.y);
         }
 
+        vec3 applyLoadingText(vec3 base) {
+            if (uLoadingTextOverlay == 0) return base;
+            vec3 text = texture(uLoadingText, vUv).rgb;
+            float coverage = max(text.r, max(text.g, text.b));
+            return coverage > 0.003 ? text : base;
+        }
+
         void main() {
             ivec2 size = ivec2(uSourceSize);
             ivec2 p = clamp(ivec2(vUv * uSourceSize), ivec2(0), size - 1);
             vec3 center = uLinearFilter != 0
                 ? sampleLinear(vUv)
                 : sourcePixel(p);
+            bool loadingCardPixel = false;
             if (uLoadingCardOverlay != 0) {
                 vec2 innerUv = (vUv - uLoadingCardRect.xy) / uLoadingCardRect.zw;
                 if (innerUv.x >= 0.0 && innerUv.x <= 1.0 &&
                     innerUv.y >= 0.0 && innerUv.y <= 1.0) {
-                    bool preserveTitle =
-                        vUv.x < 0.55 && vUv.y < 0.20;
-                    if (!preserveTitle) {
-                        vec2 cardUv =
-                            vec2(80.0 / 1280.0, 32.0 / 384.0) +
-                            innerUv * vec2(1120.0 / 1280.0, 320.0 / 384.0);
-                        oColor = vec4(texture(uLoadingCard, cardUv).rgb, 1.0);
-                        return;
-                    }
+                    vec2 cardUv =
+                        vec2(80.0 / 1280.0, 32.0 / 384.0) +
+                        innerUv * vec2(1120.0 / 1280.0, 320.0 / 384.0);
+                    center = texture(uLoadingCard, cardUv).rgb;
+                    loadingCardPixel = true;
                 }
             }
             if (uDedither == 0) {
-                if (uLoadingUiRestore != 0) {
+                if (uLoadingUiRestore != 0 && !loadingCardPixel) {
                     vec2 texel = 1.0 / uSourceSize;
                     vec3 n  = sampleLinear(vUv + vec2( 0.0, -texel.y));
                     vec3 e  = sampleLinear(vUv + vec2( texel.x,  0.0));
@@ -91,10 +97,13 @@ internal sealed class PresentationRenderer : IDisposable
                     vec3 blur = (denoised * 4.0 + n + e + s + w) / 8.0;
                     vec3 sharpened = denoised + (denoised - blur) *
                         (0.45 * restore);
-                    oColor = vec4(clamp(sharpened, lo - 0.025, hi + 0.025), 1.0);
+                    oColor = vec4(
+                        applyLoadingText(
+                            clamp(sharpened, lo - 0.025, hi + 0.025)),
+                        1.0);
                     return;
                 }
-                oColor = vec4(center, 1.0);
+                oColor = vec4(applyLoadingText(center), 1.0);
                 return;
             }
 
@@ -124,7 +133,7 @@ internal sealed class PresentationRenderer : IDisposable
                 / 12.0;
             float strength =
                 1.0 - smoothstep(0.045, 0.14, localRange);
-            oColor = vec4(mix(center, average, strength), 1.0);
+            oColor = vec4(applyLoadingText(mix(center, average, strength)), 1.0);
         }
         """;
 
@@ -183,14 +192,16 @@ internal sealed class PresentationRenderer : IDisposable
     readonly GL _gl;
     uint _vao, _vbo, _upscaleProgram, _fxaaProgram;
     uint _upscaleTexture, _fxaaTexture, _upscaleFbo, _fxaaFbo;
-    uint _loadingCardTexture;
+    uint _loadingCardTexture, _loadingTextTexture;
     int _loadingCardWidth, _loadingCardHeight;
+    int _loadingTextWidth, _loadingTextHeight;
     int _width, _height;
     int _lastSourceWidth, _lastSourceHeight, _lastOutputWidth, _lastOutputHeight;
     bool _lastFxaa;
     int _upscaleSourceSize, _upscaleDedither, _upscaleDeditherStep;
     int _upscaleLinearFilter, _upscaleLoadingUiRestore;
-    int _upscaleLoadingCardOverlay, _upscaleLoadingCardRect;
+    int _upscaleLoadingCardOverlay, _upscaleLoadingTextOverlay;
+    int _upscaleLoadingCardRect;
     int _fxaaSourceSize, _fxaaInvResolution;
 
     public bool Ready { get; private set; }
@@ -214,6 +225,7 @@ internal sealed class PresentationRenderer : IDisposable
         _gl.UseProgram(_upscaleProgram);
         _gl.Uniform1(_gl.GetUniformLocation(_upscaleProgram, "uSource"), 0);
         _gl.Uniform1(_gl.GetUniformLocation(_upscaleProgram, "uLoadingCard"), 1);
+        _gl.Uniform1(_gl.GetUniformLocation(_upscaleProgram, "uLoadingText"), 2);
         _upscaleSourceSize = _gl.GetUniformLocation(_upscaleProgram, "uSourceSize");
         _upscaleDedither =
             _gl.GetUniformLocation(_upscaleProgram, "uDedither");
@@ -225,6 +237,8 @@ internal sealed class PresentationRenderer : IDisposable
             _gl.GetUniformLocation(_upscaleProgram, "uLoadingUiRestore");
         _upscaleLoadingCardOverlay =
             _gl.GetUniformLocation(_upscaleProgram, "uLoadingCardOverlay");
+        _upscaleLoadingTextOverlay =
+            _gl.GetUniformLocation(_upscaleProgram, "uLoadingTextOverlay");
         _upscaleLoadingCardRect =
             _gl.GetUniformLocation(_upscaleProgram, "uLoadingCardRect");
         _gl.UseProgram(_fxaaProgram);
@@ -245,6 +259,7 @@ internal sealed class PresentationRenderer : IDisposable
         (_upscaleTexture, _upscaleFbo) = CreateTarget();
         (_fxaaTexture, _fxaaFbo) = CreateTarget();
         LoadLoadingCardOverlay();
+        LoadLoadingTextOverlay();
         EnsureSize(1, 1);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         Ready = true;
@@ -332,7 +347,9 @@ internal sealed class PresentationRenderer : IDisposable
         _gl.Uniform1(_upscaleLinearFilter, 0);
         _gl.Uniform1(_upscaleLoadingUiRestore, loadingUiSource ? 1 : 0);
         bool loadingCardOverlay = preTickLoadingCard && _loadingCardTexture != 0;
+        bool loadingTextOverlay = preTickLoadingCard && _loadingTextTexture != 0;
         _gl.Uniform1(_upscaleLoadingCardOverlay, loadingCardOverlay ? 1 : 0);
+        _gl.Uniform1(_upscaleLoadingTextOverlay, loadingTextOverlay ? 1 : 0);
         _gl.Uniform4(
             _upscaleLoadingCardRect,
             224f / 1280f,
@@ -343,6 +360,12 @@ internal sealed class PresentationRenderer : IDisposable
         {
             _gl.ActiveTexture(TextureUnit.Texture1);
             _gl.BindTexture(TextureTarget.Texture2D, _loadingCardTexture);
+            _gl.ActiveTexture(TextureUnit.Texture0);
+        }
+        if (loadingTextOverlay)
+        {
+            _gl.ActiveTexture(TextureUnit.Texture2);
+            _gl.BindTexture(TextureTarget.Texture2D, _loadingTextTexture);
             _gl.ActiveTexture(TextureUnit.Texture0);
         }
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
@@ -445,6 +468,70 @@ internal sealed class PresentationRenderer : IDisposable
         }
     }
 
+    void LoadLoadingTextOverlay()
+    {
+        string? explicitPath =
+            Environment.GetEnvironmentVariable("RECOMPONE_ROUTE66_LOADING_TEXT_PPM");
+        string? looseRoot = Runtime.ResolveLoosePath();
+        string? path = !string.IsNullOrWhiteSpace(explicitPath)
+            ? explicitPath
+            : looseRoot == null
+                ? null
+                : Path.Combine(
+                    looseRoot,
+                    "mods",
+                    "enhanced_textures_2x",
+                    "loading_cards",
+                    "route66_loading_text_1920x1080.ppm");
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+
+        try
+        {
+            (int width, int height, byte[] rgb) = ReadP6Ppm(path);
+            uint texture = _gl.GenTexture();
+            _gl.BindTexture(TextureTarget.Texture2D, texture);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureMinFilter,
+                (int)GLEnum.Linear);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureMagFilter,
+                (int)GLEnum.Linear);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureWrapS,
+                (int)GLEnum.ClampToEdge);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureWrapT,
+                (int)GLEnum.ClampToEdge);
+            _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+            _gl.TexImage2D<byte>(
+                TextureTarget.Texture2D,
+                0,
+                InternalFormat.Rgb8,
+                (uint)width,
+                (uint)height,
+                0,
+                PixelFormat.Rgb,
+                PixelType.UnsignedByte,
+                rgb);
+            _loadingTextTexture = texture;
+            _loadingTextWidth = width;
+            _loadingTextHeight = height;
+            Console.WriteLine(
+                $"[TexturePack] loaded Route 66 loading text overlay " +
+                $"{width}x{height}: {path}");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"[TexturePack] ignored Route 66 loading text overlay " +
+                $"{path}: {ex.Message}");
+        }
+    }
+
     static (int Width, int Height, byte[] Rgb) ReadP6Ppm(string path)
     {
         byte[] data = File.ReadAllBytes(path);
@@ -528,6 +615,7 @@ internal sealed class PresentationRenderer : IDisposable
         if (_upscaleTexture != 0) _gl.DeleteTexture(_upscaleTexture);
         if (_fxaaTexture != 0) _gl.DeleteTexture(_fxaaTexture);
         if (_loadingCardTexture != 0) _gl.DeleteTexture(_loadingCardTexture);
+        if (_loadingTextTexture != 0) _gl.DeleteTexture(_loadingTextTexture);
         if (_upscaleFbo != 0) _gl.DeleteFramebuffer(_upscaleFbo);
         if (_fxaaFbo != 0) _gl.DeleteFramebuffer(_fxaaFbo);
     }
