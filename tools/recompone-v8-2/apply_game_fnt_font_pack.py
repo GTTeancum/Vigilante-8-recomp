@@ -149,6 +149,26 @@ def alpha_only_font_atlas(image: Image.Image) -> Image.Image:
     return Image.frombytes("RGBA", rgba.size, bytes(pixels))
 
 
+def ttf_font_atlas(image: Image.Image, threshold: int, hard_alpha: bool = False) -> Image.Image:
+    rgba = image.convert("RGBA")
+    pixels = bytearray(rgba.tobytes())
+    for index in range(0, len(pixels), 4):
+        alpha = pixels[index + 3]
+        if alpha < threshold:
+            pixels[index:index + 4] = b"\x00\x00\x00\x00"
+            continue
+        if hard_alpha:
+            alpha = 255
+        else:
+            alpha = int((alpha - threshold) * 255 / (255 - threshold))
+            if alpha < 10:
+                alpha = 0
+            elif alpha > 232:
+                alpha = 255
+        pixels[index:index + 4] = bytes((255, 255, 255, alpha))
+    return Image.frombytes("RGBA", rgba.size, bytes(pixels))
+
+
 def read_deployed_atlas(path: Path) -> Image.Image:
     return Image.open(path).convert("RGBA")
 
@@ -290,6 +310,7 @@ def main() -> None:
     parser.add_argument("--point-size", type=int, default=18)
     parser.add_argument("--width-factor", type=float, default=0.92)
     parser.add_argument("--shadow-alpha", type=int, default=0)
+    parser.add_argument("--hard-alpha", action="store_true")
     parser.add_argument("--scale", type=int, default=4)
     parser.add_argument("--threshold", type=int, default=96)
     parser.add_argument("--variant-radius", type=int, default=2)
@@ -317,8 +338,11 @@ def main() -> None:
             width_factor=args.width_factor,
             shadow_alpha=args.shadow_alpha,
         )
-        image = alpha_only_font_atlas(image)
-        atlas_label = f"hard-mask fitted {args.font.stem}"
+        image = ttf_font_atlas(image, args.threshold, args.hard_alpha)
+        atlas_label = (
+            f"fitted {args.font.stem} threshold{args.threshold}"
+            f"{' hard-alpha' if args.hard_alpha else ''}"
+        )
         atlas_name = f"{prefix}_{safe_stem(args.font)}_{args.scale}x.dds"
     elif args.mode == "source":
         image = make_model_source_atlas(

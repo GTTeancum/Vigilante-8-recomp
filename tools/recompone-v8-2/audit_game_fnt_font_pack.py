@@ -238,10 +238,12 @@ def main() -> int:
         if 255 not in values:
             empty_errors.append(key)
 
+    sources = manifest.get("sources", {})
     live_entries = [
         entry for entry in manifest["entries"]
-        if str(entry.get("image", "")).startswith(
-            "images/ui/game_fnt_loading_runtime_"
+        if any(
+            str(source).startswith("GAME.FNT live loading glyph ")
+            for source in sources.get(str(entry.get("key", "")), [])
         )
     ]
     live_low_alpha_errors: list[str] = []
