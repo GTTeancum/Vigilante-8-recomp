@@ -16,6 +16,9 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[2]
 PROOF_TOOL = ROOT / "tools" / "recompone-v8-2" / "build_fnt_font_proof.py"
 DEFAULT_FNT = ROOT / "V8_2_LOOSE" / "SHARED" / "GAME.FNT"
+MOD_FONT_WORK = (
+    ROOT / "V8_2_LOOSE" / "mods" / "enhanced_textures_2x" / "font_work"
+)
 
 
 def load_fnt_tool():
@@ -290,7 +293,7 @@ def main() -> None:
     parser.add_argument("--scale", type=int, default=4)
     parser.add_argument("--threshold", type=int, default=96)
     parser.add_argument("--variant-radius", type=int, default=2)
-    parser.add_argument("--proof-out", type=Path, default=ROOT / "build" / "v82_font_source_investigation")
+    parser.add_argument("--proof-out", type=Path, default=MOD_FONT_WORK)
     parser.add_argument(
         "--source-upscale",
         type=Path,

@@ -13,6 +13,9 @@ from PIL import Image, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parents[2]
+MOD_FONT_WORK = (
+    ROOT / "V8_2_LOOSE" / "mods" / "enhanced_textures_2x" / "font_work"
+)
 FNV_OFFSET = 14695981039346656037
 FNV_PRIME = 1099511628211
 
@@ -225,7 +228,7 @@ def main() -> None:
     parser.add_argument(
         "--proof-out",
         type=Path,
-        default=ROOT / "build" / "v82_font_source_investigation",
+        default=MOD_FONT_WORK,
     )
     args = parser.parse_args()
 

@@ -13,6 +13,9 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
 ROOT = Path(__file__).resolve().parents[2]
+MOD_FONT_WORK = (
+    ROOT / "V8_2_LOOSE" / "mods" / "enhanced_textures_2x" / "font_work"
+)
 TOOLS = ROOT / "tools"
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
@@ -402,7 +405,7 @@ def find_font_candidates(font_dir: Path) -> list[Path]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fnt", type=Path, default=ROOT / "V8_2_LOOSE" / "SHARED" / "GAME.FNT")
-    parser.add_argument("--out", type=Path, default=ROOT / "build" / "v82_font_source_investigation")
+    parser.add_argument("--out", type=Path, default=MOD_FONT_WORK)
     parser.add_argument("--font-dir", type=Path, default=Path("C:/Windows/Fonts"))
     args = parser.parse_args()
 

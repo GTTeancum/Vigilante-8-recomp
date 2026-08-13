@@ -13,12 +13,15 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PROOF_DIR = ROOT / "build" / "v82_font_source_investigation"
+MOD_FONT_WORK = (
+    ROOT / "V8_2_LOOSE" / "mods" / "enhanced_textures_2x" / "font_work"
+)
 ESRGAN = ROOT / "build" / "realesrgan" / "bin" / "realesrgan-ncnn-vulkan.exe"
 KNOWN_FNTS = (
     ROOT / "V8_2_LOOSE" / "SHARED" / "GAME.FNT",
     ROOT / "V8_2_LOOSE" / "SHARED" / "HUD.FNT",
     ROOT / "V8_2_LOOSE" / "SHARED" / "KONG.FNT",
+    ROOT / "V8_2_LOOSE" / "SHELL" / "SLOGAN.FNT",
 )
 
 
@@ -100,8 +103,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scale", type=int, default=4)
     parser.add_argument("--font-scale", type=int, default=8)
-    parser.add_argument("--proof-out", type=Path, default=PROOF_DIR)
-    parser.add_argument("--mode", choices=("crisp", "source", "loading"), default="crisp")
+    parser.add_argument("--proof-out", type=Path, default=MOD_FONT_WORK)
+    parser.add_argument(
+        "--mode",
+        choices=("crisp", "source", "ttf", "loading"),
+        default="crisp",
+    )
+    parser.add_argument("--font", type=Path, default=Path("C:/Windows/Fonts/ROCKBI.TTF"))
+    parser.add_argument("--point-size", type=int, default=14)
+    parser.add_argument("--width-factor", type=float, default=0.92)
+    parser.add_argument("--threshold", type=int, default=32)
     args = parser.parse_args()
 
     fnt_tool = load_module(
@@ -112,7 +123,7 @@ def main() -> None:
         ROOT / "tools" / "recompone-v8-2" / "apply_game_fnt_font_pack.py",
         "apply_game_fnt_font_pack",
     )
-    base_mode = "source" if args.mode == "source" else "crisp"
+    base_mode = args.mode if args.mode in ("source", "ttf") else "crisp"
     for fnt_path in KNOWN_FNTS:
         if base_mode == "source":
             upscale = make_upscale(fnt_tool, fnt_path, args.proof_out, args.scale)
@@ -131,24 +142,28 @@ def main() -> None:
             "--mode", base_mode,
             "--fnt", str(fnt_path),
             "--scale", str(args.scale),
+            "--threshold", str(args.threshold),
             "--proof-out", str(args.proof_out),
         ]
         if base_mode == "source":
             sys.argv.extend(["--source-upscale", str(upscale)])
+        elif base_mode == "ttf":
+            sys.argv.extend([
+                "--font", str(args.font),
+                "--point-size", str(args.point_size),
+                "--width-factor", str(args.width_factor),
+            ])
         pack_tool.main()
 
     if args.mode != "loading":
         return
 
-    remove_fnt_pack_entries(
-        ROOT / "V8_2_LOOSE" / "mods" / "enhanced_textures_2x" / "manifest.json",
-        "SLOGAN.FNT",
-    )
     sys.argv = [
         "apply_game_fnt_font_pack.py",
         "--mode", "crisp",
         "--fnt", str(ROOT / "V8_2_LOOSE" / "SHARED" / "GAME.FNT"),
         "--scale", str(args.font_scale),
+        "--threshold", str(args.threshold),
         "--proof-out", str(args.proof_out),
     ]
     pack_tool.main()

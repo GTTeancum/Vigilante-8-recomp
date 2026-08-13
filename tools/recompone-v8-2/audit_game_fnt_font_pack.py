@@ -16,6 +16,9 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[2]
 FNT_TOOL = ROOT / "tools" / "recompone-v8-2" / "build_fnt_font_proof.py"
 PACK_TOOL = ROOT / "tools" / "recompone-v8-2" / "apply_game_fnt_font_pack.py"
+MOD_FONT_WORK = (
+    ROOT / "V8_2_LOOSE" / "mods" / "enhanced_textures_2x" / "font_work"
+)
 
 
 def load_module(path: Path, name: str):
@@ -137,20 +140,17 @@ def main() -> int:
     parser.add_argument(
         "--report",
         type=Path,
-        default=ROOT / "build" / "v82_font_source_investigation" /
-        "game_fnt_deployed_audit.txt",
+        default=MOD_FONT_WORK / "game_fnt_deployed_audit.txt",
     )
     parser.add_argument(
         "--per-glyph-report",
         type=Path,
-        default=ROOT / "build" / "v82_font_source_investigation" /
-        "game_fnt_deployed_glyph_audit.csv",
+        default=MOD_FONT_WORK / "game_fnt_deployed_glyph_audit.csv",
     )
     parser.add_argument(
         "--proof",
         type=Path,
-        default=ROOT / "build" / "v82_font_source_investigation" /
-        "game_fnt_final_dds_glyph_audit_sheet.png",
+        default=MOD_FONT_WORK / "game_fnt_final_dds_glyph_audit_sheet.png",
     )
     args = parser.parse_args()
 
