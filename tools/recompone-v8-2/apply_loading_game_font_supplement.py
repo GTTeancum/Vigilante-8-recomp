@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add live loading-screen GAME.FNT glyph variants missed by source atlas keys."""
+"""Map live loading-screen GAME.FNT variants into one canonical atlas."""
 
 from __future__ import annotations
 
@@ -32,16 +32,6 @@ class GlyphVariant:
     uv: str
     tpage: str
     clut: str
-
-
-@dataclass(frozen=True)
-class MatchedGlyph:
-    variant: GlyphVariant
-    code: int
-    char: str
-    x: int
-    y: int
-    score: float
 
 
 def load_fnt_tool():
@@ -103,6 +93,14 @@ def collect_game_misses(trace_dir: Path) -> list[GlyphVariant]:
     return sorted(variants.values(), key=lambda glyph: (glyph.tpage, glyph.uv, glyph.key))
 
 
+def collect_game_misses_from_dirs(trace_dirs: list[Path]) -> list[GlyphVariant]:
+    variants: dict[str, GlyphVariant] = {}
+    for trace_dir in trace_dirs:
+        for variant in collect_game_misses(trace_dir):
+            variants.setdefault(variant.key, variant)
+    return sorted(variants.values(), key=lambda glyph: (glyph.tpage, glyph.uv, glyph.key))
+
+
 def collect_game_variants(trace_dirs: list[Path]) -> list[GlyphVariant]:
     pattern = re.compile(
         r"V82LoadingUiResolve.*key=([0-9a-f]{16}) hit=[01] .*"
@@ -126,83 +124,6 @@ def collect_game_variants(trace_dirs: list[Path]) -> list[GlyphVariant]:
                     GlyphVariant(key, width, height, uv, tpage, clut),
                 )
     return sorted(variants.values(), key=lambda glyph: (glyph.tpage, glyph.uv, glyph.key))
-
-
-def parse_uv(uv: str) -> tuple[int, int]:
-    first, _last = uv.split("-", 1)
-    x_text, y_text = first.split(",", 1)
-    return int(x_text), int(y_text)
-
-
-def crop_mask(image: Image.Image) -> bytes:
-    rgba = image.convert("RGBA")
-    pixels = rgba.tobytes()
-    mask = bytearray(rgba.width * rgba.height)
-    for index in range(0, len(pixels), 4):
-        r, g, b, a = pixels[index:index + 4]
-        mask[index // 4] = 1 if a or r or g or b else 0
-    return bytes(mask)
-
-
-def mask_diff(a: bytes, b: bytes) -> float:
-    if len(a) != len(b):
-        return 1.0
-    if not a:
-        return 0.0
-    return sum(1 for left, right in zip(a, b) if left != right) / len(a)
-
-
-def useful_character(char: str) -> bool:
-    return ord(char) >= 0x20
-
-
-def match_live_variants(
-    sheet,
-    variants: list[GlyphVariant],
-    dump_dirs: list[Path],
-    radius: int,
-) -> list[MatchedGlyph]:
-    fnt = load_fnt_tool()
-    source_atlas = fnt.opaque_crop(sheet.atlas)
-
-    matched: list[MatchedGlyph] = []
-    for variant in variants:
-        try:
-            runtime_crop = load_runtime_crop(dump_dirs, variant)
-        except FileNotFoundError as error:
-            print(f"[warn] {error}")
-            continue
-        runtime_mask = crop_mask(runtime_crop)
-        best: tuple[int, str, int, int, float] | None = None
-        for glyph in sheet.glyphs:
-            if not useful_character(glyph.char) or glyph.width <= 0:
-                continue
-            if abs(glyph.width - variant.width) > radius:
-                continue
-            for dy in range(-radius, radius + 1):
-                for dx in range(-radius, radius + 1):
-                    x = glyph.x + dx
-                    y = glyph.y + dy
-                    if x < 0 or y < 0:
-                        continue
-                    if x + variant.width > source_atlas.width:
-                        continue
-                    if y + variant.height > source_atlas.height:
-                        continue
-                    crop = source_atlas.crop(
-                        (x, y, x + variant.width, y + variant.height))
-                    score = mask_diff(runtime_mask, crop_mask(crop))
-                    score += abs(glyph.width - variant.width) * 0.015
-                    if best is None or score < best[4]:
-                        best = (glyph.code, glyph.char, x, y, score)
-        if best is None:
-            raise ValueError(
-                f"no GAME.FNT source glyph candidate for live crop "
-                f"{variant.key} {variant.width}x{variant.height}"
-            )
-        code, char, x, y, score = best
-        matched.append(MatchedGlyph(variant, code, char, x, y, score))
-    return matched
 
 
 def active_game_fnt_image(manifest: dict[str, object]) -> str:
@@ -241,7 +162,13 @@ def load_runtime_crop(dump_dirs: list[Path], glyph: GlyphVariant) -> Image.Image
     return image
 
 
-def sharpen_source_glyph(image: Image.Image, scale: int, threshold: int) -> Image.Image:
+def sharpen_source_glyph(
+    image: Image.Image,
+    scale: int,
+    threshold: int,
+    nearest: bool = False,
+    hard_alpha: bool = False,
+) -> Image.Image:
     rgba = image.convert("RGBA")
     pixels = rgba.tobytes()
     alpha = bytearray(rgba.width * rgba.height)
@@ -251,13 +178,19 @@ def sharpen_source_glyph(image: Image.Image, scale: int, threshold: int) -> Imag
         if value < threshold:
             alpha[index // 4] = 0
         else:
-            mapped = int((value - threshold) * 255 / (255 - threshold))
-            alpha[index // 4] = 255 if mapped > 232 else mapped
+            if hard_alpha:
+                alpha[index // 4] = 255
+            else:
+                mapped = int((value - threshold) * 255 / (255 - threshold))
+                alpha[index // 4] = 255 if mapped > 232 else mapped
     mask = Image.frombytes("L", rgba.size, bytes(alpha)).resize(
         (rgba.width * scale, rgba.height * scale),
-        Image.Resampling.LANCZOS,
+        Image.Resampling.NEAREST if nearest else Image.Resampling.LANCZOS,
     )
-    mask = mask.point(lambda value: 0 if value < 10 else 255 if value > 244 else value)
+    if hard_alpha:
+        mask = mask.point(lambda value: 255 if value else 0)
+    else:
+        mask = mask.point(lambda value: 0 if value < 10 else 255 if value > 244 else value)
     out = Image.new("RGBA", mask.size, (255, 255, 255, 255))
     out.putalpha(mask)
     return out
@@ -265,18 +198,25 @@ def sharpen_source_glyph(image: Image.Image, scale: int, threshold: int) -> Imag
 
 def build_atlas(
     variants: list[GlyphVariant],
-    dump_dir: Path,
+    dump_dirs: list[Path],
     scale: int,
     threshold: int,
-) -> tuple[Image.Image, list[dict[str, object]], dict[str, list[str]], Image.Image]:
+    nearest: bool = False,
+    hard_alpha: bool = False,
+) -> tuple[Image.Image, list[dict[str, object]], dict[str, list[str]], Image.Image, list[GlyphVariant]]:
     padding = max(2, scale // 2)
     max_width = 1936
     x = y = row_h = padding
     placements: list[tuple[GlyphVariant, Image.Image, int, int]] = []
     previews: list[tuple[GlyphVariant, Image.Image]] = []
+    skipped: list[GlyphVariant] = []
     for variant in variants:
-        source = load_runtime_crop([dump_dir], variant)
-        upscaled = sharpen_source_glyph(source, scale, threshold)
+        try:
+            source = load_runtime_crop(dump_dirs, variant)
+        except FileNotFoundError:
+            skipped.append(variant)
+            continue
+        upscaled = sharpen_source_glyph(source, scale, threshold, nearest, hard_alpha)
         previews.append((variant, source))
         if x + upscaled.width + padding > max_width:
             x = padding
@@ -304,18 +244,19 @@ def build_atlas(
             f"GAME.FNT live loading glyph uv={variant.uv} "
             f"size={variant.width}x{variant.height} "
             f"tpage={variant.tpage} clut={variant.clut} "
-            f"threshold={threshold}"
+            f"threshold={threshold} nearest={1 if nearest else 0} "
+            f"hard_alpha={1 if hard_alpha else 0}"
         ]
 
     label_h = 18
     proof_w = min(max_width, 1280)
-    cell_h = max(variant.height for variant in variants) * scale + label_h + padding
+    cell_h = max((variant.height for variant, _source in previews), default=18) * scale + label_h + padding
     proof_rows: list[Image.Image] = []
     row = Image.new("RGBA", (proof_w, cell_h), (12, 12, 12, 255))
     draw = ImageDraw.Draw(row)
     cx = padding
     for variant, source in previews:
-        upscaled = sharpen_source_glyph(source, scale, threshold)
+        upscaled = sharpen_source_glyph(source, scale, threshold, nearest, hard_alpha)
         if cx + upscaled.width + padding > proof_w:
             proof_rows.append(row)
             row = Image.new("RGBA", (proof_w, cell_h), (12, 12, 12, 255))
@@ -332,7 +273,7 @@ def build_atlas(
     )
     for index, row_image in enumerate(proof_rows):
         proof.paste(row_image, (0, index * cell_h))
-    return atlas, entries, sources, proof.convert("RGB")
+    return atlas, entries, sources, proof.convert("RGB"), skipped
 
 
 def strip_existing(manifest: dict[str, object]) -> None:
@@ -373,11 +314,17 @@ def main() -> None:
     )
     parser.add_argument("--scale", type=int, default=8)
     parser.add_argument("--threshold", type=int, default=96)
-    parser.add_argument("--variant-radius", type=int, default=2)
+    parser.add_argument("--nearest", action="store_true")
+    parser.add_argument("--hard-alpha", action="store_true")
     parser.add_argument(
-        "--reuse-active-atlas",
+        "--include-hits",
         action="store_true",
-        help="map live loading keys into matched cells of the active GAME.FNT atlas",
+        help="also add logged live GAME.FNT variants that already hit",
+    )
+    parser.add_argument(
+        "--separate-runtime-atlas",
+        action="store_true",
+        help="legacy diagnostic mode: build a separate runtime-capture atlas",
     )
     parser.add_argument(
         "--proof-out",
@@ -385,83 +332,116 @@ def main() -> None:
         default=MOD_FONT_WORK,
     )
     args = parser.parse_args()
+    canonical_atlas = not args.separate_runtime_atlas
 
     dump_dir = args.dump_dir or latest_dump_dir()
     dump_dirs = [dump_dir] + args.extra_dump_dir
-    if args.reuse_active_atlas:
+    if args.include_hits:
         variants = collect_game_variants([args.trace_dir] + args.extra_trace_dir)
     else:
-        variants = collect_game_misses(args.trace_dir)
+        variants = collect_game_misses_from_dirs([args.trace_dir] + args.extra_trace_dir)
     if not variants:
-        raise SystemExit(f"no live GAME.FNT misses found in {args.trace_dir}")
+        raise SystemExit(
+            "no live GAME.FNT misses found in "
+            + ", ".join(str(path) for path in [args.trace_dir] + args.extra_trace_dir)
+        )
 
     pack_root = args.manifest.parent
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     strip_existing(manifest)
-    if args.reuse_active_atlas:
+    existing_keys = {str(entry.get("key", "")) for entry in manifest.get("entries", [])}
+    variants = [
+        variant for variant in variants
+        if variant.key not in existing_keys
+    ]
+    if not variants:
+        raise SystemExit("all logged live GAME.FNT variants are already covered")
+
+    runtime_atlas, entries, sources, proof, skipped = build_atlas(
+        variants,
+        dump_dirs,
+        args.scale,
+        args.threshold,
+        args.nearest,
+        args.hard_alpha,
+    )
+    runtime_name = f"game_fnt_loading_runtime_{args.scale}x.dds"
+    active_image = active_game_fnt_image(manifest)
+    if canonical_atlas:
         fnt = load_fnt_tool()
         sheet = fnt.decode_fnt(args.fnt)
-        active_image = active_game_fnt_image(manifest)
         active_path = pack_root / active_image
         active_atlas = Image.open(active_path).convert("RGBA")
-        entries: list[dict[str, object]] = []
-        sources: dict[str, list[str]] = {}
-        existing_keys = {str(entry.get("key", "")) for entry in manifest["entries"]}
-        missing_variants = [
-            variant for variant in variants
-            if variant.key not in existing_keys
-        ]
-        matches = match_live_variants(
-            sheet, missing_variants, dump_dirs, args.variant_radius)
-        for match in matches:
-            variant = match.variant
-            entry = {
-                "key": variant.key,
-                "image": active_image,
-                "x": match.x * args.scale,
-                "y": match.y * args.scale,
-                "width": variant.width * args.scale,
-                "height": variant.height * args.scale,
-            }
-            if (
-                entry["x"] < 0 or entry["y"] < 0 or
-                entry["x"] + entry["width"] > active_atlas.width or
-                entry["y"] + entry["height"] > active_atlas.height
-            ):
-                raise ValueError(f"{variant.key} crop outside {active_image}")
-            entries.append(entry)
-            sources[variant.key] = [
-                f"GAME.FNT live loading glyph uv={variant.uv} "
-                f"size={variant.width}x{variant.height} "
-                f"tpage={variant.tpage} clut={variant.clut} "
-                f"matched=0x{match.code:02X}/{match.char!r} "
-                f"source={match.x},{match.y} "
-                f"score={match.score:.4f} reuse={active_image}"
-            ]
-        atlas_path = active_path
-        proof = None
-    else:
-        atlas, entries, sources, proof = build_atlas(
-            variants, dump_dir, args.scale, args.threshold)
-        atlas_path = pack_root / "images" / "ui" / f"game_fnt_loading_runtime_{args.scale}x.dds"
+        base_height = sheet.atlas.height * args.scale
+        if active_atlas.width < sheet.atlas.width * args.scale:
+            raise ValueError(f"{active_image} is narrower than the decoded GAME.FNT atlas")
+        if active_atlas.height < base_height:
+            raise ValueError(f"{active_image} is shorter than the decoded GAME.FNT atlas")
+        base_atlas = active_atlas.crop((0, 0, active_atlas.width, base_height))
+        combined_width = max(base_atlas.width, runtime_atlas.width)
+        combined = Image.new(
+            "RGBA",
+            (combined_width, base_height + runtime_atlas.height),
+            (0, 0, 0, 0),
+        )
+        combined.alpha_composite(base_atlas, (0, 0))
+        combined.alpha_composite(runtime_atlas, (0, base_height))
+        canonical_name = f"game_fnt_canonical_{args.scale}x.dds"
+        canonical_image = f"images/ui/{canonical_name}"
+        atlas_path = pack_root / canonical_image
         atlas_path.parent.mkdir(parents=True, exist_ok=True)
-        atlas.save(atlas_path)
+        combined.save(atlas_path)
+        deployed_atlas = Image.open(atlas_path).convert("RGBA")
+
+        base_keys = {
+            str(key)
+            for key, source_list in manifest.get("sources", {}).items()
+            if any(str(source).startswith("GAME.FNT glyph ") for source in source_list)
+        }
+        for entry in manifest.get("entries", []):
+            if str(entry.get("key", "")) in base_keys:
+                entry["image"] = canonical_image
+        for entry in entries:
+            entry["image"] = canonical_image
+            entry["y"] = int(entry["y"]) + base_height
+    else:
+        atlas_path = pack_root / "images" / "ui" / runtime_name
+        atlas_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_atlas.save(atlas_path)
         deployed_atlas = Image.open(atlas_path).convert("RGBA")
 
     manifest["entries"].extend(entries)
     manifest.setdefault("sources", {}).update(sources)
-    suffix = (
-        f"; GAME.FNT live loading glyph supplement {args.scale}x "
-        f"{'active-atlas' if args.reuse_active_atlas else 'font atlas'}"
-    )
+    if canonical_atlas:
+        manifest["generator"] = re.sub(
+            r"; GAME\.FNT [^;]+ font atlas",
+            "",
+            str(manifest.get("generator", "")),
+        )
+        suffix = f"; GAME.FNT canonical source and live loading {args.scale}x font atlas"
+    else:
+        suffix = f"; GAME.FNT live loading glyph supplement {args.scale}x font atlas"
     if suffix not in manifest.get("generator", ""):
         manifest["generator"] = manifest.get("generator", "") + suffix
     args.manifest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
+    referenced_images = {
+        str(entry.get("image", "")) for entry in manifest.get("entries", [])
+    }
+    stale_candidates = {
+        active_image,
+        f"images/ui/{runtime_name}",
+    }
+    for stale_image in stale_candidates:
+        if stale_image in referenced_images or stale_image == f"images/ui/{atlas_path.name}":
+            continue
+        stale_path = pack_root / stale_image
+        if stale_path.exists():
+            stale_path.unlink()
+
     args.proof_out.mkdir(parents=True, exist_ok=True)
-    if proof is not None:
-        deployed_atlas.save(args.proof_out / f"game_fnt_loading_runtime_{args.scale}x.png")
-        proof.save(args.proof_out / "game_fnt_loading_runtime_proof.png")
+    deployed_atlas.save(args.proof_out / f"game_fnt_{'canonical' if canonical_atlas else 'loading_runtime'}_{args.scale}x.png")
+    proof.save(args.proof_out / "game_fnt_loading_runtime_proof.png")
     report = [
         f"trace_dir={args.trace_dir}",
         f"dump_dir={dump_dir}",
@@ -469,8 +449,16 @@ def main() -> None:
         f"font_atlas={atlas_path}",
         f"scale={args.scale}",
         f"threshold={args.threshold}",
+        f"atlas_mode={'canonical' if canonical_atlas else 'separate-runtime'}",
+        f"include_hits={1 if args.include_hits else 0}",
         f"entries_added={len(entries)}",
+        f"entries_skipped_missing_dump={len(skipped)}",
     ]
+    if skipped:
+        report.extend(
+            f"skipped={variant.key} {variant.width}x{variant.height} {variant.uv}"
+            for variant in skipped[:50]
+        )
     (args.proof_out / "game_fnt_loading_runtime_report.txt").write_text(
         "\n".join(report) + "\n",
         encoding="utf-8",

@@ -1,5 +1,6 @@
 using Silk.NET.OpenGL;
 using RecompOne.Runtime.Config;
+using RecompOne.Runtime.Dispatch;
 
 namespace RecompOne.Runtime.Host.Window;
 
@@ -332,7 +333,10 @@ internal sealed class PresentationRenderer : IDisposable
                 : 1);
         _gl.Uniform1(_upscaleLinearFilter, 0);
         _gl.Uniform1(_upscaleLoadingUiRestore, loadingUiSource ? 1 : 0);
-        bool loadingCardOverlay = preTickLoadingCard && _loadingCardTexture != 0;
+        bool route66LoadingCard = Dispatcher.ActiveNames.Any(
+            name => name.Equals("LEVELS_ROUTE66", StringComparison.OrdinalIgnoreCase));
+        bool loadingCardOverlay =
+            preTickLoadingCard && route66LoadingCard && _loadingCardTexture != 0;
         _gl.Uniform1(_upscaleLoadingCardOverlay, loadingCardOverlay ? 1 : 0);
         _gl.Uniform4(
             _upscaleLoadingCardRect,

@@ -35,6 +35,7 @@ public sealed class CueFs : IDisposable
     {
         _bin = bin;
         IndexLooseFiles(looseRoot);
+        IndexModFileOverrides(looseRoot);
         _looseByLba = IndexCueOverrides();
         if (_looseByLba.Length > 0)
             Console.WriteLine(
@@ -56,6 +57,7 @@ public sealed class CueFs : IDisposable
         foreach (var file in _manifest.Files)
             _manifestFiles[NormalizeDiscPath(file.Path)] = file;
         IndexLooseFiles(root);
+        IndexModFileOverrides(root);
         _looseByLba = IndexStandaloneFiles();
         // Nullable and already guarded at every use; tooling has no need for
         // redbook audio and an extracted disc often has none.
@@ -412,6 +414,32 @@ public sealed class CueFs : IDisposable
             string relative = NormalizeDiscPath(Path.GetRelativePath(root, file));
             if (relative.Length > 0) _looseFiles[relative] = Path.GetFullPath(file);
         }
+    }
+
+    private void IndexModFileOverrides(string? looseRoot)
+    {
+        if (string.IsNullOrWhiteSpace(looseRoot)) return;
+        string mods = Environment.GetEnvironmentVariable("RECOMPONE_MOD_DIR") ??
+            Path.Combine(Path.GetFullPath(looseRoot), "mods");
+        if (!Directory.Exists(mods)) return;
+
+        int count = 0;
+        foreach (string mod in Directory.EnumerateDirectories(mods)
+                     .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            string files = Path.Combine(mod, "files");
+            if (!Directory.Exists(files)) continue;
+            foreach (string file in Directory.EnumerateFiles(
+                         files, "*", SearchOption.AllDirectories))
+            {
+                string relative = NormalizeDiscPath(Path.GetRelativePath(files, file));
+                if (relative.Length == 0) continue;
+                _looseFiles[relative] = Path.GetFullPath(file);
+                count++;
+            }
+        }
+        if (count > 0)
+            Console.WriteLine($"[Mods] loose disc-file overrides={count} root={mods}");
     }
 
     private LooseEntry[] IndexCueOverrides()

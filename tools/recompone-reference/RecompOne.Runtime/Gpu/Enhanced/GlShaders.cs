@@ -343,7 +343,13 @@ internal static class GlShaders
                 vReplacementRect.xy + local * vReplacementRect.zw;
             vec2 atlasSize = max(uReplacementAtlasSize, vec2(1.0));
             vec2 atlasUv = atlasPixel / atlasSize;
-            bool exactUiReplacement = vUiTexture != 0;
+            bool smoothFontReplacement =
+                vUiTexture != 0 && vParticle != 0;
+            bool exactUiReplacement =
+                vUiTexture != 0 && !smoothFontReplacement;
+            vec2 minPixel = vReplacementRect.xy + vec2(0.5);
+            vec2 maxPixel = vReplacementRect.xy +
+                max(vReplacementRect.zw - vec2(0.5), vec2(0.5));
             vec4 texel = exactUiReplacement
                 ? texelFetch(
                     uReplacementAtlas,
@@ -352,11 +358,10 @@ internal static class GlShaders
                         vReplacementRect.xy,
                         vReplacementRect.xy + vReplacementRect.zw - vec2(1.0))),
                     0)
-                : texture(uReplacementAtlas, atlasUv);
+                : texture(
+                    uReplacementAtlas,
+                    clamp(atlasPixel, minPixel, maxPixel) / atlasSize);
             if (vMaterial == MaterialTerrainRoute) {
-                vec2 minPixel = vReplacementRect.xy + vec2(0.5);
-                vec2 maxPixel = vReplacementRect.xy +
-                    max(vReplacementRect.zw - vec2(0.5), vec2(0.5));
                 vec3 neighbours = (
                     texture(uReplacementAtlas,
                         clamp(atlasPixel + vec2(1.0, 0.0), minPixel, maxPixel) /
@@ -547,6 +552,11 @@ internal static class GlShaders
             bool importedProjectedShadow = vMaterial == 11;
             bool vectorFont =
                 vUiTexture != 0 && vParticle != 0 && uVectorFonts != 0;
+            // A supplied high-resolution font is already the authored
+            // silhouette. Do not gate its alpha on the optional contour-font
+            // setting or on the native PS1 texel underneath it.
+            bool replacementFont =
+                hasReplacement && vUiTexture != 0 && vParticle != 0;
             bool vectorIcon =
                 vUiTexture != 0 && vShadow != 0 && uVectorIcons != 0;
             bool enhancedParticle =
@@ -559,9 +569,8 @@ internal static class GlShaders
             float contourCoverage = 1.0;
             float contourStp = nearestTexel.a;
 
-            if ((vectorFont || vectorIcon || enhancedParticle ||
+            if ((replacementFont || vectorFont || vectorIcon || enhancedParticle ||
                  enhancedImportedShadow) && !svgHud) {
-                bool replacementFont = vectorFont && hasReplacement;
                 if (replacementFont) {
                     contourCoverage = clamp(texel.a, 0.0, 1.0);
                     if (contourCoverage <= 0.01) {
@@ -599,7 +608,7 @@ internal static class GlShaders
                 // creates dark halos. Particle sprites are semitransparent and
                 // can safely reconstruct their edge coverage.
                 bool filteredEdge =
-                    vectorFont || vectorIcon || enhancedParticle ||
+                    replacementFont || vectorFont || vectorIcon || enhancedParticle ||
                     enhancedImportedShadow;
                 if (!svgHud && !filteredEdge) discard;
             }
@@ -668,7 +677,8 @@ internal static class GlShaders
                 if (shadowCoverage <= 0.001) discard;
                 FragColor = vec4(0.0, 0.0, 0.0, shadowCoverage);
                 BlendColor = vec4(1.0);
-            } else if (vectorFont && contourCoverage < 0.999) {
+            } else if ((replacementFont || vectorFont) &&
+                       contourCoverage < 0.999) {
                 BlendColor = vec4(
                     uBlend.rgb * contourCoverage,
                     mix(1.0, uBlend.a, contourCoverage));

@@ -256,19 +256,11 @@ def render_live_cell(
     font: ImageFont.FreeTypeFont,
     scale: int,
     width_factor: float,
-    runtime: Image.Image | None,
+    hard_alpha: bool,
+    x_offset: int,
+    y_offset: int,
 ) -> Image.Image:
     target = Image.new("RGBA", (use.width * scale, use.height * scale), (0, 0, 0, 0))
-    if runtime is not None:
-        box = runtime.convert("RGBA").getbbox()
-    else:
-        box = (0, 0, use.width, use.height)
-    if box is None:
-        box = (0, 0, use.width, use.height)
-    x0, y0, x1, y1 = box
-    target_w = max(1, min(use.width * scale, int(round((x1 - x0) * scale * width_factor))))
-    target_h = max(1, min(use.height * scale, (y1 - y0) * scale))
-
     temp = Image.new(
         "RGBA",
         (max(64, use.width * scale * 6), max(64, use.height * scale * 6)),
@@ -276,16 +268,29 @@ def render_live_cell(
     )
     draw = ImageDraw.Draw(temp)
     bbox = draw.textbbox((0, 0), char, font=font)
-    draw.text((-bbox[0] + scale, -bbox[1] + scale), char, font=font, fill=(255, 255, 255, 255))
+    draw.text(
+        (-bbox[0] + scale, -bbox[1] + scale),
+        char,
+        font=font,
+        fill=(255, 255, 255, 255),
+    )
     rendered_box = temp.getbbox()
     if rendered_box is None:
         return target
     rendered = temp.crop(rendered_box)
-    fitted = rendered.resize((target_w, target_h), Image.Resampling.LANCZOS)
-    alpha = fitted.getchannel("A").point(lambda value: 0 if value < 24 else 255 if value > 232 else value)
-    white = Image.new("RGBA", fitted.size, (255, 255, 255, 0))
+    if width_factor != 1.0:
+        rendered = rendered.resize(
+            (max(1, int(round(rendered.width * width_factor))), rendered.height),
+            Image.Resampling.LANCZOS,
+        )
+    if hard_alpha:
+        alpha = rendered.getchannel("A").point(lambda value: 255 if value >= 24 else 0)
+    else:
+        alpha = rendered.getchannel("A").point(
+            lambda value: 0 if value < 24 else 255 if value > 232 else value)
+    white = Image.new("RGBA", rendered.size, (255, 255, 255, 0))
     white.putalpha(alpha)
-    target.alpha_composite(white, (x0 * scale, y0 * scale))
+    target.alpha_composite(white, (x_offset * scale, y_offset * scale))
     return target
 
 
@@ -293,11 +298,15 @@ def build_textmap_atlas(
     fnt_module,
     sheet,
     matches: dict[str, tuple[GlyphUse, str]],
+    dump_dirs: list[Path],
     font_path: Path,
     point_size: int,
     scale: int,
     width_factor: float,
     hard_alpha: bool,
+    cell_mode: str,
+    x_offset: int,
+    y_offset: int,
 ) -> tuple[str, Image.Image, list[dict[str, object]], dict[str, list[str]]]:
     source = fnt_module.render_fitted_ttf_atlas(
         sheet,
@@ -328,12 +337,25 @@ def build_textmap_atlas(
         glyph = glyphs.get(char)
         if glyph is None:
             continue
-        cell = source.crop((
-            glyph.x * scale,
-            glyph.y * scale,
-            (glyph.x + glyph.width) * scale,
-            (glyph.y + sheet.max_height) * scale,
-        ))
+        if cell_mode == "runtime":
+            font = ImageFont.truetype(str(font_path), point_size * scale)
+            cell = render_live_cell(
+                char,
+                use,
+                font,
+                scale,
+                width_factor,
+                hard_alpha,
+                x_offset,
+                y_offset,
+            )
+        else:
+            cell = source.crop((
+                glyph.x * scale,
+                glyph.y * scale,
+                (glyph.x + glyph.width) * scale,
+                (glyph.y + sheet.max_height) * scale,
+            ))
         if x + cell.width + padding > max_width:
             x = padding
             y += row_h + padding
@@ -362,7 +384,8 @@ def build_textmap_atlas(
             f"tpage={use.tpage} clut={use.clut} "
             f"source={sx},{sy} font={font_path.name} "
             f"point={point_size} width_factor={width_factor} "
-            f"hard_alpha={1 if hard_alpha else 0}"
+            f"hard_alpha={1 if hard_alpha else 0} "
+            f"cell_mode={cell_mode} x_offset={x_offset} y_offset={y_offset}"
         ]
     return image_name, atlas, entries, sources
 
@@ -378,6 +401,9 @@ def main() -> None:
     parser.add_argument("--point-size", type=int, required=True)
     parser.add_argument("--width-factor", type=float, default=0.92)
     parser.add_argument("--hard-alpha", action="store_true")
+    parser.add_argument("--cell-mode", choices=("runtime", "source"), default="runtime")
+    parser.add_argument("--x-offset", type=int, default=0)
+    parser.add_argument("--y-offset", type=int, default=-1)
     parser.add_argument("--scale", type=int, default=8)
     parser.add_argument("--radius-x", type=int, default=6)
     parser.add_argument("--radius-y", type=int, default=3)
@@ -428,11 +454,15 @@ def main() -> None:
         fnt,
         sheet,
         pending,
+        args.dump_dir,
         args.font,
         args.point_size,
         args.scale,
         args.width_factor,
         args.hard_alpha,
+        args.cell_mode,
+        args.x_offset,
+        args.y_offset,
     )
     atlas_path = args.manifest.parent / "images" / "ui" / image_name
     atlas_path.parent.mkdir(parents=True, exist_ok=True)
