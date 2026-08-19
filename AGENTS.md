@@ -33,8 +33,8 @@ For anything else: log the issue, continue working.
 - Append to `progress.log` after every major step. Format: `[ISO timestamp] [phase] [action] [result]`.
 - Append to `decisions.log` whenever you make a judgment call. Format: `[timestamp] [context] [chose X over Y because Z]`.
 - Write intermediate results to disk continuously. Never hold large analysis state only in memory.
-- After every build intended for testing or handoff, ensure the latest runnable binary and required dependencies are copied to `PS1 game\`. The user runs from that directory; never leave them on a stale exe.
-- When deploying a build for user testing, clean up old run logs in `PS1 game\` so stale `v8_latest.log` / archived run logs do not confuse crash or freeze triage.
+- After every build intended for testing or handoff, deploy to the game-specific runnable root: original Vigilante 8 builds go to `PS1 game\`, while Vigilante 8: 2nd Offense builds go to `V8_2_LOOSE\`. Never place `Vigilante82PC.exe` or V8:2 mods in `PS1 game\`.
+- When deploying a build for user testing, clean up old run logs in that game's runnable root so stale `v8_latest.log` / archived run logs do not confuse crash or freeze triage.
 
 ### When resuming a session
 1. Read `AGENTS.md` (this file).
