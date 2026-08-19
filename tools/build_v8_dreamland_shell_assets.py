@@ -318,6 +318,7 @@ def build_loading_chunk(
                 str(bitmap),
                 str(sbs),
             ],
+            creationflags=getattr(subprocess, "IDLE_PRIORITY_CLASS", 0),
             check=True,
         )
         bs = _trim_sbs_frame(sbs.read_bytes())

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Audit ZONE material ids against TINF records for terrain EXP files."""
+"""Audit ZONE material ids against TINF source records for terrain EXP files."""
 from __future__ import annotations
 
+import argparse
 from collections import Counter
 from pathlib import Path
 
@@ -60,11 +61,15 @@ def audit_file(exp: Path) -> list[str]:
             if off + rec_size <= len(payload):
                 words_be = [be16(payload, off + i) for i in range(0, rec_size, 2)]
                 words_le = [le16(payload, off + i) for i in range(0, rec_size, 2)]
-                tile_word = words_be[3]
                 flags_word = words_le[0]
+                base_word = words_be[1]
+                base_v = words_be[2]
+                tile_word = words_be[3]
                 lines.append(
                     f"  mat[{mid:03}] tinf28_be={words_be[:10]} "
-                    f"tinf28_le={words_le[:4]} tile={tile_word & 7} "
+                    f"tinf28_le={words_le[:4]} origin=({base_word},{base_v}) "
+                    f"page_step={base_word >> 7} local_u={base_word & 0x7f} "
+                    f"tile={tile_word & 7} "
                     f"flip={(tile_word >> 3) & 1} hidden={(flags_word & 0x1000) != 0}"
                 )
     lines.append("")
@@ -72,11 +77,30 @@ def audit_file(exp: Path) -> list[str]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        default=sorted((ROOT / "input" / "TERRAIN").glob("*.EXP")),
+        help="terrain EXP files to audit",
+    )
+    parser.add_argument("--output", type=Path, default=OUT)
+    args = parser.parse_args()
+
     lines: list[str] = []
-    for exp in sorted((ROOT / "input" / "TERRAIN").glob("*.EXP")):
+    paths = [
+        child
+        for path in args.paths
+        for child in (
+            sorted(path.glob("*.EXP")) if path.is_dir() else [path]
+        )
+    ]
+    for exp in sorted(paths):
         lines.extend(audit_file(exp))
-    OUT.write_text("\n".join(lines), encoding="ascii")
-    print(OUT)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text("\n".join(lines), encoding="ascii")
+    print(args.output)
     return 0
 
 

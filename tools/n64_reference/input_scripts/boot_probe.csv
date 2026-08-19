@@ -1,0 +1,3 @@
+# first_frame,last_frame,buttons,analog_x,analog_y
+# The initial probe intentionally supplies no input. Its captures establish
+# boot timing before the deterministic Dreamland navigation sequence is authored.

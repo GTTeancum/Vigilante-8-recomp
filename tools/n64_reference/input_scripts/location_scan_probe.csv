@@ -1,0 +1,16 @@
+# first_frame,last_frame,buttons,analog_x,analog_y
+120,124,A,0,0
+750,754,START,0,0
+870,874,A,0,0
+930,934,DD,0,0
+960,964,A,0,0
+# Walk the location table one row at a time after it settles.
+1140,1144,DD,0,0
+1200,1204,DD,0,0
+1260,1264,DD,0,0
+1320,1324,DD,0,0
+1380,1384,DD,0,0
+1440,1444,DD,0,0
+1500,1504,DD,0,0
+1560,1564,DD,0,0
+1620,1624,DD,0,0

@@ -157,7 +157,13 @@ def main() -> int:
     ]
     if len(xbmps) != 1:
         raise ValueError(f"expected one N64 XBMP, found {len(xbmps)}")
-    atlas = n64.parse_n64_texture(xbmps[0], 0, 0, len(xbmps[0]))
+    atlas = n64.parse_n64_texture(
+        xbmps[0],
+        0,
+        0,
+        len(xbmps[0]),
+        archive_storage_is_tmem_order=False,
+    )
 
     bins = collect_bins(args.ps1_exp)
     converted_model = Model(bins[-1], "V8")

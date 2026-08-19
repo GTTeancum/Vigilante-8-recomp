@@ -1,0 +1,21 @@
+# Retail-input-only path to unlocked Super Dreamland 64.
+120,124,A,0,0
+750,754,START,0,0
+870,874,DD,0,0
+900,904,DD,0,0
+930,934,DD,0,0
+960,964,A,0,0
+1170,1174,DD,0,0
+1200,1204,A,0,0
+1260,1260,PASSCODE:JTBT7CFD1LRMGW,0,0
+1980,1984,CU,0,0
+2340,2344,DU,0,0
+2370,2374,A,0,0
+2820,2824,DD,0,0
+2850,2854,A,0,0
+# Super Dreamland is the unlocked table's initial selection.
+3060,3064,A,0,0
+3660,3664,A,0,0
+4350,4354,A,0,0
+# Autodrive once the match has loaded; this remains ordinary controller input.
+5100,5900,A,36,0

@@ -1,0 +1,15 @@
+# first_frame,last_frame,buttons,analog_x,analog_y
+120,124,A,0,0
+750,754,START,0,0
+870,874,DD,0,0
+900,904,DD,0,0
+930,934,DD,0,0
+960,964,A,0,0
+1170,1174,DD,0,0
+1200,1204,A,0,0
+# Cycle the first passcode slot upward one character at a time.
+1260,1264,DU,0,0
+1320,1324,DU,0,0
+1380,1384,DU,0,0
+1440,1444,DU,0,0
+1500,1504,DU,0,0

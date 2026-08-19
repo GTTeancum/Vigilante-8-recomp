@@ -1,0 +1,11 @@
+# first_frame,last_frame,buttons,analog_x,analog_y
+120,124,A,0,0
+750,754,START,0,0
+870,874,DD,0,0
+900,904,DD,0,0
+930,934,DD,0,0
+960,964,A,0,0
+1170,1174,DD,0,0
+1200,1204,A,0,0
+# Expand the retail all-levels/all-characters N64 passcode through native input.
+1260,1260,PASSCODE:JTBT7CFD1LRMGW,0,0

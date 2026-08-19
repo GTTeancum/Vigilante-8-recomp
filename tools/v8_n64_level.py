@@ -341,7 +341,12 @@ def rgba5551_to_psx(
 
 
 def parse_n64_texture(
-    data: bytes, offset: int, index: int, end: int
+    data: bytes,
+    offset: int,
+    index: int,
+    end: int,
+    *,
+    archive_storage_is_tmem_order: bool = True,
 ) -> N64Texture:
     if offset + 8 > end:
         raise FormatError(f"texture {index} has an invalid header")
@@ -387,27 +392,36 @@ def parse_n64_texture(
         height=height,
         palette_rgba5551=palette,
         pixels=_decode_n64_texture_rows(
-            data[palette_end:pixel_end], row_bytes, row_stride, height
+            data[palette_end:pixel_end],
+            row_bytes,
+            row_stride,
+            height,
+            undo_odd_row_half_swap=archive_storage_is_tmem_order,
         ),
     )
 
 
 def _decode_n64_texture_rows(
-    packed: bytes, row_bytes: int, row_stride: int, height: int
+    packed: bytes,
+    row_bytes: int,
+    row_stride: int,
+    height: int,
+    *,
+    undo_odd_row_half_swap: bool = True,
 ) -> bytes:
-    """Undo the archive's TMEM scanline layout and remove row padding.
+    """Return logical image rows and remove archive padding.
 
-    Each source row occupies 64-bit units. On odd rows, the N64 swaps the two
-    32-bit halves of every unit; reading those bytes linearly produces the
-    alternating four-byte bands that obscured Dreamland's doors, roofs,
-    masonry, and foliage. Restore ordinary left-to-right texel order before
-    trimming the row to its authored width.
+    Runtime evidence proves two storage paths. Standalone XOBF/XRTP images are
+    uploaded directly with ``LoadBlock DXT=0``, so their archive bytes already
+    carry the odd-row TMEM half swap and must be undone. The large XBMP terrain
+    atlas is stored linearly; the game extracts and swaps its 32x32 tiles into
+    a separate runtime bank. Callers identify which archive contract applies.
     """
 
     output = bytearray()
     for row in range(height):
         source = packed[row * row_stride:(row + 1) * row_stride]
-        if row & 1:
+        if undo_odd_row_half_swap and row & 1:
             source = b"".join(
                 source[offset + 4:offset + 8]
                 + source[offset:offset + 4]
@@ -655,11 +669,22 @@ def encode_psx_ci8(
         raise FormatError("N64 CI8 image has an invalid header")
     width = be16(payload, 4)
     height = be16(payload, 6)
-    expected = 8 + 512 + width * height
+    row_bytes = width
+    row_stride = align(row_bytes, 8)
+    expected = 8 + 512 + row_stride * height
     if len(payload) < expected:
         raise FormatError("N64 CI8 image is truncated")
     palette = [be16(payload, 8 + index * 2) for index in range(256)]
-    pixels = payload[0x208:0x208 + width * height]
+    # Archive rows are logical image order. The N64 runtime's odd-row swap is
+    # performed only when it repacks a tile for TMEM and must not be preserved
+    # in a PS1 bitmap.
+    pixels = _decode_n64_texture_rows(
+        payload[0x208:0x208 + row_stride * height],
+        row_bytes,
+        row_stride,
+        height,
+        undo_odd_row_half_swap=False,
+    )
     if output_width is not None or output_height is not None:
         scaled_width = output_width if output_width is not None else width
         scaled_height = output_height if output_height is not None else height
@@ -699,17 +724,18 @@ def encode_psx_ci8(
 def convert_tinf(payload: bytes) -> bytes:
     """Convert N64 32-pixel terrain-material origins to PS1's 48-pixel grid.
 
-    TINF contains 256 fixed 40-byte material records.  Each record consists
-    of two 20-byte loader subrecords; the coordinate words at +2 and +4 in
-    each subrecord use the same platform scale.  Comparing the complete
-    matching Airgrave N64 and PS1 tables proves that the PS1 conversion is
-    exactly ``coordinate * 3 / 2``; every other byte is identical.
+    TINF contains 256 fixed 0x28-byte material records.  LOAD 80105550 reads
+    the render origin from words +2 and +4, then copies the seven halfwords at
+    +8..+20 into the 0x20-byte runtime material record.  Comparing matching
+    Airgrave N64 and PS1 tables proves that only the render origin needs the
+    exact ``coordinate * 3 / 2`` conversion; the remaining behavior words must
+    stay source-authored.
     """
 
-    if len(payload) % 20:
-        raise FormatError("TINF is not an array of 20-byte records")
+    if len(payload) % 0x28:
+        raise FormatError("TINF is not an array of 0x28-byte records")
     result = bytearray(payload)
-    for record in range(0, len(result), 20):
+    for record in range(0, len(result), 0x28):
         for field in (2, 4):
             value = be16(result, record + field)
             scaled = value * 3
@@ -746,6 +772,7 @@ class Face:
     dynamic_texture: bool = False
     double_sided: bool = False
     semi_transparent: bool = False
+    combiner: tuple[int, int] = (0, 0)
 
 
 @dataclass
@@ -912,6 +939,7 @@ def parse_group_faces(
         lighting_enabled = False
         double_sided = False
         primitive_color = (127, 127, 127)
+        combiner = (0, 0)
         semi_transparent = False
 
         def triangle(indices: tuple[int, int, int]) -> None:
@@ -939,6 +967,7 @@ def parse_group_faces(
                     dynamic_texture if texture_enabled else False,
                     double_sided,
                     semi_transparent,
+                    combiner,
                 )
             )
 
@@ -980,6 +1009,9 @@ def parse_group_faces(
             if opcode == 0xFA:
                 primitive_color = (command[4], command[5], command[6])
                 continue
+            if opcode == 0xFC:
+                combiner = (word0 & 0x00FFFFFF, word1)
+                continue
             if opcode == 0xE2:
                 # V8's N64 translucent surface blender word ends in 0x49D8.
                 # An alternate display list is not inherently translucent:
@@ -993,9 +1025,14 @@ def parse_group_faces(
                 # G_CULL_BACK (0x400); their PS1 counterparts duplicate the
                 # reversed triangle because the PS1 has no equivalent
                 # two-sided polygon bit.
-                if not (word0 & 0x10000):
+                # F3DEX2 geometry-mode bits are distinct: 0x10000 enables
+                # depth fog, while 0x20000 enables vertex lighting.  Treating
+                # G_FOG as G_LIGHTING made almost all Dreamland world faces
+                # consume their RGB shade attributes as signed normals and
+                # produced a bright yellow/brown cast after PS1 conversion.
+                if not (word0 & 0x20000):
                     lighting_enabled = False
-                if word1 & 0x10000:
+                if word1 & 0x20000:
                     lighting_enabled = True
                 if not (word0 & 0x400):
                     double_sided = True
@@ -1058,7 +1095,7 @@ def parse_group_faces(
                 continue
             if opcode not in {
                 0xE3, 0xE6, 0xE7, 0xE8,
-                0xF0, 0xF3, 0xFB, 0xFC,
+                0xF0, 0xF3, 0xFB,
             }:
                 raise FormatError(
                     f"group at 0x{group_offset:X} has unsupported display "
@@ -1166,6 +1203,26 @@ def encode_psx_group(
         normals.extend(struct.pack("<hhhh", value[0], value[1], value[2], 0))
         return index
 
+    def psx_lit_texture_base(face: Face) -> tuple[int, int, int]:
+        """Translate the RDP's 0..255 shade modulation to PS1 GPU scale.
+
+        Dreamland's ordinary lit models use an RDP ``TEXEL0 * SHADE``
+        combiner.  Runtime traces prove that a neutral 127 PS1 GTE base emits
+        the same 0..255 shade values as the N64 RSP, but the PS1 GPU then
+        modulates texture texels with 128 as neutral.  Feeding the RSP-scale
+        result to that path therefore doubles the source lighting.  A neutral
+        base of 64 supplies the required 128/255 bridge before the native GTE
+        and preserves the authored N64 primitive colour, which these two
+        combiners do not consume, for every other material mode.
+        """
+
+        if face.combiner in (
+            (0x127FFF, 0xFFFFF238),
+            (0x127E24, 0xFFFFF3F9),
+        ):
+            return (64, 64, 64)
+        return face.color
+
     for face in faces:
         indices = tuple(index_by_source[vertex.source_offset] for vertex in face.vertices)
         color = face.color
@@ -1246,6 +1303,7 @@ def encode_psx_group(
         vertex_normals = tuple(_vertex_normal(vertex) for vertex in face.vertices)
         flat_normal = _face_has_one_normal(face)
         lit = face.lighting and not debug_untextured
+        lit_texture_color = psx_lit_texture_base(face) if lit else color
 
         for order in orders:
             ordered_indices = tuple(indices[item] for item in order)
@@ -1314,7 +1372,9 @@ def encode_psx_group(
                 packets += (
                     struct.pack(
                         "<BBBBHHHHHH",
-                        color[0], color[1], color[2],
+                        lit_texture_color[0],
+                        lit_texture_color[1],
+                        lit_texture_color[2],
                         packet_type(
                             9,
                             textured=True,
@@ -1344,7 +1404,9 @@ def encode_psx_group(
                 packets += (
                     struct.pack(
                         "<BBBBHHHH",
-                        color[0], color[1], color[2],
+                        lit_texture_color[0],
+                        lit_texture_color[1],
+                        lit_texture_color[2],
                         packet_type(
                             packet_kind,
                             textured=True,
@@ -1617,6 +1679,7 @@ def convert_xobf_bin(
                     dynamic_texture=face.dynamic_texture,
                     double_sided=face.double_sided,
                     semi_transparent=face.semi_transparent,
+                    combiner=face.combiner,
                 )
             )
         groups.append(
@@ -1701,10 +1764,20 @@ def convert_aimp(payload: bytes) -> bytes:
 
 
 def convert_xrtp(payload: bytes) -> bytes:
-    if len(payload) <= 12:
+    if len(payload) < 12:
         return payload
+    # XRTP's descriptor layout is shared, but its platform renderer flags are
+    # not.  Dreamland's source 0x0192 road descriptor reaches the N64 RDP as
+    # opaque Z-tested, Z-writing triangles; copying bit 0x0100 verbatim makes
+    # the PS1 loader emit semitransparent primitives instead.  That false
+    # blend both changes the road colour and prevents it from occluding water.
+    descriptor = bytearray(payload[:12])
+    flags = be16(descriptor, 10) & ~0x0100
+    struct.pack_into(">H", descriptor, 10, flags)
+    if len(payload) == 12:
+        return bytes(descriptor)
     texture = parse_n64_texture(payload, 12, 0, len(payload))
-    return payload[:12] + encode_psx_texture(texture)
+    return bytes(descriptor) + encode_psx_texture(texture)
 
 
 def convert_animation(
@@ -2238,7 +2311,13 @@ def _dreamland_water_xobf(
     # N64 80159900 writes Terrain_HeightAt(center) - 16 height samples.
     object_y = terrain_y - (16 << 11)
 
-    atlas = parse_n64_texture(xbmp, 0, 0, len(xbmp))
+    atlas = parse_n64_texture(
+        xbmp,
+        0,
+        0,
+        len(xbmp),
+        archive_storage_is_tmem_order=False,
+    )
     phase_tiles = (0x23, 0x24, 0x25, 0x26, 0x27)
     source_frames = [
         _dreamland_water_texture(atlas, tile) for tile in phase_tiles

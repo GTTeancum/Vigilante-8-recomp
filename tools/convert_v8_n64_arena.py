@@ -18,6 +18,11 @@ def main() -> int:
     parser.add_argument("output", type=Path)
     parser.add_argument("--report", type=Path)
     parser.add_argument(
+        "--decoded-source",
+        type=Path,
+        help="use an existing decoded arena EXP instead of extracting the ROM",
+    )
+    parser.add_argument(
         "--source-output",
         type=Path,
         help="optionally retain the decoded N64 EXP before conversion",
@@ -25,8 +30,11 @@ def main() -> int:
     args = parser.parse_args()
 
     arena = args.arena.upper()
-    rom = V8N64Rom(args.rom)
-    source = rom.decoded(f"{arena}.EXP")
+    source = (
+        args.decoded_source.read_bytes()
+        if args.decoded_source is not None
+        else V8N64Rom(args.rom).decoded(f"{arena}.EXP")
+    )
     if args.source_output is not None:
         args.source_output.parent.mkdir(parents=True, exist_ok=True)
         args.source_output.write_bytes(source)

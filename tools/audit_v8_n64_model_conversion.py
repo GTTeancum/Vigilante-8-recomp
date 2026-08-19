@@ -163,11 +163,21 @@ def source_texture_rgb(texture: n64.N64Texture) -> list[tuple[int, int, int]]:
             for column in range(texture.width)
         )
         palette = texture.palette_rgba5551[:16]
-        return [visible_rgb(palette[index]) for index in indices]
+        return [
+            visible_rgb(palette[index] if index < len(palette) else 0)
+            for index in indices
+        ]
     if texture.format == 2 and texture.size == 1:
         if texture.palette_rgba5551:
             return [
-                visible_rgb(texture.palette_rgba5551[index])
+                # Native conversion expands every CI8 palette to a 256-word
+                # PS1 CLUT; indices beyond the authored palette therefore
+                # resolve to its zero-filled tail rather than raising here.
+                visible_rgb(
+                    texture.palette_rgba5551[index]
+                    if index < len(texture.palette_rgba5551)
+                    else 0
+                )
                 for index in texture.pixels
             ]
         return [
@@ -622,6 +632,11 @@ def main() -> int:
     parser.add_argument("rom", type=Path)
     parser.add_argument("arena")
     parser.add_argument(
+        "--decoded-source",
+        type=Path,
+        help="use an existing decoded arena EXP instead of extracting the ROM",
+    )
+    parser.add_argument(
         "--groups",
         help="comma-separated source group numbers; default audits all groups",
     )
@@ -637,7 +652,11 @@ def main() -> int:
         if args.groups
         else None
     )
-    exp = n64.V8N64Rom(args.rom).decoded(f"{args.arena.upper()}.EXP")
+    exp = (
+        args.decoded_source.read_bytes()
+        if args.decoded_source is not None
+        else n64.V8N64Rom(args.rom).decoded(f"{args.arena.upper()}.EXP")
+    )
     converted = args.converted.read_bytes() if args.converted else None
     report = audit(exp, requested, converted)
     if args.output:

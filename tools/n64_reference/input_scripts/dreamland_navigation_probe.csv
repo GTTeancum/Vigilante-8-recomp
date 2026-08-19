@@ -1,0 +1,10 @@
+# first_frame,last_frame,buttons,analog_x,analog_y
+# Clear the controller-pak warning.
+120,124,A,0,0
+# Enter the shell from the title screen.
+750,754,START,0,0
+# Accept the default 1 PLAYER entry.
+870,874,A,0,0
+# Move from QUEST to ARCADE and accept it.
+930,934,DD,0,0
+960,964,A,0,0
