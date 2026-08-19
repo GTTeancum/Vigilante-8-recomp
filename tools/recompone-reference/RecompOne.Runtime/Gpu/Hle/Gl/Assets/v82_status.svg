@@ -24,7 +24,7 @@
   </defs>
 
   <polygon points="4,0 40,0 44,4 44,20 40,24 4,24 0,20 0,4"
-           fill="url(#vehicle)" stroke="url(#frame)" stroke-width="1"/>
+           fill="none" stroke="url(#frame)" stroke-width="1"/>
   <!-- Exact right-side silhouettes decoded from SHARED/HUD.TBL image 1.
        The six-pixel prefix belongs only to the accepted expanded vehicle
        panel, so the native weapon/ammo coordinates are shifted by +6 here. -->

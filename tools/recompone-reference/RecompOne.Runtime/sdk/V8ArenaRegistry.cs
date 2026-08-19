@@ -36,6 +36,8 @@ public static class V8ArenaRegistry
         new(StringComparer.OrdinalIgnoreCase);
 
     public static string? SelectedStableId => _selectedStableId;
+    public static bool IsDreamlandSelected =>
+        _selectedStableId == DreamlandStableId;
     public static bool HasArenas => Items.Length != 0;
     public static ArenaRosterItem[] Roster() => [.. Items];
 

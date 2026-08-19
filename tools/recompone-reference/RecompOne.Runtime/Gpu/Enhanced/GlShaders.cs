@@ -94,6 +94,9 @@ internal static class GlShaders
         flat out int   vHealthPlate;
         flat out int   vVehicle;
         flat out int   vTerrainDebug;
+        flat out int   vN64RouteColor;
+        flat out int   vHudKeyedMagenta;
+        flat out int   vEffectContour;
         flat out int   vMaterial;
         flat out vec4  vReplacementRect;
         flat out vec3  vReplacementScale;
@@ -160,6 +163,9 @@ internal static class GlShaders
             vHealthPlate = (inTexpage >> 18) & 1;
             vVehicle = (inTexpage >> 19) & 1;
             vTerrainDebug = (inTexpage >> 20) & 1;
+            vN64RouteColor = (inTexpage >> 21) & 1;
+            vHudKeyedMagenta = (inTexpage >> 22) & 1;
+            vEffectContour = (inTexpage >> 23) & 1;
             vMaterial = inMaterial;
             vReplacementRect = inReplacementRect;
             vReplacementScale = inReplacementScale;
@@ -201,6 +207,9 @@ internal static class GlShaders
         flat in int   vHealthPlate;
         flat in int   vVehicle;
         flat in int   vTerrainDebug;
+        flat in int   vN64RouteColor;
+        flat in int   vHudKeyedMagenta;
+        flat in int   vEffectContour;
         flat in int   vMaterial;
         flat in vec4  vReplacementRect;
         flat in vec3  vReplacementScale;
@@ -230,6 +239,7 @@ internal static class GlShaders
         uniform int   uEnhancedFog;
         uniform vec3  uFogColor;
         uniform int   uFogColorValid;
+        uniform int   uDreamlandN64Fog;
         uniform int   uPerspectiveCorrectTextures;
         uniform int   uPerspectiveCorrectColors;
         uniform int   uTrueColor;
@@ -238,6 +248,15 @@ internal static class GlShaders
         uniform int   uStockPaintCorrection;
         uniform int   uScale;
         uniform vec2  uPosBias;
+
+        const int MaterialGlass = 3;
+        const int MaterialImportedGlass = 4;
+        const int MaterialAdditive = 6;
+        const int MaterialSubtractive = 7;
+        const int MaterialTerrainRoute = 10;
+        const int MaterialImportedShadow = 11;
+        const int MaterialVehicleReflection = 12;
+        const int MaterialOpaqueVehicleGlass = 13;
 
         const int ditherTbl[16] = int[16](
             -4,  0, -3,  1,
@@ -252,6 +271,9 @@ internal static class GlShaders
             return u5(p.r) | (u5(p.g) << 5) | (u5(p.b) << 10) | (int(ceil(p.a)) << 15);
         }
         ivec2 textureWindow(ivec2 uv) {
+            if (vHudKeyedMagenta != 0) {
+                return uv & ivec2(0xff);
+            }
             uv = (uv & uTexWindow.xy) | uTexWindow.zw;
             return uv & ivec2(0xff);
         }
@@ -330,7 +352,6 @@ internal static class GlShaders
             return vec4(rgb, nearestTexel.a);
         }
         vec4 replacementTexture(vec2 uvf) {
-            const int MaterialTerrainRoute = 10;
             vec2 sourceSize = vec2(
                 max(vUvBounds.z - vUvBounds.x + 1, 1),
                 max(vUvBounds.w - vUvBounds.y + 1, 1));
@@ -434,7 +455,9 @@ internal static class GlShaders
             return texture(uHudSvg, (atlasPixel + vec2(0.5)) / 1024.0);
         }
         vec3 stockPaintCorrection(vec3 rgb) {
-            if (vVehicle == 0 || uStockPaintCorrection == 0) return rgb;
+            if (vVehicle == 0 ||
+                uStockPaintCorrection == 0 ||
+                vMaterial == MaterialVehicleReflection) return rgb;
             float dominantGreen = rgb.g - max(rgb.r, rgb.b);
             if (dominantGreen <= 0.08 || rgb.g <= 0.16 || rgb.r >= 0.48) return rgb;
             float body = smoothstep(0.08, 0.28, dominantGreen) *
@@ -445,6 +468,19 @@ internal static class GlShaders
                 clamp(rgb.g * 1.12 + rgb.b * 0.45, 0.0, 1.0));
             return mix(rgb, blue, body);
         }
+        float rasterCameraDepth() {
+            const float depthNear = 1.0;
+            const float depthFar = 65535.0;
+            const float depthA =
+                (depthFar + depthNear) / (depthFar - depthNear);
+            const float depthB =
+                (-2.0 * depthFar * depthNear) /
+                (depthFar - depthNear);
+            float ndcDepth = gl_FragCoord.z * 2.0 - 1.0;
+            float denominator = ndcDepth - depthA;
+            if (abs(denominator) < 0.000001) return vDepth;
+            return clamp(depthB / denominator, 1.0, depthFar);
+        }
         vec3 distanceFog(vec3 rgb) {
             if (uEnhancedFog == 0 ||
                 vUiTexture != 0 ||
@@ -452,6 +488,11 @@ internal static class GlShaders
                 vDepth <= 1.0) {
                 return rgb;
             }
+            if (uDreamlandN64Fog != 0 &&
+                vN64RouteColor != 0) {
+                return rgb;
+            }
+            float fogDepth = rasterCameraDepth();
 
             // Fade every world material using camera/OT depth after texture
             // modulation. The previous textured-only pre-modulation haze was
@@ -469,7 +510,7 @@ internal static class GlShaders
                 // No backdrop colour available - either none has been seen yet
                 // or the A/B control disabled the harvest. Reproduce the
                 // previous synthesized haze exactly.
-                float amount = smoothstep(2600.0, 8500.0, vDepth) * 0.76;
+                float amount = smoothstep(2600.0, 8500.0, fogDepth) * 0.76;
                 float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
                 float atmosphericLum = clamp(mix(lum, 0.58, 0.70), 0.48, 0.68);
                 float warmth = clamp((rgb.r - rgb.b) * 0.25 + 0.10, 0.0, 0.22);
@@ -479,10 +520,31 @@ internal static class GlShaders
                     mix(rgb, mix(cool, warm, warmth), amount), 0.0, 1.0);
             }
 
+            // Super Dreamland's live N64 task supplies projection matrix
+            // Z terms A=1.0143737793 and B=-1.0071868896 together with
+            // gSPFogFactor(9846,-9550). F3DEX2 applies those factors to
+            // projected Z/W, not to a linear fraction of the far distance.
+            // The arena's authored world groups use scale shift 8, so express
+            // B in the PS1 GTE depth units retained by the conversion. This
+            // maps source fog start/end to view Z 5802.40..13985.41. Mapping
+            // 984.9685..997.9687 directly onto the far plane incorrectly
+            // confined fog to its last 1.3 percent and left the world with a
+            // green/yellow cast absent from the source framebuffer.
+            if (uDreamlandN64Fog != 0) {
+                const float projectionA = 1.014373779296875;
+                const float projectionB = -1.0071868896484375 * 256.0;
+                const float fogMultiplier = 9846.0;
+                const float fogDisplacement = -9550.0;
+                float projectedZ = projectionA + projectionB / fogDepth;
+                float amount = clamp(
+                    (projectedZ * fogMultiplier + fogDisplacement) / 256.0,
+                    0.0, 1.0);
+                return clamp(mix(rgb, uFogColor, amount), 0.0, 1.0);
+            }
+
             // The terrain walker stops at roughly 20000 camera units, so the
-            // curve has to be complete there. The 0.62 exponent brings haze in
-            // over the middle distance without washing out near geometry.
-            float amount = pow(smoothstep(2200.0, 20500.0, vDepth), 0.62);
+            // generic curve has to be complete there.
+            float amount = pow(smoothstep(2200.0, 20500.0, fogDepth), 0.62);
             return clamp(mix(rgb, uFogColor, amount), 0.0, 1.0);
         }
         vec3 stockPaintCorrection8(ivec3 c8) {
@@ -506,9 +568,16 @@ internal static class GlShaders
             }
 
             if (texMode == 4) {
-                vec4 vertexColor = uPerspectiveCorrectColors != 0
-                    ? vColorPerspective
-                    : vColorAffine;
+                // RDP shade coefficients are affine screen-space planes for
+                // Dreamland route packets even when the road/terrain polygon
+                // is untextured. Keep the same color domain used below by
+                // textured N64 route fragments instead of warping fallback
+                // route colors through perspective interpolation.
+                vec4 vertexColor = vN64RouteColor != 0
+                    ? vColorAffine
+                    : (uPerspectiveCorrectColors != 0
+                        ? vColorPerspective
+                        : vColorAffine);
                 vec3 corrected = distanceFog(
                     stockPaintCorrection(vertexColor.rgb));
                 FragColor = vec4(quant5(ivec3(corrected * 255.0 + 0.5)), uSetMask);
@@ -529,9 +598,14 @@ internal static class GlShaders
             vec2 sampleUV = uPerspectiveCorrectTextures != 0
                 ? vUVPerspective
                 : vUVAffine;
-            vec4 vertexColor = uPerspectiveCorrectColors != 0
-                ? vColorPerspective
-                : vColorAffine;
+            // RDP shade coefficients are affine screen-space planes. The
+            // N64 route path carries its decoded COLS shade in vertexColor;
+            // do not perspective-correct that plane as if it were a texture.
+            vec4 vertexColor = vN64RouteColor != 0
+                ? vColorAffine
+                : (uPerspectiveCorrectColors != 0
+                    ? vColorPerspective
+                    : vColorAffine);
             int rawU = dFdx(sampleUV.x) < 0.0 ? int(ceil(sampleUV.x - 0.0001)) : int(floor(sampleUV.x + 0.0001));
             int rawV = dFdy(sampleUV.y) < 0.0 ? int(ceil(sampleUV.y - 0.0001)) : int(floor(sampleUV.y + 0.0001));
             ivec2 nearestUv = ivec2(rawU, rawV);
@@ -547,29 +621,62 @@ internal static class GlShaders
                 : (uTextureSmoothing != 0 && vSmooth != 0
                     ? filteredTexture(sampleUV, nearestTexel)
                     : nearestTexel);
-            bool vehicleGlass = vMaterial == 3 || vMaterial == 4;
-            bool importedVehicleGlass = vMaterial == 4;
-            bool importedProjectedShadow = vMaterial == 11;
-            bool vectorFont =
-                vUiTexture != 0 && vParticle != 0 && uVectorFonts != 0;
+            bool vehicleGlass =
+                vMaterial == MaterialGlass ||
+                vMaterial == MaterialImportedGlass;
+            bool importedVehicleGlass =
+                vMaterial == MaterialImportedGlass;
+            bool vehicleReflection =
+                vMaterial == MaterialVehicleReflection;
+            bool opaqueVehicleGlass =
+                vMaterial == MaterialOpaqueVehicleGlass;
+            bool importedProjectedShadow =
+                vMaterial == MaterialImportedShadow;
+            bool fontPrimitive =
+                vUiTexture != 0 && vParticle != 0;
             // A supplied high-resolution font is already the authored
-            // silhouette. Do not gate its alpha on the optional contour-font
-            // setting or on the native PS1 texel underneath it.
+            // silhouette only when it carries real alpha. Some texture-pack
+            // glyph sheets are opaque RGB cells, so treating their alpha as
+            // coverage draws the whole cell as a white block. Those fall back
+            // to the native glyph silhouette below.
             bool replacementFont =
-                hasReplacement && vUiTexture != 0 && vParticle != 0;
+                hasReplacement && fontPrimitive &&
+                texel.a < 0.999;
+            bool opaqueReplacementFont =
+                hasReplacement && fontPrimitive && !replacementFont;
+            if (opaqueReplacementFont) {
+                texel = nearestTexel;
+            }
+            bool vectorFont =
+                fontPrimitive && uVectorFonts != 0 &&
+                !opaqueReplacementFont;
             bool vectorIcon =
                 vUiTexture != 0 && vShadow != 0 && uVectorIcons != 0;
             bool enhancedParticle =
                 vUiTexture == 0 && vParticle != 0 && uEnhancedParticles != 0;
+            bool exactBlendMaterial =
+                vMaterial == MaterialAdditive ||
+                vMaterial == MaterialSubtractive;
+            bool enhancedEffectContour =
+                vUiTexture == 0 && vEffectContour != 0 &&
+                uEnhancedParticles != 0;
             bool enhancedImportedShadow =
                 importedProjectedShadow && uEnhancedShadows != 0;
             bool svgHud = vHudPlate != 0 && uVectorIcons != 0;
+            if (vHudKeyedMagenta != 0 &&
+                nearestTexel.r > 0.92 &&
+                nearestTexel.g > 0.20 &&
+                nearestTexel.g < 0.58 &&
+                nearestTexel.b > 0.50) {
+                discard;
+            }
             vec2 hudLocal = sampleUV - vec2(vUvBounds.xy);
             float hudCoverage = 1.0;
             float contourCoverage = 1.0;
             float contourStp = nearestTexel.a;
 
-            if ((replacementFont || vectorFont || vectorIcon || enhancedParticle ||
+            if ((replacementFont || vectorFont ||
+                 vectorIcon || enhancedParticle || enhancedEffectContour ||
                  enhancedImportedShadow) && !svgHud) {
                 if (replacementFont) {
                     contourCoverage = clamp(texel.a, 0.0, 1.0);
@@ -581,8 +688,9 @@ internal static class GlShaders
                 } else {
                     texel = contourTexture(sampleUV, contourCoverage, contourStp);
                 }
-                if (vectorIcon && vHudPlate == 0)
+                if (vectorIcon && vHudPlate == 0) {
                     texel.rgb = nearestTexel.rgb;
+                }
                 if (vectorFont && !replacementFont) {
                     contourCoverage = smoothstep(0.18, 0.72, contourCoverage);
                     if (contourCoverage <= 0.01) {
@@ -601,7 +709,10 @@ internal static class GlShaders
                 }
             }
 
-            if (transparentBlack(nearestTexel) && !vehicleGlass) {
+            if (transparentBlack(nearestTexel) &&
+                !vehicleGlass &&
+                !vehicleReflection &&
+                !opaqueVehicleGlass) {
                 // UI transparency is binary in the original packets. Do not
                 // synthesize coverage outside glyph/icon silhouettes: opaque
                 // UI draws do not have a usable alpha blend and doing so
@@ -609,7 +720,7 @@ internal static class GlShaders
                 // can safely reconstruct their edge coverage.
                 bool filteredEdge =
                     replacementFont || vectorFont || vectorIcon || enhancedParticle ||
-                    enhancedImportedShadow;
+                    enhancedEffectContour || enhancedImportedShadow;
                 if (!svgHud && !filteredEdge) discard;
             }
             if (svgHud) {
@@ -623,13 +734,47 @@ internal static class GlShaders
                 texel = vec4(vectorTexel.rgb, 1.0);
             }
             texel.rgb = stockPaintCorrection(texel.rgb);
+            if (vehicleReflection) {
+                float authored = max(texel.r, max(texel.g, texel.b));
+                float luma = authored > 0.025
+                    ? dot(texel.rgb, vec3(0.299, 0.587, 0.114))
+                    : 0.56;
+                float shade = clamp(luma, 0.34, 0.82);
+                vec3 coolMirror = mix(
+                    vec3(0.34, 0.40, 0.43),
+                    vec3(0.74, 0.80, 0.82),
+                    shade);
+                vec3 authoredTint = authored > 0.025
+                    ? max(texel.rgb, vec3(0.22, 0.27, 0.29))
+                    : coolMirror;
+                vec3 mirrorTint = mix(coolMirror, authoredTint, 0.28);
+                FragColor = vec4(distanceFog(mirrorTint), 1.0);
+                BlendColor = vec4(1.0);
+                return;
+            }
+            if (opaqueVehicleGlass) {
+                float authored = max(
+                    texel.r,
+                    max(texel.g, texel.b));
+                float luma = authored > 0.02
+                    ? dot(texel.rgb, vec3(0.299, 0.587, 0.114))
+                    : 0.38;
+                vec3 coolMirror = mix(
+                    vec3(0.08, 0.11, 0.13),
+                    vec3(0.38, 0.47, 0.50),
+                    clamp(luma * 0.9, 0.0, 1.0));
+                vec3 glassTint = authored > 0.02
+                    ? mix(coolMirror, vec3(luma), 0.12)
+                    : coolMirror;
+                FragColor = vec4(distanceFog(glassTint), 1.0);
+                BlendColor = vec4(1.0);
+                return;
+            }
             if (vehicleGlass) {
-                // Imported windows use PS1 zero/STP texels as an instruction
-                // to blend the body polygon underneath.  In a modern material
-                // pass those texels are actual glass: retain the authored
-                // tint when present and provide a neutral blue-grey tint for
-                // fully clear samples instead of cutting a hole through the
-                // vehicle.
+                // Screen-space vehicle icons may use the same CLUT/textures
+                // as panes. Keep their native translucent path unless the
+                // primitive was promoted to OpaqueVehicleGlass by world
+                // projection provenance.
                 float authored = max(
                     texel.r,
                     max(texel.g, texel.b));
@@ -645,7 +790,51 @@ internal static class GlShaders
                 return;
             }
             ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
-            ivec3 c8 = (t8 * ivec3(vertexColor.rgb * 255.0 + 0.5)) >> 7;
+            ivec3 modulation = ivec3(vertexColor.rgb * 255.0 + 0.5);
+            // Native PS1 packets use /128 colour modulation. Dreamland's
+            // decoded route shade came from N64 RDP, whose 8-bit combiner
+            // multiplies by /255. Keep the two numeric domains explicit.
+            ivec3 c8 = vN64RouteColor != 0
+                ? (t8 * modulation + 127) / 255
+                : (t8 * modulation) >> 7;
+            if (enhancedEffectContour) {
+                bool exactBlendEffect = exactBlendMaterial;
+                float effectEnergy = max(
+                    float(c8.r),
+                    max(float(c8.g), float(c8.b))) / 255.0;
+                vec2 effectBoundMin = vec2(vUvBounds.xy);
+                vec2 effectBoundMax = vec2(max(vUvBounds.zw, vUvBounds.xy));
+                vec2 effectSpan = max(
+                    effectBoundMax - effectBoundMin,
+                    vec2(1.0));
+                vec2 effectLocal = clamp(
+                    (sampleUV - effectBoundMin) / effectSpan,
+                    vec2(0.0),
+                    vec2(1.0));
+                vec2 effectCentered =
+                    effectLocal * vec2(2.0) - vec2(1.0);
+                float exactEffectFalloff = exactBlendEffect
+                    ? 1.0 - smoothstep(
+                        0.24,
+                        1.0,
+                        dot(effectCentered, effectCentered))
+                    : 1.0;
+                vec2 effectEdgeDistance = min(
+                    sampleUV - effectBoundMin,
+                    effectBoundMax - sampleUV);
+                float effectEdgeCoverage = smoothstep(
+                    0.0,
+                    5.0,
+                    min(effectEdgeDistance.x, effectEdgeDistance.y));
+                float effectCoverage =
+                    (exactBlendEffect
+                        ? smoothstep(0.20, 0.72, effectEnergy)
+                        : smoothstep(0.12, 0.30, effectEnergy)) *
+                    effectEdgeCoverage *
+                    exactEffectFalloff;
+                contourCoverage *= effectCoverage * effectCoverage;
+                if (contourCoverage <= 0.001) discard;
+            }
             vec3 corrected = distanceFog(stockPaintCorrection8(c8));
             FragColor = vec4(
                 quant5(ivec3(corrected * 255.0 + 0.5)),
@@ -692,6 +881,10 @@ internal static class GlShaders
                         vec3(contourCoverage),
                         1.0 - contourCoverage);
                 }
+            } else if (enhancedEffectContour) {
+                BlendColor = vec4(
+                    uBlend.rgb * contourCoverage,
+                    mix(1.0, uBlend.a, contourCoverage));
             } else {
                 BlendColor = nearestTexel.a >= 0.5 ? uBlend : uBlendOpaque;
             }

@@ -148,6 +148,9 @@ public sealed class PSMemory : IMemory
     static readonly bool StrictUnmappedReads =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_STRICT_UNMAPPED_READS") == "1";
+    static readonly bool TraceUnmappedStack =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_UNMAPPED_STACK") == "1";
     static readonly byte[] _unmappedRead = new byte[8];
     readonly HashSet<uint> _reportedUnmapped = [];
 
@@ -174,9 +177,13 @@ public sealed class PSMemory : IMemory
         if (!forWrite && !StrictUnmappedReads)
         {
             if (_reportedUnmapped.Add(address))
+            {
                 Console.Error.WriteLine(
                     $"[Memory] unmapped read at 0x{address:X8} " +
                     $"size={size}; returning zero");
+                if (TraceUnmappedStack)
+                    Console.Error.WriteLine(Environment.StackTrace);
+            }
             Array.Clear(_unmappedRead);
             return _unmappedRead.AsSpan(0, size);
         }
@@ -248,7 +255,7 @@ public sealed class PSMemory : IMemory
         uint phys = MemoryMap.ToPhysical(address);
         InvalidatePreciseGteVertex(phys, 4);
         TraceWatchedWrite(phys, value);
-        RecompOne.Runtime.Hle.GpuHle.ObserveTerrainRoutePacketWrite(phys);
+        RecompOne.Runtime.Hle.GpuHle.ObservePacketWrite(phys);
         TrackWrite(phys, 4);
         if (phys == 0x1F801810u) { _gpu.WriteGp0(value); return; }
         if (phys == 0x1F801814u) { _gpu.WriteGp1(value); return; }

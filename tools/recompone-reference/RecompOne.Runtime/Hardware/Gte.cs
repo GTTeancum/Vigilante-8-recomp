@@ -14,6 +14,12 @@ public static class Gte
     static long _nclipTerrainCorrections;
     static long _nclipObjectCorrections;
     static long _nclipRescued;
+    static readonly bool TraceLighting =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_GTE_LIGHTING") == "1";
+    static int _lightingTraceCount;
+    static int _shadeTraceCount;
+    static int _activeGteCommand;
+    static int _activeShadeVector = -1;
     // Is near geometry never projected, or projected and then discarded? The
     // renderer only sees what the engine submits, so counting projections the
     // GTE actually performed at close range separates an engine-side gate
@@ -221,6 +227,12 @@ public static class Gte
     static readonly bool WidePreciseNclip =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_V82_WIDE_PRECISE_NCLIP") != "0";
+    static readonly bool TraceNclipOwners =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_NCLIP_OWNERS") == "1";
+    static string _nclipOwner = "unscoped";
+    static int _nclipOwnerTraceCount;
+    public static bool TraceNclipOwnersEnabled => TraceNclipOwners || TraceLighting;
     static readonly bool WideClipHeadroomGlobal =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_V82_WIDE_CLIP_GLOBAL") == "1";
@@ -232,6 +244,12 @@ public static class Gte
     /// <see cref="WideClipHeadroom"/>.
     /// </summary>
     public static void BeginTerrainProjection() => _terrainProjectionDepth++;
+
+    public static void SetNclipOwner(string owner) =>
+        _nclipOwner = owner;
+
+    public static void ClearNclipOwner() =>
+        _nclipOwner = "unscoped";
 
     public static void EndTerrainProjection()
     {
@@ -593,6 +611,15 @@ public static class Gte
         int r = SatColor(0, MAC1 >> 4);
         int g = SatColor(1, MAC2 >> 4);
         int b = SatColor(2, MAC3 >> 4);
+        if (TraceLighting && GpuHle.GameplayActive &&
+            _shadeTraceCount++ < 32768)
+            Console.Error.WriteLine(
+                $"[GteShade] tick={GpuHle.DebugGameplayTick} " +
+                $"op=0x{_activeGteCommand:X2} " +
+                $"normal={(_activeShadeVector >= 0 ? V[_activeShadeVector * 3] : 0)}," +
+                $"{(_activeShadeVector >= 0 ? V[_activeShadeVector * 3 + 1] : 0)}," +
+                $"{(_activeShadeVector >= 0 ? V[_activeShadeVector * 3 + 2] : 0)} " +
+                $"rgb={r},{g},{b} owner={_nclipOwner}");
         RGB[0] = RGB[1]; RGB[1] = RGB[2];
         RGB[2] = (uint)(r | (g << 8) | (b << 16) | (RGBC_CODE << 24));
     }
@@ -1307,6 +1334,8 @@ public static class Gte
     public static void Execute(uint cmd)
     {
         FLAG = 0;
+        _activeGteCommand = (int)(cmd & 0x3F);
+        _activeShadeVector = -1;
         int sf = (cmd & (1u << 19)) != 0 ? 12 : 0;
         bool lm = (cmd & (1u << 10)) != 0;
         int mx = (int)((cmd >> 17) & 3);
@@ -1411,6 +1440,14 @@ public static class Gte
                                     SX[0], SY[0], SX[1], SY[1],
                                     SX[2], SY[2]));
                         }
+                        if (TraceNclipOwners &&
+                            GpuHle.GameplayActive &&
+                            _nclipOwnerTraceCount++ < 4096)
+                            Console.Error.WriteLine(
+                                $"[NclipOwner] tick={GpuHle.DebugGameplayTick} " +
+                                $"terrain={(terrainScope ? 1 : 0)} " +
+                                $"packed={packed} precise={area:F6} " +
+                                $"result={MAC0} owner={_nclipOwner}");
                     }
                 }
                 else
@@ -1492,6 +1529,7 @@ public static class Gte
 
     static void Ncs(int vec, int sf, bool lm)
     {
+        _activeShadeVector = vec;
         MatVec(LLM, 0, 0, 0, V[vec * 3], V[vec * 3 + 1], V[vec * 3 + 2], sf, lm);
         MatVec(LCM, BK[0], BK[1], BK[2], IR1, IR2, IR3, sf, lm);
         PushColor();
@@ -1499,6 +1537,7 @@ public static class Gte
 
     static void Ncds(int vec, int sf, bool lm)
     {
+        _activeShadeVector = vec;
         MatVec(LLM, 0, 0, 0, V[vec * 3], V[vec * 3 + 1], V[vec * 3 + 2], sf, lm);
         MatVec(LCM, BK[0], BK[1], BK[2], IR1, IR2, IR3, sf, lm);
         Interp(((long)RGBC_R * IR1) << 4, ((long)RGBC_G * IR2) << 4, ((long)RGBC_B * IR3) << 4, sf, lm);
@@ -1506,6 +1545,7 @@ public static class Gte
 
     static void Nccs(int vec, int sf, bool lm)
     {
+        _activeShadeVector = vec;
         MatVec(LLM, 0, 0, 0, V[vec * 3], V[vec * 3 + 1], V[vec * 3 + 2], sf, lm);
         MatVec(LCM, BK[0], BK[1], BK[2], IR1, IR2, IR3, sf, lm);
         Modulate(sf, lm);
@@ -1743,6 +1783,13 @@ public static class Gte
             case 30: ZSF4 = (short)val; break;
             case 31: FLAG = val & 0x7FFFF000u; if ((FLAG & 0x7F87E000u) != 0) FLAG |= 0x80000000u; break;
         }
+        if (TraceLighting && GpuHle.GameplayActive && reg is 12 or 15 or 20 &&
+            _lightingTraceCount++ < 512)
+            Console.Error.WriteLine(
+                $"[GteLighting] tick={GpuHle.DebugGameplayTick} reg={reg} " +
+                $"llm={string.Join(',', LLM)} " +
+                $"back={string.Join(',', BK)} " +
+                $"color={string.Join(',', LCM)}");
     }
 
     public static void LoadWord(int reg, uint val) => Write(reg, val);

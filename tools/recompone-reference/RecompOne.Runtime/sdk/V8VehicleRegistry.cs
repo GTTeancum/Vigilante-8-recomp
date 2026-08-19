@@ -433,7 +433,7 @@ public static class V8VehicleRegistry
         string? loose = Environment.GetEnvironmentVariable("RECOMPONE_LOOSE_DIR");
         if (!string.IsNullOrWhiteSpace(loose) && loose != "0")
             roots.Add(Path.GetFullPath(loose));
-        roots.Add(AppContext.BaseDirectory);
+        roots.Add(Runtime.ExecutableDirectory);
         roots.Add(Environment.CurrentDirectory);
 
         foreach (string root in roots.Distinct(StringComparer.OrdinalIgnoreCase))

@@ -21,4 +21,8 @@ public interface IGpuBackend
     // these touch gl
     void Flush();
     void Present(in HleDispEnv disp);
+
+    // Drop submission state whose meaning is scoped to one gameplay scene.
+    // Native VRAM and display targets deliberately survive menu transitions.
+    void ResetTransientState() { }
 }

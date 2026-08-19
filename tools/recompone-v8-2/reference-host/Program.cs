@@ -13,6 +13,7 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         $"[Host] process exit requested (code={Environment.ExitCode})");
 
 string launchDirectory = Environment.CurrentDirectory;
+string executableDirectory = Runtime.ExecutableDirectory;
 // ViewConfig has sequel-specific Enhanced defaults (notably Maximum LOD).
 // Establish the game identity before any command, probe, or configuration
 // migration. Runtime.Initialize reaffirms this title when a window is needed.
@@ -55,6 +56,15 @@ for (int index = 0; index < launchArguments.Count; index++)
     break;
 }
 args = launchArguments.ToArray();
+
+if (args.Length == 3 &&
+    args[0].Equals("--extract-loose", StringComparison.OrdinalIgnoreCase))
+{
+    string cue = Path.GetFullPath(args[1], launchDirectory);
+    string output = Path.GetFullPath(args[2], launchDirectory);
+    V82LooseImporter.Import(cue, output, ReportLooseImport);
+    return 0;
+}
 
 if (args.Length == 1 &&
     args[0].Equals("--probe-native-controls", StringComparison.OrdinalIgnoreCase))
@@ -365,9 +375,48 @@ if (args.Length == 2 &&
             throw new InvalidDataException(
                 "enemy selector context displaced player-one Sid selection");
 
+        // The enemy editor keeps retail proxy bytes in its four fixed rows.
+        // Crossing left from retail slot zero must enter the final registered
+        // guest, and the gameplay participant handoff must translate every
+        // matching proxy occurrence without changing player one.
+        context.A1 = 1u;
+        V82VehicleRegistry.BeginNativeSelector(context, memory);
+        context.RA = 0x80107A1Cu;
+        context.A1 = 0x801008E8u;
+        V82VehicleRegistry.ObserveNativeSelectorCall(context, memory);
+        context.S3 = 0u;
+        memory.WriteU8(0x8006B8F6u, (byte)0);
+        // Reserve Sid's ordinary wrap proxy in row one. The guest row must
+        // move to a distinct retail identity so participant expansion cannot
+        // silently convert row one's stock enemy as well.
+        memory.WriteU8(0x8006B8F7u, (byte)17);
+        memory.WriteU32(0x8006B508u, 0u);
+        V82VehicleRegistry.ApplyNativeEnemySelectorSlot(context, memory);
+        memory.WriteU8(0x8006B8F6u, (byte)17);
+        memory.WriteU32(0x8006B508u, 0x80000000u);
+        V82VehicleRegistry.ApplyNativeEnemySelectorSlot(context, memory);
+        int npcProxy = memory.ReadU8(0x8006B8F6u);
+        if (V82VehicleRegistry.SelectedNpcTypeForSlot(0) != 75 ||
+            npcProxy == 17)
+            throw new InvalidDataException(
+                "enemy selector did not isolate Sid's retail proxy");
+        const uint participantBase = 0x80061104u;
+        memory.WriteU8(participantBase, (byte)0);
+        memory.WriteU8(participantBase + 1u, (byte)0xFF);
+        memory.WriteU8(participantBase + 2u, checked((byte)npcProxy));
+        memory.WriteU8(participantBase + 3u, (byte)17);
+        V82VehicleRegistry.ApplySelectedNpcTypes(memory, participantBase);
+        if (memory.ReadU8(participantBase) != 0u ||
+            memory.ReadU8(participantBase + 2u) != 75u ||
+            memory.ReadU8(participantBase + 3u) != 17u)
+            throw new InvalidDataException(
+                "isolated enemy proxy changed an unrelated stock participant");
+        V82VehicleRegistry.EndNativeSelector(context, memory);
+
         Console.WriteLine(
             $"[SelectorLifecycle] {validation} left_wrap=Sid " +
-            $"type=75 enemy_portrait=native player_selection=preserved");
+            $"type=75 enemy_portrait=native player_selection=preserved " +
+            $"npc_type=75 npc_proxy={npcProxy} stock_proxy=17_preserved");
         return 0;
     }
     catch (Exception exception)
@@ -441,10 +490,25 @@ string? explicitSource = args.Length switch
 
 ConfigManager.Load();
 string? loosePath =
-    explicitLoose ?? ResolveLooseSource(explicitSource ?? launchDirectory);
+    explicitLoose ?? ResolveLooseSource(explicitSource ?? executableDirectory);
+string importedLooseRoot = V82LooseImporter.DefaultRoot;
+if (loosePath == null && explicitSource == null &&
+    V82LooseImporter.IsComplete(importedLooseRoot))
+    loosePath = importedLooseRoot;
 string? cuePath = loosePath == null
-    ? ResolveCue(explicitSource ?? launchDirectory)
+    ? ResolveCue(explicitSource ?? executableDirectory)
     : null;
+if (loosePath == null)
+{
+    Console.WriteLine(
+        $"[Import] preparing standalone game data from {cuePath}");
+    V82LooseImporter.Import(cuePath!, importedLooseRoot, ReportLooseImport);
+    loosePath = V82LooseImporter.IsComplete(importedLooseRoot)
+        ? importedLooseRoot
+        : throw new InvalidDataException(
+            $"Disc import did not complete: {importedLooseRoot}");
+    cuePath = null;
+}
 if (loosePath != null)
 {
     ConfigManager.Game.CdPath = "";
@@ -482,6 +546,13 @@ static byte[] CaptureVramRgb(int x, int y, int width, int height)
         rgb[output++] = Expand5(pixel >> 10 & 31);
     }
     return rgb;
+}
+
+static void ReportLooseImport(LooseImportProgress progress)
+{
+    Console.WriteLine(
+        $"[Import] {progress.Phase} {progress.Current}/{progress.Total} " +
+        progress.Item);
 }
 
 static byte Expand5(int value) =>

@@ -84,7 +84,11 @@ def collect_game_misses(trace_dir: Path) -> list[GlyphVariant]:
             height = int(height_text)
             if key == "0000000000000000" or width <= 0 or height <= 0:
                 continue
-            if height != 18:
+            loading_tip_glyph = height == 18
+            start_prompt_glyph = (
+                height == 15 and tpage == "0x0A5" and clut == "0x7800"
+            )
+            if not (loading_tip_glyph or start_prompt_glyph):
                 continue
             variants.setdefault(
                 key,
@@ -117,7 +121,14 @@ def collect_game_variants(trace_dirs: list[Path]) -> list[GlyphVariant]:
                 key, width_text, height_text, uv, tpage, clut = match.groups()
                 width = int(width_text)
                 height = int(height_text)
-                if key == "0000000000000000" or width <= 0 or height != 18:
+                loading_tip_glyph = height == 18
+                start_prompt_glyph = (
+                    height == 15 and tpage == "0x0A5" and clut == "0x7800"
+                )
+                if (
+                    key == "0000000000000000" or width <= 0 or
+                    not (loading_tip_glyph or start_prompt_glyph)
+                ):
                     continue
                 variants.setdefault(
                     key,

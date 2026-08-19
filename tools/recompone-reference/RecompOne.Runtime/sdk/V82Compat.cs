@@ -22,7 +22,6 @@ public static class V82Compat
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_NATIVE_OPTIONS") == "1";
     static readonly HashSet<string> SeenNativeOptionText = [];
     static bool _nativeOptionsActive;
-
     public static int? GetFirstPressedNativeControlPadButton(int player) =>
         InputManager.GetFirstPressedPadButton(player);
 
@@ -50,11 +49,6 @@ public static class V82Compat
             "v82_options_native_video", captureDelayPolls: 12);
     }
 
-    // HostWindow is internal to this assembly, so the native Video page in the
-    // recompiled project reaches display state through these wrappers. They
-    // are the same entry points the ImGui Display section uses, so a change
-    // made from the in-game menu and one made from the host panel take effect
-    // by the identical path.
     public static void SetFullscreen(bool on) => HostWindow.SetFullscreen(on);
 
     public static void SetOutputResolution(string resolution) =>
@@ -123,9 +117,9 @@ public static class V82Compat
             byte value = m.ReadU8(address + (uint)length);
             if (value == 0)
                 break;
-            if (value is < 0x20 or > 0x7E)
-                return string.Empty;
-            chars[length++] = (char)value;
+            chars[length++] = value is >= 0x20 and <= 0x7E
+                ? (char)value
+                : '?';
         }
         return new string(chars[..length]);
     }
@@ -192,8 +186,10 @@ public static class V82Compat
     readonly record struct ObjectRenderScope(
         uint ObjectAddress,
         uint PacketStart,
+        uint Caller,
         bool IsVehicle,
-        bool IsImportedVehicle);
+        bool IsImportedVehicle,
+        bool IsDreamlandWater);
     readonly record struct ImportedRenderGroupScope(
         uint PacketStart,
         uint Descriptor,
@@ -203,7 +199,15 @@ public static class V82Compat
     static readonly bool TraceRendererOwnership =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_ENHANCED_RENDERER") == "1";
+    static readonly uint TraceObjectAddress =
+        uint.TryParse(
+            Environment.GetEnvironmentVariable("RECOMPONE_TRACE_V82_OBJECT"),
+            out uint traceObjectAddress)
+            ? traceObjectAddress
+            : 0u;
     static int _rendererOwnershipTraceCount;
+    static int _traceObjectCount;
+    static readonly HashSet<uint> TracedRenderObjects = [];
     static int _objectSchedulerPass;
     static int _gameplayFrameCount;
     static int _lastTracedOrderingTableFrame;
@@ -217,6 +221,18 @@ public static class V82Compat
     static uint _terrainFrustumNativeWidth;
     static bool _terrainFrustumAdjusted;
     static bool _terrainFrustumLogged;
+    static readonly int[] StableTerrainPolygonX = new int[32];
+    static readonly int[] StableTerrainPolygonZ = new int[32];
+    static int _stableTerrainPolygonCount;
+    static long _stableTerrainPolygonArea2;
+    static int _stableTerrainPolygonWidth;
+    static int _stableTerrainPolygonDepth;
+    static double _stableTerrainCameraX;
+    static double _stableTerrainCameraZ;
+    static double _stableTerrainRightX;
+    static double _stableTerrainRightZ;
+    static double _stableTerrainForwardX;
+    static double _stableTerrainForwardZ;
     static readonly double TerrainFrustumScaleOverride =
         ReadTerrainFrustumScaleOverride();
     // Widening the widescreen terrain edge happens here rather than on the
@@ -1476,17 +1492,45 @@ public static class V82Compat
         m = Dispatcher.UnwrapMemory(m);
         uint objectAddress = c.A0;
         uint packetStart = m.ReadU32(c.GP + 0x610u);
+        if (objectAddress == TraceObjectAddress && _traceObjectCount++ < 256)
+        {
+            Console.Error.WriteLine(
+                $"[V82RenderObjectTrace] gameplay={_gameplayFrameCount} " +
+                $"object=0x{objectAddress:X8} caller=0x{c.RA:X8} " +
+                $"packets=0x{packetStart:X8} " +
+                $"words00=0x{m.ReadU32(objectAddress):X8}," +
+                $"0x{m.ReadU32(objectAddress + 4u):X8}," +
+                $"0x{m.ReadU32(objectAddress + 8u):X8}," +
+                $"0x{m.ReadU32(objectAddress + 0xCu):X8} " +
+                $"links=0x{m.ReadU32(objectAddress + 0x10u):X8}," +
+                $"0x{m.ReadU32(objectAddress + 0x14u):X8} " +
+                $"words18=0x{m.ReadU32(objectAddress + 0x18u):X8}," +
+                $"0x{m.ReadU32(objectAddress + 0x1Cu):X8}," +
+                $"0x{m.ReadU32(objectAddress + 0x20u):X8}," +
+                $"0x{m.ReadU32(objectAddress + 0x24u):X8} " +
+                $"words40=0x{m.ReadU32(objectAddress + 0x40u):X8}," +
+                $"0x{m.ReadU32(objectAddress + 0x44u):X8}," +
+                $"0x{m.ReadU32(objectAddress + 0x48u):X8}," +
+                $"0x{m.ReadU32(objectAddress + 0x4Cu):X8}");
+        }
         bool isVehicle =
             VehicleObjects.Contains(objectAddress) ||
             V82VehicleRegistry.IsVehicleObject(objectAddress);
         bool isImportedVehicle =
             V82VehicleRegistry.IsVehicleObject(objectAddress);
+        bool isDreamlandWater =
+            V82ArenaRegistry.IsDreamlandSelected &&
+            m.ReadU16(objectAddress + 0xAu) == 0x0133u;
+        if (isDreamlandWater)
+            GpuHle.BeginDreamlandWaterPacketWrites();
         ObjectRenderScopes.Push(
             new ObjectRenderScope(
                 objectAddress,
                 packetStart,
+                c.RA,
                 isVehicle,
-                isImportedVehicle));
+                isImportedVehicle,
+                isDreamlandWater));
     }
 
     public static void EndObjectRender(CpuContext c, IMemory m)
@@ -1499,6 +1543,30 @@ public static class V82Compat
         m = Dispatcher.UnwrapMemory(m);
         ObjectRenderScope scope = ObjectRenderScopes.Pop();
         uint packetEnd = m.ReadU32(c.GP + 0x610u);
+        if (TraceRendererOwnership &&
+            scope.ObjectAddress != 0u &&
+            TracedRenderObjects.Count < 4096 &&
+            TracedRenderObjects.Add(scope.ObjectAddress))
+        {
+            Console.Error.WriteLine(
+                $"[V82RenderObject] gameplay={_gameplayFrameCount} " +
+                $"object=0x{scope.ObjectAddress:X8} caller=0x{scope.Caller:X8} " +
+                $"packets=0x{scope.PacketStart:X8}..0x{packetEnd:X8} " +
+                $"words00=0x{m.ReadU32(scope.ObjectAddress):X8}," +
+                $"0x{m.ReadU32(scope.ObjectAddress + 4u):X8}," +
+                $"0x{m.ReadU32(scope.ObjectAddress + 8u):X8}," +
+                $"0x{m.ReadU32(scope.ObjectAddress + 0xCu):X8} " +
+                $"links=0x{m.ReadU32(scope.ObjectAddress + 0x10u):X8}," +
+                $"0x{m.ReadU32(scope.ObjectAddress + 0x14u):X8} " +
+                $"words18=0x{m.ReadU32(scope.ObjectAddress + 0x18u):X8}," +
+                $"0x{m.ReadU32(scope.ObjectAddress + 0x1Cu):X8}," +
+                $"0x{m.ReadU32(scope.ObjectAddress + 0x20u):X8}," +
+                $"0x{m.ReadU32(scope.ObjectAddress + 0x24u):X8} " +
+                $"words40=0x{m.ReadU32(scope.ObjectAddress + 0x40u):X8}," +
+                $"0x{m.ReadU32(scope.ObjectAddress + 0x44u):X8}," +
+                $"0x{m.ReadU32(scope.ObjectAddress + 0x48u):X8}," +
+                $"0x{m.ReadU32(scope.ObjectAddress + 0x4Cu):X8}");
+        }
         // A0 is clobbered by the time the renderer returns, so the object
         // pointer has to come from the scope captured on entry. Diagnostic
         // only - gated so a shipping build does not pay a dictionary write and
@@ -1546,7 +1614,11 @@ public static class V82Compat
             GpuHle.RegisterPacketOwnerRange(
                 scope.PacketStart,
                 packetEnd,
-                $"v82-object=0x{scope.ObjectAddress:X8}");
+                scope.IsDreamlandWater
+                    ? "v82-dreamland-water"
+                    : $"v82-object=0x{scope.ObjectAddress:X8}");
+        if (scope.IsDreamlandWater)
+            GpuHle.EndDreamlandWaterPacketWrites();
         if (!scope.IsVehicle || packetEnd <= scope.PacketStart)
             return;
 
@@ -1999,7 +2071,10 @@ public static class V82Compat
         CpuContext c,
         IMemory m)
     {
-        if (!TraceTerrainTraversal || _terrainTraversalTraceCount >= 8)
+        StabilizeTerrainTraversalPolygon(c, m);
+        bool traceFrame = TraceTerrainCells && GpuHle.GameplayActive;
+        if ((!TraceTerrainTraversal || _terrainTraversalTraceCount >= 8) &&
+            !traceFrame)
             return;
 
         m = Dispatcher.UnwrapMemory(m);
@@ -2023,12 +2098,16 @@ public static class V82Compat
         int maxZ = int.MinValue;
         long sumX = 0;
         long sumZ = 0;
+        int[] polygonX = new int[count];
+        int[] polygonZ = new int[count];
         var detail = new System.Text.StringBuilder();
         for (int index = 0; index < count; index++)
         {
             int x = unchecked((int)m.ReadU32(points + (uint)(index * 8)));
             int z = unchecked((int)m.ReadU32(
                 points + (uint)(index * 8 + 4)));
+            polygonX[index] = x;
+            polygonZ[index] = z;
             sumX += x;
             sumZ += z;
             minX = Math.Min(minX, x);
@@ -2038,6 +2117,15 @@ public static class V82Compat
             if (index != 0)
                 detail.Append(';');
             detail.Append(x).Append(',').Append(z);
+        }
+
+        long area2 = 0;
+        for (int index = 0; index < count; index++)
+        {
+            int next = (index + 1) % count;
+            area2 +=
+                (long)polygonX[index] * polygonZ[next] -
+                (long)polygonX[next] * polygonZ[index];
         }
 
         uint matrix = c.GP + 0xF28u;
@@ -2057,6 +2145,17 @@ public static class V82Compat
         int cameraX = cameraXFixed / 256;
         int cameraY = cameraYFixed / 256;
         int cameraZ = cameraZFixed / 256;
+        if (traceFrame)
+            Console.Error.WriteLine(
+                $"[V82TerrainPolygonFrame] tick={GpuHle.DebugGameplayTick} " +
+                $"count={count} area2={area2} " +
+                $"bounds-x={minX}..{maxX} bounds-z={minZ}..{maxZ} " +
+                $"camera={cameraX},{cameraY},{cameraZ} " +
+                $"matrix=[{m00},{m01},{m02};{m10},{m11},{m12};" +
+                $"{m20},{m21},{m22}] points={detail}");
+
+        if (!TraceTerrainTraversal || _terrainTraversalTraceCount >= 8)
+            return;
         double centerX = (double)sumX / count;
         double centerZ = (double)sumZ / count;
         double cameraToCenterX = centerX - cameraX;
@@ -2080,6 +2179,199 @@ public static class V82Compat
             $"inferred-right={inferredRightX:F6},{inferredRightZ:F6} " +
             $"matrix=[{m00},{m01},{m02};{m10},{m11},{m12};" +
             $"{m20},{m21},{m22}] points={detail}");
+    }
+
+    static void StabilizeTerrainTraversalPolygon(CpuContext c, IMemory m)
+    {
+        if (!GpuHle.GameplayActive ||
+            !V82ArenaRegistry.IsDreamlandSelected)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        int count = unchecked((int)c.A1);
+        uint points = c.A0;
+        uint byteCount = count is > 0 and <= 32
+            ? (uint)(count * 8)
+            : 0u;
+        bool retailRam =
+            points >= 0x80000000u &&
+            points <= 0x801FFFFFu - byteCount;
+        bool scratchpad =
+            points >= 0x1F800000u &&
+            points <= 0x1F800400u - byteCount;
+        if (count < 3 || count > 32 ||
+            (!retailRam && !scratchpad))
+            return;
+
+        Span<int> polygonX = stackalloc int[32];
+        Span<int> polygonZ = stackalloc int[32];
+        int minX = int.MaxValue;
+        int maxX = int.MinValue;
+        int minZ = int.MaxValue;
+        int maxZ = int.MinValue;
+        for (int index = 0; index < count; index++)
+        {
+            int x = unchecked((int)m.ReadU32(
+                points + (uint)(index * 8)));
+            int z = unchecked((int)m.ReadU32(
+                points + (uint)(index * 8 + 4)));
+            polygonX[index] = x;
+            polygonZ[index] = z;
+            minX = Math.Min(minX, x);
+            maxX = Math.Max(maxX, x);
+            minZ = Math.Min(minZ, z);
+            maxZ = Math.Max(maxZ, z);
+        }
+
+        long area2 = 0;
+        for (int index = 0; index < count; index++)
+        {
+            int next = (index + 1) % count;
+            area2 +=
+                (long)polygonX[index] * polygonZ[next] -
+                (long)polygonX[next] * polygonZ[index];
+        }
+        long areaMagnitude = Math.Abs(area2);
+        int width = maxX - minX;
+        int depth = maxZ - minZ;
+
+        uint matrix = c.GP + 0xF28u;
+        double rightX = unchecked((short)m.ReadU16(matrix));
+        double rightZ = unchecked((short)m.ReadU16(matrix + 12u));
+        double forwardX = unchecked((short)m.ReadU16(matrix + 4u));
+        double forwardZ = unchecked((short)m.ReadU16(matrix + 16u));
+        double rightLength = Math.Sqrt(rightX * rightX + rightZ * rightZ);
+        double forwardLength =
+            Math.Sqrt(forwardX * forwardX + forwardZ * forwardZ);
+        if (rightLength < 1d || forwardLength < 1d)
+            return;
+        rightX /= rightLength;
+        rightZ /= rightLength;
+        forwardX /= forwardLength;
+        forwardZ /= forwardLength;
+
+        uint translation = c.GP + 0xF3Cu;
+        double cameraX =
+            unchecked((int)m.ReadU32(translation)) / 256d;
+        double cameraZ =
+            unchecked((int)m.ReadU32(translation + 8u)) / 256d;
+
+        bool collapsed =
+            _stableTerrainPolygonCount >= 3 &&
+            areaMagnitude * 4L < _stableTerrainPolygonArea2 &&
+            width * 2 < _stableTerrainPolygonWidth &&
+            depth * 2 < _stableTerrainPolygonDepth;
+        if (collapsed)
+        {
+            if (TraceTerrainCells)
+            {
+                var collapsedDetail = new System.Text.StringBuilder();
+                for (int index = 0; index < count; index++)
+                {
+                    if (index != 0)
+                        collapsedDetail.Append(';');
+                    collapsedDetail.Append(polygonX[index])
+                        .Append(',')
+                        .Append(polygonZ[index]);
+                }
+                Console.Error.WriteLine(
+                    $"[V82TerrainPolygonCollapsed] " +
+                    $"tick={GpuHle.DebugGameplayTick} " +
+                    $"camera={cameraX:F1},{cameraZ:F1} points={collapsedDetail}");
+            }
+
+            Span<int> restoredX = stackalloc int[32];
+            Span<int> restoredZ = stackalloc int[32];
+            int collapsedCameraIndex = 0;
+            double collapsedCameraDistance = double.MaxValue;
+            for (int index = 0; index < count; index++)
+            {
+                double dx = polygonX[index] - cameraX;
+                double dz = polygonZ[index] - cameraZ;
+                double distance = dx * dx + dz * dz;
+                if (distance < collapsedCameraDistance)
+                {
+                    collapsedCameraDistance = distance;
+                    collapsedCameraIndex = index;
+                }
+            }
+
+            int restoredCameraIndex = 0;
+            double restoredCameraDistance = double.MaxValue;
+            for (int index = 0; index < _stableTerrainPolygonCount; index++)
+            {
+                double dx =
+                    StableTerrainPolygonX[index] - _stableTerrainCameraX;
+                double dz =
+                    StableTerrainPolygonZ[index] - _stableTerrainCameraZ;
+                double lateral =
+                    dx * _stableTerrainRightX +
+                    dz * _stableTerrainRightZ;
+                double forward =
+                    dx * _stableTerrainForwardX +
+                    dz * _stableTerrainForwardZ;
+                int x = (int)Math.Round(
+                    cameraX + lateral * rightX + forward * forwardX,
+                    MidpointRounding.AwayFromZero);
+                int z = (int)Math.Round(
+                    cameraZ + lateral * rightZ + forward * forwardZ,
+                    MidpointRounding.AwayFromZero);
+                restoredX[index] = x;
+                restoredZ[index] = z;
+                double currentDx = x - cameraX;
+                double currentDz = z - cameraZ;
+                double distance =
+                    currentDx * currentDx + currentDz * currentDz;
+                if (distance < restoredCameraDistance)
+                {
+                    restoredCameraDistance = distance;
+                    restoredCameraIndex = index;
+                }
+            }
+
+            int rotation =
+                (restoredCameraIndex - collapsedCameraIndex +
+                 _stableTerrainPolygonCount) %
+                _stableTerrainPolygonCount;
+            for (int index = 0; index < _stableTerrainPolygonCount; index++)
+            {
+                int source = (index + rotation) % _stableTerrainPolygonCount;
+                m.WriteU32(
+                    points + (uint)(index * 8),
+                    unchecked((uint)restoredX[source]));
+                m.WriteU32(
+                    points + (uint)(index * 8 + 4),
+                    unchecked((uint)restoredZ[source]));
+            }
+            c.A1 = (uint)_stableTerrainPolygonCount;
+            Console.Error.WriteLine(
+                $"[V82TerrainPolygonStabilized] " +
+                $"tick={GpuHle.DebugGameplayTick} " +
+                $"collapsed-count={count} collapsed-area2={areaMagnitude} " +
+                $"restored-count={_stableTerrainPolygonCount} " +
+                $"restored-area2={_stableTerrainPolygonArea2} " +
+                $"camera-index={restoredCameraIndex}->{collapsedCameraIndex}");
+            return;
+        }
+
+        if (areaMagnitude < 100_000_000L ||
+            width < 12_000 || depth < 12_000)
+            return;
+        _stableTerrainPolygonCount = count;
+        _stableTerrainPolygonArea2 = areaMagnitude;
+        _stableTerrainPolygonWidth = width;
+        _stableTerrainPolygonDepth = depth;
+        _stableTerrainCameraX = cameraX;
+        _stableTerrainCameraZ = cameraZ;
+        _stableTerrainRightX = rightX;
+        _stableTerrainRightZ = rightZ;
+        _stableTerrainForwardX = forwardX;
+        _stableTerrainForwardZ = forwardZ;
+        for (int index = 0; index < count; index++)
+        {
+            StableTerrainPolygonX[index] = polygonX[index];
+            StableTerrainPolygonZ[index] = polygonZ[index];
+        }
     }
 
     public static void ExpandTerrainTraversalLateral(
@@ -2665,6 +2957,11 @@ public static class V82Compat
 
     public static void ExpandTerrainRowSpan(CpuContext c, IMemory m)
     {
+        if (TraceTerrainCells && GpuHle.GameplayActive)
+            Console.Error.WriteLine(
+                $"[V82TerrainRow] tick={GpuHle.DebugGameplayTick} " +
+                $"start={c.A0} end={c.A1} row={c.A2} " +
+                $"valid={(c.A1 > c.A0 ? 1 : 0)}");
         if (TerrainRowCellPadding <= 0 ||
             !ConfigManager.View.HighResolution3D ||
             !ConfigManager.View.Widescreen ||
@@ -2695,6 +2992,20 @@ public static class V82Compat
         CpuContext c,
         IMemory m)
     {
+        if (V82ArenaRegistry.IsDreamlandSelected)
+        {
+            if (GpuHle.SetTerrainRouteColorRamp(
+                    126, 48, 143,
+                    253, 245, 94))
+                Console.Error.WriteLine(
+                    "[V82N64RouteColorRamp] " +
+                    "low=126,48,143 high=253,245,94 " +
+                    "source=DREAMLND.COLS");
+        }
+        else
+        {
+            GpuHle.ClearTerrainRouteColorRamp();
+        }
         GpuHle.BeginTerrainRoutePacketWrites();
         Gte.BeginTerrainProjection();
         _terrainCellsSubmitted++;
@@ -3093,6 +3404,9 @@ public static class V82Compat
             Console.Error.WriteLine(
                 $"[V82Vehicles] player={player + 1} type={selectedPlayerType}");
         }
+        int primaryParticipants = (sbyte)m.ReadU8(c.GP + 0x31u) < 9 ? 2 : 4;
+        V82VehicleRegistry.ApplySelectedNpcTypes(
+            m, c.GP + 0x1104u, primaryParticipants);
         // func_800132CC builds the two resource masks in S3/S2 after several
         // split callbacks. Those callbacks can leak their callee-saved scratch
         // registers into the generated caller. Rebuild the masks from the same
@@ -3101,7 +3415,6 @@ public static class V82Compat
         // page and leaves the local vehicle/HUD textures unavailable.
         uint commonMask = 0x001C0000u;
         uint alternateMask = 0u;
-        int primaryParticipants = (sbyte)m.ReadU8(c.GP + 0x31u) < 9 ? 2 : 4;
         var participantTypes = new List<int>(6);
         for (int index = 0; index < 6; index++)
         {
@@ -3173,7 +3486,9 @@ public static class V82Compat
         // every roster type. Restricting this to type 0 loses automation and
         // diagnostics as soon as the player selects another vehicle.
         if (c.A2 == 0xFFFFFFFFu)
+        {
             _playerVehicle = c.A0;
+        }
         VehicleFactorySources.Add(c.A0);
         uint requestedType = c.A1;
         if (c.A2 != 0xFFFFFFFFu &&
@@ -3202,6 +3517,7 @@ public static class V82Compat
         VehicleFactorySources.Clear();
         VehicleObjects.Clear();
         ObjectRenderScopes.Clear();
+        TracedRenderObjects.Clear();
         _rendererOwnershipTraceCount = 0;
     }
 
@@ -3293,7 +3609,6 @@ public static class V82Compat
         uint node = m.ReadU32(head);
         var visited = new HashSet<uint>();
         int callbacks = 0;
-
         while (node != 0u)
         {
             if (!visited.Add(node))
@@ -3315,6 +3630,30 @@ public static class V82Compat
                 {
                     uint resolvedCallback =
                         Dispatcher.ResolveOwnedFunction(objectAddress, callback);
+                    bool traceObject =
+                        objectAddress == TraceObjectAddress &&
+                        _traceObjectCount++ < 256;
+                    if (traceObject)
+                    {
+                        Console.Error.WriteLine(
+                            $"[V82ObjectTrace] pass={_objectSchedulerPass + 1} " +
+                            $"gameplay={_gameplayFrameCount} node=0x{node:X8} " +
+                            $"object=0x{objectAddress:X8} callback=0x{callback:X8} " +
+                            $"resolved=0x{resolvedCallback:X8} " +
+                            $"kind={m.ReadU8(objectAddress + 8u)} " +
+                            $"subkind={unchecked((sbyte)m.ReadU8(objectAddress + 9u))} " +
+                            $"id={(short)m.ReadU16(objectAddress + 0xAu)} " +
+                            $"flags=0x{m.ReadU32(objectAddress + 4u):X8} " +
+                            $"timer=0x{m.ReadU16(objectAddress + 0x1Cu):X4} " +
+                            $"model=0x{m.ReadU32(objectAddress + 0x40u):X8} " +
+                            $"database=0x{m.ReadU32(objectAddress + 0x5Cu):X8} " +
+                            $"aux64=0x{m.ReadU32(objectAddress + 0x64u):X8} " +
+                            $"aux68=0x{m.ReadU32(objectAddress + 0x68u):X8} " +
+                            $"aux6C=0x{m.ReadU32(objectAddress + 0x6Cu):X8} " +
+                            $"pos=({unchecked((int)m.ReadU32(objectAddress + 0x34u))}," +
+                            $"{unchecked((int)m.ReadU32(objectAddress + 0x38u))}," +
+                            $"{unchecked((int)m.ReadU32(objectAddress + 0x3Cu))})");
+                    }
                     if (_soakEnabled && SoakCallbacks.Count < 256 &&
                         SoakCallbacks.Add(callback))
                     {
@@ -3353,6 +3692,15 @@ public static class V82Compat
                     c.S6 = callbackS6;
                     c.S7 = callbackS7;
                     uint primitiveAfter = m.ReadU32(c.GP + 0x610u);
+                    if (traceObject)
+                    {
+                        Console.Error.WriteLine(
+                            $"[V82ObjectTrace] pass={_objectSchedulerPass + 1} " +
+                            $"object=0x{objectAddress:X8} " +
+                            $"packets=0x{primitiveBefore:X8}..0x{primitiveAfter:X8} " +
+                            $"callbackAfter=0x{m.ReadU32(objectAddress):X8} " +
+                            $"timerAfter=0x{m.ReadU16(objectAddress + 0x1Cu):X4}");
+                    }
                     uint primitiveBuffer = m.ReadU32(c.GP + 0x20u) & 1u;
                     bool expandedPrimitives =
                         Runtime.Mode == RunMode.Devkit &&
@@ -3383,7 +3731,6 @@ public static class V82Compat
             }
             node = m.ReadU32(node);
         }
-
         c.RA = savedRa;
         c.S1 = savedS1;
         c.S0 = savedS0;
@@ -4065,6 +4412,9 @@ public static class V82Compat
         if (!IsShapeAddress(descriptor, 0x18u))
             return SkipMalformedGeometryPrimitive(c, m, 0u);
 
+        if (CurrentGeometryDescriptorIsVehicleReflection(m, descriptor))
+            GpuHle.RegisterVehicleReflectionPacket(c.A2);
+
         uint textureIndex = (uint)(m.ReadU16(descriptor + 0x16u) & 0x3FFF);
         uint tableEntry = c.S0 + textureIndex * 4u + 0x1Cu;
         if (!IsShapeAddress(tableEntry, 4u))
@@ -4123,6 +4473,24 @@ public static class V82Compat
         _geometryContinuationActive = true;
         _geometryContinuationIterations = 0;
         return true;
+    }
+
+    static bool CurrentGeometryDescriptorIsVehicleReflection(
+        IMemory m,
+        uint descriptor)
+    {
+        bool vehicleScope =
+            ObjectRenderScopes.TryPeek(out ObjectRenderScope objectScope) &&
+            objectScope.IsVehicle;
+        bool importedScope =
+            ImportedRenderGroupScopes.TryPeek(
+                out ImportedRenderGroupScope importedScopeInfo) &&
+            importedScopeInfo.Resolved;
+        if (!vehicleScope && !importedScope)
+            return false;
+        if (!IsShapeAddress(descriptor, 4u))
+            return false;
+        return (m.ReadU8(descriptor + 3u) & 0x0Fu) == 12;
     }
 
     public static void LeaveGeometryContinuation(CpuContext c, IMemory m)
@@ -4461,8 +4829,12 @@ public static class V82Compat
 
     public static bool ResolveOriginalResultVoiceFile(
         CpuContext c,
-        IMemory m) =>
-        V82VehicleRegistry.ResolveOriginalResultVoiceFile(c, m);
+        IMemory m)
+    {
+        if (!V82ArenaRegistry.ResolveVirtualFile(c, m))
+            return false;
+        return V82VehicleRegistry.ResolveOriginalResultVoiceFile(c, m);
+    }
 
     public static void ReleaseGuestVramReservation(CpuContext c, IMemory m)
     {
@@ -4838,7 +5210,22 @@ public static class V82Compat
     public static bool RecoverMatchVramFailure(CpuContext c, IMemory m)
     {
         const uint outOfVramMessage = 0x8006B054u;
-        if (!_matchVramActive || c.A0 != outOfVramMessage)
+        if (!_matchVramActive)
+            return true;
+
+        string message;
+        try
+        {
+            message = RecompOne.Runtime.Bios.Bios.ReadString(m, c.A0);
+        }
+        catch
+        {
+            message = "<unreadable>";
+        }
+        Console.Error.WriteLine(
+            $"[V82Fatal] caller=0x{c.RA:X8} message=0x{c.A0:X8} " +
+            $"'{message}' saved-ra=0x{m.ReadU32(c.SP + 0x18u):X8}");
+        if (c.A0 != outOfVramMessage)
             return true;
 
         // Texture users in the match loader already test a null rectangle and
@@ -4923,7 +5310,12 @@ public static class V82Compat
     // across the two heap allocations that precede the second read.
     public static void PreserveShellImageDecodePre(CpuContext c, IMemory m)
     {
-        GpuHle.GameplayActive = false;
+        bool dreamlandLoading =
+            V82ArenaRegistry.IsDreamlandSelected &&
+            GpuHle.GameplayActive &&
+            GpuHle.DebugGameplayTick == 0;
+        if (!dreamlandLoading)
+            GpuHle.GameplayActive = false;
         if (_traceVram)
         {
             Console.Error.WriteLine(
@@ -5028,7 +5420,6 @@ public static class V82Compat
 
         uint state = m.ReadU32(c.GP + 0xE98u);
         if (state == 0u || state == 2u) return;
-
         int frames = 0;
         while (m.ReadU32(c.GP + 0xE98u) != 2u && frames < 256)
         {

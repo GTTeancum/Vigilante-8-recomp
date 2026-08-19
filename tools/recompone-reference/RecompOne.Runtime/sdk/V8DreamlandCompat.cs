@@ -372,6 +372,7 @@ public static class V8DreamlandCompat
         if (eventCode == 5u)
         {
             m.WriteU32(effect + 0x60u, 0u);
+            m.WriteU16(effect + 0x80u, 0xFFFF);
             c.V0 = 0u;
             c.RA = savedReturnAddress;
             return;
@@ -429,7 +430,13 @@ public static class V8DreamlandCompat
         c.A0 = effect;
         c.RA = ContactEffectUpdateAddress;
         Dispatcher.Call(c, m, 0x800205F8u);
-        c.V0 = 0xFFFFFFFFu;
+        // Hoover Dam's native PS1 callback continues through 0x80100B18:
+        // clear animation, disarm the interval, and return zero even after
+        // the object frees itself. Returning -1 here changed the animation
+        // sibling-walk contract and left Dreamland effect teardown divergent.
+        m.WriteU32(effect + 0x60u, 0u);
+        m.WriteU16(effect + 0x80u, 0xFFFF);
+        c.V0 = 0u;
         c.RA = savedReturnAddress;
     }
 

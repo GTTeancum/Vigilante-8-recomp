@@ -665,6 +665,15 @@ def main() -> int:
         "ignored": [],
         "patches": [
             {
+                "overlay": "main",
+                "address": "8001714C",
+                "target": (
+                    "RecompOne.Runtime.Sdk.V8Compat."
+                    "ApplyDeterministicGameRngSeed"
+                ),
+                "mode": "pre",
+            },
+            {
                 "overlay": "SHELL",
                 "address": "80104D24",
                 "target": (
@@ -717,6 +726,12 @@ def main() -> int:
                 "address": "80045088",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.Free",
                 "mode": "replace",
+            },
+            {
+                "overlay": "main",
+                "address": "80045134",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.PreservePinnedShellRealloc",
+                "mode": "pre",
             },
             {
                 "overlay": "main",
@@ -804,9 +819,39 @@ def main() -> int:
             },
             {
                 "overlay": "main",
+                "address": "8001D898",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.BeginWideObjectFrustum",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "8001D898",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.EndWideObjectFrustum",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
                 "address": "80021460",
                 "target": "RecompOne.Runtime.Sdk.V8Compat.RestoreTerrainFrustum",
                 "mode": "post",
+            },
+            {
+                "overlay": "main",
+                "address": "800209CC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceTerrainBspEnter",
+                "mode": "pre",
+            },
+            {
+                "overlay": "main",
+                "address": "800209CC",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceTerrainBspExit",
+                "mode": "post",
+            },
+            {
+                "overlay": "main",
+                "address": "800206F0",
+                "target": "RecompOne.Runtime.Sdk.V8Compat.TraceTerrainBspLeaf",
+                "mode": "pre",
             },
             {
                 "overlay": "main",

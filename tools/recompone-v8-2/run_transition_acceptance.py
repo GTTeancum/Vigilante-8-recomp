@@ -99,7 +99,7 @@ def run_case(
             "RECOMPONE_V82_UNLOCK_ROSTER": "1",
             "RECOMPONE_SUPPRESS_RUMBLE": "1",
             "RECOMPONE_MUTE": "1",
-            "RECOMPONE_UNTHROTTLED": "1",
+            "RECOMPONE_UNTHROTTLED": "0",
             "RECOMPONE_CAPTURE_DIR": str(case_dir),
         }
     )

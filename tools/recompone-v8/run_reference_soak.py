@@ -523,16 +523,22 @@ def preserve_final_capture(
 def preserve_scripted_captures(
     directory: Path, output: Path, stem: str, started_at: float
 ) -> list[Path]:
-    """Keep any diagnostic captures requested by scripted-input pulses."""
+    """Keep scripted-input and explicit presentation diagnostic captures."""
 
     preserved: list[Path] = []
-    for source in sorted(directory.glob("recompone_capture_*.ppm")):
+    sources = sorted(directory.glob("recompone_capture_*.ppm"))
+    sources.extend(sorted(directory.glob("recompone_present_*.ppm")))
+    for source in sources:
         try:
             if source.stat().st_mtime < started_at - 1.0:
                 continue
         except FileNotFoundError:
             continue
-        suffix = source.name.removeprefix("recompone_capture_")
+        suffix = source.name
+        for prefix in ("recompone_capture_", "recompone_present_"):
+            if suffix.startswith(prefix):
+                suffix = suffix.removeprefix(prefix)
+                break
         target = output / f"{stem}.{suffix}"
         shutil.copy2(source, target)
         preserved.append(target)
@@ -686,7 +692,10 @@ def run_one(
     if clean_exit:
         env["RECOMPONE_SOAK_TEARDOWN_TICKS"] = str(max(180, round(seconds * 60)))
 
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    creationflags = (
+        getattr(subprocess, "CREATE_NO_WINDOW", 0) |
+        getattr(subprocess, "IDLE_PRIORITY_CLASS", 0)
+    )
     started = time.time()
     gameplay_started: float | None = None
     last_framebuffer_at: float | None = None

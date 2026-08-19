@@ -185,7 +185,7 @@ internal sealed class HudSvgAtlas : IDisposable
     {
         string[] candidates =
         [
-            Path.Combine(AppContext.BaseDirectory, "SHARED", "HUD", file),
+            Path.Combine(Runtime.ExecutableDirectory, "SHARED", "HUD", file),
             Path.Combine(Environment.CurrentDirectory, "SHARED", "HUD", file),
         ];
         foreach (string candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))

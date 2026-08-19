@@ -34,10 +34,18 @@ public static class V82VehicleRegistry
     const int TransformTableSize = TransformModeCount * TransformWheelCount * 2;
     const int PowerupCount = 5;
     const int PowerupTableSize = PowerupCount * 4;
-    const int PlayerSelectionCount = 2;
+    const int PlayerSelectionCount = 4;
+    const int NpcSelectionCount = 4;
     const ushort NoArchiveIndex = 0xFFFF;
     const uint SelectorInputAddress = 0x8006B508u;
+    // Gameplay and SHELL share six participant bytes at 0x8006B8F4. The
+    // first two are players; the four enemy-row vehicle types start at +2.
+    const uint SelectorNpcTypeAddress = 0x8006B8F6u;
     const uint SelectorTextAddress = 0x807FE000u;
+    const uint SelectorEnemyPreviewInitialReturn = 0x80105718u;
+    const uint SelectorEnemyPreviewRefreshReturn = 0x801058D0u;
+    const uint SelectorEnemyQuantityReturn = 0x801059CCu;
+    const uint SelectorVehicleCreateAddress = 0x8003C464u;
     const uint SelectorVehiclePreviewReturn = 0x80106C1Cu;
     const uint SelectorBankPrepareReturn = 0x80106BA8u;
     const uint SelectorBankFinalizeReturn = 0x80106C58u;
@@ -68,7 +76,11 @@ public static class V82VehicleRegistry
     static readonly Dictionary<uint, uint> ObjectUpgradeStatus = [];
     static bool _initialized;
     static bool _dispatchRegistered;
-    static readonly int[] SelectedTypes = [-1, -1];
+    static readonly int[] SelectedTypes = [-1, -1, -1, -1];
+    static readonly int[] SelectedNpcTypes = [-1, -1, -1, -1];
+    static readonly int[] SelectorNpcGuests = [-1, -1, -1, -1];
+    static readonly int[] SelectorNpcPreviousSlots = [-1, -1, -1, -1];
+    static readonly int[] SelectorNpcProxySlots = [0, 0, 0, 0];
     static string? _requestedStableId;
     static string? _loadedPackageRoot;
     static VehicleEntry? _constructingEntry;
@@ -141,10 +153,19 @@ public static class V82VehicleRegistry
         Volatile.Read(ref _selectorGuestIndex);
     public static bool HasAnySelection =>
         Enumerable.Range(0, PlayerSelectionCount)
-            .Any(player => SelectedTypeForPlayer(player) >= 0);
+            .Any(player => SelectedTypeForPlayer(player) >= 0) ||
+        Enumerable.Range(0, NpcSelectionCount)
+            .Any(slot => SelectedNpcTypeForSlot(slot) >= 0);
 
     public static bool IsVehicleObject(uint objectAddress) =>
         ObjectEntries.ContainsKey(objectAddress);
+
+    public static string? StableIdForType(int type)
+    {
+        return TryEntryForType(unchecked((uint)type), out VehicleEntry? entry)
+            ? entry?.StableId
+            : null;
+    }
 
     public readonly record struct ImportedRenderGroupInfo(
         string StableId,
@@ -338,6 +359,13 @@ public static class V82VehicleRegistry
         return Volatile.Read(ref SelectedTypes[player]);
     }
 
+    public static int SelectedNpcTypeForSlot(int slot)
+    {
+        if ((uint)slot >= NpcSelectionCount)
+            throw new ArgumentOutOfRangeException(nameof(slot));
+        return Volatile.Read(ref SelectedNpcTypes[slot]);
+    }
+
     public static void SelectType(int type) => SelectTypeForPlayer(0, type);
 
     public static void SelectTypeForPlayer(int player, int type)
@@ -359,6 +387,18 @@ public static class V82VehicleRegistry
     {
         for (int player = 0; player < PlayerSelectionCount; player++)
             Volatile.Write(ref SelectedTypes[player], -1);
+        ClearNpcSelections();
+    }
+
+    static void ClearNpcSelections()
+    {
+        for (int slot = 0; slot < NpcSelectionCount; slot++)
+        {
+            Volatile.Write(ref SelectedNpcTypes[slot], -1);
+            SelectorNpcGuests[slot] = -1;
+            SelectorNpcPreviousSlots[slot] = -1;
+            SelectorNpcProxySlots[slot] = 0;
+        }
     }
 
     public static void BeginNativeSelector(CpuContext c, IMemory m)
@@ -374,14 +414,17 @@ public static class V82VehicleRegistry
         // two. Context 0 is the AI/enemy pass and must not displace player
         // one's accepted guest.
         _selectorContext = c.A1;
-        _selectorPlayer = c.A1 == 2u ? 1 : 0;
+        _selectorPlayer = c.A1 == 0u
+            ? 0
+            : Math.Clamp((int)c.A1 - 1, 0, PlayerSelectionCount - 1);
         _selectorStableFrames = 0;
         _selectorStableGuest = -1;
-        _selectorEnemyPhase = false;
+        _selectorEnemyPhase = _selectorContext == 0u;
         _selectorEnemyFrames = 0;
         _selectorAcceptedGuest = -1;
         _selectorAcceptedProxySlot = -1;
         _selectorPreviewObject = 0u;
+        ClearNpcSelections();
         SelectorProofCaptured.Clear();
         InputManager.SignalScriptStage(
             _selectorContext == 0u ? "choose_enemies" : "choose_player");
@@ -389,10 +432,10 @@ public static class V82VehicleRegistry
 
     public static void EndNativeSelector(CpuContext c, IMemory m)
     {
-        int guest = _selectorAcceptedGuest >= 0
+        int guest = _selectorEnemyPhase
             ? _selectorAcceptedGuest
             : NativeSelectorGuestIndex;
-        int proxySlot = _selectorAcceptedGuest >= 0
+        int proxySlot = _selectorEnemyPhase
             ? _selectorAcceptedProxySlot
             : _selectorProxySlot;
         if (guest >= 0 && guest < Entries.Count &&
@@ -430,7 +473,7 @@ public static class V82VehicleRegistry
     public static uint ResolveNativeSelectorSlot(CpuContext c, IMemory m)
     {
         uint slot = c.FP;
-        if (Entries.Count == 0 || _selectorEnemyPhase)
+        if (Entries.Count == 0)
             return slot;
 
         int current = checked((int)slot);
@@ -524,11 +567,213 @@ public static class V82VehicleRegistry
         return checked((uint)current);
     }
 
+    /// <summary>
+    /// Extends each native enemy row through the registered guest roster while
+    /// retaining a retail proxy byte in SHELL's fixed tables. The selected
+    /// custom identity is carried separately into gameplay participant slots.
+    /// </summary>
+    public static void ApplyNativeEnemySelectorSlot(CpuContext c, IMemory m)
+    {
+        if (!_selectorEnemyPhase || Entries.Count == 0)
+            return;
+
+        int row = checked((int)c.S3);
+        if ((uint)row >= NpcSelectionCount)
+            return;
+
+        uint address = SelectorNpcTypeAddress + checked((uint)row);
+        int current = (sbyte)m.ReadU8(address);
+        if (current < 0 || current >= RetailVehicleCount)
+        {
+            ClearNpcSelection(row);
+            EnsureNpcProxyIsolation(m);
+            return;
+        }
+
+        uint input = m.ReadU32(SelectorInputAddress);
+        bool left = (input & 0x80000000u) != 0u;
+        bool right = (input & 0x20000000u) != 0u;
+        int guest = SelectorNpcGuests[row];
+        int previous = SelectorNpcPreviousSlots[row];
+        if (TraceNativeSelectorInput && (left || right))
+            Console.Error.WriteLine(
+                $"[V82NpcSelectorTrace] row={row} current={current} " +
+                $"previous={previous} guest={guest} input=0x{input:X8} " +
+                $"caller=0x{c.RA:X8}");
+        if (previous < 0)
+        {
+            SelectorNpcPreviousSlots[row] = current;
+            SetActiveEnemySelectorGuest(row);
+            EnsureNpcProxyIsolation(m);
+            return;
+        }
+
+        if (guest < 0)
+        {
+            if (right && current < previous)
+            {
+                guest = 0;
+                SelectorNpcProxySlots[row] = current;
+            }
+            else if (left && current > previous)
+            {
+                guest = Entries.Count - 1;
+                SelectorNpcProxySlots[row] = current;
+            }
+            else
+            {
+                SelectorNpcPreviousSlots[row] = current;
+                SetActiveEnemySelectorGuest(row);
+                EnsureNpcProxyIsolation(m);
+                return;
+            }
+        }
+        else if (right && current != previous)
+        {
+            if (guest + 1 < Entries.Count)
+            {
+                guest++;
+                current = SelectorNpcProxySlots[row];
+            }
+            else
+            {
+                ClearNpcSelection(row);
+                SelectorNpcPreviousSlots[row] = current;
+                _selectorGuestIndex = -1;
+                EnsureNpcProxyIsolation(m);
+                Console.Error.WriteLine(
+                    $"[V82NpcSelector] row={row} returned to retail={current}");
+                return;
+            }
+        }
+        else if (left && current != previous)
+        {
+            if (guest > 0)
+            {
+                guest--;
+                current = SelectorNpcProxySlots[row];
+            }
+            else
+            {
+                ClearNpcSelection(row);
+                SelectorNpcPreviousSlots[row] = current;
+                _selectorGuestIndex = -1;
+                EnsureNpcProxyIsolation(m);
+                Console.Error.WriteLine(
+                    $"[V82NpcSelector] row={row} returned to retail={current}");
+                return;
+            }
+        }
+        else
+        {
+            current = SelectorNpcProxySlots[row];
+        }
+
+        SelectorNpcGuests[row] = guest;
+        Volatile.Write(ref SelectedNpcTypes[row], Entries[guest].Type);
+        m.WriteU8(address, checked((byte)current));
+        SelectorNpcPreviousSlots[row] = current;
+        SetActiveEnemySelectorGuest(row);
+        EnsureNpcProxyIsolation(m);
+        Console.Error.WriteLine(
+            $"[V82NpcSelector] row={row} guest={guest} " +
+            $"type={Entries[guest].Type} name={Entries[guest].DisplayName} " +
+            $"proxy={SelectorNpcProxySlots[row]}");
+    }
+
+    static void ClearNpcSelection(int row)
+    {
+        SelectorNpcGuests[row] = -1;
+        SelectorNpcProxySlots[row] = 0;
+        Volatile.Write(ref SelectedNpcTypes[row], -1);
+    }
+
+    static void EnsureNpcProxyIsolation(IMemory m)
+    {
+        Span<bool> used = stackalloc bool[RetailVehicleCount];
+        for (int row = 0; row < NpcSelectionCount; row++)
+        {
+            if (SelectorNpcGuests[row] >= 0)
+                continue;
+            int type = (sbyte)m.ReadU8(
+                SelectorNpcTypeAddress + checked((uint)row));
+            if ((uint)type < RetailVehicleCount)
+                used[type] = true;
+        }
+
+        for (int row = 0; row < NpcSelectionCount; row++)
+        {
+            if (SelectorNpcGuests[row] < 0)
+                continue;
+            int proxy = SelectorNpcProxySlots[row];
+            if ((uint)proxy < RetailVehicleCount && !used[proxy])
+            {
+                used[proxy] = true;
+                continue;
+            }
+
+            int replacement = -1;
+            for (int candidate = 0;
+                 candidate < RetailVehicleCount;
+                 candidate++)
+            {
+                if (used[candidate])
+                    continue;
+                replacement = candidate;
+                break;
+            }
+            if (replacement < 0)
+                throw new InvalidOperationException(
+                    "no isolated retail proxy remains for a guest NPC row");
+
+            Console.Error.WriteLine(
+                $"[V82NpcSelector] isolated row={row} " +
+                $"proxy={proxy}->{replacement}");
+            SelectorNpcProxySlots[row] = replacement;
+            SelectorNpcPreviousSlots[row] = replacement;
+            m.WriteU8(
+                SelectorNpcTypeAddress + checked((uint)row),
+                checked((byte)replacement));
+            used[replacement] = true;
+        }
+    }
+
+    static void SetActiveEnemySelectorGuest(int row)
+    {
+        int guest = SelectorNpcGuests[row];
+        _selectorGuestIndex = guest >= 0 && guest < Entries.Count
+            ? guest
+            : -1;
+        if (_selectorStableGuest != _selectorGuestIndex)
+        {
+            _selectorStableGuest = _selectorGuestIndex;
+            _selectorStableFrames = 0;
+        }
+    }
+
     public static bool TickNativeSelector(CpuContext c, IMemory m)
     {
         if (_selectorEnemyPhase)
         {
             int enemyFrame = ++_selectorEnemyFrames;
+            if (c.RA == 0x80105B20u)
+            {
+                int row = checked((int)(c.S6 >> 1));
+                if ((uint)row < NpcSelectionCount)
+                    SetActiveEnemySelectorGuest(row);
+            }
+            int npcGuest = NativeSelectorGuestIndex;
+            if (npcGuest >= 0 && npcGuest < Entries.Count)
+            {
+                int npcFrame = ++_selectorStableFrames;
+                if (CaptureNativeSelectorProof &&
+                    npcFrame == 80 &&
+                    !SelectorProofCaptured.Contains(npcGuest))
+                    HostWindow.RequestDisplayCapture(
+                        $"native_npc_{npcGuest:00}");
+                if (npcFrame == 200)
+                    SelectorProofCaptured.Add(npcGuest);
+            }
             if (CaptureNativeSelectorProof && enemyFrame == 80)
                 HostWindow.RequestDisplayCapture("native_enemy_selector");
             return true;
@@ -597,21 +842,22 @@ public static class V82VehicleRegistry
             return;
 
         int guest = NativeSelectorGuestIndex;
-        if (guest < 0 || guest >= Entries.Count)
-            return;
-
-        _selectorAcceptedGuest = guest;
+        _selectorAcceptedGuest = guest >= 0 && guest < Entries.Count
+            ? guest
+            : -1;
         _selectorAcceptedProxySlot = _selectorProxySlot;
-        PlayOriginalV8SelectionVoice(c, m, guest);
+        if (_selectorAcceptedGuest >= 0)
+            PlayOriginalV8SelectionVoice(c, m, _selectorAcceptedGuest);
         _selectorEnemyPhase = true;
         _selectorEnemyFrames = 0;
         _selectorGuestIndex = -1;
         _selectorPreviousSlot = -1;
-        ReleaseSelectorPreviewForEnemyPhase(c, m);
+        if (_selectorAcceptedGuest >= 0)
+            ReleaseSelectorPreviewForEnemyPhase(c, m);
         InputManager.SignalScriptStage("choose_enemies");
         Console.Error.WriteLine(
             $"[V82Vehicles] entered native enemy selector after accepting " +
-            $"guest={guest}; stock portraits and previews restored");
+            $"player_guest={_selectorAcceptedGuest}; NPC guest roster enabled");
     }
 
     /// <summary>
@@ -730,14 +976,18 @@ public static class V82VehicleRegistry
         if (c.RA == SelectorDriverNameReturn)
             return false;
 
-        string? text = c.RA switch
-        {
-            SelectorVehicleNameReturn => NativeSelectorGuestIndex <
-                SelectorVehicleNames.Length
+        // The enemy editor call at 0x801059CC draws the row's quantity text,
+        // not a vehicle caption. Replacing it left successive guest names
+        // accumulated in the persistent row texture and hid the native x1.
+        // Guest identity is already represented by the row's 3D preview.
+        if (c.RA == SelectorEnemyQuantityReturn)
+            return true;
+
+        string? text = c.RA == SelectorVehicleNameReturn
+            ? NativeSelectorGuestIndex < SelectorVehicleNames.Length
                 ? SelectorVehicleNames[NativeSelectorGuestIndex]
-                : entry.DisplayName,
-            _ => null,
-        };
+                : entry.DisplayName
+            : null;
         if (text == null)
             return true;
 
@@ -832,6 +1082,78 @@ public static class V82VehicleRegistry
         _constructingEntry = entry;
         V82Compat.BeginGuestVramClaim(reusable: true);
         return true;
+    }
+
+    /// <summary>
+    /// Replaces the enemy editor's retail type-only preview factory for rows
+    /// currently mapped to a guest. The unchanged selector constructor still
+    /// owns wheel setup, suspension, camera framing, and render lifecycle.
+    /// </summary>
+    public static bool BuildNativeEnemySelectorPreview(
+        CpuContext c, IMemory m)
+    {
+        if (!_selectorEnemyPhase)
+            return true;
+
+        int row = c.RA switch
+        {
+            SelectorEnemyPreviewInitialReturn => checked((int)c.S3),
+            SelectorEnemyPreviewRefreshReturn => checked((int)c.S3),
+            _ => -1,
+        };
+        if ((uint)row >= NpcSelectionCount)
+            return true;
+
+        if (TraceNativeSelectorInput)
+            Console.Error.WriteLine(
+                $"[V82NpcPreviewTrace] row={row} type={(short)c.A0} " +
+                $"stored={(sbyte)m.ReadU8(SelectorNpcTypeAddress + (uint)row)} " +
+                $"caller=0x{c.RA:X8}");
+
+        // This factory call follows the native row's left/right update. It is
+        // the authoritative point where a retail wrap can enter or leave the
+        // appended guest range, including paths that bypass L80105C94.
+        ApplyNativeEnemySelectorSlot(c, m);
+        int type = SelectedNpcTypeForSlot(row);
+        if (!TryEntryForType(unchecked((uint)type), out VehicleEntry? entry) ||
+            entry == null)
+            return true;
+
+        m = Dispatcher.UnwrapMemory(m);
+        EnsureSelectorRuntime(entry, c, m);
+        _selectorGuestIndex = type - FirstCustomType;
+        c.A0 = entry.SelectorPreviewRuntime;
+        c.A1 = checked((uint)entry.SelectorPreviewBodyKind);
+        c.A2 = entry.StatsRuntime;
+        _constructingSelectorPreview = true;
+        _constructingEntry = entry;
+        V82Compat.BeginGuestVramClaim(reusable: true);
+
+        uint callerRa = c.RA;
+        try
+        {
+            c.RA = CustomDispatchAddress;
+            Dispatcher.Call(c, m, SelectorVehicleCreateAddress);
+        }
+        catch
+        {
+            if (_constructingSelectorPreview)
+            {
+                V82Compat.AbortGuestVramClaim();
+                _constructingEntry = null;
+                _constructingSelectorPreview = false;
+            }
+            throw;
+        }
+        finally
+        {
+            c.RA = callerRa;
+        }
+
+        Console.Error.WriteLine(
+            $"[V82NpcSelector] built row={row} guest={entry.StableId} " +
+            $"preview=0x{c.V0:X8}");
+        return false;
     }
 
     /// <summary>
@@ -1070,10 +1392,18 @@ public static class V82VehicleRegistry
     {
         for (int index = 0; index < Entries.Count; index++)
         {
-            string path = Path.Combine(
-                root, "SHELL", $"SELECTOR_{index:00}.PPM");
+            string path = SelectorPortraitPath(root, index);
             _ = BuildSelectorPortraitPixels(path);
         }
+    }
+
+    static string SelectorPortraitPath(string root, int index)
+    {
+        string fileName = $"SELECTOR_{index:00}.PPM";
+        string packagePath = Path.Combine(root, fileName);
+        if (File.Exists(packagePath))
+            return packagePath;
+        return Path.Combine(root, "SHELL", fileName);
     }
 
     static void LoadAndValidate(string registryPath, string archivePath)
@@ -1270,6 +1600,41 @@ public static class V82VehicleRegistry
             EnsureRuntime(entry, c, m);
     }
 
+    /// <summary>
+    /// Converts the enemy editor's retained retail proxy identities into
+    /// custom participant types after SHELL has finished all retail-only table
+    /// work. Quantities are preserved because every occurrence of the row's
+    /// proxy maps to the same registered NPC identity.
+    /// </summary>
+    public static void ApplySelectedNpcTypes(
+        IMemory m, uint participantBase, int localPlayerCount = 2)
+    {
+        localPlayerCount = Math.Clamp(localPlayerCount, 1, PlayerSelectionCount);
+        for (int participant = localPlayerCount;
+             participant < Math.Min(6, localPlayerCount + NpcSelectionCount);
+             participant++)
+        {
+            uint address = participantBase + checked((uint)participant);
+            int nativeType = (sbyte)m.ReadU8(address);
+            if (nativeType < 0)
+                continue;
+
+            for (int row = 0; row < NpcSelectionCount; row++)
+            {
+                int customType = SelectedNpcTypeForSlot(row);
+                if (customType < 0 ||
+                    SelectorNpcProxySlots[row] != nativeType)
+                    continue;
+                m.WriteU8(address, checked((byte)customType));
+                Console.Error.WriteLine(
+                    $"[V82Vehicles] NPC participant={participant} " +
+                    $"row={row} proxy={nativeType} type={customType} " +
+                    $"name={NameForType(customType)}");
+                break;
+            }
+        }
+    }
+
     internal static IReadOnlyList<NativeVramAllocation>
         SelectedVramAllocations()
     {
@@ -1329,10 +1694,20 @@ public static class V82VehicleRegistry
 
     static VehicleEntry[] ActiveEntries()
     {
-        var active = new List<VehicleEntry>(PlayerSelectionCount + 1);
+        var active = new List<VehicleEntry>(
+            PlayerSelectionCount + NpcSelectionCount + 1);
         for (int player = 0; player < PlayerSelectionCount; player++)
         {
             int selected = SelectedTypeForPlayer(player);
+            if (selected >= 0 &&
+                TryEntryForType((uint)selected, out VehicleEntry? entry) &&
+                entry != null &&
+                !active.Contains(entry))
+                active.Add(entry);
+        }
+        for (int slot = 0; slot < NpcSelectionCount; slot++)
+        {
+            int selected = SelectedNpcTypeForSlot(slot);
             if (selected >= 0 &&
                 TryEntryForType((uint)selected, out VehicleEntry? entry) &&
                 entry != null &&
@@ -1760,9 +2135,7 @@ public static class V82VehicleRegistry
             throw new InvalidOperationException(
                 "native selector portrait has no loaded package root");
 
-        string fileName = $"SELECTOR_{guestIndex:00}.PPM";
-        string path = Path.Combine(
-            _loadedPackageRoot, "SHELL", fileName);
+        string path = SelectorPortraitPath(_loadedPackageRoot, guestIndex);
         return BuildSelectorPortraitPixels(path);
     }
 
@@ -2253,7 +2626,9 @@ public static class V82VehicleRegistry
     {
         NativeBankAllocation? preview = entry.SelectorPreviewAllocation;
         NativeBankAllocation? wheels = entry.SelectorTransformAllocation;
-        if (preview == null && wheels == null)
+        bool releaseSelectorStats =
+            entry.BodyRuntime == 0u && entry.StatsRuntime != 0u;
+        if (preview == null && wheels == null && !releaseSelectorStats)
         {
             entry.SelectorPreviewRuntime = 0u;
             entry.SelectorTransformRuntime = 0u;
@@ -2265,11 +2640,19 @@ public static class V82VehicleRegistry
         {
             ReleaseOwnedNativeBank(preview, c, m);
             ReleaseOwnedNativeBank(wheels, c, m);
+            if (releaseSelectorStats &&
+                V82Compat.IsPcAllocationLive(entry.StatsRuntime))
+            {
+                c.A0 = entry.StatsRuntime;
+                V82Compat.PcFree(c, m);
+            }
         }
         finally
         {
             c.Restore(state);
         }
+        if (releaseSelectorStats)
+            entry.StatsRuntime = 0u;
         entry.SelectorPreviewAllocation = null;
         entry.SelectorTransformAllocation = null;
         entry.SelectorPreviewRuntime = 0u;
@@ -2375,7 +2758,7 @@ public static class V82VehicleRegistry
         string? loose = Runtime.ResolveLoosePath();
         if (!string.IsNullOrWhiteSpace(loose))
             roots.Add(Path.GetFullPath(loose));
-        roots.Add(AppContext.BaseDirectory);
+        roots.Add(Runtime.ExecutableDirectory);
         roots.Add(Environment.CurrentDirectory);
 
         var candidates = new List<string>();

@@ -16,8 +16,14 @@ public static class V8Compat
         uint Y,
         uint Descriptor);
 
+    const uint HeapHeadAddress = 0x8005ED4Cu;
+    const uint ShellLinkedBase = 0x80100000u;
+    const uint ShellLinkedImageEnd = 0x80116D98u;
+    const uint ShellSectorAllocation = 0x00017000u;
+
     static bool _heapCycleLogged;
     static bool _heapExhaustedLogged;
+    static bool _shellPinnedAtLinkedBase;
     static int _vramAllocCount;
     static readonly List<GuestVramReservation> GuestVramReservations = [];
     static readonly HashSet<int> ClaimedGuestVramReservations = [];
@@ -52,16 +58,32 @@ public static class V8Compat
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1";
     static readonly bool _tracePacketOwners =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PACKET_OWNERS") == "1";
+    static readonly bool _tracePacketOwnerRanges =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_PACKET_OWNER_RANGES") == "1";
+    static int _packetOwnerRangeTraceCount;
     static readonly bool _traceDreamMushroom =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_DREAM_MUSHROOM") == "1";
     static readonly bool _validateHeap =
         Environment.GetEnvironmentVariable("RECOMPONE_VALIDATE_HEAP") == "1";
+    static readonly bool _traceHeapSnapshots =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_HEAP_SNAPSHOTS") == "1";
+    static int _heapSnapshotSerial;
     static readonly bool _victoryAutopilot =
         Environment.GetEnvironmentVariable("RECOMPONE_V8_VICTORY_AUTOPILOT") == "1";
     static readonly bool _whammyMatrix =
         Environment.GetEnvironmentVariable("RECOMPONE_V8_WHAMMY_MATRIX") == "1";
     static readonly string? _stateTracePath =
         Environment.GetEnvironmentVariable("RECOMPONE_STATE_TRACE_PATH");
+    static readonly uint? _deterministicGameRngSeed =
+        uint.TryParse(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_DETERMINISTIC_GAME_RNG_SEED"),
+            out uint deterministicGameRngSeed)
+            ? deterministicGameRngSeed
+            : null;
+    static bool _deterministicGameRngSeedLogged;
     static readonly int _soakHeartbeatTicks =
         int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_SOAK_HEARTBEAT_TICKS"),
             out int heartbeatTicks)
@@ -187,6 +209,22 @@ public static class V8Compat
     static uint _terrainFrustumNativeWidth;
     static bool _terrainFrustumAdjusted;
     static bool _terrainFrustumLogged;
+    static uint _objectFrustumWidthAddress;
+    static uint _objectFrustumNativeWidth;
+    static bool _objectFrustumAdjusted;
+    static bool _objectFrustumLogged;
+    static readonly bool _traceTerrainBsp =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_TERRAIN_BSP") == "1";
+    static bool _terrainBspTraceActive;
+    static int _terrainBspDepth;
+    static int _terrainBspSequence;
+    static uint _terrainBspRoot;
+    static int _terrainBspMinX;
+    static int _terrainBspMaxX;
+    static int _terrainBspMinZ;
+    static int _terrainBspMaxZ;
+    static readonly HashSet<uint> _terrainBspLeaves = [];
+    static readonly HashSet<uint> _terrainBspObjects = [];
     static readonly Dictionary<(uint Mesh, uint Object), uint> _meshRenderLastSpatialNode = new();
     static readonly Dictionary<(uint Mesh, uint Object), string> _meshRenderLastSpatialPath = new();
     static readonly Dictionary<(uint Mesh, uint Object), uint> _meshRenderLastFrame = new();
@@ -219,6 +257,20 @@ public static class V8Compat
     static bool _missingDiagonalNeighborFixLogged;
     static StreamWriter? _stateTraceWriter;
     static bool _stateTraceUnavailable;
+
+    public static void ApplyDeterministicGameRngSeed(CpuContext c, IMemory m)
+    {
+        if (_deterministicGameRngSeed is not uint seed)
+            return;
+        uint requested = c.A0;
+        c.A0 = seed;
+        if (_deterministicGameRngSeedLogged)
+            return;
+        _deterministicGameRngSeedLogged = true;
+        Console.Error.WriteLine(
+            "[V8DeterministicRng] " +
+            $"requested={requested} effective={seed}");
+    }
 
     static int[] BuildWhammyMatrixKinds()
     {
@@ -419,7 +471,7 @@ public static class V8Compat
     public static void Alloc(CpuContext c, IMemory m)
     {
         V8VehicleRegistry.Initialize(c, m);
-        AllocFromHead(c, m, 0x8005ED4Cu);
+        AllocFromHead(c, m, HeapHeadAddress);
     }
 
     internal static void AllocFromHead(
@@ -434,9 +486,59 @@ public static class V8Compat
         }
 
         uint units = (requestedBytes + 15u) >> 3;
+        int operation = ++_heapOperation;
+        uint caller = ResolveHeapAllocationCaller(c, m);
+
+        // SHELL.DLL is the first sector-rounded 0x17000-byte whole-file
+        // allocation. Put it directly at its linked address instead of
+        // allocating a relocated copy and separately reserving the alias.
+        // The header begins eight bytes before the payload so the original
+        // realloc shrink can return the unused sector tail to the retail heap.
+        if (reserveLinkedOverlayRanges &&
+            requestedBytes == ShellSectorAllocation &&
+            caller == 0x80015980u)
+        {
+            if (_shellPinnedAtLinkedBase)
+            {
+                c.V0 = ShellLinkedBase;
+                Console.Error.WriteLine(
+                    $"[V8Compat] reused resident SHELL.DLL at 0x{ShellLinkedBase:X8}");
+                return;
+            }
+
+            uint header = ShellLinkedBase - 8u;
+            uint end = header + (units << 3);
+            if (_linkedOverlayRangesReserved)
+            {
+                CarveFreeRange(m, headAddress, header, ShellLinkedBase);
+                CarveFreeRange(m, headAddress, ShellLinkedImageEnd, end);
+            }
+            else
+            {
+                CarveFreeRange(m, headAddress, header, end);
+            }
+            _linkedOverlayRangesReserved = true;
+            _shellPinnedAtLinkedBase = true;
+            m.WriteU32(header, 0u);
+            m.WriteU32(header + 4u, units);
+            c.V0 = ShellLinkedBase;
+            if (_validateHeap)
+            {
+                _liveHeapAllocations[c.V0] = new HeapAllocation(
+                    units, requestedBytes, caller, operation);
+                _lastHeapOperation =
+                    $"alloc #{operation} pinned-shell ptr=0x{c.V0:X8} " +
+                    $"bytes={requestedBytes} units={units} caller=0x{caller:X8}";
+                ValidateFreeList(m, $"after {_lastHeapOperation}");
+                ValidateLiveAllocations(m, $"after {_lastHeapOperation}");
+            }
+            Console.Error.WriteLine(
+                $"[V8Compat] pinned SHELL.DLL at 0x{ShellLinkedBase:X8}-0x{end:X8}");
+            return;
+        }
+
         if (reserveLinkedOverlayRanges)
             ReserveLinkedOverlayRanges(m, headAddress);
-        int operation = ++_heapOperation;
         bool validateNow = _validateHeap &&
             (operation == 1 || (operation & 0xFF) == 0);
         uint predecessor = m.ReadU32(headAddress);
@@ -465,8 +567,8 @@ public static class V8Compat
                 c.V0 = block + 8u;
                 if (_validateHeap)
                 {
-                    _liveHeapAllocations[c.V0] = new HeapAllocation(units, requestedBytes, c.RA, operation);
-                    _lastHeapOperation = $"alloc #{operation} ptr=0x{c.V0:X8} bytes={requestedBytes} units={units} caller=0x{c.RA:X8}";
+                    _liveHeapAllocations[c.V0] = new HeapAllocation(units, requestedBytes, caller, operation);
+                    _lastHeapOperation = $"alloc #{operation} ptr=0x{c.V0:X8} bytes={requestedBytes} units={units} caller=0x{caller:X8}";
                     if (validateNow)
                     {
                         ValidateFreeList(m, $"after {_lastHeapOperation}");
@@ -478,7 +580,7 @@ public static class V8Compat
 
             if (block == head)
             {
-                LogHeapExhausted(m, requestedBytes, headAddress);
+                LogHeapExhausted(m, requestedBytes, caller, headAddress);
                 c.V0 = 0u;
                 return;
             }
@@ -495,7 +597,22 @@ public static class V8Compat
 
     public static void Free(CpuContext c, IMemory m)
     {
-        FreeFromHead(c, m, 0x8005ED4Cu);
+        if (_shellPinnedAtLinkedBase && c.A0 == ShellLinkedBase)
+            return;
+        FreeFromHead(c, m, HeapHeadAddress);
+    }
+
+    public static bool PreservePinnedShellRealloc(CpuContext c, IMemory m)
+    {
+        if (!_shellPinnedAtLinkedBase || c.A0 != ShellLinkedBase)
+            return true;
+
+        // SHELL remains resident through match/menu transitions. The retail
+        // file loader normally shrinks its sector-rounded allocation and later
+        // frees it, but doing either would return linked code/BSS addresses to
+        // the heap while generated calls still target those addresses.
+        c.V0 = ShellLinkedBase;
+        return false;
     }
 
     internal static void FreeFromHead(CpuContext c, IMemory m, uint headAddress)
@@ -761,6 +878,17 @@ public static class V8Compat
         ThrowHeapCorruption($"untracked or double free 0x{pointer:X8}; free #{operation} caller=0x{caller:X8}");
     }
 
+    static uint ResolveHeapAllocationCaller(CpuContext c, IMemory m) => c.RA switch
+    {
+        // FUN_800116f4 is the game's retrying malloc wrapper. Its saved RA is
+        // the useful ownership site; the immediate RA only identifies malloc.
+        0x8001170Cu or 0x80011748u => m.ReadU32(c.SP + 0x18u),
+        // calloc and realloc retain their incoming RA in t9 and t7.
+        0x800451D4u => c.T9,
+        0x80045190u => c.T7,
+        _ => c.RA,
+    };
+
     static void ValidateLiveAllocations(IMemory m, string context)
     {
         foreach (var pair in _liveHeapAllocations)
@@ -958,17 +1086,38 @@ public static class V8Compat
         }
         _activeMeshIsVehicle = vehicleMesh;
         _activeMeshIsDreamlandWater = dreamlandWaterMesh;
+        if (dreamlandWaterMesh)
+            RecompOne.Runtime.Hle.GpuHle.BeginDreamlandWaterPacketWrites();
         _activeMeshAddress = c.A0;
         _activeMeshObject = c.S0;
         _activeMeshPacketBytes = m.ReadU16(c.A0 + 2u);
+        if (Gte.TraceNclipOwnersEnabled)
+            Gte.SetNclipOwner(
+                $"mesh=0x{c.A0:X8},object=0x{c.S0:X8}," +
+                $"vehicle={(vehicleMesh ? 1 : 0)}," +
+                $"water={(dreamlandWaterMesh ? 1 : 0)}," +
+                $"meshFlags=0x{m.ReadU16(c.A0):X4}," +
+                $"vertexCount={m.ReadU32(c.A0 + 4u)}," +
+                $"polygonCount={m.ReadU32(c.A0 + 0x14u)}," +
+                $"objectFlags=0x{(IsRetailRamRange(c.S0, 4u) ? m.ReadU32(c.S0) : 0u):X8}");
         if (_tracePacketOwners)
+        {
+            bool validObject = IsRetailRamRange(c.S0, 0x68u);
             _activeMeshIdentity =
                 $"{(dreamlandWaterMesh ? "dreamland-water," : "")}" +
+                $"object=0x{c.S0:X8}," +
+                $"objectFlags=0x{(validObject ? m.ReadU32(c.S0) : 0u):X8}," +
+                $"objectKind={(validObject ? m.ReadU8(c.S0 + 4u) : 0u)}," +
+                $"objectPosition={(validObject ? ReadVec3(m, c.S0 + 0x48u) : "invalid")}," +
+                $"objectModel=0x{(validObject ? m.ReadU32(c.S0 + 0x30u) : 0u):X8}," +
+                $"objectParent=0x{(validObject ? m.ReadU32(c.S0 + 0x3Cu) : 0u):X8}," +
+                $"objectCallback=0x{(validObject ? m.ReadU32(c.S0 + 0x64u) : 0u):X8}," +
                 $"mesh=0x{c.A0:X8}," +
                 $"vertices=0x{m.ReadU32(c.A0 + 8u):X8}," +
                 $"vertexCount={m.ReadU32(c.A0 + 4u)}," +
                 $"polygonCount={m.ReadU32(c.A0 + 0x14u)}," +
                 $"textureCount={m.ReadU16(c.A0 + 0x26u)}";
+        }
 
         bool traceOt =
             Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OT") == "1";
@@ -1024,6 +1173,29 @@ public static class V8Compat
 
     public static void BeginTerrainRoutePacketWrites(CpuContext c, IMemory m)
     {
+        if (V8ArenaRegistry.IsDreamlandSelected)
+        {
+            // LOAD 0x80105318 copies COLS words 3 and 4 into these globals.
+            // They are the low/high endpoints used by the N64 route vertex
+            // builder; reading them here keeps the translation tied to the
+            // loaded arena rather than to a guessed post-process tint.
+            byte lowR = m.ReadU8(0x80065B54u);
+            byte lowG = m.ReadU8(0x80065B55u);
+            byte lowB = m.ReadU8(0x80065B56u);
+            byte highR = m.ReadU8(0x80065B08u);
+            byte highG = m.ReadU8(0x80065B09u);
+            byte highB = m.ReadU8(0x80065B0Au);
+            if (RecompOne.Runtime.Hle.GpuHle.SetTerrainRouteColorRamp(
+                    lowR, lowG, lowB, highR, highG, highB))
+                Console.Error.WriteLine(
+                    "[V8N64RouteColorRamp] " +
+                    $"low={lowR},{lowG},{lowB} " +
+                    $"high={highR},{highG},{highB} source=COLS");
+        }
+        else
+        {
+            RecompOne.Runtime.Hle.GpuHle.ClearTerrainRouteColorRamp();
+        }
         RecompOne.Runtime.Hle.GpuHle.BeginTerrainRoutePacketWrites();
     }
 
@@ -1043,6 +1215,25 @@ public static class V8Compat
                 0x1Cu)
             : 0u;
         uint packetEnd = packetStart + _activeMeshPacketBytes;
+        if (_tracePacketOwners && packetStart != 0u && packetEnd > packetStart)
+        {
+            // Meshes allocate a contiguous primitive arena for the active
+            // display buffer.  Registering the complete arena is more robust
+            // than relying on per-constructor hooks: the model renderer uses
+            // several indirect packet builders selected by its polygon type.
+            RecompOne.Runtime.Hle.GpuHle.RegisterPacketOwnerRange(
+                packetStart,
+                packetEnd,
+                _activeMeshIdentity);
+            if (_tracePacketOwnerRanges &&
+                _packetOwnerRangeTraceCount++ < 4096)
+                Console.Error.WriteLine(
+                    $"[V8PacketOwnerRange] buffer={bufferIndex} " +
+                    $"packet0=0x{m.ReadU32(_activeMeshAddress + 0x1Cu):X8} " +
+                    $"packet1=0x{m.ReadU32(_activeMeshAddress + 0x20u):X8} " +
+                    $"start=0x{packetStart:X8} end=0x{packetEnd:X8} " +
+                    $"{_activeMeshIdentity}");
+        }
         if (_activeMeshIsVehicle && packetStart != 0u)
         {
             RecompOne.Runtime.Hle.GpuHle.RegisterVehiclePacketRange(
@@ -1055,26 +1246,28 @@ public static class V8Compat
         }
         if (_activeMeshIsDreamlandWater && packetStart != 0u)
         {
-            RecompOne.Runtime.Hle.GpuHle.RegisterDreamlandWaterPacketRange(
-                packetStart,
-                packetEnd);
             RecompOne.Runtime.Hle.GpuHle.RegisterPacketOwnerRange(
                 packetStart,
                 packetEnd,
                 _activeMeshIdentity);
-            if (_tracePacketOwners)
+            if (Environment.GetEnvironmentVariable(
+                    "RECOMPONE_TRACE_DREAMLAND_WATER_PACKETS") == "1")
                 Console.Error.WriteLine(
                     $"[V8DreamlandWaterPackets] " +
                     $"object=0x{_activeMeshObject:X8} " +
                     $"mesh=0x{_activeMeshAddress:X8} " +
                     $"start=0x{packetStart:X8} end=0x{packetEnd:X8}");
         }
+        if (_activeMeshIsDreamlandWater)
+            RecompOne.Runtime.Hle.GpuHle.EndDreamlandWaterPacketWrites();
         _activeMeshIsVehicle = false;
         _activeMeshIsDreamlandWater = false;
         _activeMeshAddress = 0u;
         _activeMeshObject = 0u;
         _activeMeshPacketBytes = 0u;
         _activeMeshIdentity = "unresolved";
+        if (Gte.TraceNclipOwnersEnabled)
+            Gte.ClearNclipOwner();
         if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OT") == "1")
             _activeMeshRender = "none";
     }
@@ -1188,10 +1381,7 @@ public static class V8Compat
             string.Join(",", Enumerable.Range(0, 64)
                 .Select(index => m.ReadU8(0x80106DBCu + (uint)index).ToString("X2"))));
 
-        foreach (int material in new[] {
-            0, 1, 12, 32, 33, 41, 48, 49, 77, 80, 81,
-            120, 121, 128, 142, 160, 177, 198, 214, 232, 240, 241
-        })
+        foreach (int material in Enumerable.Range(0, 256))
         {
             uint address = 0x8008F020u + (uint)material * 0x20u;
             Console.Error.WriteLine(
@@ -1353,6 +1543,17 @@ public static class V8Compat
         // viewport aspect ratio preserves the original traversal and painter
         // order while including the additional side pixels.
         _terrainFrustumAdjusted = false;
+        _terrainBspTraceActive =
+            _traceTerrainBsp &&
+            Hle.GpuHle.GameplayActive &&
+            IsSelectedDebugGameplayTick(Hle.GpuHle.DebugGameplayTick);
+        if (_terrainBspTraceActive)
+        {
+            _terrainBspDepth = 0;
+            _terrainBspRoot = 0u;
+            _terrainBspLeaves.Clear();
+            _terrainBspObjects.Clear();
+        }
         if (!ConfigManager.View.HighResolution3D ||
             !Hle.GpuHle.GameplayActive ||
             Hle.GpuHle.WideAspect <= Hle.GpuHle.BaseAspect + 0.001f)
@@ -1388,8 +1589,209 @@ public static class V8Compat
         return true;
     }
 
+    public static void BeginWideObjectFrustum(CpuContext c, IMemory m)
+    {
+        _objectFrustumAdjusted = false;
+        if (!ConfigManager.View.HighResolution3D ||
+            !Hle.GpuHle.GameplayActive ||
+            Hle.GpuHle.WideAspect <= Hle.GpuHle.BaseAspect + 0.001f)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint address = c.GP + 0x6D8u;
+        uint nativeWidth = m.ReadU32(address);
+        int signedWidth = unchecked((int)nativeWidth);
+        if (signedWidth <= 0 || signedWidth > 0x10000)
+            return;
+
+        int wideWidth = checked((int)Math.Round(
+            signedWidth *
+            (double)Hle.GpuHle.WideAspect /
+            Hle.GpuHle.BaseAspect,
+            MidpointRounding.AwayFromZero));
+        if (wideWidth <= signedWidth)
+            return;
+
+        _objectFrustumWidthAddress = address;
+        _objectFrustumNativeWidth = nativeWidth;
+        _objectFrustumAdjusted = true;
+        m.WriteU32(address, unchecked((uint)wideWidth));
+        if (!_objectFrustumLogged)
+        {
+            _objectFrustumLogged = true;
+            Console.Error.WriteLine(
+                $"[V8WideObjectFrustum] native={signedWidth} " +
+                $"wide={wideWidth} " +
+                $"aspect={Hle.GpuHle.WideAspect:F6}");
+        }
+    }
+
+    public static void EndWideObjectFrustum(CpuContext c, IMemory m)
+    {
+        if (!_objectFrustumAdjusted)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        m.WriteU32(
+            _objectFrustumWidthAddress,
+            _objectFrustumNativeWidth);
+        _objectFrustumAdjusted = false;
+    }
+
+    static int ReadSignedMatrixElement(IMemory m, uint address) =>
+        unchecked((short)m.ReadU16(address));
+
+    static (int X, int Z) TerrainFrustumSide(
+        IMemory m,
+        int halfWidth,
+        int focalDepth)
+    {
+        double magnitude = Math.Sqrt(
+            (double)halfWidth * halfWidth +
+            (double)focalDepth * focalDepth);
+        if (magnitude <= 0.0)
+            return (0, 0);
+
+        int nx = checked((int)Math.Round(
+            halfWidth * 4096.0 / magnitude,
+            MidpointRounding.AwayFromZero));
+        int nz = checked((int)Math.Round(
+            focalDepth * 4096.0 / magnitude,
+            MidpointRounding.AwayFromZero));
+        const uint matrix = 0x8006F6E0u;
+        long rotatedX =
+            (long)ReadSignedMatrixElement(m, matrix + 0u) * nx +
+            (long)ReadSignedMatrixElement(m, matrix + 4u) * nz;
+        long rotatedZ =
+            (long)ReadSignedMatrixElement(m, matrix + 12u) * nx +
+            (long)ReadSignedMatrixElement(m, matrix + 16u) * nz;
+        return (
+            Math.Clamp((int)(rotatedX >> 12), short.MinValue, short.MaxValue),
+            Math.Clamp((int)(rotatedZ >> 12), short.MinValue, short.MaxValue));
+    }
+
+    static (int MinX, int MaxX, int MinZ, int MaxZ)
+        CalculateTerrainFrustumBounds(IMemory memory, int width)
+    {
+        IMemory m = Dispatcher.UnwrapMemory(memory);
+        int focalDepth = unchecked((short)m.ReadU16(
+            _terrainFrustumWidthAddress - 4u));
+        int leftHalf = -width / 2;
+        int rightHalf = width / 2;
+        (int leftX, int leftZ) =
+            TerrainFrustumSide(m, leftHalf, focalDepth);
+        (int rightX, int rightZ) =
+            TerrainFrustumSide(m, rightHalf, focalDepth);
+        int originX = unchecked((int)m.ReadU32(0x8006F6F4u));
+        int originZ = unchecked((int)m.ReadU32(0x8006F6FCu));
+        return (
+            originX + Math.Min(0, Math.Min(leftX, rightX)) * 0x400,
+            originX + Math.Max(0, Math.Max(leftX, rightX)) * 0x400,
+            originZ + Math.Min(0, Math.Min(leftZ, rightZ)) * 0x400,
+            originZ + Math.Max(0, Math.Max(leftZ, rightZ)) * 0x400);
+    }
+
+    public static void TraceTerrainBspEnter(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        if (_terrainFrustumAdjusted && c.RA == 0x800215B8u)
+        {
+            int wideMinX = unchecked((int)c.A1);
+            int wideMaxX = unchecked((int)c.A2);
+            int wideMinZ = unchecked((int)c.A3);
+            int wideMaxZ = unchecked((int)m.ReadU32(c.SP + 0x10u));
+            var native = CalculateTerrainFrustumBounds(
+                m,
+                unchecked((int)_terrainFrustumNativeWidth));
+            if (_terrainBspTraceActive)
+                Console.Error.WriteLine(
+                    $"[V8TerrainBspNativeBounds] tick=" +
+                    $"{Hle.GpuHle.DebugGameplayTick} " +
+                    $"calculated={native.MinX},{native.MaxX}," +
+                        $"{native.MinZ},{native.MaxZ} " +
+                    $"wide={wideMinX},{wideMaxX},{wideMinZ},{wideMaxZ}");
+        }
+
+        if (!_terrainBspTraceActive)
+            return;
+
+        if (_terrainBspDepth == 0)
+        {
+            _terrainBspRoot = c.A0;
+            _terrainBspMinX = unchecked((int)c.A1);
+            _terrainBspMaxX = unchecked((int)c.A2);
+            _terrainBspMinZ = unchecked((int)c.A3);
+            _terrainBspMaxZ = unchecked((int)m.ReadU32(c.SP + 0x10u));
+        }
+        _terrainBspDepth++;
+    }
+
+    public static void TraceTerrainBspExit(CpuContext c, IMemory m)
+    {
+        if (_terrainBspTraceActive && _terrainBspDepth > 0)
+            _terrainBspDepth--;
+    }
+
+    public static void TraceTerrainBspLeaf(CpuContext c, IMemory m)
+    {
+        if (!_terrainBspTraceActive)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint leaf = c.A0;
+        _terrainBspLeaves.Add(leaf);
+        if (!IsRetailRamRange(leaf, 4u))
+            return;
+
+        uint link = m.ReadU32(leaf);
+        int guard = 0;
+        while (IsRetailRamRange(link, 12u) && guard++ < 4096)
+        {
+            uint objectAddress = m.ReadU32(link + 8u);
+            if (IsRetailRamRange(objectAddress, 0x70u))
+                _terrainBspObjects.Add(objectAddress);
+            link = m.ReadU32(link);
+        }
+    }
+
+    static ulong HashTerrainBspAddresses(IEnumerable<uint> addresses)
+    {
+        ulong hash = 14695981039346656037ul;
+        foreach (uint address in addresses.Order())
+            for (int shift = 0; shift < 32; shift += 8)
+            {
+                hash ^= (byte)(address >> shift);
+                hash *= 1099511628211ul;
+            }
+        return hash;
+    }
+
+    static void EmitTerrainBspTrace()
+    {
+        if (!_terrainBspTraceActive)
+            return;
+
+        _terrainBspSequence++;
+        string leaves = string.Join(",", _terrainBspLeaves.Order().Select(
+            address => $"{address:X8}"));
+        Console.Error.WriteLine(
+            $"[V8TerrainBsp] sequence={_terrainBspSequence} " +
+            $"tick={Hle.GpuHle.DebugGameplayTick} " +
+            $"wide={(ConfigManager.View.Widescreen ? 1 : 0)} " +
+            $"root=0x{_terrainBspRoot:X8} " +
+            $"bounds={_terrainBspMinX},{_terrainBspMaxX}," +
+                $"{_terrainBspMinZ},{_terrainBspMaxZ} " +
+            $"leaves={_terrainBspLeaves.Count} " +
+            $"leaf-hash=0x{HashTerrainBspAddresses(_terrainBspLeaves):X16} " +
+            $"objects={_terrainBspObjects.Count} " +
+            $"object-hash=0x{HashTerrainBspAddresses(_terrainBspObjects):X16} " +
+            $"leaf-addresses={leaves}");
+        _terrainBspTraceActive = false;
+    }
+
     public static void RestoreTerrainFrustum(CpuContext c, IMemory m)
     {
+        EmitTerrainBspTrace();
         if (!_terrainFrustumAdjusted)
             return;
 
@@ -1521,6 +1923,8 @@ public static class V8Compat
         int tick = ++_gameplayHeartbeatTick;
         _vehiclePhysicsTick = tick;
         Hle.GpuHle.DebugGameplayTick = tick;
+        if (tick == 1)
+            TraceTerrainMaterials(c, m);
         if (tick == 1 && _proofVehiclePosition != null)
             ApplyProofVehiclePosition(c, m, player, _proofVehiclePosition);
         if (tick == 1 && _proofVehicleFacing != null)
@@ -2855,6 +3259,8 @@ public static class V8Compat
         }
         if (stage == "press_start")
         {
+            if (_lastMenuStage != stage)
+                TraceHeapSnapshot(m, "press-start");
             _gameplayStage = false;
             _vehiclePhysicsTick = 0;
             Hle.GpuHle.GameplayActive = false;
@@ -2950,6 +3356,8 @@ public static class V8Compat
         {
             _gameplayStage = false;
             Hle.GpuHle.GameplayActive = false;
+            Hle.GpuHle.ResetSceneTracking();
+            TraceHeapSnapshot(m, "pause-quit-pre-teardown");
             InputManager.SignalScriptStage("pause_quit");
         }
         else
@@ -3331,7 +3739,8 @@ public static class V8Compat
             $"{(short)m.ReadU16(rect + 4u)}x{(short)m.ReadU16(rect + 6u)}");
     }
 
-    static void LogHeapExhausted(IMemory m, uint requestedBytes, uint headAddress)
+    static void LogHeapExhausted(
+        IMemory m, uint requestedBytes, uint caller, uint headAddress)
     {
         if (_heapExhaustedLogged) return;
         _heapExhaustedLogged = true;
@@ -3352,7 +3761,90 @@ public static class V8Compat
             cursor = next;
             if (cursor == head) break;
         }
-        Console.Error.WriteLine($"[V8Compat] heap exhausted: request={requestedBytes} freeBlocks={blocks} freeBytes={totalUnits << 3} largestBytes={largestUnits << 3}");
+        Console.Error.WriteLine(
+            $"[V8Compat] heap exhausted: request={requestedBytes} caller=0x{caller:X8} " +
+            $"freeBlocks={blocks} freeBytes={totalUnits << 3} largestBytes={largestUnits << 3}");
+        if (_traceHeapSnapshots)
+        {
+            uint blockCursor = head;
+            var blockVisited = new HashSet<uint>();
+            while (blockVisited.Add(blockCursor))
+            {
+                uint block = m.ReadU32(blockCursor);
+                uint units = m.ReadU32(block + 4u);
+                if (units != 0u)
+                {
+                    uint bytes = units << 3;
+                    Console.Error.WriteLine(
+                        $"[V8HeapFreeBlock] start=0x{block:X8} end=0x{block + bytes:X8} bytes={bytes}");
+                }
+                blockCursor = block;
+                if (blockCursor == head)
+                    break;
+            }
+
+            TraceHeapSnapshot(m, "allocation-failure");
+        }
+    }
+
+    static void TraceHeapSnapshot(IMemory memory, string stage)
+    {
+        if (!_traceHeapSnapshots || !_validateHeap)
+            return;
+
+        IMemory m = Dispatcher.UnwrapMemory(memory);
+        const uint headAddress = 0x8005ED4Cu;
+        uint head = m.ReadU32(headAddress);
+        uint cursor = head;
+        uint freeUnits = 0u;
+        uint largestUnits = 0u;
+        int freeBlocks = 0;
+        var visited = new HashSet<uint>();
+        while (visited.Add(cursor) && freeBlocks < 4096)
+        {
+            uint next = m.ReadU32(cursor);
+            uint units = m.ReadU32(next + 4u);
+            freeUnits += units;
+            largestUnits = Math.Max(largestUnits, units);
+            freeBlocks++;
+            cursor = next;
+            if (cursor == head)
+                break;
+        }
+
+        ulong liveBytes = _liveHeapAllocations.Values.Aggregate(
+            0ul,
+            (total, allocation) => total + ((ulong)allocation.Units << 3));
+        int serial = ++_heapSnapshotSerial;
+        Console.Error.WriteLine(
+            $"[V8HeapSnapshot] serial={serial} stage={stage} " +
+            $"liveBlocks={_liveHeapAllocations.Count} liveBytes={liveBytes} " +
+            $"freeBlocks={freeBlocks} freeBytes={(ulong)freeUnits << 3} " +
+            $"largestBytes={(ulong)largestUnits << 3}");
+
+        foreach (var group in _liveHeapAllocations.Values
+                     .GroupBy(allocation => (
+                         allocation.Caller,
+                         allocation.RequestedBytes))
+                     .Select(group => new
+                     {
+                         group.Key.Caller,
+                         group.Key.RequestedBytes,
+                         Count = group.Count(),
+                         Bytes = group.Aggregate(
+                             0ul,
+                             (total, allocation) =>
+                                 total + ((ulong)allocation.Units << 3)),
+                     })
+                     .OrderByDescending(group => group.Bytes)
+                     .Take(24))
+        {
+            Console.Error.WriteLine(
+                $"[V8HeapSnapshotGroup] serial={serial} " +
+                $"caller=0x{group.Caller:X8} " +
+                $"request={group.RequestedBytes} count={group.Count} " +
+                $"bytes={group.Bytes}");
+        }
     }
 
     // The original card library blocks here until its interrupt callback updates

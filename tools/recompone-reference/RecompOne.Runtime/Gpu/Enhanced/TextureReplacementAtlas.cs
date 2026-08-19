@@ -95,12 +95,13 @@ internal sealed class TextureReplacementAtlas : IDisposable
 
     void Load()
     {
-        string root = Runtime.ResolveLoosePath() ?? AppContext.BaseDirectory;
+        string executableRoot = Runtime.ExecutableDirectory;
+        string looseRoot = Runtime.ResolveLoosePath() ?? executableRoot;
         string? overrideDirectory = Environment.GetEnvironmentVariable(
             "RECOMPONE_TEXTURE_PACK_DIR");
         string modsDirectory = Path.Combine(
-            root, "mods", "enhanced_textures_2x");
-        string legacyDirectory = Path.Combine(root, "textures", "2x");
+            Runtime.ModsDirectory, "enhanced_textures_2x");
+        string legacyDirectory = Path.Combine(looseRoot, "textures", "2x");
         string directory = overrideDirectory ??
             (File.Exists(Path.Combine(modsDirectory, "manifest.json"))
                 ? modsDirectory

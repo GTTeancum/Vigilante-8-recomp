@@ -26,11 +26,14 @@ def load(path: Path):
     tris = []
     for line in path.read_text().splitlines():
         f = line.split()
-        if len(f) < 7:
+        if not f or f[0].startswith("#"):
             continue
-        material = int(f[1])
+        offset = 1 if f[0].startswith("nclip=") else 0
+        if len(f) < offset + 8:
+            continue
+        material = int(f[offset + 2])
         verts = []
-        for token in f[4:7]:
+        for token in f[offset + 5:offset + 8]:
             p = token.split(",")
             if len(p) < 8:
                 return None
@@ -42,7 +45,7 @@ def load(path: Path):
                 "scale": float(p[6]),
                 "provenance": float(p[7]),
             })
-        tris.append((f[0], material, verts))
+        tris.append((f[offset], material, verts))
     return tris
 
 

@@ -88,7 +88,11 @@ def collect_uses(trace_dirs: list[Path]) -> dict[Path, list[GlyphUse]]:
                 )
                 width = int(width_text)
                 height = int(height_text)
-                if height != 18:
+                loading_tip_glyph = height == 18
+                start_prompt_glyph = (
+                    height == 15 and tpage == "0x0A5" and clut == "0x7800"
+                )
+                if not (loading_tip_glyph or start_prompt_glyph):
                     continue
                 uses.append(
                     GlyphUse(

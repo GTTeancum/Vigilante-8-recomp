@@ -77,7 +77,7 @@ def main() -> int:
             "RECOMPONE_TRACE_RESULTS": "1",
             "RECOMPONE_SUPPRESS_RUMBLE": "1",
             "RECOMPONE_MUTE": "1",
-            "RECOMPONE_UNTHROTTLED": "1",
+            "RECOMPONE_UNTHROTTLED": "0",
             "RECOMPONE_PRESENTATION_CAPTURE": "1",
             # The native result lock, prompt, and X-to-return input consume
             # roughly 825 presented frames. Retain enough uninterrupted

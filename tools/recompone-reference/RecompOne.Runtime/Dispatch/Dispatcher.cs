@@ -16,6 +16,7 @@ public static class Dispatcher
     static readonly Dictionary<uint, (uint Base, uint Size, uint Delta)> _objectOwners = [];
     static readonly List<(IOverlay Overlay, uint Delta)> _relocatedImages = [];
     private static IOverlay? _pending;
+    static int _dreamlandInvalidObjectCallbacks;
     public static void Register(string name, IOverlay overlay)
     {
         _registry[name] = overlay;
@@ -347,9 +348,23 @@ public static class Dispatcher
         if (!_funcMap.ContainsKey(addr))
             TryLoadRelocatedOverlay(m, addr);
         if (!_funcMap.TryGetValue(addr, out var fn))
+        {
+            if (Sdk.V82ArenaRegistry.IsDreamlandSelected &&
+                objectCallback &&
+                addr < 0x80000000u)
+            {
+                c.V0 = 0u;
+                if (_dreamlandInvalidObjectCallbacks++ < 8)
+                    Console.Error.WriteLine(
+                        "[V82DreamlandDispatch] ignored invalid object " +
+                        $"callback=0x{addr:X8} object=0x{c.A0:X8} " +
+                        $"event=0x{c.A1:X8} caller=0x{c.RA:X8}");
+                return;
+            }
             throw new InvalidOperationException(
                 $"unmapped call: 0x{addr:X8}; {DescribeCallContext(c, m)}; " +
                 $"overlay images: {DescribeOverlayImages(m, addr)}");
+        }
         IMemory callMemory = m;
         if (_relocatedFunctions.TryGetValue(addr, out var relocation) && relocation.Delta != 0)
         {

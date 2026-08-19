@@ -35,13 +35,18 @@ public static class GpuHle
         string Owner);
     static readonly List<PacketRange> VehiclePacketRanges = [];
     static readonly List<PacketRange> ImportedVehiclePacketRanges = [];
-    static readonly List<PacketRange> DreamlandWaterPacketRanges = [];
     static readonly List<OwnedPacketRange> OwnedPacketRanges = [];
     static readonly HashSet<uint> VehiclePackets = [];
+    static readonly HashSet<uint> VehicleReflectionPackets = [];
     static readonly HashSet<uint> DreamlandWaterPackets = [];
     static readonly HashSet<uint> TerrainRoutePackets = [];
     static readonly Dictionary<uint, string> PacketOwners = [];
+    static int _dreamlandWaterWriteScopeDepth;
     static int _terrainRouteWriteScopeDepth;
+    readonly record struct TerrainRouteColorRamp(
+        byte LowR, byte LowG, byte LowB,
+        byte HighR, byte HighG, byte HighB);
+    static TerrainRouteColorRamp? _terrainRouteColorRamp;
 
     static uint NormalizePacketAddress(uint address)
     {
@@ -98,41 +103,37 @@ public static class GpuHle
         VehiclePacketRanges.Clear();
         ImportedVehiclePacketRanges.Clear();
         VehiclePackets.Clear();
+        VehicleReflectionPackets.Clear();
     }
 
     public static void RegisterVehiclePacket(uint address) =>
         VehiclePackets.Add(NormalizePacketAddress(address));
 
+    public static bool IsVehicleReflectionPacket(uint address) =>
+        VehicleReflectionPackets.Contains(NormalizePacketAddress(address));
+
+    public static void RegisterVehicleReflectionPacket(uint address) =>
+        VehicleReflectionPackets.Add(NormalizePacketAddress(address));
+
     public static void RegisterDreamlandWaterPacket(uint address) =>
         DreamlandWaterPackets.Add(NormalizePacketAddress(address));
 
-    public static void RegisterDreamlandWaterPacketRange(uint start, uint end)
-    {
-        start = NormalizePacketAddress(start);
-        end = NormalizePacketAddress(end);
-        if (end <= start)
-            return;
-        var range = new PacketRange(start, end);
-        if (!DreamlandWaterPacketRanges.Contains(range))
-            DreamlandWaterPacketRanges.Add(range);
-    }
+    public static bool IsDreamlandWaterPacket(uint address) =>
+        DreamlandWaterPackets.Contains(NormalizePacketAddress(address));
 
-    public static bool IsDreamlandWaterPacket(uint address)
+    public static void BeginDreamlandWaterPacketWrites() =>
+        _dreamlandWaterWriteScopeDepth++;
+
+    public static void EndDreamlandWaterPacketWrites()
     {
-        address = NormalizePacketAddress(address);
-        if (DreamlandWaterPackets.Contains(address))
-            return true;
-        foreach (PacketRange range in DreamlandWaterPacketRanges)
-            if (address >= range.Start && address < range.End)
-                return true;
-        return false;
+        if (_dreamlandWaterWriteScopeDepth > 0)
+            _dreamlandWaterWriteScopeDepth--;
     }
 
     // The original engine has a dedicated route-strip renderer at
-    // FUN_80040E38/FUN_80040E5C. PSMemory calls this observer for native
-    // 32-bit packet writes only while that renderer is on the call stack.
-    // This is source provenance: no tpage, CLUT, UV, colour, or arena-specific
-    // signature is used to infer whether a primitive is a road.
+    // FUN_80040E38/FUN_80040E5C. Its call-stack scope, and the exact converted
+    // Dreamland water-mesh scope, provide source provenance without inferring
+    // material identity from tpage, CLUT, UV, colour, or packet address.
     public static void BeginTerrainRoutePacketWrites() =>
         _terrainRouteWriteScopeDepth++;
 
@@ -142,16 +143,95 @@ public static class GpuHle
             _terrainRouteWriteScopeDepth--;
     }
 
-    public static void ObserveTerrainRoutePacketWrite(uint physicalAddress)
+    public static void ObservePacketWrite(uint physicalAddress)
     {
-        if (_terrainRouteWriteScopeDepth <= 0 ||
-            physicalAddress >= Memory.MemoryMap.RamWindow)
+        if (physicalAddress >= Memory.MemoryMap.RamWindow)
             return;
-        TerrainRoutePackets.Add(NormalizePacketAddress(physicalAddress));
+
+        uint address = NormalizePacketAddress(physicalAddress);
+        if (_dreamlandWaterWriteScopeDepth > 0)
+            DreamlandWaterPackets.Add(address);
+        else
+            DreamlandWaterPackets.Remove(address);
+
+        if (_terrainRouteWriteScopeDepth > 0)
+        {
+            TerrainRoutePackets.Add(address);
+            return;
+        }
+
+        // V8 recycles its GPU packet arena continuously. Provenance belongs
+        // to the renderer that produced the current bytes, not permanently to
+        // a RAM address. A write outside either source scope therefore retires
+        // an old water/route tag before that address can be submitted again.
+        TerrainRoutePackets.Remove(address);
     }
 
     public static bool IsTerrainRoutePacket(uint address) =>
         TerrainRoutePackets.Contains(NormalizePacketAddress(address));
+
+    /// <summary>
+    /// Installs the two authored COLS endpoints used by an N64 arena's route
+    /// builder. Native PS1 route vertices retain the terrain lighting index as
+    /// grayscale <c>index &lt;&lt; 2</c>; the N64 renderer instead expands that
+    /// index through this inclusive 32-entry colour ramp.
+    /// </summary>
+    public static bool SetTerrainRouteColorRamp(
+        byte lowR, byte lowG, byte lowB,
+        byte highR, byte highG, byte highB)
+    {
+        var value = new TerrainRouteColorRamp(
+            lowR, lowG, lowB, highR, highG, highB);
+        if (_terrainRouteColorRamp == value)
+            return false;
+        _terrainRouteColorRamp = value;
+        return true;
+    }
+
+    public static void ClearTerrainRouteColorRamp() =>
+        _terrainRouteColorRamp = null;
+
+    public static bool TerrainRouteColorRampActive =>
+        _terrainRouteColorRamp is not null;
+
+    static int InterpolateRouteChannel(byte low, byte high, int shade) =>
+        low + ((high - low) * shade) / 124;
+
+    /// <summary>
+    /// Decodes one native route shade into the N64 vertex RGB domain. Authored
+    /// terrain indices are stored as <c>index &lt;&lt; 2</c> (0..124). The
+    /// original near-plane path at 0x80040e5c also averages pairs of those
+    /// bytes when it creates midpoint vertices, so valid generated shades can
+    /// lie between the four-unit index samples. Using 124 as the denominator
+    /// is algebraically identical to the source signed /31 ramp at every
+    /// authored index and preserves those generated fractional samples.
+    /// </summary>
+    public static bool TryDecodeTerrainRouteColor(
+        byte red,
+        byte green,
+        byte blue,
+        out byte mappedRed,
+        out byte mappedGreen,
+        out byte mappedBlue,
+        out int index)
+    {
+        mappedRed = red;
+        mappedGreen = green;
+        mappedBlue = blue;
+        index = -1;
+        if (_terrainRouteColorRamp is not { } ramp ||
+            red != green || red != blue || red > 124)
+            return false;
+
+        index = red >> 2;
+        mappedRed = (byte)InterpolateRouteChannel(
+            ramp.LowR, ramp.HighR, red);
+        mappedGreen = (byte)InterpolateRouteChannel(
+            ramp.LowG, ramp.HighG, red);
+        mappedBlue = (byte)InterpolateRouteChannel(
+            ramp.LowB, ramp.HighB, red);
+        return true;
+    }
 
     public static void RegisterPacketOwner(uint address, string owner) =>
         PacketOwners[NormalizePacketAddress(address)] = owner;
@@ -204,6 +284,24 @@ public static class GpuHle
         OwnedPacketRanges.Clear();
     }
 
+    public static void ResetSceneTracking()
+    {
+        VehiclePacketRanges.Clear();
+        ImportedVehiclePacketRanges.Clear();
+        OwnedPacketRanges.Clear();
+        VehiclePackets.Clear();
+        VehicleReflectionPackets.Clear();
+        DreamlandWaterPackets.Clear();
+        TerrainRoutePackets.Clear();
+        PacketOwners.Clear();
+        _dreamlandWaterWriteScopeDepth = 0;
+        _terrainRouteWriteScopeDepth = 0;
+        _terrainRouteColorRamp = null;
+        DebugGameplayTick = 0;
+        NativeModalHold = 0;
+        Backend?.ResetTransientState();
+    }
+
     public static void BeginPacketArena(uint start, uint end)
     {
         start = NormalizePacketAddress(start);
@@ -219,11 +317,11 @@ public static class GpuHle
             range.Start < end && range.End > start);
         ImportedVehiclePacketRanges.RemoveAll(range =>
             range.Start < end && range.End > start);
-        DreamlandWaterPacketRanges.RemoveAll(range =>
-            range.Start < end && range.End > start);
         OwnedPacketRanges.RemoveAll(range =>
             range.Start < end && range.End > start);
         VehiclePackets.RemoveWhere(address =>
+            address >= start && address < end);
+        VehicleReflectionPackets.RemoveWhere(address =>
             address >= start && address < end);
         DreamlandWaterPackets.RemoveWhere(address =>
             address >= start && address < end);

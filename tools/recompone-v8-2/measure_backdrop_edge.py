@@ -24,10 +24,11 @@ def backdrop_edges(path: Path, zlo: float, zhi: float, min_area: float):
         if line.startswith("#"):
             continue
         f = line.split()
-        if len(f) < 8 or int(f[2]) != 2:
+        offset = 1 if f and f[0].startswith("nclip=") else 0
+        if len(f) < offset + 8 or int(f[offset + 2]) != 2:
             continue
         pts = []
-        for token in f[5:8]:
+        for token in f[offset + 5:offset + 8]:
             q = token.split(",")
             try:
                 sx, sy, z = float(q[2]), float(q[3]), float(q[4])

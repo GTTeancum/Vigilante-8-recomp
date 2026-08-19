@@ -29,9 +29,12 @@ public static class ConfigManager
     // Resolve it next to the executable instead, and migrate a config found
     // beside the launch directory the first time so nothing is lost.
     static readonly string GameConfigPath =
-        Path.Combine(AppContext.BaseDirectory, "settings.json");
+        Path.Combine(global::RecompOne.Runtime.Runtime.ExecutableDirectory,
+            "settings.json");
     const string LegacyGameConfigPath = "settings.json";
-    const string InterfaceFile = "interface.ini";
+    static readonly string InterfaceFile =
+        Path.Combine(global::RecompOne.Runtime.Runtime.ExecutableDirectory,
+            "interface.ini");
 
     public static GameConfig Game { get; private set; } = new();
     public static ViewConfig  View { get; private set; } = new();

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 import os
@@ -90,8 +91,8 @@ def main() -> int:
             "RECOMPONE_GPU_HLE": "1",
             "RECOMPONE_MUTE": "1",
             "RECOMPONE_SUPPRESS_RUMBLE": "1",
-            "RECOMPONE_UNTHROTTLED": "1",
-            "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS": "5300",
+            "RECOMPONE_UNTHROTTLED": "0",
+            "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS": "10500",
             "RECOMPONE_PRESENTATION_CAPTURE": "1",
             "RECOMPONE_PRESENTATION_RESOLUTION": "1280x720",
             "RECOMPONE_CAPTURE_NATIVE_GUEST_SELECTOR": "1",
@@ -169,19 +170,33 @@ def main() -> int:
     enemy_capture = (
         "captured presentation 'native_enemy_selector'" in text
     )
+    preview_build_counts = Counter(re.findall(
+        r"\[V82Vehicles\] built (guest\.v8\.[a-z0-9_]+) selector=",
+        text,
+    ))
+    complete_double_roster = (
+        len(preview_build_counts) == 12
+        and all(count >= 2 for count in preview_build_counts.values())
+    )
     clean_exit = (
         process.returncode == 0
-        and "deterministic replay completed at poll 5300" in text
+        and "deterministic replay completed at poll 10500" in text
     )
     passed = (
         not reason
         and captures == list(range(12))
+        and complete_double_roster
         and enemy_stage
         and enemy_capture
         and clean_exit
     )
     if not reason and captures != list(range(12)):
         reason = f"selector captures {captures}, expected 0-11"
+    if not reason and not complete_double_roster:
+        reason = (
+            "selector did not construct every imported preview twice: "
+            f"{dict(sorted(preview_build_counts.items()))}"
+        )
     if not reason and not enemy_stage:
         reason = "enemy selector was not reached"
     if not reason and not enemy_capture:
@@ -189,14 +204,13 @@ def main() -> int:
     if not reason and not clean_exit:
         reason = f"process exit was not clean: {process.returncode}"
 
-    guest_images = [
-        output
-        / (
-            f"recompone_present_native_guest_{index:02}_"
-            "1280x720_fxaa.ppm"
-        )
-        for index in range(12)
-    ]
+    guest_images = []
+    for index in range(12):
+        matches = sorted(output.glob(
+            f"recompone_present_native_guest_{index:02}_1280x720_*.ppm"
+        ))
+        if len(matches) == 1:
+            guest_images.append(matches[0])
     contact_sheet = output / "all-guests-contact.bmp"
     material_report = output / "vehicle-materials.json"
     material_exit = subprocess.run(
@@ -216,7 +230,8 @@ def main() -> int:
             "classified as glass"
         )
         passed = False
-    if all(image.is_file() for image in guest_images):
+    if len(guest_images) == 12 and all(
+            image.is_file() for image in guest_images):
         subprocess.run(
             [
                 str(BLENDER_PYTHON),
@@ -242,6 +257,8 @@ def main() -> int:
         "executable_sha256":
             hashlib.sha256(exe.read_bytes()).hexdigest().upper(),
         "captures": captures,
+        "preview_build_counts": dict(sorted(preview_build_counts.items())),
+        "complete_double_roster": complete_double_roster,
         "enemy_stage": enemy_stage,
         "enemy_capture": enemy_capture,
         "clean_exit": clean_exit,

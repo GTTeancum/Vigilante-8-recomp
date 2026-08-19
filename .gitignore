@@ -63,6 +63,7 @@ __pycache__/
 /tools/n64_reference/bin/
 /tools/n64_reference/state/
 /tools/n64_reference/vendor/
+/tools/recompone-v8-2/reference-host/bin/
 
 # Compiled objects
 **/obj/
@@ -70,6 +71,7 @@ __pycache__/
 *.obj
 *.exe
 *.dll
+!tools/recompone-v8-2/reference-host/runtime/win-x64/vcruntime140.dll
 *.so
 *.dylib
 *.a

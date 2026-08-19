@@ -24,7 +24,7 @@ public static class ModLoader
     public static void LoadAll(string? root = null)
     {
         root ??= Environment.GetEnvironmentVariable("RECOMPONE_MOD_DIR");
-        root = Path.GetFullPath(root ?? "mods");
+        root = Path.GetFullPath(root ?? Runtime.ModsDirectory);
         Directory.CreateDirectory(root);
 
         if (IsSingleFileApplication())

@@ -42,6 +42,27 @@
              Link="V82NativeVideoPage.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeTextPageInput.cs"
              Link="V82NativeTextPageInput.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\LEVELS_N64_DREAMLND.cs"
+             Link="LEVELS_N64_DREAMLND.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- GLFW uses the dynamic MSVC runtime. Bundle the official redistributable
+         app-locally so the single-file release has no VC Redist prerequisite. -->
+    <Content Include="runtime\win-x64\vcruntime140.dll"
+             Link="vcruntime140.dll"
+             TargetPath="vcruntime140.dll"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             ExcludeFromSingleFile="false" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\main.cs')">
+    <!-- The source-tree reference host supplies its own top-level Program but
+         exercises the current generated dispatch tables and entry point. The
+         same project file is copied into generated/recompiled, where default
+         compile items already include these files. -->
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\..\reference-v8-2\generated\recompiled\*.cs"
+             Exclude="$(MSBuildThisFileDirectory)..\..\..\reference-v8-2\generated\recompiled\Program.cs"
+             Link="Generated\%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup Condition="'$(PublishTrimmed)' == 'true'">
     <!-- Silk discovers input backends through assembly attributes. Keep that
@@ -54,7 +75,8 @@
           BeforeTargets="CoreCompile"
           Condition="Exists('$(MSBuildProjectDirectory)\main.cs')">
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_vehicle_engine_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
-    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_selector_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot;" />
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_selector_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot; --main-source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_options_patches.py&quot; --shell-source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot; --main-source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\port_dreamland_overlay.py&quot;" />
   </Target>
 </Project>

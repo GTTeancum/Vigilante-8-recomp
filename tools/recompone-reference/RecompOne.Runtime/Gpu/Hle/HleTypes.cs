@@ -33,12 +33,15 @@ public enum HleMaterialKind : byte
     ScreenEffect,
     TerrainRoute,
     ImportedShadow,
+    VehicleReflection,
+    OpaqueVehicleGlass,
 }
 
 public struct PrimFlags
 {
     public bool Textured, SemiTrans, RawTexture, Gouraud, Vehicle;
-    public bool DreamlandWater, TerrainRoute;
+    public bool DreamlandWater, TerrainRoute, N64RouteColor;
+    public bool N64RouteDepthCompare;
     public HleMaterialKind Material;
     public ushort TPage; 
     public ushort Clut; 

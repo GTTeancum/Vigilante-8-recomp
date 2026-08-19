@@ -1,6 +1,7 @@
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Host;
 using RecompOne.Runtime.Memory;
+using System.Reflection;
 
 namespace RecompOne.Runtime;
 
@@ -19,6 +20,39 @@ public static class Runtime
     public static Cdrom.CdController? Cd;
     public static string GameTitle { get; private set; } = "";
 
+    public static string ExecutableDirectory
+    {
+        get
+        {
+            // IncludeAllContentForSelfExtract makes EntryAssembly.Location
+            // point into the single-file bundle's temporary cache. An apphost
+            // process path identifies the actual shipped executable. Retain
+            // the assembly fallback only for `dotnet application.dll` runs.
+            string? processPath = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(processPath) &&
+                !Path.GetFileNameWithoutExtension(processPath).Equals(
+                    "dotnet", StringComparison.OrdinalIgnoreCase))
+                return Path.GetDirectoryName(processPath) ??
+                    Environment.CurrentDirectory;
+
+            string? entryPath = Assembly.GetEntryAssembly()?.Location;
+            return Path.GetDirectoryName(entryPath) ??
+                Environment.CurrentDirectory;
+        }
+    }
+
+    public static string ModsDirectory
+    {
+        get
+        {
+            string? configured = Environment.GetEnvironmentVariable(
+                "RECOMPONE_MOD_DIR");
+            return Path.GetFullPath(string.IsNullOrWhiteSpace(configured)
+                ? Path.Combine(ExecutableDirectory, "mods")
+                : configured);
+        }
+    }
+
     public static RunMode Mode { get; private set; } = RunMode.Retail;
     public static void ConfigureGameTitle(string title) => GameTitle = title;
     public static void SetMode(RunMode mode) => Mode = mode; //devkit vs retail, devkits reads from sim and has more ram
@@ -36,7 +70,7 @@ public static class Runtime
         string? configured = Environment.GetEnvironmentVariable("RECOMPONE_LOOSE_DIR");
         if (configured == "0") return null;
         string candidate = string.IsNullOrWhiteSpace(configured)
-            ? AppContext.BaseDirectory
+            ? ExecutableDirectory
             : Path.GetFullPath(configured);
         if (string.IsNullOrWhiteSpace(configured) &&
             !File.Exists(Path.Combine(candidate, "SYSTEM.CNF")))
@@ -47,8 +81,10 @@ public static class Runtime
     public static Config.ViewConfig View => Config.ConfigManager.View;
     public static void SaveView() => Config.ConfigManager.SaveView(Host.Window.PanelManager.Panels);
     
-    public static Hardware.MemoryCard CardA = new("carda.sav") { Enabled = true };
-    public static Hardware.MemoryCard CardB = new("cardb.sav") { Enabled = true };
+    public static Hardware.MemoryCard CardA = new(
+        Path.Combine(ExecutableDirectory, "carda.sav")) { Enabled = true };
+    public static Hardware.MemoryCard CardB = new(
+        Path.Combine(ExecutableDirectory, "cardb.sav")) { Enabled = true };
     public static readonly Memory.RamLogger RamLog = new();
     public static readonly Dispatch.OverlayEventLog OverlayLog = new();
 

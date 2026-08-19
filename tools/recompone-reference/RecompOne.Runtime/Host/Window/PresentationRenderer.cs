@@ -8,6 +8,8 @@ namespace RecompOne.Runtime.Host.Window;
 // PS1 framebuffer; this class cannot affect emulated VRAM or game state.
 internal sealed class PresentationRenderer : IDisposable
 {
+    const string LoadingCardSuffix = "_loading_card_4x.ppm";
+
     const string UpscaleFs = """
         #version 330 core
         in vec2 vUv;
@@ -20,6 +22,12 @@ internal sealed class PresentationRenderer : IDisposable
         uniform sampler2D uLoadingCard;
         uniform int uLoadingCardOverlay;
         uniform vec4 uLoadingCardRect;
+        uniform vec4 uLoadingCardSampleRect;
+        uniform sampler2D uDreamlandSelector;
+        uniform int uDreamlandSelectorOverlay;
+        uniform vec4 uDreamlandSelectorRect;
+        uniform int uDreamlandLocationMarkerOverlay;
+        uniform vec4 uDreamlandLocationMarkerRect;
         out vec4 oColor;
 
         vec3 sourcePixel(ivec2 p) {
@@ -43,6 +51,24 @@ internal sealed class PresentationRenderer : IDisposable
             return mix(a, b, f.y);
         }
 
+        float segment(vec2 p, vec2 a, vec2 b, float width) {
+            vec2 pa = p - a;
+            vec2 ba = b - a;
+            float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+            return 1.0 - smoothstep(width, width + 0.035,
+                length(pa - ba * h));
+        }
+
+        float roundedRectMask(
+            vec2 uv, vec2 pixelSize, float radius, float softness) {
+            vec2 p = (uv - 0.5) * pixelSize;
+            vec2 q = abs(p) - (pixelSize * 0.5 - vec2(radius));
+            float distanceToEdge =
+                length(max(q, vec2(0.0))) +
+                min(max(q.x, q.y), 0.0) - radius;
+            return 1.0 - smoothstep(-softness, softness, distanceToEdge);
+        }
+
         void main() {
             ivec2 size = ivec2(uSourceSize);
             ivec2 p = clamp(ivec2(vUv * uSourceSize), ivec2(0), size - 1);
@@ -54,15 +80,62 @@ internal sealed class PresentationRenderer : IDisposable
                 vec2 innerUv = (vUv - uLoadingCardRect.xy) / uLoadingCardRect.zw;
                 if (innerUv.x >= 0.0 && innerUv.x <= 1.0 &&
                     innerUv.y >= 0.0 && innerUv.y <= 1.0) {
-                    bool preserveTitle =
-                        vUv.x < 0.55 && vUv.y < 0.20;
+                    bool preserveTitle = vUv.y < 0.16;
                     if (!preserveTitle) {
-                        vec2 cardUv =
-                            vec2(80.0 / 1280.0, 32.0 / 384.0) +
-                            innerUv * vec2(1120.0 / 1280.0, 320.0 / 384.0);
+                        vec2 cardUv = uLoadingCardSampleRect.xy +
+                            innerUv * uLoadingCardSampleRect.zw;
                         center = texture(uLoadingCard, cardUv).rgb;
                         loadingCardPixel = true;
                     }
+                }
+            }
+            if (uDreamlandSelectorOverlay != 0) {
+                vec2 innerUv =
+                    (vUv - uDreamlandSelectorRect.xy) /
+                    uDreamlandSelectorRect.zw;
+                if (innerUv.x >= 0.0 && innerUv.x <= 1.0 &&
+                    innerUv.y >= 0.0 && innerUv.y <= 1.0) {
+                    vec3 preview = texture(uDreamlandSelector, innerUv).rgb;
+                    float rounded = roundedRectMask(
+                        innerUv, vec2(440.0, 115.0), 23.0, 1.5);
+                    float mapBottom = min(
+                        0.26, max(0.0, (innerUv.x - 0.59) * 1.40));
+                    float behindUsaMap = smoothstep(
+                        mapBottom - 0.008,
+                        mapBottom + 0.008,
+                        innerUv.y);
+                    float previewAlpha = rounded * behindUsaMap;
+                    center = mix(center, preview, previewAlpha);
+                    loadingCardPixel = loadingCardPixel || previewAlpha > 0.0;
+                }
+            }
+            if (uDreamlandLocationMarkerOverlay != 0) {
+                vec2 markerUv =
+                    (vUv - uDreamlandLocationMarkerRect.xy) /
+                    uDreamlandLocationMarkerRect.zw;
+                if (markerUv.x >= 0.0 && markerUv.x <= 1.0 &&
+                    markerUv.y >= 0.0 && markerUv.y <= 1.0) {
+                    vec2 p = markerUv;
+                    float outer = step(abs(p.x - 0.5) / 0.48 +
+                        abs(p.y - 0.54) / 0.64, 1.0);
+                    float inner = step(abs(p.x - 0.5) / 0.42 +
+                        abs(p.y - 0.55) / 0.54, 1.0);
+                    vec3 marker = p.y < 0.45
+                        ? vec3(0.72, 0.02, 0.10)
+                        : vec3(0.08, 0.18, 0.62);
+                    float vStroke = max(
+                        segment(p, vec2(0.22, 0.30), vec2(0.39, 0.70), 0.055),
+                        segment(p, vec2(0.39, 0.70), vec2(0.56, 0.30), 0.055));
+                    float eightStroke = max(
+                        1.0 - smoothstep(0.06, 0.09,
+                            abs(distance(p, vec2(0.72, 0.42)) - 0.105)),
+                        1.0 - smoothstep(0.06, 0.09,
+                            abs(distance(p, vec2(0.72, 0.64)) - 0.105)));
+                    float letters = max(vStroke, eightStroke) * inner;
+                    marker = mix(marker, vec3(0.92, 0.92, 0.82), letters);
+                    float alpha = max(outer * 0.55, inner);
+                    center = mix(center, marker, alpha);
+                    loadingCardPixel = true;
                 }
             }
             if (uDedither == 0) {
@@ -185,14 +258,24 @@ internal sealed class PresentationRenderer : IDisposable
     readonly GL _gl;
     uint _vao, _vbo, _upscaleProgram, _fxaaProgram;
     uint _upscaleTexture, _fxaaTexture, _upscaleFbo, _fxaaFbo;
-    uint _loadingCardTexture;
-    int _loadingCardWidth, _loadingCardHeight;
+    uint _dreamlandSelectorTexture;
+    readonly Dictionary<string, uint> _loadingCardTextures =
+        new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, string> _loadingCardPaths =
+        new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, (int Width, int Height)> _loadingCardSizes =
+        new(StringComparer.OrdinalIgnoreCase);
+    string? _lastLoadingCardArena;
     int _width, _height;
     int _lastSourceWidth, _lastSourceHeight, _lastOutputWidth, _lastOutputHeight;
     bool _lastFxaa;
     int _upscaleSourceSize, _upscaleDedither, _upscaleDeditherStep;
     int _upscaleLinearFilter, _upscaleLoadingUiRestore;
     int _upscaleLoadingCardOverlay, _upscaleLoadingCardRect;
+    int _upscaleLoadingCardSampleRect;
+    int _upscaleDreamlandSelectorOverlay, _upscaleDreamlandSelectorRect;
+    int _upscaleDreamlandLocationMarkerOverlay;
+    int _upscaleDreamlandLocationMarkerRect;
     int _fxaaSourceSize, _fxaaInvResolution;
 
     public bool Ready { get; private set; }
@@ -216,6 +299,8 @@ internal sealed class PresentationRenderer : IDisposable
         _gl.UseProgram(_upscaleProgram);
         _gl.Uniform1(_gl.GetUniformLocation(_upscaleProgram, "uSource"), 0);
         _gl.Uniform1(_gl.GetUniformLocation(_upscaleProgram, "uLoadingCard"), 1);
+        _gl.Uniform1(
+            _gl.GetUniformLocation(_upscaleProgram, "uDreamlandSelector"), 2);
         _upscaleSourceSize = _gl.GetUniformLocation(_upscaleProgram, "uSourceSize");
         _upscaleDedither =
             _gl.GetUniformLocation(_upscaleProgram, "uDedither");
@@ -229,6 +314,16 @@ internal sealed class PresentationRenderer : IDisposable
             _gl.GetUniformLocation(_upscaleProgram, "uLoadingCardOverlay");
         _upscaleLoadingCardRect =
             _gl.GetUniformLocation(_upscaleProgram, "uLoadingCardRect");
+        _upscaleLoadingCardSampleRect =
+            _gl.GetUniformLocation(_upscaleProgram, "uLoadingCardSampleRect");
+        _upscaleDreamlandSelectorOverlay = _gl.GetUniformLocation(
+            _upscaleProgram, "uDreamlandSelectorOverlay");
+        _upscaleDreamlandSelectorRect = _gl.GetUniformLocation(
+            _upscaleProgram, "uDreamlandSelectorRect");
+        _upscaleDreamlandLocationMarkerOverlay = _gl.GetUniformLocation(
+            _upscaleProgram, "uDreamlandLocationMarkerOverlay");
+        _upscaleDreamlandLocationMarkerRect = _gl.GetUniformLocation(
+            _upscaleProgram, "uDreamlandLocationMarkerRect");
         _gl.UseProgram(_fxaaProgram);
         _gl.Uniform1(_gl.GetUniformLocation(_fxaaProgram, "uSource"), 0);
         _fxaaSourceSize = _gl.GetUniformLocation(_fxaaProgram, "uSourceSize");
@@ -246,7 +341,8 @@ internal sealed class PresentationRenderer : IDisposable
 
         (_upscaleTexture, _upscaleFbo) = CreateTarget();
         (_fxaaTexture, _fxaaFbo) = CreateTarget();
-        LoadLoadingCardOverlay();
+        LoadLoadingCardOverlays();
+        LoadDreamlandSelectorPreview();
         EnsureSize(1, 1);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         Ready = true;
@@ -333,23 +429,83 @@ internal sealed class PresentationRenderer : IDisposable
                 : 1);
         _gl.Uniform1(_upscaleLinearFilter, 0);
         _gl.Uniform1(_upscaleLoadingUiRestore, loadingUiSource ? 1 : 0);
-        bool route66LoadingCard = Dispatcher.ActiveNames.Any(
-            name => name.Equals("LEVELS_ROUTE66", StringComparison.OrdinalIgnoreCase));
+        bool dreamlandLoading =
+            preTickLoadingCard &&
+            RecompOne.Runtime.Sdk.V82ArenaRegistry.IsDreamlandSelected;
+        string? loadingCardArena =
+            dreamlandLoading &&
+            _loadingCardTextures.ContainsKey("LEVELS_N64_DREAMLND")
+                ? "LEVELS_N64_DREAMLND"
+                : Dispatcher.ActiveNames.FirstOrDefault(
+                    name => _loadingCardTextures.ContainsKey(name));
+        uint loadingCardTexture = loadingCardArena == null
+            ? 0
+            : _loadingCardTextures[loadingCardArena];
+        (int Width, int Height) loadingCardSize = loadingCardArena == null
+            ? (1280, 384)
+            : _loadingCardSizes[loadingCardArena];
         bool loadingCardOverlay =
-            preTickLoadingCard && route66LoadingCard && _loadingCardTexture != 0;
+            preTickLoadingCard && loadingCardTexture != 0;
         _gl.Uniform1(_upscaleLoadingCardOverlay, loadingCardOverlay ? 1 : 0);
+        float loadingCardRectHeight = loadingCardSize.Height == 448 ? 288f : 240f;
+        float loadingCardLeft = 0f;
+        float loadingCardWidth = 1280f;
         _gl.Uniform4(
             _upscaleLoadingCardRect,
-            224f / 1280f,
-            90f / 720f,
-            832f / 1280f,
-            240f / 720f);
+            loadingCardLeft / 1280f,
+            (210f - loadingCardRectHeight * 0.5f) / 720f,
+            loadingCardWidth / 1280f,
+            loadingCardRectHeight / 720f);
+        _gl.Uniform4(
+            _upscaleLoadingCardSampleRect,
+            0f,
+            32f / loadingCardSize.Height,
+            1f,
+            (loadingCardSize.Height - 64f) / loadingCardSize.Height);
         if (loadingCardOverlay)
         {
+            if (!loadingCardArena!.Equals(
+                    _lastLoadingCardArena, StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine(
+                    $"[TexturePack] selected loading card overlay " +
+                    $"arena={loadingCardArena}: {_loadingCardPaths[loadingCardArena]}");
+                _lastLoadingCardArena = loadingCardArena;
+            }
             _gl.ActiveTexture(TextureUnit.Texture1);
-            _gl.BindTexture(TextureTarget.Texture2D, _loadingCardTexture);
+            _gl.BindTexture(TextureTarget.Texture2D, loadingCardTexture);
             _gl.ActiveTexture(TextureUnit.Texture0);
         }
+        bool dreamlandSelectorOverlay =
+            offGameplayV82Ui &&
+            RecompOne.Runtime.Sdk.V82ArenaRegistry.IsDreamlandHighlighted &&
+            _dreamlandSelectorTexture != 0;
+        _gl.Uniform1(
+            _upscaleDreamlandSelectorOverlay,
+            dreamlandSelectorOverlay ? 1 : 0);
+        _gl.Uniform4(
+            _upscaleDreamlandSelectorRect,
+            90f / 1280f,
+            383f / 720f,
+            440f / 1280f,
+            115f / 720f);
+        if (dreamlandSelectorOverlay)
+        {
+            _gl.ActiveTexture(TextureUnit.Texture2);
+            _gl.BindTexture(
+                TextureTarget.Texture2D,
+                _dreamlandSelectorTexture);
+            _gl.ActiveTexture(TextureUnit.Texture0);
+        }
+        _gl.Uniform1(
+            _upscaleDreamlandLocationMarkerOverlay,
+            dreamlandSelectorOverlay ? 1 : 0);
+        _gl.Uniform4(
+            _upscaleDreamlandLocationMarkerRect,
+            142f / 1280f,
+            312f / 720f,
+            48f / 1280f,
+            52f / 720f);
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
 
         uint finalTexture = _upscaleTexture;
@@ -386,26 +542,61 @@ internal sealed class PresentationRenderer : IDisposable
         _gl.BindTexture(TextureTarget.Texture2D, sourceTexture);
     }
 
-    void LoadLoadingCardOverlay()
+    void LoadLoadingCardOverlays()
     {
-        string? explicitPath =
-            Environment.GetEnvironmentVariable("RECOMPONE_ROUTE66_LOADING_CARD_PPM");
-        string? looseRoot = Runtime.ResolveLoosePath();
-        string? path = !string.IsNullOrWhiteSpace(explicitPath)
-            ? explicitPath
-            : looseRoot == null
-                ? null
-                : Path.Combine(
-                    looseRoot,
-                    "mods",
-                    "enhanced_textures_2x",
-                    "loading_cards",
-                    "route66_loading_card_4x.ppm");
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+        string modsRoot = Runtime.ModsDirectory;
+        string? directory =
+            Environment.GetEnvironmentVariable("RECOMPONE_LOADING_CARD_DIR");
+        if (string.IsNullOrWhiteSpace(directory))
+            directory = Path.Combine(
+                modsRoot,
+                "enhanced_textures_2x",
+                "loading_cards");
 
+        if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+        {
+            LoadLoadingCardDirectory(directory);
+        }
+
+        string dreamlandDirectory = Path.Combine(
+            modsRoot,
+            "v82_n64_super_dreamland",
+            "loading_cards");
+        if (Directory.Exists(dreamlandDirectory))
+            LoadLoadingCardDirectory(dreamlandDirectory);
+
+        string? route66Override = Environment.GetEnvironmentVariable(
+            "RECOMPONE_ROUTE66_LOADING_CARD_PPM");
+        if (!string.IsNullOrWhiteSpace(route66Override) &&
+            File.Exists(route66Override))
+        {
+            LoadLoadingCardOverlay("LEVELS_ROUTE66", route66Override);
+        }
+
+        Console.WriteLine(
+            $"[TexturePack] loaded {_loadingCardTextures.Count} loading card overlays");
+    }
+
+    void LoadLoadingCardDirectory(string directory)
+    {
+        foreach (string path in Directory.EnumerateFiles(
+                     directory, $"*{LoadingCardSuffix}"))
+        {
+            string fileName = Path.GetFileName(path);
+            string stem = fileName[..^LoadingCardSuffix.Length];
+            LoadLoadingCardOverlay(
+                $"LEVELS_{stem.ToUpperInvariant()}", path);
+        }
+    }
+
+    void LoadLoadingCardOverlay(string arena, string path)
+    {
         try
         {
             (int width, int height, byte[] rgb) = ReadP6Ppm(path);
+            if (width != 1280 || (height != 384 && height != 448))
+                throw new InvalidDataException(
+                    $"expected 1280x384 or 1280x448, found {width}x{height}");
             uint texture = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, texture);
             _gl.TexParameter(
@@ -435,17 +626,82 @@ internal sealed class PresentationRenderer : IDisposable
                 PixelFormat.Rgb,
                 PixelType.UnsignedByte,
                 rgb);
-            _loadingCardTexture = texture;
-            _loadingCardWidth = width;
-            _loadingCardHeight = height;
+            if (_loadingCardTextures.Remove(arena, out uint replacedTexture))
+                _gl.DeleteTexture(replacedTexture);
+            _loadingCardTextures[arena] = texture;
+            _loadingCardPaths[arena] = Path.GetFullPath(path);
+            _loadingCardSizes[arena] = (width, height);
             Console.WriteLine(
-                $"[TexturePack] loaded Route 66 loading card overlay " +
+                $"[TexturePack] loaded loading card overlay arena={arena} " +
                 $"{width}x{height}: {path}");
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine(
-                $"[TexturePack] ignored Route 66 loading card overlay " +
+                $"[TexturePack] ignored loading card overlay arena={arena} " +
+                $"{path}: {ex.Message}");
+        }
+    }
+
+    void LoadDreamlandSelectorPreview()
+    {
+        string path = Path.Combine(
+            Runtime.ModsDirectory,
+            "v82_n64_super_dreamland",
+            "ui",
+            "n64_dreamlnd_selector_preview.ppm");
+        if (!File.Exists(path)) return;
+
+        try
+        {
+            (int width, int height, byte[] rgb) = ReadP6Ppm(path);
+            if (width != 440 || height != 115)
+                throw new InvalidDataException(
+                    $"expected 440x115, found {width}x{height}");
+            _dreamlandSelectorTexture = _gl.GenTexture();
+            _gl.BindTexture(
+                TextureTarget.Texture2D,
+                _dreamlandSelectorTexture);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureMinFilter,
+                (int)GLEnum.Linear);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureMagFilter,
+                (int)GLEnum.Linear);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureWrapS,
+                (int)GLEnum.ClampToEdge);
+            _gl.TexParameter(
+                TextureTarget.Texture2D,
+                TextureParameterName.TextureWrapT,
+                (int)GLEnum.ClampToEdge);
+            _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+            _gl.TexImage2D<byte>(
+                TextureTarget.Texture2D,
+                0,
+                InternalFormat.Rgb8,
+                (uint)width,
+                (uint)height,
+                0,
+                PixelFormat.Rgb,
+                PixelType.UnsignedByte,
+                rgb);
+            Console.WriteLine(
+                $"[TexturePack] loaded Dreamland selector preview " +
+                $"{width}x{height}: {path}");
+        }
+        catch (Exception ex)
+        {
+            if (_dreamlandSelectorTexture != 0)
+            {
+                _gl.DeleteTexture(_dreamlandSelectorTexture);
+                _dreamlandSelectorTexture = 0;
+            }
+            Console.Error.WriteLine(
+                $"[TexturePack] ignored Dreamland selector preview " +
                 $"{path}: {ex.Message}");
         }
     }
@@ -532,7 +788,10 @@ internal sealed class PresentationRenderer : IDisposable
         if (_fxaaProgram != 0) _gl.DeleteProgram(_fxaaProgram);
         if (_upscaleTexture != 0) _gl.DeleteTexture(_upscaleTexture);
         if (_fxaaTexture != 0) _gl.DeleteTexture(_fxaaTexture);
-        if (_loadingCardTexture != 0) _gl.DeleteTexture(_loadingCardTexture);
+        if (_dreamlandSelectorTexture != 0)
+            _gl.DeleteTexture(_dreamlandSelectorTexture);
+        foreach (uint texture in _loadingCardTextures.Values)
+            _gl.DeleteTexture(texture);
         if (_upscaleFbo != 0) _gl.DeleteFramebuffer(_upscaleFbo);
         if (_fxaaFbo != 0) _gl.DeleteFramebuffer(_fxaaFbo);
     }

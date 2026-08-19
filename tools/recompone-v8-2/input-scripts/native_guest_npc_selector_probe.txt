@@ -1,0 +1,68 @@
+# Enter the stock player selector, accept the default player, then traverse the
+# complete imported roster through the first SELECT ENEMIES row. The native
+# enemy list retains retail proxy bytes while the gameplay handoff receives
+# the selected custom identity.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+300+3=CROSS
+
+[choose_enemies]
+160+2=RIGHT
+380+2=RIGHT
+600+2=RIGHT
+820+2=RIGHT
+1040+2=RIGHT
+1260+2=RIGHT
+1480+2=RIGHT
+1700+2=RIGHT
+1920+2=RIGHT
+2140+2=RIGHT
+2360+2=RIGHT
+2580+2=RIGHT
+2800+2=RIGHT
+3020+2=RIGHT
+3240+2=RIGHT
+3460+2=RIGHT
+3680+2=RIGHT
+3900+2=RIGHT
+4120+2=RIGHT
+4340+2=RIGHT
+4560+2=RIGHT
+4780+2=RIGHT
+5000+2=RIGHT
+5220+2=RIGHT
+5440+2=RIGHT
+5660+2=RIGHT
+5880+2=RIGHT
+6100+2=RIGHT
+6320+2=RIGHT
+6540+2=RIGHT
+6880+3=CROSS
+# Loading continues to poll the native pad callback before the pre-match gate.
+# The gate tests a fresh Cross edge, so tap periodically across the load span.
+10000+3=CROSS
+14000+3=CROSS
+18000+3=CROSS
+22000+3=CROSS
+26000+3=CROSS
+30000+3=CROSS
+34000+3=CROSS
+38000+3=CROSS
+42000+3=CROSS
+46000+3=CROSS
+50000+3=CROSS
+54000+3=CROSS
+58000+3=CROSS
+62000+3=CROSS
+66000+3=CROSS
+
+[gameplay]
+30+180=CROSS

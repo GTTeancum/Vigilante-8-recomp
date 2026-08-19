@@ -419,8 +419,9 @@ public sealed class CueFs : IDisposable
     private void IndexModFileOverrides(string? looseRoot)
     {
         if (string.IsNullOrWhiteSpace(looseRoot)) return;
-        string mods = Environment.GetEnvironmentVariable("RECOMPONE_MOD_DIR") ??
-            Path.Combine(Path.GetFullPath(looseRoot), "mods");
+        string mods = Runtime.ModsDirectory;
+        if (!Directory.Exists(mods))
+            mods = Path.Combine(Path.GetFullPath(looseRoot), "mods");
         if (!Directory.Exists(mods)) return;
 
         int count = 0;
@@ -646,15 +647,21 @@ public sealed class CueFs : IDisposable
     private static bool IsAppendOnlyLooseAsset(string path)
     {
         bool arena =
-            path.StartsWith(
-                "TERRAIN/", StringComparison.OrdinalIgnoreCase) &&
+            (path.StartsWith(
+                 "TERRAIN/", StringComparison.OrdinalIgnoreCase) ||
+             path.StartsWith(
+                 "LEVELS/N64/", StringComparison.OrdinalIgnoreCase)) &&
             (path.EndsWith(".DLL", StringComparison.OrdinalIgnoreCase) ||
              path.EndsWith(".EXP", StringComparison.OrdinalIgnoreCase));
         bool legacyVoice =
             path.StartsWith(
                 "SHARED/V8VOICE/", StringComparison.OrdinalIgnoreCase) &&
             path.EndsWith(".XA", StringComparison.OrdinalIgnoreCase);
-        return arena || legacyVoice;
+        bool originalV8EndingAlias =
+            path.StartsWith(
+                "MOVIES/V8", StringComparison.OrdinalIgnoreCase) &&
+            path.EndsWith(".STR", StringComparison.OrdinalIgnoreCase);
+        return arena || legacyVoice || originalV8EndingAlias;
     }
 
     private bool TryGetLoose(int startLba, out LooseEntry entry) =>

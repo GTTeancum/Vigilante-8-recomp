@@ -90,7 +90,7 @@ def build_live_textmap(textmap, sheet, tips, trace_dirs: list[Path]):
         prompt = [
             use for use in sorted(uses, key=lambda item: (item.y, item.x))
             if use.tpage == "0x0A5" and use.clut == "0x7800" and
-            use.height == 18 and use.width > 0 and
+            use.height in (15, 18) and use.width > 0 and
             use.key != "0000000000000000"
         ]
         prompt_chars = "PressXtostart..."

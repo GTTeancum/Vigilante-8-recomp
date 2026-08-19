@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Diagnostics;
 using ImGuiNET;
 using Silk.NET.Input;
 using Silk.NET.Maths;
@@ -91,6 +92,11 @@ internal static class HostWindow
     static string? _activeComposedBurstLabel;
     static int _activeComposedBurstFrame;
     static int _activeComposedBurstRemaining;
+    static readonly bool _lowerProcessPriority =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_LOWER_PROCESS_PRIORITY") != "0";
+    static readonly string? _processPriorityOverride =
+        Environment.GetEnvironmentVariable("RECOMPONE_PROCESS_PRIORITY");
     static readonly bool _windowVisible =
         Environment.GetEnvironmentVariable("RECOMPONE_WINDOW_VISIBLE") != "0";
     static readonly bool _forceHeadless =
@@ -125,6 +131,7 @@ internal static class HostWindow
     public static void Initialize(string title)
     {
         ConfigManager.Load();
+        ApplyProcessPriority();
         if (_forceHeadless)
         {
             _headless = true;
@@ -186,6 +193,36 @@ internal static class HostWindow
         {
             Console.Error.WriteLine($"[Host] window unavailable {e.Message}");
             _headless = true;
+        }
+    }
+
+    static void ApplyProcessPriority()
+    {
+        if (!_lowerProcessPriority)
+            return;
+
+        ProcessPriorityClass priority = ProcessPriorityClass.BelowNormal;
+        if (!string.IsNullOrWhiteSpace(_processPriorityOverride) &&
+            Enum.TryParse(
+                _processPriorityOverride,
+                ignoreCase: true,
+                out ProcessPriorityClass configured))
+            priority = configured;
+
+        try
+        {
+            using Process process = Process.GetCurrentProcess();
+            process.PriorityClass = priority;
+            Thread.CurrentThread.Priority =
+                priority == ProcessPriorityClass.Idle
+                    ? ThreadPriority.Lowest
+                    : ThreadPriority.BelowNormal;
+            Console.WriteLine($"[Host] process priority={priority}");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"[Host] process priority unchanged: {ex.Message}");
         }
     }
 

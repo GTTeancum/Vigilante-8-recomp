@@ -347,6 +347,19 @@ PROVEN_PATCHES = [
         "mode": "inline",
         "position": "before",
     },
+    {
+        # The enemy editor keeps four retail type bytes and indexes fixed
+        # sequel tables with them. Extend each row through registered guests
+        # after native left/right handling while retaining a safe proxy byte.
+        "overlay": "SHELL_SHELL",
+        "address": "80105C94",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82VehicleRegistry."
+            "ApplyNativeEnemySelectorSlot"
+        ),
+        "mode": "inline",
+        "position": "before",
+    },
     # Render-pass brackets and the object-visibility record. These were hand
     # edits to generated output, which is rebuilt from the disc and therefore
     # dropped them; each sits at a function boundary and is an ordinary
@@ -851,6 +864,18 @@ PROVEN_PATCHES = [
         "overlay": "main",
         "address": "80036B64",
         "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.ResolveVehicleCallback",
+        "mode": "pre",
+    },
+    {
+        # Enemy-selection previews normally resolve a retail type through the
+        # fixed COMMON table. Guest rows instead use their independent native
+        # selector bank while preserving the original preview lifecycle.
+        "overlay": "main",
+        "address": "80036BE0",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82VehicleRegistry."
+            "BuildNativeEnemySelectorPreview"
+        ),
         "mode": "pre",
     },
     {

@@ -61,7 +61,7 @@ def main() -> int:
             "RECOMPONE_GPU_HLE": "1",
             "RECOMPONE_MUTE": "1",
             "RECOMPONE_SUPPRESS_RUMBLE": "1",
-            "RECOMPONE_UNTHROTTLED": "1",
+            "RECOMPONE_UNTHROTTLED": "0",
             "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS": "4600",
             "RECOMPONE_PRESENTATION_CAPTURE": "1",
             "RECOMPONE_PRESENTATION_RESOLUTION": "1280x720",
@@ -111,14 +111,16 @@ def main() -> int:
             r"\[V82SelectorResources\] released=guest\.v8\.sid_burn ", text
         )
     )
-    generation_images = [
-        output
-        / (
+    generation_images = []
+    for generation in generations:
+        stem = (
             "recompone_present_native_guest_11_generation_"
-            f"{generation}_1280x720_fxaa.ppm"
+            f"{generation}_1280x720_"
         )
-        for generation in generations
-    ]
+        matches = sorted(output.glob(stem + "*.ppm"))
+        generation_images.append(
+            matches[0] if matches else output / (stem + "fxaa.ppm")
+        )
     contact_sheet = output / "selector-generation-contact.bmp"
     if len(generation_images) >= 2 and all(
         image.is_file() for image in generation_images

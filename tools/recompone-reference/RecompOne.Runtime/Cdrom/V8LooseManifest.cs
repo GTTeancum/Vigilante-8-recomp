@@ -24,6 +24,11 @@ internal sealed class V8LooseManifest
                 ? "V8LooseManifest.json"
                 : throw new InvalidDataException(
                     $"Unsupported loose SYSTEM.CNF: {systemPath}");
+        return LoadEmbedded(manifestFile);
+    }
+
+    internal static V8LooseManifest LoadEmbedded(string manifestFile)
+    {
         var assembly = typeof(V8LooseManifest).Assembly;
         string resourceName = assembly.GetManifestResourceNames().Single(name =>
             name.EndsWith(manifestFile, StringComparison.Ordinal));

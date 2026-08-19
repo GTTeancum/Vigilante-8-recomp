@@ -1,0 +1,21 @@
+# Select Chassey Blue as the first NPC, cross the pre-match gate, and hold a
+# deterministic gameplay frame long enough to trace and capture the top HUD.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+300+3=CROSS
+
+[choose_enemies]
+160+2=RIGHT
+380+3=CROSS
+10000+3=CROSS
+
+[gameplay]
+30+180=CROSS

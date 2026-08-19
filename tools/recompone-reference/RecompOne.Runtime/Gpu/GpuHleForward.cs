@@ -17,6 +17,9 @@ public sealed partial class Gpu
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PACKET_OWNERS") == "1";
     static readonly bool TraceMeshes =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1";
+    static readonly bool TraceN64RouteColors =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_N64_ROUTE_COLORS") == "1";
     static readonly bool TraceImportedShadowAtlas =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_IMPORTED_SHADOW_ATLAS") == "1";
@@ -25,6 +28,9 @@ public sealed partial class Gpu
     static readonly string DumpVramLoadDir =
         Environment.GetEnvironmentVariable("RECOMPONE_VRAM_LOAD_DUMP_DIR") ??
         "vram_load_dump";
+    static readonly (int Width, int Height)? DumpVramLoadSize =
+        ParseDumpSize(Environment.GetEnvironmentVariable(
+            "RECOMPONE_VRAM_LOAD_DUMP_SIZE"));
     static readonly HashSet<string> TracedImportedShadowAtlasRegions = [];
     static int s_vramLoadDumpIndex;
     static int _terrainPrimTraceCount;
@@ -34,6 +40,7 @@ public sealed partial class Gpu
     uint _currentOtPacketAddress;
     bool _currentOtPacketVehicle;
     bool _currentOtPacketImportedVehicle;
+    bool _currentOtPacketVehicleReflection;
     bool _currentOtPacketDreamlandWater;
     bool _currentOtPacketTerrainRoute;
     int _traceVehiclePacketHits;
@@ -46,6 +53,10 @@ public sealed partial class Gpu
     int _traceGameplayTick = -1;
     int _traceGameplayTickPrimitives;
     int _traceGameplayTickLines;
+    int _traceN64RouteColorVertices;
+    long _n64RouteColorMappedVertices;
+    long _n64RouteColorRejectedVertices;
+    int _traceN64RouteColorSummaryTick = -1;
 
     static (int Start, int End)? ParseTraceGameplayTicks(string? value)
     {
@@ -91,6 +102,8 @@ public sealed partial class Gpu
         _currentOtPacketVehicle = GpuHle.IsVehiclePacket(address);
         _currentOtPacketImportedVehicle =
             GpuHle.IsImportedVehiclePacket(address);
+        _currentOtPacketVehicleReflection =
+            GpuHle.IsVehicleReflectionPacket(address);
         _currentOtPacketDreamlandWater =
             GpuHle.IsDreamlandWaterPacket(address);
         _currentOtPacketTerrainRoute =
@@ -108,6 +121,7 @@ public sealed partial class Gpu
                     $"words={wordCount} " +
                     $"vehicle={(_currentOtPacketVehicle ? 1 : 0)} " +
                     $"imported={(_currentOtPacketImportedVehicle ? 1 : 0)} " +
+                    $"reflection={(_currentOtPacketVehicleReflection ? 1 : 0)} " +
                     $"terrain-route={(_currentOtPacketTerrainRoute ? 1 : 0)} " +
                     $"owner={owner}");
         }
@@ -119,10 +133,24 @@ public sealed partial class Gpu
 
     public void EndOrderingTable()
     {
+        if (TraceN64RouteColors &&
+            GpuHle.GameplayActive &&
+            GpuHle.DebugGameplayTick >= 0 &&
+            GpuHle.DebugGameplayTick % 120 == 0 &&
+            _traceN64RouteColorSummaryTick != GpuHle.DebugGameplayTick)
+        {
+            _traceN64RouteColorSummaryTick = GpuHle.DebugGameplayTick;
+            Console.Error.WriteLine(
+                $"[V8N64RouteColorSummary] " +
+                $"tick={GpuHle.DebugGameplayTick} " +
+                $"mapped={_n64RouteColorMappedVertices} " +
+                $"rejected={_n64RouteColorRejectedVertices}");
+        }
         _currentOtDepth = 0;
         _currentOtPacketAddress = 0;
         _currentOtPacketVehicle = false;
         _currentOtPacketImportedVehicle = false;
+        _currentOtPacketVehicleReflection = false;
         _currentOtPacketDreamlandWater = false;
         _currentOtPacketTerrainRoute = false;
         _projectiveDepthCache.Clear();
@@ -131,6 +159,14 @@ public sealed partial class Gpu
     int CurTPage() => ((_texPageX / 64) & 0xf) | (((_texPageY / 256) & 1) << 4)
                     | ((_blendMode & 3) << 5) | ((_texDepth & 3) << 7);
 
+    static bool IsNativeVehicleGlassClut(int clut)
+    {
+        // Native V8:2 vehicle panes use a dedicated authored CLUT row. Keep
+        // this as material provenance; do not infer glass from sampled colour.
+        int row = clut >> 6;
+        return row == 509;
+    }
+
     HleDrawEnv CurEnv() => new()
     {
         ClipX0 = _drawAreaLeft, ClipY0 = _drawAreaTop, ClipX1 = _drawAreaRight, ClipY1 = _drawAreaBottom,
@@ -138,26 +174,68 @@ public sealed partial class Gpu
         SetMask = _setMask, CheckMask = _checkMask, Dither = DitherEnabled,
     };
 
-    static HleVertex HV(in Vert v) => new()
+    HleVertex HV(in Vert v, in PrimFlags flags)
     {
-        SourceAddress = v.SourceAddress,
-        // This path exists only for the Enhanced renderer.  Stock geometry
-        // continues through Gpu.RasterTriangle and therefore retains native
-        // integer SXY.  Do not reintroduce a fidelity toggle here.
-        X = v.HasPrecisePosition ? v.PreciseX : v.X,
-        Y = v.HasPrecisePosition ? v.PreciseY : v.Y,
-        R = (byte)v.R, G = (byte)v.G, B = (byte)v.B,
-        U = (short)v.U, V = (short)v.V,
-        Z = v.Z, HasGteZ = v.HasGteZ,
-        HasCoherentGteZ = v.HasCoherentGteZ,
-        PerspectiveW = v.PerspectiveW, HasProjectiveW = v.HasProjectiveW,
-        ViewX = v.ViewX, ViewY = v.ViewY, ViewZ = v.ViewZ,
-        ProjectionCenterX = v.ProjectionCenterX,
-        ProjectionCenterY = v.ProjectionCenterY,
-        ProjectionScale = v.ProjectionScale,
-        HasViewSpace = v.HasViewSpace,
-        ReconstructedViewSpace = v.ReconstructedViewSpace,
-    };
+        HleVertex result = new()
+        {
+            SourceAddress = v.SourceAddress,
+            // This path exists only for the Enhanced renderer. Stock
+            // geometry continues through Gpu.RasterTriangle and therefore
+            // retains native integer SXY.
+            X = v.HasPrecisePosition ? v.PreciseX : v.X,
+            Y = v.HasPrecisePosition ? v.PreciseY : v.Y,
+            R = (byte)v.R, G = (byte)v.G, B = (byte)v.B,
+            U = (short)v.U, V = (short)v.V,
+            Z = v.Z, HasGteZ = v.HasGteZ,
+            HasCoherentGteZ = v.HasCoherentGteZ,
+            PerspectiveW = v.PerspectiveW,
+            HasProjectiveW = v.HasProjectiveW,
+            ViewX = v.ViewX, ViewY = v.ViewY, ViewZ = v.ViewZ,
+            ProjectionCenterX = v.ProjectionCenterX,
+            ProjectionCenterY = v.ProjectionCenterY,
+            ProjectionScale = v.ProjectionScale,
+            HasViewSpace = v.HasViewSpace,
+            ReconstructedViewSpace = v.ReconstructedViewSpace,
+        };
+        if (!flags.N64RouteColor)
+            return result;
+
+        if (GpuHle.TryDecodeTerrainRouteColor(
+                result.R,
+                result.G,
+                result.B,
+                out byte mappedRed,
+                out byte mappedGreen,
+                out byte mappedBlue,
+                out int index))
+        {
+            _n64RouteColorMappedVertices++;
+            if (TraceN64RouteColors &&
+                _traceN64RouteColorVertices++ < 4096)
+                Console.Error.WriteLine(
+                    $"[V8N64RouteVertexColor] " +
+                    $"tick={GpuHle.DebugGameplayTick} " +
+                    $"packet=0x{flags.PacketAddress:X8} " +
+                    $"encoded={result.R},{result.G},{result.B} " +
+                    $"index={index} substep={result.R & 3} " +
+                    $"mapped={mappedRed},{mappedGreen},{mappedBlue}");
+            result.R = mappedRed;
+            result.G = mappedGreen;
+            result.B = mappedBlue;
+        }
+        else
+        {
+            _n64RouteColorRejectedVertices++;
+            if (TraceN64RouteColors &&
+                _n64RouteColorRejectedVertices <= 256)
+                Console.Error.WriteLine(
+                    $"[V8N64RouteVertexColorReject] " +
+                    $"tick={GpuHle.DebugGameplayTick} " +
+                    $"packet=0x{flags.PacketAddress:X8} " +
+                    $"encoded={result.R},{result.G},{result.B}");
+        }
+        return result;
+    }
 
     PrimFlags PrimOf(
         bool tex,
@@ -167,10 +245,18 @@ public sealed partial class Gpu
         bool gouraud = false)
     {
         HleMaterialKind material;
+        bool nativeVehicleGlass =
+            !_currentOtPacketImportedVehicle &&
+            tex &&
+            IsNativeVehicleGlassClut(clut);
         if (_currentOtPacketTerrainRoute)
             material = HleMaterialKind.TerrainRoute;
         else if (_currentOtPacketVehicle)
-            material = semi && tex
+            material = _currentOtPacketVehicleReflection && tex
+                ? HleMaterialKind.VehicleReflection
+                : nativeVehicleGlass
+                    ? HleMaterialKind.Glass
+                : semi && tex
                 ? _blendMode switch
                 {
                     // Vehicle render scopes also emit stock projected
@@ -215,6 +301,12 @@ public sealed partial class Gpu
             Vehicle = _currentOtPacketVehicle,
             DreamlandWater = _currentOtPacketDreamlandWater,
             TerrainRoute = _currentOtPacketTerrainRoute,
+            N64RouteColor =
+                _currentOtPacketTerrainRoute &&
+                GpuHle.TerrainRouteColorRampActive,
+            N64RouteDepthCompare =
+                _currentOtPacketTerrainRoute &&
+                GpuHle.TerrainRouteColorRampActive,
             Material = material,
         };
     }
@@ -438,11 +530,27 @@ public sealed partial class Gpu
             !flags.Vehicle &&
             (!GpuHle.GameplayActive ||
              (_currentOtDepth >= 0x800 && !hasWorldProjection));
-        if (screenSpaceOverlay)
+        bool misownedGameplayCaption =
+            GpuHle.GameplayActive &&
+            flags.Vehicle &&
+            _currentOtDepth >= 0x800 &&
+            !hasWorldProjection &&
+            tex &&
+            minY >= 110 &&
+            minY <= 230;
+        if (screenSpaceOverlay || misownedGameplayCaption)
             flags.Material = HleMaterialKind.Ui;
         else if (nativeScreenEffect)
             flags.Material = HleMaterialKind.ScreenEffect;
-        be.DrawTri(HV(a), HV(b), HV(c), flags);
+        else if (GpuHle.GameplayActive &&
+                 flags.Vehicle &&
+                 hasWorldProjection &&
+                 maxX - minX <= 260 &&
+                 maxY - minY <= 180 &&
+                 flags.Material is
+                    (HleMaterialKind.Glass or HleMaterialKind.ImportedGlass))
+            flags.Material = HleMaterialKind.OpaqueVehicleGlass;
+        be.DrawTri(HV(a, flags), HV(b, flags), HV(c, flags), flags);
     }
 
     void HleRect(int x, int y, int w, int h, int u, int v, int clut, int r, int g, int b, bool tex, bool semi, bool raw)
@@ -633,6 +741,8 @@ public sealed partial class Gpu
     void DumpVramLoad(ReadOnlySpan<ushort> upload)
     {
         if (!DumpVramLoads || _loadW <= 0 || _loadH <= 0) return;
+        if (DumpVramLoadSize is { } size &&
+            (_loadW != size.Width || _loadH != size.Height)) return;
         if (_loadW * _loadH != upload.Length) return;
 
         Directory.CreateDirectory(DumpVramLoadDir);
@@ -655,6 +765,22 @@ public sealed partial class Gpu
         for (int i = 0; i < upload.Length; i++)
             WriteRgb555(rgb, i * 3, upload[i]);
         fs.Write(rgb);
+    }
+
+    static (int Width, int Height)? ParseDumpSize(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        string[] parts = value.Split('x', 'X');
+        if (parts.Length != 2 ||
+            !int.TryParse(parts[0], out int width) ||
+            !int.TryParse(parts[1], out int height) ||
+            width <= 0 || height <= 0)
+        {
+            Console.Error.WriteLine(
+                $"[GPU] ignored invalid RECOMPONE_VRAM_LOAD_DUMP_SIZE '{value}'");
+            return null;
+        }
+        return (width, height);
     }
 
     static void WriteRgb555(byte[] rgb, int offset, ushort value)

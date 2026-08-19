@@ -214,6 +214,9 @@ public static class InstructionEmitter
         void CallOrDispatch(uint addr, string ind)
         {
             if (ctx.KnownFunctions.TryGetValue(addr, out var name))
+                // Keep the caller's overlay view across direct calls. Main
+                // globals sit outside the linked overlay window, while pointer
+                // arguments into overlay data must remain translated.
                 sb.AppendLine($"{ind}{name}(c, m);");
             else
                 sb.AppendLine($"{ind}Dispatcher.Call(c, m, 0x{addr:X8}u);");
@@ -373,6 +376,8 @@ public sealed class FunctionContext
     public HashSet<uint> RaReturnJrs = [];
     public MipsInstruction[] AllInstructions = [];
     public bool RelocatableOverlay;
+    public uint OverlayBase;
+    public uint OverlaySize;
     
     public uint SkipNopPadding(uint addr) //faltru can end up in padding
     {

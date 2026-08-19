@@ -148,7 +148,7 @@ def run_case(
             "RECOMPONE_WINDOW_VISIBLE": "0",
             "RECOMPONE_MUTE": "1",
             "RECOMPONE_SUPPRESS_RUMBLE": "1",
-            "RECOMPONE_UNTHROTTLED": "1",
+            "RECOMPONE_UNTHROTTLED": "0",
         }
     )
     for key in (
