@@ -10,9 +10,8 @@ comfortable to play, test, and extend on current hardware.
 
 > [!IMPORTANT]
 > This project is in pre-release testing. Vigilante 8: 2nd Offense is the
-> current release-candidate focus; the original Vigilante 8 build and native C
-> decompilation remain active development work. No copyrighted game data is
-> included.
+> current release-candidate focus; the original Vigilante 8 build remains
+> active development work. No copyrighted game data is included.
 
 ## Screenshots
 
@@ -28,7 +27,6 @@ comfortable to play, test, and extend on current hardware.
 | --- | --- | --- |
 | Vigilante 8: 2nd Offense | Windows x64 release candidate | USA `SLUS-00868`, one- and two-player play, first-run disc import, enhanced presentation, and mods |
 | Vigilante 8 | Playable development/reference build | All retail arenas, direct disc or complete loose-file play, one- and two-player testing, and long-form stability coverage |
-| Native C decompilation | Ongoing | Physics, collision, gameplay, and proprietary asset loaders; renderer, controls, and audio are intentionally rewritten |
 
 The V8:2 candidate has passed fresh-directory first-run installation, repeat
 launch, Route 66 gameplay, and invalid-disc rejection smoke tests. Broader
@@ -36,7 +34,7 @@ release regression work is still in progress.
 
 ## Highlights
 
-- Original PS1 game logic recompiled for a native 64-bit Windows host.
+- Original PS1 game logic recompiled for a modern 64-bit Windows host.
 - Widescreen and selectable output resolution, with high-resolution 3D
   presentation and optional anti-aliasing.
 - Enhanced shadows, lighting, fog, particles, texture filtering, mipmaps, and
@@ -139,8 +137,8 @@ The canonical, detailed backlog is maintained in [TO-DO.MD](TO-DO.MD).
 
 ## Project Structure
 
-This repository contains two complementary efforts: a playable RecompOne PC
-runtime and a long-term clean C decompilation.
+This repository contains the shared RecompOne runtime, game-specific
+integration, supporting tools, mods, and verification material.
 
 | Path | Purpose |
 | --- | --- |
@@ -149,7 +147,6 @@ runtime and a long-term clean C decompilation.
 | `tools/recompone-v8-2/` | V8:2 preparation, host, patches, importer, and test tooling |
 | `reference/` | Original Vigilante 8 reference-lane documentation and generated-work area |
 | `reference-v8-2/` | V8:2 manifests, documentation, and generated-work area |
-| `src/`, `include/`, `analysis/` | Native C decompilation, recovered types, and reverse-engineering output |
 | `mods/` | Mod manifests and distributable mod content |
 | `notes/` | Format research, defect investigations, and verification records |
 
@@ -169,8 +166,6 @@ Start with the game-specific documentation:
 - [Vigilante 8 reference lane](reference/README.md)
 - [Vigilante 8: 2nd Offense reference lane](reference-v8-2/README.md)
 - [V8:2 loose-file layout](reference-v8-2/LOOSE_FILES.md)
-- [Project scope](PROJECT_SCOPE.md)
-- [Decompilation rules](DECOMP_RULES.md)
 
 After the V8:2 reference sources have been prepared locally, the development
 host builds with:
@@ -183,8 +178,8 @@ dotnet build tools/recompone-v8-2/reference-host/Vigilante82PC.csproj -c Debug
 
 Automated runs cover startup, selectors, gameplay entry, weapons, AI, movies,
 split-screen, result flow, teardown, and bounded multi-arena soaks. Visual
-changes are reviewed from retained native and presentation captures in addition
-to logs and deterministic acceptance data.
+changes are reviewed from retained original-resolution and presentation
+captures in addition to logs and deterministic acceptance data.
 
 When reporting a defect, include the executable build identifier from
 `v8_latest.log`, the affected game mode/map/vehicle, reproduction steps, and
