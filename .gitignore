@@ -15,6 +15,15 @@ data/
 .DS_Store
 Thumbs.db
 
+# Local agent/process files -- useful for active automation, not needed to build.
+/AGENTS.md
+/CLAUDE.md
+/HANDOFF.md
+/STATUS.md
+/TO-DO.MD
+/progress.log
+/decisions.log
+
 # Ghidra install + project files -- regenerable, 1GB+. analysis/ exports ARE checked in.
 ghidra/
 
