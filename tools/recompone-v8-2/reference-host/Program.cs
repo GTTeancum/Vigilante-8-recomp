@@ -218,8 +218,8 @@ if (args.Length is 2 or 3 &&
                 16, 16, pixels);
             timer.Stop();
             durations.Add(timer.ElapsedMilliseconds);
-            const int width = 260;
-            const int height = 422;
+            const int width = 240;
+            const int height = 421;
             byte[] rgb = CaptureVramRgb(16, 16, width, height);
             decodedPortraits.Add((width, height, rgb));
             if (portraitOutput != null)

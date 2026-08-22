@@ -65,6 +65,8 @@ public static class V82VehicleRegistry
     const int OriginalV8SelectionVoiceCount = 12;
     const int SelectorPortraitWidth = 260;
     const int SelectorPortraitHeight = 422;
+    const int SelectorPortraitNativeWidth = 240;
+    const int SelectorPortraitNativeHeight = 421;
     const uint ShellDisplayXAddress = 0x8006B7C0u;
     const uint ShellDisplayYAddress = 0x8006B7C4u;
 
@@ -132,6 +134,9 @@ public static class V82VehicleRegistry
     static readonly bool CaptureNativeSelectorTurns =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_CAPTURE_V82_SELECTOR_TURNS") != "0";
+    static readonly bool CaptureFullNativeSelectorTurn =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_CAPTURE_V82_SELECTOR_FULL_TURN") == "1";
     static readonly bool CaptureSelectorGenerations =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_CAPTURE_SELECTOR_GENERATIONS") == "1";
@@ -151,6 +156,20 @@ public static class V82VehicleRegistry
     public static int SelectedType => SelectedTypeForPlayer(0);
     public static int NativeSelectorGuestIndex =>
         Volatile.Read(ref _selectorGuestIndex);
+    public static int NativeSelectorStableFrame =>
+        Volatile.Read(ref _selectorStableFrames);
+    public static int NativeSelectorGeneration
+    {
+        get
+        {
+            int guest = NativeSelectorGuestIndex;
+            return guest >= 0 && guest < Entries.Count
+                ? Entries[guest].SelectorGeneration
+                : -1;
+        }
+    }
+    public static uint NativeSelectorPreviewObject =>
+        Volatile.Read(ref _selectorPreviewObject);
     public static bool HasAnySelection =>
         Enumerable.Range(0, PlayerSelectionCount)
             .Any(player => SelectedTypeForPlayer(player) >= 0) ||
@@ -812,10 +831,12 @@ public static class V82VehicleRegistry
         if (frame == 80)
             HostWindow.RequestDisplayCapture($"native_guest_{guest:00}");
         else if (CaptureNativeSelectorTurns &&
-                 frame > 80 && frame <= 200 && (frame - 80) % 4 == 0)
+                 frame > 80 &&
+                 frame <= (CaptureFullNativeSelectorTurn ? 320 : 200) &&
+                 (frame - 80) % 4 == 0)
             HostWindow.RequestDisplayCapture(
                 $"native_guest_{guest:00}_turn_{(frame - 80) / 4:000}");
-        if (frame == 200)
+        if (frame == (CaptureFullNativeSelectorTurn ? 320 : 200))
             SelectorProofCaptured.Add(guest);
         return true;
     }
@@ -1030,7 +1051,9 @@ public static class V82VehicleRegistry
         UploadSelectorPortrait(x, y, pixels);
         Console.Error.WriteLine(
             $"[V82SelectorPortrait] guest={guest} format=RGB555 " +
-            $"size={SelectorPortraitWidth}x{SelectorPortraitHeight} " +
+            $"source={SelectorPortraitWidth}x{SelectorPortraitHeight} " +
+            $"upload={SelectorPortraitNativeWidth}x" +
+            $"{SelectorPortraitNativeHeight} " +
             $"destination=({x},{y})");
         return false;
     }
@@ -1748,6 +1771,38 @@ public static class V82VehicleRegistry
         return pointer >= bin && pointer - bin < length;
     }
 
+    public static string? StableIdForImportedBankAddress(
+        IMemory m,
+        uint address)
+    {
+        foreach (VehicleEntry entry in Entries)
+        {
+            if (PointerInBank(
+                    m,
+                    entry.BodyRuntime,
+                    Banks[entry.BodyArchiveIndex].BinLength,
+                    address) ||
+                PointerInBank(
+                    m,
+                    entry.TransformRuntime,
+                    Banks[entry.TransformArchiveIndex].BinLength,
+                    address) ||
+                PointerInBank(
+                    m,
+                    entry.SelectorTransformRuntime,
+                    Banks[entry.TransformArchiveIndex].BinLength,
+                    address) ||
+                entry.SelectorPreviewArchiveIndex != NoArchiveIndex &&
+                PointerInBank(
+                    m,
+                    entry.SelectorPreviewRuntime,
+                    Banks[entry.SelectorPreviewArchiveIndex].BinLength,
+                    address))
+                return entry.StableId;
+        }
+        return null;
+    }
+
     public static void ResetRuntimeForMatch()
     {
         ObjectEntries.Clear();
@@ -2224,8 +2279,8 @@ public static class V82VehicleRegistry
                 $"selector portrait has {pixels.Length} RGB555 pixels, " +
                 $"expected {SelectorPortraitWidth * SelectorPortraitHeight}");
         if (x < 0 || y < 0 ||
-            x + SelectorPortraitWidth > Gpu.VramWidth ||
-            y + SelectorPortraitHeight > Gpu.VramHeight)
+            x + SelectorPortraitNativeWidth > Gpu.VramWidth ||
+            y + SelectorPortraitNativeHeight > Gpu.VramHeight)
             throw new InvalidOperationException(
                 $"selector portrait destination ({x},{y}) is outside VRAM");
         Gpu gpu = Runtime.Gpu ??
@@ -2236,13 +2291,16 @@ public static class V82VehicleRegistry
             checked((uint)(ushort)x) |
             checked((uint)(ushort)y) << 16);
         gpu.WriteGp0(
-            checked((uint)SelectorPortraitWidth) |
-            checked((uint)SelectorPortraitHeight) << 16);
-        for (int index = 0; index < pixels.Length; index += 2)
+            checked((uint)SelectorPortraitNativeWidth) |
+            checked((uint)SelectorPortraitNativeHeight) << 16);
+        for (int row = 0; row < SelectorPortraitNativeHeight; row++)
+        for (int column = 0;
+             column < SelectorPortraitNativeWidth;
+             column += 2)
         {
+            int index = row * SelectorPortraitWidth + column;
             uint word = pixels[index];
-            if (index + 1 < pixels.Length)
-                word |= (uint)pixels[index + 1] << 16;
+            word |= (uint)pixels[index + 1] << 16;
             gpu.WriteGp0(word);
         }
     }

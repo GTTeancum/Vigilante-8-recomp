@@ -86,9 +86,13 @@ def validate_environment_translation(
     ):
         before_type = before.packet_kind | before.packet_flags
         after_type = after.packet_kind | after.packet_flags
+        expected_mode = render_mode(before_type)
+        if before.packet_flags & 0x20:
+            expected_mode |= 0x02
         require(
-            render_mode(before_type) == render_mode(after_type),
-            f"{stable_id} {label} face {index} changed GPU render mode",
+            expected_mode == render_mode(after_type),
+            f"{stable_id} {label} face {index} did not map the V8 "
+            "environment role to V8:2",
         )
         require(
             after.packet_flags & 0x20 == 0,
@@ -97,10 +101,18 @@ def validate_environment_translation(
 
         source_selector = before.environment_parameters[0]
         if (source_selector & 0x3FFF) == 0x3FFF:
+            translucent = bool(before.packet_flags & 0x30)
+            expected_flags = before.packet_flags & ~0x20
+            if before.packet_flags & 0x20:
+                expected_flags |= 0x10
             expected = (
-                (0x10, (0x7FFE, 0x8080, 0, 0))
-                if before.packet_flags & 0x10
-                else (0x00, (0x3FFF, 0x8080, 0, 0))
+                expected_flags,
+                (
+                    0x7FFE if translucent else 0x3FFF,
+                    0x8080,
+                    0,
+                    0,
+                ),
             )
             actual = (
                 after.packet_flags,
@@ -340,8 +352,8 @@ def main() -> None:
         beezwax["body_environment"]
         == {
             "faces": 26,
-            "opaque_arena_reflection": 18,
-            "translucent_gloss": 8,
+            "opaque_arena_reflection": 2,
+            "translucent_gloss": 24,
         },
         "Beezwax body glass/reflection structure changed",
     )

@@ -181,6 +181,108 @@ class V8N64Rom:
         return decode_lzss(self.compressed(name))
 
 
+@dataclass(frozen=True)
+class OverlayExport:
+    name: str
+    callback_offset: int
+
+
+def overlay_exports(data: bytes, *, byteorder: str = "big") -> tuple[OverlayExport, ...]:
+    """Decode the ordinary V8 overlay export directory.
+
+    Both N64 and PS1 arena overlays use the same image-size/export-table
+    header and zero-name terminator; only byte order differs.  Object names
+    absent from this directory resolve to the engine's static/default
+    callback, which is the reusable source-level distinction needed by arena
+    conversion.  No arena or object identities participate in the decision.
+    """
+
+    if byteorder not in {"big", "little"}:
+        raise ValueError(f"unsupported overlay byte order {byteorder!r}")
+    if len(data) < 16:
+        raise FormatError("overlay is truncated")
+
+    def word(offset: int) -> int:
+        return int.from_bytes(data[offset:offset + 4], byteorder)
+
+    image_size = word(0)
+    table = word(4)
+    if image_size < 8 or image_size > len(data):
+        raise FormatError(f"invalid overlay image size 0x{image_size:X}")
+    if table < 8 or table + 8 > image_size or table & 3:
+        raise FormatError(f"invalid overlay export table 0x{table:X}")
+
+    result: list[OverlayExport] = []
+    cursor = table
+    while cursor + 8 <= image_size:
+        name_offset = word(cursor)
+        callback_offset = word(cursor + 4)
+        cursor += 8
+        if name_offset == 0:
+            if callback_offset != 0:
+                raise FormatError("overlay export terminator has a callback")
+            return tuple(result)
+        if not (table + 8 <= name_offset < image_size):
+            raise FormatError(
+                f"overlay export name 0x{name_offset:X} is outside its image"
+            )
+        if not (0 <= callback_offset < image_size):
+            raise FormatError(
+                f"overlay callback 0x{callback_offset:X} is outside its image"
+            )
+        end = data.find(b"\0", name_offset, image_size)
+        if end < 0:
+            raise FormatError("overlay export name is unterminated")
+        try:
+            name = data[name_offset:end].decode("ascii")
+        except UnicodeDecodeError as error:
+            raise FormatError("overlay export name is not ASCII") from error
+        if not name:
+            raise FormatError("overlay export name is empty")
+        result.append(OverlayExport(name, callback_offset))
+    raise FormatError("overlay export table has no terminator")
+
+
+def psx_executable_exports(data: bytes) -> tuple[OverlayExport, ...]:
+    """Decode the resident callback table at the start of a PS-X EXE image."""
+
+    if len(data) < 0x808 or data[:8] != b"PS-X EXE":
+        raise FormatError("target runtime is not a PS-X EXE")
+    load_address = int.from_bytes(data[0x18:0x1C], "little")
+    image_size = int.from_bytes(data[0x1C:0x20], "little")
+    if load_address == 0 or image_size == 0 or 0x800 + image_size > len(data):
+        raise FormatError("PS-X EXE has an invalid load image")
+
+    def image_offset(address: int) -> int:
+        relative = address - load_address
+        if not 0 <= relative < image_size:
+            raise FormatError(
+                f"resident export address 0x{address:08X} is outside the image"
+            )
+        return 0x800 + relative
+
+    result: list[OverlayExport] = []
+    cursor = 0x800
+    for _ in range(0x1000):
+        name_address, callback_address = struct.unpack_from("<II", data, cursor)
+        cursor += 8
+        if name_address == 0:
+            return tuple(result)
+        name_offset = image_offset(name_address)
+        callback_offset = image_offset(callback_address) - 0x800
+        end = data.find(b"\0", name_offset, 0x800 + image_size)
+        if end < 0:
+            raise FormatError("resident export name is unterminated")
+        try:
+            name = data[name_offset:end].decode("ascii")
+        except UnicodeDecodeError as error:
+            raise FormatError("resident export name is not ASCII") from error
+        if not name:
+            raise FormatError("resident export name is empty")
+        result.append(OverlayExport(name, callback_offset))
+    raise FormatError("resident export table has no terminator")
+
+
 def decode_lzss(data: bytes) -> bytes:
     """Decode the exact 2 KiB-window stream used by the N64 game."""
 
@@ -773,6 +875,9 @@ class Face:
     double_sided: bool = False
     semi_transparent: bool = False
     combiner: tuple[int, int] = (0, 0)
+    z_compare: bool = False
+    z_update: bool = False
+    z_buffer_geometry: bool | None = None
 
 
 @dataclass
@@ -903,6 +1008,15 @@ def _vertex_attributes_are_normals(vertices: tuple[Vertex, Vertex, Vertex]) -> b
     return True
 
 
+def _update_other_mode(current: int, word0: int, word1: int) -> int:
+    """Apply one F3DEX2 G_SETOTHERMODE field update."""
+
+    size = (word0 & 0xFF) + 1
+    offset = max(0, 32 - ((word0 >> 8) & 0xFF) - size)
+    mask = ((1 << size) - 1) << offset
+    return (current & ~mask) | (word1 & mask)
+
+
 def parse_group_faces(
     data: bytes,
     group_offset: int,
@@ -941,6 +1055,9 @@ def parse_group_faces(
         primitive_color = (127, 127, 127)
         combiner = (0, 0)
         semi_transparent = False
+        other_mode_l = 0
+        geometry_mode = 0
+        geometry_known = 0
 
         def triangle(indices: tuple[int, int, int]) -> None:
             if any(index not in cache for index in indices):
@@ -968,6 +1085,13 @@ def parse_group_faces(
                     double_sided,
                     semi_transparent,
                     combiner,
+                    bool(other_mode_l & 0x0010),
+                    bool(other_mode_l & 0x0020),
+                    (
+                        bool(geometry_mode & 0x00000001)
+                        if geometry_known & 0x00000001
+                        else None
+                    ),
                 )
             )
 
@@ -1017,7 +1141,10 @@ def parse_group_faces(
                 # An alternate display list is not inherently translucent:
                 # Airgrave and Dreamland also place opaque/emissive geometry
                 # there, so derive the PSX flag from the authored RDP state.
-                semi_transparent = (word1 & 0xFFFF) == 0x49D8
+                other_mode_l = _update_other_mode(
+                    other_mode_l, word0, word1
+                )
+                semi_transparent = (other_mode_l & 0xFFFF) == 0x49D8
                 continue
             if opcode == 0xD9:
                 # F3DEX2 G_GEOMETRYMODE encodes a clear mask in word zero and
@@ -1030,6 +1157,13 @@ def parse_group_faces(
                 # G_FOG as G_LIGHTING made almost all Dreamland world faces
                 # consume their RGB shade attributes as signed normals and
                 # produced a bright yellow/brown cast after PS1 conversion.
+                clear_mask = word0 & 0x00FFFFFF
+                geometry_mode = (geometry_mode & clear_mask) | word1
+                geometry_known = (
+                    (geometry_known & clear_mask)
+                    | ((~clear_mask) & 0x00FFFFFF)
+                    | word1
+                )
                 if not (word0 & 0x20000):
                     lighting_enabled = False
                 if word1 & 0x20000:
@@ -1539,10 +1673,400 @@ class XobfReport:
     textures: int
     collisions: int
     slots: int
+    rooted_variants: int = 0
+    terrain_clipped_faces: int = 0
+    terrain_discarded_faces: int = 0
+
+
+@dataclass(frozen=True)
+class RootedInstance:
+    """One source OBJ placement eligible for static terrain adaptation."""
+
+    key: int
+    root_slot: int
+    flags: int
+    position: tuple[int, int, int]
+    rotation_xyz: tuple[int, int, int]
+
+
+@dataclass(frozen=True)
+class _SourceSlot:
+    render_key: int
+    obstacle_index: int
+    position: tuple[int, int, int]
+    rotation_yxz_storage: tuple[int, int, int]
+    flags: int
+    next_sibling: int
+    first_child: int
+
+
+@dataclass(frozen=True)
+class _Transform:
+    rotation: tuple[tuple[float, float, float], ...]
+    position: tuple[float, float, float]
+
+
+@dataclass(frozen=True)
+class _ClipVertex:
+    position: tuple[float, float, float]
+    st: tuple[float, float]
+    color: tuple[float, float, float, float]
+    uv: tuple[float, float]
+    source_offset: int | None
+
+
+def _matrix_yxz(
+    rotation_xyz: tuple[int, int, int],
+) -> tuple[tuple[float, float, float], ...]:
+    """Float expression of the retail RotMatrixYXZ_gte coefficient order."""
+
+    x, y, z = (value * math.tau / 4096.0 for value in rotation_xyz)
+    sx, cx = math.sin(x), math.cos(x)
+    sy, cy = math.sin(y), math.cos(y)
+    sz, cz = math.sin(z), math.cos(z)
+    return (
+        (cy * cz + sz * sy * sx, cz * sy * sx - cy * sz, cx * sy),
+        (sz * cx, cz * cx, -sx),
+        (sz * cy * sx - sy * cz, cz * cy * sx + sy * sz, cx * cy),
+    )
+
+
+def _matrix_multiply(
+    left: tuple[tuple[float, float, float], ...],
+    right: tuple[tuple[float, float, float], ...],
+) -> tuple[tuple[float, float, float], ...]:
+    return tuple(
+        tuple(
+            sum(left[row][item] * right[item][column] for item in range(3))
+            for column in range(3)
+        )
+        for row in range(3)
+    )
+
+
+def _matrix_rotate(
+    matrix: tuple[tuple[float, float, float], ...],
+    vector: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return tuple(
+        sum(matrix[row][column] * vector[column] for column in range(3))
+        for row in range(3)
+    )  # type: ignore[return-value]
+
+
+def _compose_transform(parent: _Transform, local: _Transform) -> _Transform:
+    offset = _matrix_rotate(parent.rotation, local.position)
+    return _Transform(
+        _matrix_multiply(parent.rotation, local.rotation),
+        tuple(parent.position[index] + offset[index] for index in range(3)),
+    )
+
+
+def _source_slots(data: bytes, count: int) -> list[_SourceSlot]:
+    result: list[_SourceSlot] = []
+    for index in range(count):
+        offset = 0x1C + index * 0x1C
+        result.append(
+            _SourceSlot(
+                render_key=be16(data, offset),
+                obstacle_index=be16(data, offset + 2, signed=True),
+                position=tuple(
+                    be32(data, offset + item, signed=True)
+                    for item in (4, 8, 12)
+                ),
+                rotation_yxz_storage=tuple(
+                    be16(data, offset + item, signed=True)
+                    for item in (16, 18, 20)
+                ),
+                flags=be16(data, offset + 22, signed=True),
+                next_sibling=be16(data, offset + 24, signed=True),
+                first_child=be16(data, offset + 26, signed=True),
+            )
+        )
+    return result
+
+
+def _render_group(render_key: int, group_count: int) -> int | None:
+    raw = render_key & 0xFFFF
+    if (
+        raw >> 12 in {8, 9}
+        or 0x8000 <= raw <= 0x8005
+        or 0x8010 <= raw <= 0x8016
+        or raw == 0x801F
+        or 0x8040 <= raw <= 0x8043
+        or 0x8100 <= raw <= 0x8102
+    ):
+        return None
+    group = raw & 0x07FF
+    return group if group < group_count else None
+
+
+def _instance_slots(
+    slots: list[_SourceSlot], instance: RootedInstance
+) -> list[tuple[int, _Transform]]:
+    if not 0 <= instance.root_slot < len(slots):
+        return []
+    root = _Transform(
+        _matrix_yxz(instance.rotation_xyz),
+        tuple(float(value) for value in instance.position),
+    )
+    result: list[tuple[int, _Transform]] = []
+    seen: set[int] = set()
+
+    def visit(index: int, parent: _Transform, include_sibling: bool) -> None:
+        if index < 0 or index >= len(slots) or index in seen:
+            return
+        seen.add(index)
+        slot = slots[index]
+        transform = parent if index == instance.root_slot else _compose_transform(
+            parent,
+            _Transform(
+                # The loader copies the stored Y/X/Z halfwords verbatim into
+                # the SVECTOR consumed by RotMatrixYXZ_gte.
+                _matrix_yxz(slot.rotation_yxz_storage),
+                tuple(float(value) for value in slot.position),
+            ),
+        )
+        result.append((index, transform))
+        if slot.first_child >= 0:
+            visit(slot.first_child, transform, True)
+        if include_sibling and slot.next_sibling >= 0:
+            visit(slot.next_sibling, parent, True)
+
+    visit(instance.root_slot, root, False)
+    return result
+
+
+def _clip_point_distance(
+    point: _ClipVertex,
+    transforms: tuple[_Transform, ...],
+    scale_shift: int,
+    zmap: bytes | None,
+    zones: list[bytes] | None,
+) -> float:
+    scale = 65536.0 / float(1 << scale_shift)
+    local = tuple(value * scale for value in point.position)
+    distances = []
+    for transform in transforms:
+        rotated = _matrix_rotate(transform.rotation, local)
+        world = tuple(
+            transform.position[index] + rotated[index] for index in range(3)
+        )
+        terrain_y = (
+            0
+            if zmap is None or zones is None
+            else _terrain_height_from_source(
+                round(world[0]), round(world[2]), zmap, zones
+            )
+        )
+        # PS1 world Y increases downward; positive distance is buried. The
+        # maximum forms one shared geometry envelope safe at every placement.
+        distances.append(world[1] - terrain_y)
+    return max(distances, default=-math.inf)
+
+
+def _interpolate_clip_vertex(
+    first: _ClipVertex, second: _ClipVertex, amount: float
+) -> _ClipVertex:
+    def values(left: tuple[float, ...], right: tuple[float, ...]) -> tuple[float, ...]:
+        return tuple(
+            left[index] + (right[index] - left[index]) * amount
+            for index in range(len(left))
+        )
+
+    return _ClipVertex(
+        values(first.position, second.position),  # type: ignore[arg-type]
+        values(first.st, second.st),  # type: ignore[arg-type]
+        values(first.color, second.color),  # type: ignore[arg-type]
+        values(first.uv, second.uv),  # type: ignore[arg-type]
+        None,
+    )
+
+
+def _terrain_intersection(
+    first: _ClipVertex,
+    second: _ClipVertex,
+    first_distance: float,
+    transforms: tuple[_Transform, ...],
+    scale_shift: int,
+    zmap: bytes | None,
+    zones: list[bytes] | None,
+) -> _ClipVertex:
+    low = 0.0
+    high = 1.0
+    first_inside = first_distance <= 0.0
+    for _ in range(32):
+        middle = (low + high) * 0.5
+        point = _interpolate_clip_vertex(first, second, middle)
+        inside = _clip_point_distance(
+            point, transforms, scale_shift, zmap, zones
+        ) <= 0.0
+        if inside == first_inside:
+            low = middle
+        else:
+            high = middle
+    return _interpolate_clip_vertex(first, second, (low + high) * 0.5)
+
+
+def _clip_group_to_terrain(
+    group: tuple[list[Vertex], list[Face], int, int, int],
+    transforms: tuple[_Transform, ...],
+    zmap: bytes | None,
+    zones: list[bytes] | None,
+    generated_offset: list[int],
+) -> tuple[tuple[list[Vertex], list[Face], int, int, int], int, int]:
+    vertices, faces, scale_shift, auxiliary_count, native_extent = group
+    output_faces: list[Face] = []
+    clipped_count = 0
+    discarded_count = 0
+
+    for face in faces:
+        if not (face.z_compare and face.z_update):
+            output_faces.append(face)
+            continue
+        polygon = [
+            _ClipVertex(
+                tuple(float(value) for value in vertex_position),
+                (float(vertex.s), float(vertex.t)),
+                tuple(float(value) for value in vertex.color),
+                tuple(float(value) for value in uv),
+                vertex.source_offset,
+            )
+            for vertex, vertex_position, uv in zip(
+                face.vertices,
+                ((item.x, item.y, item.z) for item in face.vertices),
+                face.uv,
+            )
+        ]
+        distances = [
+            _clip_point_distance(
+                point, transforms, scale_shift, zmap, zones
+            )
+            for point in polygon
+        ]
+        inside = [value <= 0.0 for value in distances]
+        if all(inside):
+            output_faces.append(face)
+            continue
+        if not any(inside):
+            discarded_count += 1
+            continue
+
+        clipped_count += 1
+        clipped: list[_ClipVertex] = []
+        previous = polygon[-1]
+        previous_distance = distances[-1]
+        previous_inside = previous_distance <= 0.0
+        for current, current_distance in zip(polygon, distances):
+            current_inside = current_distance <= 0.0
+            if current_inside != previous_inside:
+                clipped.append(
+                    _terrain_intersection(
+                        previous,
+                        current,
+                        previous_distance,
+                        transforms,
+                        scale_shift,
+                        zmap,
+                        zones,
+                    )
+                )
+            if current_inside:
+                clipped.append(current)
+            previous = current
+            previous_distance = current_distance
+            previous_inside = current_inside
+
+        converted_vertices: list[Vertex] = []
+        converted_uv: list[tuple[int, int]] = []
+        for point in clipped:
+            source_offset = point.source_offset
+            if source_offset is None:
+                source_offset = generated_offset[0]
+                generated_offset[0] -= 1
+            converted_vertices.append(
+                Vertex(
+                    *(
+                        max(-32768, min(32767, _round_half_away(value)))
+                        for value in point.position
+                    ),
+                    *(
+                        max(-32768, min(32767, _round_half_away(value)))
+                        for value in point.st
+                    ),
+                    tuple(
+                        max(0, min(255, _round_half_away(value)))
+                        for value in point.color
+                    ),
+                    source_offset,
+                )
+            )
+            converted_uv.append(
+                tuple(
+                    max(0, min(255, _round_half_away(value)))
+                    for value in point.uv
+                )  # type: ignore[arg-type]
+            )
+
+        for index in range(1, len(converted_vertices) - 1):
+            triangle_vertices = (
+                converted_vertices[0],
+                converted_vertices[index],
+                converted_vertices[index + 1],
+            )
+            triangle_uv = (
+                converted_uv[0],
+                converted_uv[index],
+                converted_uv[index + 1],
+            )
+            output_faces.append(
+                Face(
+                    vertices=triangle_vertices,
+                    texture=face.texture,
+                    palette_bank=face.palette_bank,
+                    color=face.color,
+                    uv=triangle_uv,
+                    lighting=face.lighting,
+                    dynamic_texture=face.dynamic_texture,
+                    double_sided=face.double_sided,
+                    semi_transparent=face.semi_transparent,
+                    combiner=face.combiner,
+                    z_compare=face.z_compare,
+                    z_update=face.z_update,
+                    z_buffer_geometry=face.z_buffer_geometry,
+                )
+            )
+
+    if clipped_count == 0 and discarded_count == 0:
+        return group, 0, 0
+    output_vertices: list[Vertex] = []
+    seen_vertices: set[int] = set()
+    for face in output_faces:
+        for vertex in face.vertices:
+            if vertex.source_offset in seen_vertices:
+                continue
+            seen_vertices.add(vertex.source_offset)
+            output_vertices.append(vertex)
+    return (
+        (
+            output_vertices,
+            output_faces,
+            scale_shift,
+            auxiliary_count,
+            native_extent,
+        ),
+        clipped_count,
+        discarded_count,
+    )
 
 
 def convert_xobf_bin(
     data: bytes,
+    *,
+    rooted_instances: Iterable[RootedInstance] = (),
+    animated_slots: frozenset[int] = frozenset(),
+    zmap: bytes | None = None,
+    zones: list[bytes] | None = None,
 ) -> tuple[
     bytes,
     XobfReport,
@@ -1605,6 +2129,97 @@ def convert_xobf_bin(
                 native_extent,
             )
         )
+
+    rooted_instances = tuple(rooted_instances)
+    if rooted_instances and (zmap is None or not zones):
+        raise ValueError("rooted instances require ZMAP and ZONE terrain")
+    source_slots = _source_slots(data, slot_count)
+    slot_records = [
+        bytearray(convert_slot(data[0x1C + index * 0x1C:0x38 + index * 0x1C]))
+        for index in range(slot_count)
+    ]
+    rooted_variant_count = 0
+    terrain_clipped_faces = 0
+    terrain_discarded_faces = 0
+    generated_offset = [-1]
+    instances_by_root: dict[int, list[RootedInstance]] = {}
+    for instance in rooted_instances:
+        instances_by_root.setdefault(instance.root_slot, []).append(instance)
+    patched_slots: dict[int, tuple[tuple[float, ...], int]] = {}
+
+    for root_slot, instances in sorted(instances_by_root.items()):
+        placement_nodes = [
+            _instance_slots(source_slots, instance) for instance in instances
+        ]
+        if not placement_nodes or any(not nodes for nodes in placement_nodes):
+            continue
+        node_indices = tuple(index for index, _transform in placement_nodes[0])
+        if any(
+            tuple(index for index, _transform in nodes) != node_indices
+            for nodes in placement_nodes[1:]
+        ):
+            raise FormatError(
+                f"rooted template {root_slot} has placement-dependent topology"
+            )
+        if any(slot_index in animated_slots for slot_index in node_indices):
+            # An animated subtree can leave its authored terrain relationship;
+            # retain the source geometry instead of baking a static mask.
+            continue
+        template_changed = False
+        for node_order, slot_index in enumerate(node_indices):
+            transforms = tuple(
+                nodes[node_order][1] for nodes in placement_nodes
+            )
+            group_index = _render_group(
+                source_slots[slot_index].render_key, group_count
+            )
+            if group_index is None:
+                continue
+            context = tuple(
+                round(value, 6)
+                for transform in transforms
+                for row in transform.rotation
+                for value in row
+            ) + tuple(
+                round(value, 3)
+                for transform in transforms
+                for value in transform.position
+            )
+            existing = patched_slots.get(slot_index)
+            if existing is not None:
+                if existing[0] != context:
+                    raise FormatError(
+                        f"rooted slot {slot_index} has incompatible local planes"
+                    )
+                continue
+            variant, clipped, discarded = _clip_group_to_terrain(
+                parsed_groups[group_index],
+                transforms,
+                zmap,
+                zones,
+                generated_offset,
+            )
+            if not (clipped or discarded):
+                continue
+            if len(parsed_groups) >= 0x100:
+                raise FormatError(
+                    "terrain-adapted model exceeds V8's 8-bit group capacity"
+                )
+            variant_index = len(parsed_groups)
+            parsed_groups.append(variant)
+            raw_key = struct.unpack_from("<H", slot_records[slot_index], 0)[0]
+            raw_key = (raw_key & 0xFF00) | variant_index
+            struct.pack_into("<H", slot_records[slot_index], 0, raw_key)
+            patched_slots[slot_index] = (context, variant_index)
+            template_changed = True
+            terrain_clipped_faces += clipped
+            terrain_discarded_faces += discarded
+        if template_changed:
+            rooted_variant_count += 1
+
+    output_group_count = len(parsed_groups)
+    output_slot_count = len(slot_records)
+    face_count = sum(len(group[1]) for group in parsed_groups)
 
     base_alpha_zero = {
         texture.index: texture_has_nonblack_alpha_cutout(texture)
@@ -1680,6 +2295,9 @@ def convert_xobf_bin(
                     double_sided=face.double_sided,
                     semi_transparent=face.semi_transparent,
                     combiner=face.combiner,
+                    z_compare=face.z_compare,
+                    z_update=face.z_update,
+                    z_buffer_geometry=face.z_buffer_geometry,
                 )
             )
         groups.append(
@@ -1710,9 +2328,8 @@ def convert_xobf_bin(
         collisions.append(convert_collision_stream(data, target, later))
 
     output = bytearray(b"\0" * 0x1C)
-    for index in range(slot_count):
-        start = 0x1C + index * 0x1C
-        output += convert_slot(data[start:start + 0x1C])
+    for record in slot_records:
+        output += record
     while len(output) < align(len(output), 4):
         output.append(0)
     group_table_out, _ = _layout_table(output, groups)
@@ -1732,17 +2349,17 @@ def convert_xobf_bin(
     texture_table_out, _ = _layout_table(output, texture_blobs)
     struct.pack_into(
         "<IIIIIII", output, 0,
-        group_count, group_table_out,
+        output_group_count, group_table_out,
         collision_count, collision_table_out,
         len(texture_blobs), texture_table_out,
-        slot_count,
+        output_slot_count,
     )
     slot_vertex_defaults: list[
         tuple[tuple[int, int, int, int], ...] | None
     ] = []
-    for index in range(slot_count):
-        render_key = be16(data, 0x1C + index * 0x1C) & 0x07FF
-        if render_key >= group_count:
+    for record in slot_records:
+        render_key = struct.unpack_from("<H", record, 0)[0] & 0x07FF
+        if render_key >= output_group_count:
             slot_vertex_defaults.append(None)
             continue
         vertices = parsed_groups[render_key][0]
@@ -1750,7 +2367,14 @@ def convert_xobf_bin(
             tuple((vertex.x, vertex.y, vertex.z, 0) for vertex in vertices)
         )
     return bytes(output), XobfReport(
-        group_count, face_count, len(texture_blobs), collision_count, slot_count
+        output_group_count,
+        face_count,
+        len(texture_blobs),
+        collision_count,
+        output_slot_count,
+        rooted_variant_count,
+        terrain_clipped_faces,
+        terrain_discarded_faces,
     ), slot_vertex_defaults
 
 
@@ -1786,6 +2410,8 @@ def convert_animation(
     slot_vertex_defaults: list[
         tuple[tuple[int, int, int, int], ...] | None
     ] | None = None,
+    *,
+    source_slot_count: int | None = None,
 ) -> bytes:
     """Convert N64 ANM streams and adapt partial vertex morph tables.
 
@@ -1796,12 +2422,19 @@ def convert_animation(
     expansion.
     """
 
+    if source_slot_count is None:
+        source_slot_count = slot_count
+    if not 0 <= source_slot_count <= slot_count:
+        raise FormatError("animation source slot count exceeds output slots")
+    source_table_size = 4 + source_slot_count * 4
     table_size = 4 + slot_count * 4
-    if len(payload) < table_size:
+    if len(payload) < source_table_size:
         raise FormatError("N64 ANM table is truncated")
-    offsets = [be32(payload, 4 + index * 4) for index in range(slot_count)]
+    offsets = [
+        be32(payload, 4 + index * 4) for index in range(source_slot_count)
+    ]
     for index, offset in enumerate(offsets):
-        if offset and not (table_size <= offset < len(payload)):
+        if offset and not (source_table_size <= offset < len(payload)):
             raise FormatError(f"N64 ANM slot {index} has invalid offset 0x{offset:X}")
     if slot_vertex_defaults is None:
         slot_vertex_defaults = [None] * slot_count
@@ -2467,7 +3100,12 @@ class ArenaReport:
     chunks: tuple[str, ...]
 
 
-def convert_arena(exp: bytes, name: str) -> tuple[bytes, ArenaReport]:
+def convert_arena(
+    exp: bytes,
+    name: str,
+    *,
+    object_callback_names: frozenset[str] | None = None,
+) -> tuple[bytes, ArenaReport]:
     children = root_children(exp)
     converted: list[bytes] = []
     reports: list[XobfReport] = []
@@ -2476,6 +3114,98 @@ def convert_arena(exp: bytes, name: str) -> tuple[bytes, ArenaReport]:
         1 for _off, tag, _payload, _parent in iter_chunks(exp) if tag == b"OBJ "
     )
     converted_tags: list[str] = []
+    zmap = next((child.payload for child in children if child.tag == b"ZMAP"), None)
+    terrain_zones = [
+        child.payload for child in children if child.tag == b"ZONE"
+    ]
+
+    placements_by_bank: dict[int, list[RootedInstance]] = {}
+    root_uses: dict[tuple[int, int], list[RootedInstance | None]] = {}
+    if object_callback_names is not None:
+        for child_index, child in enumerate(children):
+            if not child.is_form or child.form_type != b"OBJ ":
+                continue
+            nested = form_children(iff_form(b"OBJ ", [child.payload]), b"OBJ ")
+            head = next((item.payload for item in nested if item.tag == b"HEAD"), None)
+            if head is None or len(head) < 34:
+                continue
+            object_name = head[34:].split(b"\0", 1)[0].decode(
+                "ascii", "replace"
+            )
+            # Kind zero is the ordinary placed-object path. Other kinds are
+            # engine-managed item/effect records and are not rooted scenery.
+            if head[1] != 0:
+                continue
+            bank = be16(head, 26, signed=True)
+            root_slot = be16(head, 28, signed=True)
+            if bank < 0 or root_slot < 0:
+                continue
+            instance = RootedInstance(
+                    key=child_index,
+                    root_slot=root_slot,
+                    flags=be32(head, 4),
+                    position=(
+                        be32(head, 8, signed=True),
+                        be32(head, 12, signed=True) - 0x100000,
+                        be32(head, 16, signed=True),
+                    ),
+                    rotation_xyz=tuple(
+                        be16(head, offset, signed=True)
+                        for offset in (20, 22, 24)
+                    ),
+                )
+            root_uses.setdefault((bank, root_slot), []).append(
+                None if object_name in object_callback_names else instance
+            )
+        for (bank, _root_slot), uses in root_uses.items():
+            if all(instance is not None for instance in uses):
+                placements_by_bank.setdefault(bank, []).extend(
+                    instance for instance in uses if instance is not None
+                )
+
+    prepared_xobf: dict[int, bytes] = {}
+    xobf_index = 0
+    for child_index, child in enumerate(children):
+        if not child.is_form or child.form_type != b"XOBF":
+            continue
+        nested = form_children(iff_form(b"XOBF", [child.payload]), b"XOBF")
+        bin_chunk = next(item for item in nested if item.tag == b"BIN ")
+        anm = next((item for item in nested if item.tag == b"ANM "), None)
+        source_slot_count = be32(bin_chunk.payload, 24)
+        animated_slots = frozenset()
+        if anm is not None:
+            source_table_size = 4 + source_slot_count * 4
+            if len(anm.payload) < source_table_size:
+                raise FormatError("N64 ANM slot table is truncated")
+            animated_slots = frozenset(
+                index
+                for index in range(source_slot_count)
+                if be32(anm.payload, 4 + index * 4) != 0
+            )
+        model, report, slot_vertex_defaults = convert_xobf_bin(
+            bin_chunk.payload,
+            rooted_instances=placements_by_bank.get(xobf_index, ()),
+            animated_slots=animated_slots,
+            zmap=zmap,
+            zones=terrain_zones,
+        )
+        reports.append(report)
+        out_children = [iff_chunk(b"BIN ", model)]
+        if anm is not None:
+            out_children.append(
+                iff_chunk(
+                    b"ANM ",
+                    convert_animation(
+                        anm.payload,
+                        report.slots,
+                        slot_vertex_defaults,
+                        source_slot_count=source_slot_count,
+                    ),
+                )
+            )
+        prepared_xobf[child_index] = iff_form(b"XOBF", out_children)
+        xobf_index += 1
+
     dreamland_water: tuple[bytes, XobfReport, int, int, int] | None = None
     if name.upper() == "DREAMLND":
         rects = [child.payload for child in children if child.tag == b"RECT"]
@@ -2489,7 +3219,7 @@ def convert_arena(exp: bytes, name: str) -> tuple[bytes, ArenaReport]:
         dreamland_water = _dreamland_water_xobf(
             rects[0], xbmps[0], zmaps[0], zones
         )
-    for child in children:
+    for child_index, child in enumerate(children):
         tag = child.form_type if child.is_form else child.tag
         if tag == b"TITL":
             # N64 shell metadata, not consumed by the PSX terrain loader.
@@ -2507,26 +3237,7 @@ def convert_arena(exp: bytes, name: str) -> tuple[bytes, ArenaReport]:
             converted_tags.append("HEAD")
             continue
         if child.is_form and tag == b"XOBF":
-            nested = form_children(iff_form(b"XOBF", [child.payload]), b"XOBF")
-            bin_chunk = next(item for item in nested if item.tag == b"BIN ")
-            model, report, slot_vertex_defaults = convert_xobf_bin(
-                bin_chunk.payload
-            )
-            reports.append(report)
-            out_children = [iff_chunk(b"BIN ", model)]
-            anm = next((item for item in nested if item.tag == b"ANM "), None)
-            if anm is not None:
-                out_children.append(
-                    iff_chunk(
-                        b"ANM ",
-                        convert_animation(
-                            anm.payload,
-                            report.slots,
-                            slot_vertex_defaults,
-                        ),
-                    )
-                )
-            converted.append(iff_form(b"XOBF", out_children))
+            converted.append(prepared_xobf[child_index])
             converted_tags.append("XOBF")
             continue
         if tag == b"XBMP" or tag == b"XBGM":

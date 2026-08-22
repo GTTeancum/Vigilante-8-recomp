@@ -601,12 +601,12 @@ PROVEN_PATCHES = [
         "mode": "pre",
     },
     {
-        # Appended original-V8 result banks are absent from V8:2's boot-time
-        # retail file tree. Resolve only that nested loose path to a native
-        # file descriptor, then leave its XA streamer/filter/SPU path intact.
+        # Expanded overrides and append-only mod files live beyond the retail
+        # lead-out. Resolve their generic loose-file extent to V8:2's native
+        # descriptor layout, then leave every caller's loader lifecycle intact.
         "overlay": "main",
         "address": "80018210",
-        "target": "RecompOne.Runtime.Sdk.V82Compat.ResolveOriginalResultVoiceFile",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ResolveVirtualLooseFile",
         "mode": "pre",
     },
     {
@@ -759,6 +759,95 @@ PROVEN_PATCHES = [
         "mode": "post",
     },
     {
+        # The outer terrain walker subdivides mixed-distance 4x4 cells into
+        # four 2x2 calls here. Capture each inner packet range independently
+        # so a coarse subcell can receive its native four texture descriptors
+        # even when neighboring subcells emitted detailed textured packets.
+        "overlay": "main",
+        "address": "800290A8",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "BeginTerrainDetailPacketWrites"
+        ),
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "800290A8",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "EndTerrainDetailPacketWrites"
+        ),
+        "mode": "post",
+    },
+    {
+        # Both terrain LOD walkers use this helper for the mixed case where
+        # only part of a 4x4 or 2x2 cell crosses the detail threshold. It emits
+        # Gouraud-only transition triangles; preserve their source grid so the
+        # enhanced backend can apply the authored tile textures.
+        "overlay": "main",
+        "address": "800297E8",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "BeginTerrainTransitionPacketWrites"
+        ),
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "800297E8",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "EndTerrainTransitionPacketWrites"
+        ),
+        "mode": "post",
+    },
+    {
+        # The outer terrain walker independently culls either half of a coarse
+        # 4x4 cell. Tag each completed packet at its exact emission site so a
+        # surviving single triangle still receives its authored texture grid.
+        "overlay": "main",
+        "address": "80028B54",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "TagFirstCoarseTerrainPacket"
+        ),
+        "mode": "inline",
+        "position": "after",
+    },
+    {
+        "overlay": "main",
+        "address": "80028BB4",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "TagSecondCoarseTerrainPacket"
+        ),
+        "mode": "inline",
+        "position": "after",
+    },
+    {
+        # func_800290A8 applies the same independent half-cull to each 2x2
+        # subcell, so tag those two packet sites as well.
+        "overlay": "main",
+        "address": "80029160",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "TagFirstCoarseTerrainPacket"
+        ),
+        "mode": "inline",
+        "position": "after",
+    },
+    {
+        "overlay": "main",
+        "address": "800291A8",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "TagSecondCoarseTerrainPacket"
+        ),
+        "mode": "inline",
+        "position": "after",
+    },
+    {
         # func_8001C158 constructs the native terrain traversal polygon from
         # gp+0xEDC (horizontal extent) and gp+0xF20 (vertical extent). Expand
         # only the horizontal source while Enhanced true widescreen is active,
@@ -830,6 +919,17 @@ PROVEN_PATCHES = [
         "address": "80021F70",
         "target": "RecompOne.Runtime.Sdk.V82Compat.EndImportedRenderGroup",
         "mode": "post",
+    },
+    {
+        # V8:2 dispatches authored environment/reflection faces through the
+        # kind-12 handler at 0x80022C54.  Tag its output packet while any
+        # native vehicle hierarchy is rendering; converted V8 and retail
+        # V8:2 banks therefore use the exact same material path.
+        "overlay": "main",
+        "address": "80022C54",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ObserveVehicleReflectionPacket",
+        "mode": "inline",
+        "position": "before",
     },
     {
         # func_8002E22C is the per-object frustum test. Its three planes are

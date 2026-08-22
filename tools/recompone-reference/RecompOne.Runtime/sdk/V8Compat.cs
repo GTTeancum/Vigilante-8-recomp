@@ -200,9 +200,7 @@ public static class V8Compat
     static string _activeMeshRender = "none";
     static string _activeMeshIdentity = "unresolved";
     static bool _activeMeshIsVehicle;
-    static bool _activeMeshIsDreamlandWater;
     static uint _activeMeshAddress;
-    static uint _activeMeshObject;
     static uint _activeMeshPacketBytes;
     static readonly Dictionary<(uint Mesh, uint Object), int> _meshRenderCounts = new();
     static uint _terrainFrustumWidthAddress;
@@ -1065,7 +1063,6 @@ public static class V8Compat
         }
         uint objectAddress = c.S0;
         bool vehicleMesh = false;
-        bool dreamlandWaterMesh = IsDreamlandWaterMesh(m, c.A0);
         var visitedParents = new HashSet<uint>();
         while (IsRetailRamRange(objectAddress, 0x40u) &&
                visitedParents.Add(objectAddress))
@@ -1075,27 +1072,15 @@ public static class V8Compat
                 vehicleMesh = true;
                 break;
             }
-            // The converted EXP's named DreamlandWater HEAD is bank 2,
-            // slot 0 with persistent animated-water flags 0x00018005 and
-            // an exact root translation of (882.5, *, 1354.0). Renderable
-            // patch children retain a native link to that model-free root.
-            if (m.ReadU32(objectAddress + 0x48u) == 57835520u &&
-                m.ReadU32(objectAddress + 0x50u) == 88735744u)
-                dreamlandWaterMesh = true;
             objectAddress = m.ReadU32(objectAddress + 0x3Cu);
         }
         _activeMeshIsVehicle = vehicleMesh;
-        _activeMeshIsDreamlandWater = dreamlandWaterMesh;
-        if (dreamlandWaterMesh)
-            RecompOne.Runtime.Hle.GpuHle.BeginDreamlandWaterPacketWrites();
         _activeMeshAddress = c.A0;
-        _activeMeshObject = c.S0;
         _activeMeshPacketBytes = m.ReadU16(c.A0 + 2u);
         if (Gte.TraceNclipOwnersEnabled)
             Gte.SetNclipOwner(
                 $"mesh=0x{c.A0:X8},object=0x{c.S0:X8}," +
                 $"vehicle={(vehicleMesh ? 1 : 0)}," +
-                $"water={(dreamlandWaterMesh ? 1 : 0)}," +
                 $"meshFlags=0x{m.ReadU16(c.A0):X4}," +
                 $"vertexCount={m.ReadU32(c.A0 + 4u)}," +
                 $"polygonCount={m.ReadU32(c.A0 + 0x14u)}," +
@@ -1104,7 +1089,6 @@ public static class V8Compat
         {
             bool validObject = IsRetailRamRange(c.S0, 0x68u);
             _activeMeshIdentity =
-                $"{(dreamlandWaterMesh ? "dreamland-water," : "")}" +
                 $"object=0x{c.S0:X8}," +
                 $"objectFlags=0x{(validObject ? m.ReadU32(c.S0) : 0u):X8}," +
                 $"objectKind={(validObject ? m.ReadU8(c.S0 + 4u) : 0u)}," +
@@ -1244,61 +1228,14 @@ public static class V8Compat
                     $"[V8VehiclePackets] start=0x{packetStart:X8} " +
                     $"end=0x{packetEnd:X8}");
         }
-        if (_activeMeshIsDreamlandWater && packetStart != 0u)
-        {
-            RecompOne.Runtime.Hle.GpuHle.RegisterPacketOwnerRange(
-                packetStart,
-                packetEnd,
-                _activeMeshIdentity);
-            if (Environment.GetEnvironmentVariable(
-                    "RECOMPONE_TRACE_DREAMLAND_WATER_PACKETS") == "1")
-                Console.Error.WriteLine(
-                    $"[V8DreamlandWaterPackets] " +
-                    $"object=0x{_activeMeshObject:X8} " +
-                    $"mesh=0x{_activeMeshAddress:X8} " +
-                    $"start=0x{packetStart:X8} end=0x{packetEnd:X8}");
-        }
-        if (_activeMeshIsDreamlandWater)
-            RecompOne.Runtime.Hle.GpuHle.EndDreamlandWaterPacketWrites();
         _activeMeshIsVehicle = false;
-        _activeMeshIsDreamlandWater = false;
         _activeMeshAddress = 0u;
-        _activeMeshObject = 0u;
         _activeMeshPacketBytes = 0u;
         _activeMeshIdentity = "unresolved";
         if (Gte.TraceNclipOwnersEnabled)
             Gte.ClearNclipOwner();
         if (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OT") == "1")
             _activeMeshRender = "none";
-    }
-
-    private static bool IsDreamlandWaterMesh(IMemory m, uint mesh)
-    {
-        if (V8ArenaRegistry.SelectedStableId != "n64.super_dreamland_64" ||
-            !IsRetailRamRange(mesh, 0x28u))
-            return false;
-
-        uint vertexCount = m.ReadU32(mesh + 4u);
-        uint polygonCount = m.ReadU32(mesh + 0x14u);
-        if (!((vertexCount == 16u && polygonCount == 32u) ||
-              (vertexCount == 8u && polygonCount == 16u)) ||
-            m.ReadU16(mesh + 0x26u) != 10u)
-            return false;
-
-        uint vertices = m.ReadU32(mesh + 8u);
-        uint byteCount = vertexCount * 8u;
-        if (!IsRetailRamRange(vertices, byteCount))
-            return false;
-
-        // FNV-1a over the exact native vertex tables authored by
-        // _dreamland_water_group. The four hashes represent the 8x8, 5x8,
-        // 8x4 and 5x4 edge-patch dimensions in the converted XOBF bank.
-        ulong hash = MeshVertexHash(m, vertices, vertexCount);
-        return hash is
-            0x9D297A2FD42648A5ul or
-            0x9C703016A3102885ul or
-            0xB69EA7EBF285D9A5ul or
-            0xC11410461BCA7265ul;
     }
 
     private static ulong MeshVertexHash(
@@ -1330,8 +1267,6 @@ public static class V8Compat
             _activeMeshIdentity);
         if (_activeMeshIsVehicle)
             RecompOne.Runtime.Hle.GpuHle.RegisterVehiclePacket(c.A2);
-        if (_activeMeshIsDreamlandWater)
-            RecompOne.Runtime.Hle.GpuHle.RegisterDreamlandWaterPacket(c.A2);
     }
 
     public static string DescribeActiveMeshRender() => _activeMeshRender;
@@ -1941,9 +1876,6 @@ public static class V8Compat
                     $"model=0x{m.ReadU32(_dreamlandCastleObject + 0x30u):X8} " +
                     $"callback=0x{m.ReadU32(_dreamlandCastleObject + 0x64u):X8}");
         }
-        if (_traceMeshes &&
-            tick is 1 or 7 or 13 or 19 or 25 or 31 or 37 or 43)
-            TraceDreamlandWaterObjects(m, tick);
         if (_whammyMatrix)
         {
             uint lockedTarget = m.ReadU32(player + 0xE4u);
@@ -3079,76 +3011,6 @@ public static class V8Compat
                 $"parent=0x{m.ReadU32(obj + 0x3Cu):X8} " +
                 $"callback=0x{m.ReadU32(obj + 0x64u):X8}");
         }
-    }
-
-    static void TraceDreamlandWaterObjects(IMemory m, int tick)
-    {
-        // Root of the first source-authored 8x8 patch covering RECT
-        // (852,1324)..(913,1384).  The other 63 hierarchy nodes use local
-        // transforms under this object.
-        const uint waterX = 56098816u;
-        const uint waterZ = 87031808u;
-        for (uint address = 0x80000000u; address < 0x801FFFF8u; address += 4u)
-        {
-            if (m.ReadU32(address) != waterX ||
-                m.ReadU32(address + 8u) != waterZ)
-                continue;
-            uint obj = address >= 0x48u ? address - 0x48u : 0u;
-            uint model = m.ReadU32(obj + 0x30u);
-            uint texture = IsRetailRamRange(model, 0x30u)
-                ? m.ReadU32(model + 0x2Cu)
-                : 0u;
-            Console.Error.WriteLine(
-                $"[V8WaterObject] tick={tick} vector=0x{address:X8} object=0x{obj:X8} " +
-                $"flags=0x{m.ReadU32(obj):X8} kind={m.ReadU8(obj + 4u)} " +
-                $"pos={ReadVec3(m, address)} " +
-                $"model=0x{model:X8} texture=0x{texture:X8} " +
-                $"textureWords={(IsRetailRamRange(texture, 16u) ? ReadHex(m, texture, 16) : "invalid")} " +
-                $"sibling=0x{m.ReadU32(obj + 0x34u):X8} " +
-                $"child=0x{m.ReadU32(obj + 0x38u):X8} " +
-                $"callback=0x{m.ReadU32(obj + 0x64u):X8}");
-            if (IsRetailRamRange(model, 0x30u))
-                TraceDreamlandWaterHierarchy(m, obj, tick);
-        }
-    }
-
-    static void TraceDreamlandWaterHierarchy(IMemory m, uint root, int tick)
-    {
-        var pending = new Stack<uint>();
-        var visited = new HashSet<uint>();
-        var textures = new Dictionary<uint, int>();
-        int modelCount = 0;
-        int invalidModels = 0;
-        pending.Push(root);
-        while (pending.Count != 0)
-        {
-            uint obj = pending.Pop();
-            if (!IsRetailRamRange(obj, 0x40u) || !visited.Add(obj))
-                continue;
-            uint model = m.ReadU32(obj + 0x30u);
-            if (IsRetailRamRange(model, 0x30u))
-            {
-                modelCount++;
-                uint texture = m.ReadU32(model + 0x2Cu);
-                textures.TryGetValue(texture, out int count);
-                textures[texture] = count + 1;
-            }
-            else
-            {
-                invalidModels++;
-            }
-            uint sibling = m.ReadU32(obj + 0x34u);
-            uint child = m.ReadU32(obj + 0x38u);
-            if (sibling != 0u)
-                pending.Push(sibling);
-            if (child != 0u)
-                pending.Push(child);
-        }
-        Console.Error.WriteLine(
-            $"[V8WaterHierarchy] tick={tick} nodes={visited.Count} " +
-            $"models={modelCount} invalidModels={invalidModels} textures=" +
-            string.Join(",", textures.OrderBy(pair => pair.Key).Select(
-                pair => $"0x{pair.Key:X8}:{pair.Value}")));
     }
 
     public static void TraceMenuText(CpuContext c, IMemory m)

@@ -29,6 +29,17 @@ MIGRATIONS = (
 
 REPLACEMENTS = (
     (
+        """    public static void func_80022C54(CpuContext c, IMemory m)
+    {
+        c.At = RecompOne.Runtime.Gte.ReadControl(31);
+""",
+        """    public static void func_80022C54(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Sdk.V82Compat.ObserveVehicleReflectionPacket(c, m);
+        c.At = RecompOne.Runtime.Gte.ReadControl(31);
+""",
+    ),
+    (
         """    public static void func_80021064(CpuContext c, IMemory m)
     {
         c.SP = c.SP - 0xC70u;

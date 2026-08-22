@@ -1,0 +1,23 @@
+# Enter Bayou as the guest vehicle selected on the command line.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+1450+2=RIGHT
+1480+2=RIGHT
+2020+3=CROSS
+2220+2=SELECT
+2280+3=CROSS
+2400+2=SELECT
+2460+3=CROSS
+2580+2=SELECT
+2640+3=CROSS
+[gameplay]
+# Reuse the established rear-quarter driving arc under Bayou lighting.
+180+420=UP
+240+180=LEFT
+480+180=RIGHT
+720+2=SELECT

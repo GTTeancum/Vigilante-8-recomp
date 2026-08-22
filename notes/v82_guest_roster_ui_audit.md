@@ -74,3 +74,18 @@ Required validation: 1P Arcade/Quest/Survival, 2P versus/co-op, locked and
 unlocked retail rosters, zero/one/many guests, package removal, duplicate
 selection with `MIXED_CARS` off/on, guest transformation previews, match load,
 pause/quit, and return to player select.
+
+## Conversion follow-ups
+
+- [ ] Convert OG V8's Y the Alien and his flying saucer as a distinct legacy
+  guest entry, even though V8:2 has its own native Y vehicle. Route the saucer
+  through the same V8-to-V8:2 model, packet, material, selector, registry, and
+  gameplay conversion infrastructure as every other imported vehicle.
+- [ ] Represent the saucer as a generic non-transformable vehicle capability.
+  Non-transformable vehicles must be ineligible to collect transformation
+  powerups. The check must consume capability metadata; it must not branch on
+  Y's display name, stable ID, numeric type, model, or source game.
+- [ ] Validate ordinary weapon/powerup collection, flight behavior, selector
+  presentation, reflection/material output, AI use, and 1P/2P match loading,
+  plus explicit rejection of all transformation pickups without consuming or
+  activating them.

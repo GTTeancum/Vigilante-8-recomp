@@ -741,9 +741,6 @@ public sealed partial class Gpu
         int maxY = Math.Min(_drawAreaBottom, Math.Max(a.Y, Math.Max(b.Y, c.Y)));
         if (minX > maxX || minY > maxY) return;
 
-        if (tex && semi)
-            TraceImportedShadowSourceSoftware(a, b, c, clut);
-
         int bias0 = IsTopLeft(b, c) ? 0 : -1;
         int bias1 = IsTopLeft(c, a) ? 0 : -1;
         int bias2 = IsTopLeft(a, b) ? 0 : -1;

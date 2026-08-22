@@ -17,8 +17,11 @@ LINE = re.compile(
     r"packet=(?P<packet>\S+) ot=(?P<ot>\d+) "
     r"owner=\"(?P<owner>[^\"]*)\" "
     r"material=(?P<material>\w+) tex=(?P<textured>[01]) "
+    r"(?:semi=(?P<semi>[01]) )?"
     r"raw=(?P<raw>[01]) "
     r"tpage=(?P<tpage>\S+) clut=(?P<clut>\S+) "
+    r"(?:tw=(?P<texture_window>\S+) )?"
+    r"(?:ps1-zero-key=(?P<ps1_zero_key>\S+) )?"
     r"xy=(?P<xy>.*?) uv=(?P<uv>.*?) rgb=(?P<rgb>.*?) "
     r"gte=(?P<gte>.*)$"
 )
@@ -67,9 +70,9 @@ def main() -> int:
     parser.add_argument("trace", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
-        "--require-imported-shadow",
+        "--require-reflection",
         action="store_true",
-        help="fail unless the run exercised the dedicated imported-shadow path",
+        help="fail unless native vehicle-reflection packets were observed",
     )
     parser.add_argument(
         "--probe",
@@ -99,6 +102,7 @@ def main() -> int:
             int(row["gameplay"]),
             row["material"],
             int(row["textured"]),
+            int(row["semi"]) if row["semi"] is not None else None,
             int(row["raw"]),
             row["tpage"],
             row["clut"],
@@ -124,9 +128,16 @@ def main() -> int:
                 "owner": row["owner"],
                 "material": row["material"],
                 "textured": bool(int(row["textured"])),
+                "semi_transparent": (
+                    bool(int(row["semi"]))
+                    if row["semi"] is not None
+                    else None
+                ),
                 "raw_texture": bool(int(row["raw"])),
                 "tpage": row["tpage"],
                 "clut": row["clut"],
+                "texture_window": row["texture_window"],
+                "ps1_zero_key": row["ps1_zero_key"],
                 "xy": row["xy"],
                 "uv": row["uv"],
                 "rgb": row["rgb"],
@@ -140,22 +151,29 @@ def main() -> int:
             "gameplay": key[0],
             "material": key[1],
             "textured": bool(key[2]),
-            "raw_texture": bool(key[3]),
-            "tpage": key[4],
-            "clut": key[5],
-            "uv": key[6],
-            "rgb": key[7],
+            "semi_transparent": (
+                bool(key[3]) if key[3] is not None else None
+            ),
+            "raw_texture": bool(key[4]),
+            "tpage": key[5],
+            "clut": key[6],
+            "uv": key[7],
+            "rgb": key[8],
         }
         for key, count in signatures.most_common()
     ]
     misclassified_subtractive = [
         item for item in grouped
-        if item["material"] in ("Glass", "ImportedGlass")
+        if item["material"] == "Glass"
         and ((int(str(item["tpage"]), 16) >> 5) & 3) == 2
     ]
-    imported_shadows = [
+    forbidden_imported_materials = [
         item for item in grouped
-        if item["material"] == "ImportedShadow"
+        if str(item["material"]).startswith("Imported")
+    ]
+    reflections = [
+        item for item in grouped
+        if item["material"] == "VehicleReflection"
     ]
     probe_hits = []
     for probe_x, probe_y in args.probe:
@@ -174,7 +192,7 @@ def main() -> int:
             }
         )
     report = {
-        "schema": 1,
+        "schema": 2,
         "trace": str(args.trace.resolve()),
         "triangle_count": len(records),
         "signature_count": len(grouped),
@@ -182,22 +200,19 @@ def main() -> int:
             "has_vehicle_material_triangles": bool(records),
             "no_subtractive_effect_classified_as_glass":
                 not misclassified_subtractive,
-            "imported_shadow_uses_dedicated_material":
-                not any(
-                    record["owner"] != ""
-                    and record["material"] == "ImportedGlass"
-                    and ((int(str(record["tpage"]), 16) >> 5) & 3) == 2
-                    for record in records
-                ),
-            "required_imported_shadow_observed":
-                bool(imported_shadows) or not args.require_imported_shadow,
+            "no_imported_only_materials": not forbidden_imported_materials,
+            "required_native_reflection_observed":
+                bool(reflections) or not args.require_reflection,
         },
-        "imported_shadow_signatures": len(imported_shadows),
+        "native_reflection_signatures": len(reflections),
         "passed": (
             bool(records)
             and not misclassified_subtractive
-            and (bool(imported_shadows) or not args.require_imported_shadow)
+            and not forbidden_imported_materials
+            and (bool(reflections) or not args.require_reflection)
         ),
+        "forbidden_imported_material_signatures":
+            forbidden_imported_materials,
         "misclassified_subtractive_signatures":
             misclassified_subtractive,
         "probe_hits": probe_hits,
@@ -216,6 +231,7 @@ def main() -> int:
         print(
             f"  {item['count']:5d} gameplay={item['gameplay']} "
             f"{item['material']} tex={int(item['textured'])} "
+            f"semi={item['semi_transparent']} "
             f"tpage={item['tpage']} clut={item['clut']} "
             f"uv={item['uv']}"
         )
@@ -227,6 +243,7 @@ def main() -> int:
             print(
                 f"    frame={hit['frame']} tick={hit['tick']} "
                 f"packet={hit['packet']} material={hit['material']} "
+                f"semi={hit['semi_transparent']} "
                 f"tpage={hit['tpage']} clut={hit['clut']} "
                 f"xy={hit['xy']} uv={hit['uv']}"
             )

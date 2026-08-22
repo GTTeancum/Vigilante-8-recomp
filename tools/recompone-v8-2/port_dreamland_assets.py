@@ -8,6 +8,7 @@ from io import BytesIO
 from pathlib import Path
 import struct
 import sys
+import tempfile
 
 from PIL import Image, ImageOps
 
@@ -17,8 +18,17 @@ ADDONS = REPO / "tools" / "blender_addons"
 sys.path.insert(0, str(REPO / "tools"))
 sys.path.insert(0, str(ADDONS))
 
-from v8_n64_level import V8N64Rom, root_children
+from v8_n64_level import (
+    V8N64Rom,
+    convert_arena as convert_n64_arena,
+    overlay_exports,
+    psx_executable_exports,
+    root_children,
+)
 import build_v8_dreamland_shell_assets as shell_assets
+import v82_native_selector_table as selector_table
+import v82_arena_registry as arena_registry
+import v82_native_water_conversion as native_water
 from vigilante8_vehicle_tools import compiler, conversion, iff, registry, xobf
 
 
@@ -42,7 +52,7 @@ class _Target:
         pass
 
 
-def _convert_xobf(node: iff.IffChunk) -> iff.IffChunk:
+def _decode_xobf(node: iff.IffChunk):
     # Terrain banks may use 0x3fff as an engine-global texture selector.  The
     # strict vehicle decoder normally rejects that value because authored
     # vehicles may only address textures they own.  Relax that one validation
@@ -62,22 +72,20 @@ def _convert_xobf(node: iff.IffChunk) -> iff.IffChunk:
         bank = registry._decode_bank(node, "V8")
     finally:
         registry._decode_face = decode_face
-    source_chunks = {child.tag: child.payload for child in node.children}
-    source_model = xobf.Model(source_chunks[b"BIN "], dialect="V8")
+    return bank
+
+
+def _convert_xobf(node: iff.IffChunk) -> iff.IffChunk:
+    bank = _decode_xobf(node)
     bank = conversion.v8_bank_to_v82(bank)
     target = _Target()
     model = bytearray(compiler.compile_model(target, bank))
-    # Semantic conversion keeps every slot index. Preserve the source's exact
-    # hierarchy links as well: independent location roots are not one sibling
-    # chain, even though the generic vehicle compiler links top-level roots.
-    for slot in source_model.slots():
-        struct.pack_into(
-            "<HH",
-            model,
-            0x1C + slot.index * 0x1C + 0x18,
-            slot.next_sibling,
-            slot.first_child,
-        )
+    # V8:2 owns top-level objects as one sibling chain.  Original V8 leaves
+    # independent roots unlinked and its arena loader enumerates them by
+    # record; copying those raw links into a V8:2 bank leaves lifecycle code
+    # with the wrong ownership graph.  Let the shared semantic compiler rebuild
+    # sibling/child links from decoded parents, exactly as the retail V8:2
+    # conversions do.
     children = [
         iff.IffChunk(tag=b"BIN ", payload=bytes(model))
     ]
@@ -224,7 +232,10 @@ def _convert_cols(payload: bytes) -> bytes:
     return payload + b"\0\0\0\0"
 
 
-def _convert_object(node: iff.IffChunk) -> iff.IffChunk:
+def _convert_object(
+    node: iff.IffChunk,
+    bank_map: dict[int, int | None],
+) -> iff.IffChunk | None:
     """Translate V8 object metadata that changed in V8:2.
 
     Retail V8:2 ports of the original arenas preserve the OBJ/HEAD layout but
@@ -239,11 +250,23 @@ def _convert_object(node: iff.IffChunk) -> iff.IffChunk:
             converted.append(child)
             continue
         payload = bytearray(child.payload)
+        source_bank = struct.unpack_from(">h", payload, 26)[0]
+        if source_bank >= 0:
+            if source_bank not in bank_map:
+                raise ValueError(f"object references unknown source bank {source_bank}")
+            target_bank = bank_map[source_bank]
+            if target_bank is None:
+                # A modeled original-V8 water plane has no object equivalent
+                # after conversion to V8:2's global XWAT facility.
+                continue
+            struct.pack_into(">h", payload, 26, target_bank)
         name = bytes(payload[34:]).split(b"\0", 1)[0]
         kind = V8_TO_V82_OBJECT_KIND.get(name)
         if kind is not None:
             struct.pack_into(">H", payload, 28, kind)
         converted.append(iff.IffChunk(tag=b"HEAD", payload=bytes(payload)))
+    if not any(child.tag == b"HEAD" for child in converted):
+        return None
     return iff.IffChunk(tag=b"FORM", form_type=b"OBJ ", children=converted)
 
 
@@ -252,6 +275,37 @@ def _native_v82_item_bank(source: Path) -> iff.IffChunk:
     if len(forms) < 2:
         raise ValueError("V8:2 donor arena has no shared item XOBF bank")
     return forms[1]
+
+
+def _native_xbgm_prefix(source_payload: bytes, template_exp: Path) -> bytes:
+    """Derive V8:2's four-byte XBGM placement prefix from a native peer.
+
+    Original V8 XBGM chunks begin directly with the TIM-like texture record.
+    V8:2 prepends one big-endian signed placement word which SHELL/LOAD consumes
+    before passing the remaining record to the shared texture decoder.  Match
+    a native arena with the same texture-record layout so this remains a data
+    conversion rule rather than an arena-specific runtime workaround.
+    """
+
+    if len(source_payload) < 20 or struct.unpack_from("<I", source_payload, 0)[0] != 0x10:
+        raise ValueError("V8 XBGM does not begin with a texture record")
+    template_chunks = [
+        node.payload
+        for node in iff.parse(template_exp.read_bytes()).walk()
+        if node.tag == b"XBGM"
+    ]
+    if len(template_chunks) != 1:
+        raise ValueError("V8:2 backdrop template must contain exactly one XBGM")
+    template = template_chunks[0]
+    if len(template) < 24 or struct.unpack_from("<I", template, 4)[0] != 0x10:
+        raise ValueError("V8:2 XBGM template has no native placement prefix")
+    # Compare the texture flags, image-block offset, CLUT origin, and CLUT
+    # dimensions. Pixel data and the authored placement value may differ.
+    if template[8:24] != source_payload[4:20]:
+        raise ValueError(
+            "V8:2 XBGM template does not match the source texture layout"
+        )
+    return template[:4]
 
 
 def _n64_loading_chunk(rom_path: Path) -> bytes:
@@ -281,42 +335,7 @@ def _upscale_preserving_source(
     final.save(output)
 
 
-def _write_loading_card(
-    n64_xlsc: bytes,
-    output: Path,
-) -> None:
-    with Image.open(BytesIO(n64_xlsc[4:])) as source:
-        if source.size != (320, 100):
-            raise ValueError(
-                f"unexpected N64 Dreamland loading image size {source.size}"
-            )
-        native = Image.new("RGB", (320, 112), (0, 0, 0))
-        native.paste(source.convert("RGB"), (0, 6))
-        native = native.crop((82, 0, 238, 112)).resize(
-            (320, 112),
-            Image.Resampling.LANCZOS,
-        )
-        pixels = native.load()
-        width, height = native.size
-        for y in range(height):
-            for x in range(width):
-                edge = min(x, width - 1 - x)
-                factor = 0.18 + 0.82 * min(1.0, edge / 42.5)
-                r, g, b = pixels[x, y]
-                pixels[x, y] = (
-                    int(r * factor),
-                    int(g * factor),
-                    int(b * factor),
-                )
-        output.parent.mkdir(parents=True, exist_ok=True)
-        native.save(output.with_name("n64_dreamlnd_loading_card_native_320x112.ppm"))
-        _upscale_preserving_source(native, output, (1280, 448))
-
-
-def _write_selector_preview(
-    source: Path,
-    output: Path,
-) -> None:
+def _selector_preview_tim(source: Path, template: bytes) -> bytes:
     form = iff.IffChunk(
         tag=b"FORM",
         form_type=b"XOBF",
@@ -329,31 +348,59 @@ def _write_selector_preview(
     if len(dreamland.textures) != 1:
         raise ValueError("Dreamland selector root does not have one texture")
     texture = dreamland.textures[0]
-    rgb = bytearray()
-    for index in texture.indices:
-        color = texture.palette_bgr555[index]
-        rgb.extend(
-            (
-                ((color & 0x1F) << 3) | ((color & 0x1F) >> 2),
-                (((color >> 5) & 0x1F) << 3) | (((color >> 5) & 0x1F) >> 2),
-                (((color >> 10) & 0x1F) << 3) | (((color >> 10) & 0x1F) >> 2),
-            )
-        )
-    image = Image.frombytes("RGB", (texture.width, texture.height), bytes(rgb))
-    output.parent.mkdir(parents=True, exist_ok=True)
-    _upscale_preserving_source(image, output, (440, 115))
+    indexed = Image.frombytes(
+        "P", (texture.width, texture.height), bytes(texture.indices)
+    )
+    # Retail V8:2's original-V8 previews preserve the complete wide source
+    # composition inside a 220x74 native TIM and use an authored transparent
+    # silhouette. Do the same here: never crop the source, and derive the
+    # silhouette from the selected stock preview template.
+    resized = indexed.resize(
+        (220, 74),
+        resample=Image.Resampling.NEAREST,
+    )
+    masked_indices, masked_palette = selector_table.apply_ci8_template_mask(
+        resized.tobytes(),
+        220,
+        74,
+        texture.palette_bgr555,
+        template,
+    )
+    return selector_table.encode_ci8_tim(
+        masked_indices,
+        220,
+        74,
+        masked_palette,
+        template,
+    )
 
 
 def convert(
-    source: Path,
+    source: Path | bytes,
     item_bank_source: Path,
     loading_trigger: iff.IffChunk,
+    backdrop_template: Path,
+    water_template_source: Path,
 ) -> bytes:
-    document = iff.parse(source.read_bytes())
+    document = iff.parse(source if isinstance(source, bytes) else source.read_bytes())
+    water = native_water.find_native_water_source(document)
     roots = list(document.forms(b"TERR"))
     if len(roots) != 1:
         raise ValueError("Dreamland EXP must contain exactly one TERR form")
     root = roots[0]
+    source_xobfs = list(document.forms(b"XOBF"))
+    # V8:2 owns water globally through XWAT; its original-V8 0x8043 arena
+    # conversions do not keep a modeled water XOBF or an owning HEAD.  Build a
+    # reusable structural remap so later source banks remain valid when the
+    # detected water bank is removed.
+    bank_map: dict[int, int | None] = {}
+    target_bank = 0
+    for source_bank in range(len(source_xobfs)):
+        if source_bank == water.bank_index:
+            bank_map[source_bank] = None
+        else:
+            bank_map[source_bank] = target_bank
+            target_bank += 1
     xbmps = [node.payload for node in root.children if node.tag == b"XBMP"]
     if len(xbmps) != 1:
         raise ValueError("Dreamland EXP must contain exactly one XBMP")
@@ -363,6 +410,19 @@ def convert(
         loading_trigger,
     ]
     item_bank = _native_v82_item_bank(item_bank_source)
+    water_template_doc = iff.parse(water_template_source.read_bytes())
+    xwat = iff.IffChunk(
+        tag=b"XWAT",
+        payload=native_water.encode_native_xwat(
+            water.bank.textures[0], native_water.xwat_payload(water_template_doc)
+        ),
+    )
+    source_backdrops = [node.payload for node in root.children if node.tag == b"XBGM"]
+    if len(source_backdrops) != 1:
+        raise ValueError("Dreamland EXP must contain exactly one XBGM")
+    backdrop_prefix = _native_xbgm_prefix(
+        source_backdrops[0], backdrop_template
+    )
     xobf_index = 0
     for node in root.children:
         if node.is_form and node.form_type == b"XOBF":
@@ -371,12 +431,17 @@ def convert(
             # bank; packet conversion alone cannot manufacture its nine new
             # models. Reuse that native shared bank exactly as the retail
             # original-arena ports do.
-            converted.append(
-                item_bank if xobf_index == 1 else _convert_xobf(node)
-            )
+            if xobf_index == water.bank_index:
+                converted.append(xwat)
+            else:
+                converted.append(
+                    item_bank if xobf_index == 1 else _convert_xobf(node)
+                )
             xobf_index += 1
         elif node.is_form and node.form_type == b"OBJ ":
-            converted.append(_convert_object(node))
+            converted_object = _convert_object(node, bank_map)
+            if converted_object is not None:
+                converted.append(converted_object)
         elif node.tag == b"TINF":
             converted.append(
                 iff.IffChunk(tag=b"XTIN", payload=_convert_tinf(node.payload, xbmps[0]))
@@ -385,6 +450,19 @@ def convert(
             converted.append(iff.IffChunk(tag=b"COLS", payload=_convert_cols(node.payload)))
         elif node.tag == b"XBMP":
             converted.append(iff.IffChunk(tag=b"XBMP", payload=_compact_xbmp(node.payload)))
+        elif node.tag == b"XBGM":
+            converted.append(
+                iff.IffChunk(tag=b"XBGM", payload=backdrop_prefix + node.payload)
+            )
+        elif node.tag == b"RECT" and node.payload == struct.pack(
+            ">7h", *water.rectangle
+        ):
+            converted.append(
+                iff.IffChunk(
+                    tag=b"RECT",
+                    payload=native_water.convert_water_rectangle(node.payload),
+                )
+            )
         else:
             converted.append(node)
     root.children = converted
@@ -396,12 +474,31 @@ def main() -> int:
     parser.add_argument(
         "--source",
         type=Path,
-        default=REPO / "PS1 game" / "TERRAIN" / "DREAMLND.EXP",
+        help=(
+            "optional preconverted V8 EXP; by default reconvert the N64 ROM "
+            "through the generic rooted-prop pipeline"
+        ),
+    )
+    parser.add_argument(
+        "--runtime-executable",
+        type=Path,
+        default=REPO / "PS1 game" / "SLUS_005.10",
+        help="target PS-X EXE supplying resident object callbacks",
     )
     parser.add_argument(
         "--item-bank-source",
         type=Path,
         default=REPO / "V8_2_LOOSE" / "LEVELS" / "V8" / "AIRGRAVE.EXP",
+    )
+    parser.add_argument(
+        "--backdrop-template-source",
+        type=Path,
+        default=REPO / "V8_2_LOOSE" / "LEVELS" / "NUCLEAR.EXP",
+    )
+    parser.add_argument(
+        "--water-template-source",
+        type=Path,
+        default=REPO / "V8_2_LOOSE" / "LEVELS" / "BAYOU.EXP",
     )
     parser.add_argument(
         "--psxavenc",
@@ -433,54 +530,129 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--selector-preview-output",
+        "--selector-table-source",
+        type=Path,
+        default=REPO / "V8_2_LOOSE" / "SHELL" / "LEVELSEL.TBL",
+    )
+    parser.add_argument(
+        "--selector-table-output",
         type=Path,
         default=(
             REPO / "V8_2_LOOSE" / "mods" / "v82_n64_super_dreamland" /
-            "ui" / "n64_dreamlnd_selector_preview.ppm"
+            "files" / "SHELL" / "LEVELSEL.TBL"
+        ),
+    )
+    parser.add_argument("--selector-template-index", type=int, default=8)
+    parser.add_argument(
+        "--arena-registry-output",
+        type=Path,
+        default=(
+            REPO / "V8_2_LOOSE" / "mods" / "v82_n64_super_dreamland" /
+            "ARENAS.V8R"
         ),
     )
     parser.add_argument(
-        "--loading-card-output",
+        "--arena-dll",
         type=Path,
         default=(
             REPO / "V8_2_LOOSE" / "mods" / "v82_n64_super_dreamland" /
-            "loading_cards" / "n64_dreamlnd_loading_card_4x.ppm"
+            "files" / "LEVELS" / "N64" / "DREAMLND.DLL"
         ),
     )
     args = parser.parse_args()
+    rom = V8N64Rom(args.rom.resolve())
+    source: Path | bytes
+    if args.source is not None:
+        source = args.source.resolve()
+    else:
+        callbacks = frozenset(
+            item.name
+            for item in (
+                *overlay_exports(rom.decoded("DREAMLND.DLL")),
+                *psx_executable_exports(
+                    args.runtime_executable.resolve().read_bytes()
+                ),
+            )
+        )
+        source, conversion_report = convert_n64_arena(
+            rom.decoded("DREAMLND.EXP"),
+            "DREAMLND",
+            object_callback_names=callbacks,
+        )
+        rooted = sum(item.rooted_variants for item in conversion_report.xobf)
+        clipped = sum(
+            item.terrain_clipped_faces for item in conversion_report.xobf
+        )
+        discarded = sum(
+            item.terrain_discarded_faces for item in conversion_report.xobf
+        )
+        print(
+            "reconverted N64 arena: "
+            f"rooted-variants={rooted} terrain-clipped={clipped} "
+            f"terrain-discarded={discarded}"
+        )
     n64_xlsc = _n64_loading_chunk(args.rom.resolve())
-    native_preview = args.loading_card_output.resolve().with_name(
-        "n64_dreamlnd_loading_card_native_320x112.ppm"
-    )
-    loading_payload, _ = shell_assets.build_loading_chunk(
-        n64_xlsc,
-        args.psxavenc.resolve(),
-        native_preview,
-    )
+    # The encoder requires a decoded intermediate, but conversion verification
+    # is text-only.  Keep the PPM temporary so repeated reconversions do not
+    # accumulate screenshot-like artifacts.
+    with tempfile.TemporaryDirectory(prefix="v82-dreamland-loading-") as temp:
+        native_preview = Path(temp) / "loading_native_320x96.ppm"
+        loading_payload, _ = shell_assets.build_loading_chunk(
+            n64_xlsc,
+            args.psxavenc.resolve(),
+            native_preview,
+            target_size=(320, 96),
+        )
     result = convert(
-        args.source.resolve(),
+        source,
         args.item_bank_source.resolve(),
         iff.IffChunk(tag=b"XLSC", payload=loading_payload),
+        args.backdrop_template_source.resolve(),
+        args.water_template_source.resolve(),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(result)
-    _write_selector_preview(
-        args.selector_source.resolve(),
-        args.selector_preview_output.resolve(),
+    retail_selector = args.selector_table_source.resolve().read_bytes()
+    resources = selector_table.split_resource_table(retail_selector)
+    template_index = args.selector_template_index
+    if not 0 <= template_index < len(resources) - 1:
+        raise ValueError("selector template index is outside retail previews")
+    preview_tim = _selector_preview_tim(
+        args.selector_source.resolve(), resources[template_index]
     )
-    _write_loading_card(
-        n64_xlsc,
-        args.loading_card_output.resolve(),
+    selector_result = selector_table.write_extended_table(
+        args.selector_table_source.resolve(),
+        args.selector_table_output.resolve(),
+        preview_tim,
+    )
+    arena_entry = arena_registry.ArenaEntry(
+            stable_id="n64.super_dreamland_64",
+            name="Super Dreamland 64",
+            subtitle="Super Dreamland 64",
+            # LOAD strips the extension and performs an exact, case-sensitive
+            # lookup against the DLL's first export.  Preserve native path
+            # casing just like Levels\Bayou.exp and Levels\V8\AirGrave.exp.
+            path="Levels\\N64\\DreamLnd.exp",
+            marker_x=84,
+            marker_y=222,
+            preview_index=18,
+        )
+    primary_export = arena_registry.validate_primary_export(
+        arena_entry, args.arena_dll.resolve().read_bytes()
+    )
+    arena_result = arena_registry.write_registry(
+        args.arena_registry_output.resolve(), [arena_entry],
     )
     print(f"wrote {args.output.resolve()} ({len(result)} bytes)")
     print(
-        f"wrote {args.selector_preview_output.resolve()} "
-        f"({args.selector_preview_output.stat().st_size} bytes)"
+        f"wrote {args.selector_table_output.resolve()} "
+        f"({len(selector_result)} bytes, template={template_index}, "
+        "preview=220x74, resources=20)"
     )
     print(
-        f"wrote {args.loading_card_output.resolve()} "
-        f"({args.loading_card_output.stat().st_size} bytes)"
+        f"wrote {args.arena_registry_output.resolve()} "
+        f"({len(arena_result)} bytes, entries=1, "
+        f"primary-export={primary_export})"
     )
     return 0
 

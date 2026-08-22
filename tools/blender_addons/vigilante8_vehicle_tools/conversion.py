@@ -340,27 +340,31 @@ def v8_bank_to_v82(source: project.ObjectBank) -> project.ObjectBank:
         #          | (native & 0x10 ? 0x02 : 0)
         #          | (native & 0x40 ? 0x80 : 0)
         #
-        # Native bit 0x20 is ignored by both loaders, so remove it without
-        # changing the render mode.  Retail V8:2 vehicle banks then use one
+        # Native bit 0x20 is ignored by the retail packet-mode rewrite, but V8
+        # uses it on the coplanar environment faces that follow their diffuse
+        # surface. Translate that authored gloss role to V8:2's semitransparent
+        # bit 0x10 instead of dropping it. Retail V8:2 vehicle banks use one
         # exact tuple for each of the two environment roles:
         #
         #   opaque arena reflection: type 0x0C, (0x3FFF, 0x8080, 0, 0)
         #   translucent gloss pass:  type 0x1C, (0x7FFE, 0x8080, 0, 0)
         #
-        # V8 stores both global roles under selector 0x3FFF and distinguishes
-        # the gloss pass with native mode bit 0x10.  Translate that semantic
-        # pair to the sequel's own measured packet dialect.  Direct local
-        # texture selectors are retained rather than being mistaken for a
-        # global vehicle material.
+        # V8 stores both global roles under selector 0x3FFF. Its normal gloss
+        # packets carry 0x20, while a small number carry 0x30; both become the
+        # sequel's 0x10 gloss role. Direct local texture selectors are retained
+        # rather than being mistaken for a global vehicle material.
         source_environment = face.environment_parameters[0]
-        translucent = bool(face.packet_flags & 0x10)
+        translucent = bool(face.packet_flags & 0x30)
+        target_flags = face.packet_flags & ~0x20
+        if face.packet_flags & 0x20:
+            target_flags |= 0x10
         target_environment = source_environment
         if (source_environment & 0x3FFF) == 0x3FFF:
             target_environment = 0x7FFE if translucent else 0x3FFF
 
         return replace(
             face,
-            packet_flags=face.packet_flags & ~0x20,
+            packet_flags=target_flags,
             environment_parameters=(
                 target_environment,
                 0x8080,
@@ -390,6 +394,18 @@ def v8_bank_to_v82(source: project.ObjectBank) -> project.ObjectBank:
             # V8:2 sentinel is 0x07FF; emitting generic -1 would accidentally
             # add V8:2 render-class bits and prevent root construction.
             key=(
+                # V8 has two distinct signed structural keys.  Its -2
+                # (0xFFFE) node preserves class F while suppressing a model;
+                # V8:2 expresses that same meaning as 0xF7FF after widening
+                # the owned group field from eight to eleven bits.  This is
+                # confirmed one-for-one by the retail Air Grave conversion:
+                # thirteen V8 0xFFFE nodes become thirteen V8:2 0xF7FF nodes,
+                # while its four V8 0xFFFF nodes become four plain 0x07FF
+                # no-model nodes.  Preserving 0xFFFE in V8:2 would instead
+                # request nonexistent group 0x7FE and walk garbage.
+                0xF7FF
+                if slot.key == 0xFFFE
+                else
                 # V8's vehicle constructor takes the first immediate child
                 # of a wheel anchor as its authored suspension-travel marker.
                 # V8:2 performs the same lookup by the explicit 0x8000 key.
@@ -410,6 +426,155 @@ def v8_bank_to_v82(source: project.ObjectBank) -> project.ObjectBank:
         for slot in source.slots
     )
     return replace(source, groups=groups, slots=slots)
+
+
+def is_v8_alpha_coverage_surface(source: project.ObjectBank) -> bool:
+    """Recognize V8's two-pass approximation of a translucent surface.
+
+    The original renderer has no variable source alpha.  Converted animated
+    surfaces can therefore contain a normal texture phase bank followed by a
+    synchronized checkerboard-coverage copy.  This is a data-layout contract,
+    not an arena or object identity check.
+    """
+
+    texture_count = len(source.textures)
+    if texture_count < 2 or texture_count % 2:
+        return False
+    phase_count = texture_count // 2
+    base = source.textures[:phase_count]
+    coverage = source.textures[phase_count:]
+    if any(
+        left.depth != 0
+        or right.depth != 0
+        or (left.width, left.height) != (right.width, right.height)
+        or not left.palette_bgr555
+        or not right.palette_bgr555
+        or 0 in left.palette_bgr555
+        or right.palette_bgr555[0] != 0
+        or right.indices.count(0) * 2 != len(right.indices)
+        for left, right in zip(base, coverage)
+    ):
+        return False
+    # Some arena banks retain an empty native collision-table sentinel.  It is
+    # semantically collision-free and does not disqualify a render surface.
+    if not source.groups or any(stream.shapes for stream in source.collisions):
+        return False
+
+    rendered_slots = {
+        slot_index
+        for slot_index, slot in enumerate(source.slots)
+        if slot.render_group is not None
+    }
+    animated_slots = {animation.slot for animation in source.animations}
+    if not rendered_slots or rendered_slots != animated_slots:
+        return False
+
+    for group in source.groups:
+        if (
+            group.scale_shift <= 0
+            or not group.faces
+            or group.controls
+            or group.texture_slot_count != texture_count
+            or len({vertex[1] for vertex in group.vertices}) != 1
+        ):
+            return False
+        base_faces = []
+        coverage_faces = []
+        for face in group.faces:
+            if (
+                face.packet_kind != 15
+                or not (face.packet_flags & 0x10)
+                or face.native_texture_slot is None
+                or face.texture is None
+            ):
+                return False
+            if face.native_texture_slot < phase_count:
+                base_faces.append(face)
+            elif face.native_texture_slot < texture_count:
+                coverage_faces.append(face)
+            else:
+                return False
+        if not base_faces or len(base_faces) != len(coverage_faces):
+            return False
+        base_geometry = sorted(
+            (face.vertices, face.uv, face.native_texture_slot)
+            for face in base_faces
+        )
+        coverage_geometry = sorted(
+            (
+                face.vertices,
+                face.uv,
+                face.native_texture_slot - phase_count,
+            )
+            for face in coverage_faces
+        )
+        if base_geometry != coverage_geometry:
+            return False
+
+    for animation in source.animations:
+        if not animation.frames:
+            return False
+        for frame in animation.frames:
+            bindings = tuple(frame.texture_bindings)
+            if len(bindings) != 2:
+                return False
+            first, second = bindings
+            if (
+                first.target >= phase_count
+                or first.texture >= phase_count
+                or second.target != first.target + phase_count
+                or second.texture != first.texture + phase_count
+            ):
+                return False
+    return True
+
+
+def v8_alpha_coverage_surface_to_v82(
+    source: project.ObjectBank,
+) -> project.ObjectBank:
+    """Convert a recognized two-pass V8 surface to V8:2's native material.
+
+    Retail Casino City supplies the direct original-arena precedent.  Its V8
+    ``water_1`` object preserves both local texture slots and every water face
+    in V8:2, uses dark 38/128 modulation, and stores equivalent geometry one
+    scale step smaller.  Dreamland's second slot is an authored checkerboard
+    coverage pass, so it must remain paired with the fully covered base pass;
+    deleting it makes the converted surface visually disappear.  The
+    conversion below applies the native packet contract to both passes without
+    consulting a map name, object name, archive index, or runtime identity.
+    """
+
+    if not is_v8_alpha_coverage_surface(source):
+        return source
+
+    def half_coordinate(value: int) -> int:
+        # Native integer conversion truncates toward zero.  Authored surface
+        # grids normally use even coordinates, making this lossless.
+        return value // 2 if value >= 0 else -((-value) // 2)
+
+    def convert_group(group: project.RenderGroup) -> project.RenderGroup:
+        return replace(
+            group,
+            scale_shift=group.scale_shift - 1,
+            vertices=tuple(
+                tuple(half_coordinate(value) for value in vertex)
+                for vertex in group.vertices
+            ),
+            faces=tuple(
+                replace(
+                    face,
+                    packet_index=index,
+                    color=(38, 38, 38),
+                    texture_flags=face.texture_flags | 0x4000,
+                    material_parameter=0xBFF7,
+                )
+                for index, face in enumerate(group.faces)
+            ),
+            render_extent=group.render_extent // 2,
+        )
+
+    groups = tuple(convert_group(group) for group in source.groups)
+    return replace(source, groups=groups)
 
 
 def add_v82_flamethrower_mount(

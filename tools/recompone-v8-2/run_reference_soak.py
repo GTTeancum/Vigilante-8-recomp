@@ -104,6 +104,7 @@ class RunResult:
     power_state_changes: int
     stdout_log: str
     stderr_log: str
+    runtime_log: str
     gameplay_capture: str | None
     final_capture: str | None
     gameplay_presentation: str | None
@@ -145,6 +146,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--guest-vehicle",
         help="select an independent vehicle by stable ID through the engine roster API",
+    )
+    parser.add_argument(
+        "--input-script",
+        type=Path,
+        help=(
+            "use this complete deterministic input script instead of generating "
+            "menu navigation for the selected map and character"
+        ),
     )
     parser.add_argument("--cycles", type=int, default=1)
     parser.add_argument(
@@ -213,6 +222,30 @@ def parse_args() -> argparse.Namespace:
         help=(
             "retain this many consecutive frames when the gameplay capture "
             "stage is reached (maximum 600)"
+        ),
+    )
+    parser.add_argument(
+        "--text-only",
+        action="store_true",
+        help=(
+            "retain framebuffer hashes and all stdout/stderr diagnostics "
+            "without writing or preserving PPM presentation artifacts"
+        ),
+    )
+    parser.add_argument(
+        "--verbose-log",
+        action="store_true",
+        help=(
+            "enable detailed selector, vehicle-material, ownership, input, "
+            "presentation-frame, and reflection-packet text traces"
+        ),
+    )
+    parser.add_argument(
+        "--conversion-log",
+        action="store_true",
+        help=(
+            "enable strict-memory plus per-frame terrain, shared depth, fog, "
+            "HUD, renderer, and presentation diagnostics without raster proof"
         ),
     )
     return parser.parse_args()
@@ -402,8 +435,12 @@ def run_one(
     presentation_resolution: str,
     presentation_frames_spec: str | None,
     presentation_burst_frames: int,
+    text_only: bool,
+    verbose_log: bool,
+    conversion_log: bool,
     location_settle_frames: int,
     loading_prompt_hold_frames: int,
+    input_script: Path | None,
 ) -> RunResult:
     expected = EXPECTED_OVERLAYS[slot]
     stem = (
@@ -413,15 +450,18 @@ def run_one(
     fixture_path = output / f"{stem}.input.txt"
     stdout_path = output / f"{stem}.stdout.log"
     stderr_path = output / f"{stem}.stderr.log"
-    fixture_path.write_text(
-        build_input_script(
+    runtime_path = output / f"{stem}.runtime.log"
+    fixture_text = (
+        input_script.read_text(encoding="utf-8")
+        if input_script is not None
+        else build_input_script(
             slot,
             character_slot,
             location_settle_frames,
             loading_prompt_hold_frames,
-        ),
-        encoding="utf-8",
+        )
     )
+    fixture_path.write_text(fixture_text, encoding="utf-8")
 
     env = os.environ.copy()
     env.update(
@@ -457,6 +497,10 @@ def run_one(
             # Keep every worker's framebuffer and presentation captures in its
             # own result directory so "latest" probes cannot collide.
             "RECOMPONE_CAPTURE_DIR": str(output.resolve()),
+            # Keep the runtime's complete mirrored diagnostic stream beside
+            # the run result.  This avoids stale root-level v8_latest.log
+            # files and gives conversion investigations an unabridged log.
+            "RECOMPONE_LOG_PATH": str(runtime_path.resolve()),
         }
     )
     if guest_vehicle is None:
@@ -477,11 +521,60 @@ def run_one(
         env["RECOMPONE_PRESENTATION_CAPTURE_FRAMES"] = (
             presentation_frames_spec
         )
+    if text_only:
+        env["RECOMPONE_DISPLAY_PROBE_IMAGES"] = "0"
+        env["RECOMPONE_CAPTURE_SCRIPTED_STAGE"] = ""
+        env["RECOMPONE_CAPTURE_NATIVE_GUEST_SELECTOR"] = "0"
+        env["RECOMPONE_CAPTURE_V82_SELECTOR_TURNS"] = "0"
+        env["RECOMPONE_CAPTURE_V82_SELECTOR_FULL_TURN"] = "0"
+        for name in (
+            "RECOMPONE_PRESENTATION_CAPTURE",
+            "RECOMPONE_PRESENTATION_CAPTURE_FRAME",
+            "RECOMPONE_PRESENTATION_CAPTURE_FRAMES",
+            "RECOMPONE_PRESENTATION_CAPTURE_BURST_FRAMES",
+            "RECOMPONE_COMPOSED_PRESENTATION_CAPTURE",
+        ):
+            env.pop(name, None)
+    if verbose_log:
+        env.update(
+            {
+                "RECOMPONE_TRACE_INPUT": "1",
+                "RECOMPONE_TRACE_PRESENTATION_FRAMES": "1",
+                "RECOMPONE_TRACE_IMPORTED_OVERLAY_ABI": "1",
+                "RECOMPONE_TRACE_V82_REFLECTION_SUMMARY": "1",
+                "RECOMPONE_TRACE_V82_SELECTOR": "1",
+                "RECOMPONE_TRACE_V82_SELECTOR_PHYSICS": "1",
+                "RECOMPONE_TRACE_SELECTOR_RENDER_STATE": "1",
+                "RECOMPONE_TRACE_PACKET_ARENAS": "1",
+                "RECOMPONE_TRACE_VEHICLE_MATERIALS": "1",
+                "RECOMPONE_TRACE_ENHANCED_RENDERER": "1",
+                "RECOMPONE_TRACE_LOADING_UI_TEXTURES": "1",
+                "RECOMPONE_TRACE_MDEC": "1",
+                "RECOMPONE_TRACE_NATIVE_OPTIONS": "1",
+            }
+        )
+    if conversion_log:
+        env.update(
+            {
+                "RECOMPONE_STRICT_UNMAPPED_READS": "1",
+                "RECOMPONE_TRACE_DEPTH": "1",
+                "RECOMPONE_TRACE_FOG": "1",
+                "RECOMPONE_TRACE_HUD": "1",
+                "RECOMPONE_V82_TRACE_TERRAIN_FRAME": "1",
+                "RECOMPONE_TRACE_ENHANCED_RENDERER": "1",
+                "RECOMPONE_TRACE_PRESENTATION_FRAMES": "1",
+                "RECOMPONE_TRACE_IMPORTED_OVERLAY_ABI": "1",
+                "RECOMPONE_TRACE_CONVERTED_SURFACES": "1",
+                "RECOMPONE_TRACE_NATIVE_WATER": "1",
+                "RECOMPONE_TRACE_OVERLAY_CALLS": "1",
+            }
+        )
 
     started = time.time()
     gameplay_started: float | None = None
     last_progress_at = started
     last_frame = 0
+    completion_observed_at: float | None = None
     reason = ""
     passed = False
     hang_stack: Path | None = None
@@ -531,12 +624,28 @@ def run_one(
                 if observed > last_frame:
                     last_frame = observed
                     last_progress_at = now
-                if last_frame >= frames:
-                    passed = True
-                    reason = f"completed {last_frame} gameplay frames"
-                    break
-
                 return_code = process.poll()
+                if last_frame >= frames:
+                    if completion_observed_at is None:
+                        completion_observed_at = now
+                    if return_code is not None:
+                        passed = return_code == 0
+                        reason = (
+                            f"completed {last_frame} gameplay frames"
+                            if passed
+                            else f"process exited after completion with code "
+                                 f"{return_code}"
+                        )
+                        break
+                    # The native soak teardown exits on the target frame. Give
+                    # ProcessExit diagnostics time to flush instead of killing
+                    # the process as soon as its final heartbeat is observed.
+                    if now - completion_observed_at >= 5.0:
+                        passed = True
+                        reason = f"completed {last_frame} gameplay frames"
+                        break
+                    time.sleep(0.1)
+                    continue
                 if return_code is not None:
                     reason = f"process exited early with code {return_code}"
                     break
@@ -584,9 +693,27 @@ def run_one(
     presentation_frames = []
     frame_sources = [
         *capture_source.glob("recompone_present_frame_*.ppm"),
-        *capture_source.glob("recompone_present_gameplay_???_*.ppm"),
+        *capture_source.glob(
+            "recompone_present_gameplay_[0-9][0-9][0-9][0-9]_*.ppm"
+        ),
     ]
     for source in sorted(frame_sources):
+        try:
+            if source.stat().st_mtime < started - 1:
+                continue
+        except FileNotFoundError:
+            continue
+        target = output / f"{stem}.{source.name}"
+        shutil.copy2(source, target)
+        presentation_frames.append(str(target))
+    # RequestDisplayCapture labels are also presentation proof points. Keep
+    # their full-resolution postprocessed images before source cleanup, just
+    # as we already keep their native-resolution framebuffer counterparts.
+    for source in sorted(capture_source.glob("recompone_present_*.ppm")):
+        if source in frame_sources or source.name.startswith(
+            ("recompone_present_gameplay_", "recompone_present_soak_teardown_")
+        ):
+            continue
         try:
             if source.stat().st_mtime < started - 1:
                 continue
@@ -740,6 +867,7 @@ def run_one(
         power_state_changes=power_states,
         stdout_log=str(stdout_path),
         stderr_log=str(stderr_path),
+        runtime_log=str(runtime_path),
         gameplay_capture=str(gameplay_capture) if gameplay_capture else None,
         final_capture=str(final_capture) if final_capture else None,
         gameplay_presentation=(
@@ -835,6 +963,9 @@ def main() -> int:
         raise SystemExit("location settle frames must be non-negative")
     if args.loading_prompt_hold_frames < 0:
         raise SystemExit("loading prompt hold frames must be non-negative")
+    input_script = args.input_script.resolve() if args.input_script else None
+    if input_script is not None and not input_script.is_file():
+        raise SystemExit(f"input script not found: {input_script}")
 
     slots = selected_slots(args.maps)
     characters = selected_characters(args.characters)
@@ -892,8 +1023,12 @@ def main() -> int:
                 args.presentation_resolution,
                 args.presentation_frames,
                 args.presentation_burst_frames,
+                args.text_only,
+                args.verbose_log,
+                args.conversion_log,
                 args.location_settle_frames,
                 args.loading_prompt_hold_frames,
+                input_script,
             )
             results.append(result)
             write_summary(output, args, results, started)

@@ -5,6 +5,10 @@ namespace RecompOne.Runtime.Dispatch;
 
 internal sealed class RelocatedMemory : IMemory
 {
+    static readonly bool TraceInvalidAddresses =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_RELOCATED_MEMORY") == "1";
+
     internal IMemory Inner { get; }
     internal uint LinkedBase { get; }
     internal uint Size { get; }
@@ -21,8 +25,28 @@ internal sealed class RelocatedMemory : IMemory
     internal bool Matches(uint linkedBase, uint size, uint delta) =>
         LinkedBase == linkedBase && Size == size && Delta == delta;
 
-    uint Address(uint address) =>
-        address >= LinkedBase && address - LinkedBase < Size ? address + Delta : address;
+    uint Address(uint address)
+    {
+        uint mapped =
+            address >= LinkedBase && address - LinkedBase < Size
+                ? address + Delta
+                : address;
+        bool inputInvalidRam =
+            address >= MemoryMap.Kseg0Base &&
+            (address & MemoryMap.PhysicalMask) >= MemoryMap.RamWindow;
+        bool mappedInvalidRam =
+            mapped >= MemoryMap.Kseg0Base &&
+            (mapped & MemoryMap.PhysicalMask) >= MemoryMap.RamWindow;
+        if (TraceInvalidAddresses && (inputInvalidRam || mappedInvalidRam))
+        {
+            Console.Error.WriteLine(
+                "[RelocatedMemory] out-of-RAM access " +
+                $"input=0x{address:X8} mapped=0x{mapped:X8} " +
+                $"linked=0x{LinkedBase:X8}+0x{Size:X} " +
+                $"delta=0x{Delta:X8}");
+        }
+        return mapped;
+    }
 
     public byte ReadU8(uint address) => Inner.ReadU8(Address(address));
     public ushort ReadU16(uint address) => Inner.ReadU16(Address(address));

@@ -35,6 +35,8 @@ internal sealed class TextureReplacementAtlas : IDisposable
         int ImageX, int ImageY, int Depth, ulong IndexHash,
         byte[] Indices, ushort[] Palette);
     readonly record struct TerrainTileKey(int Width, int Height, ulong Hash);
+    readonly record struct TerrainAnchor(
+        int LiveX, int LiveY, int SourceX, int SourceY);
     sealed record LooseImage(string Name, int Width, int Height, byte[] Rgba);
     sealed class TerrainAtlas
     {
@@ -51,6 +53,7 @@ internal sealed class TextureReplacementAtlas : IDisposable
         public required int PackedX { get; init; }
         public required int PackedY { get; init; }
         public required Dictionary<TerrainTileKey, (int X, int Y)> Tiles { get; init; }
+        public List<TerrainAnchor> Anchors { get; } = [];
     }
 
     readonly GL _gl;
@@ -68,8 +71,14 @@ internal sealed class TextureReplacementAtlas : IDisposable
     readonly string? _dumpDirectory;
     readonly bool _dumpTerrainOnly;
     readonly bool _traceFontEntries;
+    readonly bool _traceTerrainAtlasFragments;
+    int _terrainAtlasCatalogTraceCount;
+    int _terrainAtlasAnchorTraceCount;
+    int _terrainAtlasMissTraceCount;
     long _resolves, _hits;
     long _terrainResolves, _terrainAtlasHits;
+    long _terrainAtlasCatalogHits, _terrainAtlasAnchorHits;
+    long _terrainAtlasMisses;
     ulong _revision = 1;
     uint _texture;
     int _width = 1, _height = 1;
@@ -88,6 +97,8 @@ internal sealed class TextureReplacementAtlas : IDisposable
             "RECOMPONE_TEXTURE_DUMP_TERRAIN_ONLY") == "1";
         _traceFontEntries = Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_FONT_TEXTURES") == "1";
+        _traceTerrainAtlasFragments = Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_TERRAIN_ATLAS_FRAGMENTS") == "1";
         if (!string.IsNullOrWhiteSpace(_dumpDirectory))
             Directory.CreateDirectory(Path.GetFullPath(_dumpDirectory));
         Load();
@@ -501,6 +512,8 @@ internal sealed class TextureReplacementAtlas : IDisposable
             _resolves++;
             _hits++;
             _terrainAtlasHits++;
+            if ((_terrainResolves & 0xFF) == 0)
+                LogTerrainAtlasCoverage();
             _cache[signature] = new Cached(
                 regionRevision, terrainRect, terrainKey);
             if (_loggedTerrain.Count < 128 && _loggedTerrain.Add(terrainKey))
@@ -596,7 +609,62 @@ internal sealed class TextureReplacementAtlas : IDisposable
                 }
             }
         }
-        if (match == null) return false;
+        bool anchored = false;
+        if (match == null && _activeTerrainAtlas is { } activeAnchor &&
+            activeAnchor.Depth == depth &&
+            TryResolveTerrainAnchor(
+                activeAnchor,
+                globalX, globalY,
+                sourceWidth, sourceHeight,
+                liveHash,
+                out tile))
+        {
+            match = activeAnchor;
+            anchored = true;
+        }
+        if (match == null)
+        {
+            foreach (TerrainAtlas candidate in _terrainAtlases)
+            {
+                if (candidate.Depth == depth &&
+                    TryResolveTerrainAnchor(
+                        candidate,
+                        globalX, globalY,
+                        sourceWidth, sourceHeight,
+                        liveHash,
+                        out tile))
+                {
+                    match = candidate;
+                    anchored = true;
+                    break;
+                }
+            }
+        }
+        if (match == null)
+        {
+            _terrainAtlasMisses++;
+            if (_traceTerrainAtlasFragments &&
+                _terrainAtlasMissTraceCount++ < 512)
+                Console.WriteLine(
+                    "[TerrainAtlasFragment] miss " +
+                    $"depth={depth} live={globalX},{globalY} " +
+                    $"size={sourceWidth}x{sourceHeight} " +
+                    $"indexHash={liveHash:x16} anchors=" +
+                    string.Join(',', _terrainAtlases.Select(
+                        atlas => $"{atlas.Name}:{atlas.Anchors.Count}")));
+            return false;
+        }
+        if (anchored)
+            _terrainAtlasAnchorHits++;
+        else
+            _terrainAtlasCatalogHits++;
+        if (!anchored)
+        {
+            var anchor = new TerrainAnchor(
+                globalX, globalY, tile.X, tile.Y);
+            if (!match.Anchors.Contains(anchor) && match.Anchors.Count < 64)
+                match.Anchors.Add(anchor);
+        }
         if (!ReferenceEquals(_activeTerrainAtlas, match))
         {
             _activeTerrainAtlas = match;
@@ -618,7 +686,52 @@ internal sealed class TextureReplacementAtlas : IDisposable
             ColorBias = colorBias,
         };
         key = match.IndexHash;
+        if (_traceTerrainAtlasFragments &&
+            (anchored
+                ? _terrainAtlasAnchorTraceCount++ < 512
+                : _terrainAtlasCatalogTraceCount++ < 128))
+            Console.WriteLine(
+                "[TerrainAtlasFragment] hit " +
+                $"mode={(anchored ? "anchor" : "catalog")} " +
+                $"atlas={match.Name} depth={depth} " +
+                $"live={globalX},{globalY} source={tile.X},{tile.Y} " +
+                $"size={sourceWidth}x{sourceHeight} " +
+                $"indexHash={liveHash:x16} anchors={match.Anchors.Count}");
         return true;
+    }
+
+    static bool TryResolveTerrainAnchor(
+        TerrainAtlas atlas,
+        int globalX,
+        int globalY,
+        int width,
+        int height,
+        ulong liveHash,
+        out (int X, int Y) source)
+    {
+        foreach (TerrainAnchor anchor in atlas.Anchors)
+        {
+            int sourceX = globalX - anchor.LiveX + anchor.SourceX;
+            int sourceY = globalY - anchor.LiveY + anchor.SourceY;
+            if (sourceX < 0 || sourceY < 0 ||
+                sourceX + width > atlas.SourceWidth ||
+                sourceY + height > atlas.SourceHeight)
+                continue;
+            ulong sourceHash = HashSourceIndices(
+                atlas.SourceIndices,
+                atlas.SourceWidth,
+                atlas.Depth,
+                sourceX,
+                sourceY,
+                width,
+                height);
+            if (sourceHash != liveHash)
+                continue;
+            source = (sourceX, sourceY);
+            return true;
+        }
+        source = default;
+        return false;
     }
 
     ulong HashNativeIndices(
@@ -783,6 +896,18 @@ internal sealed class TextureReplacementAtlas : IDisposable
         return revision;
     }
 
+    void LogTerrainAtlasCoverage()
+    {
+        Console.WriteLine(
+            $"[TexturePack] terrain atlas coverage=" +
+            $"{_terrainAtlasHits}/{_terrainResolves} " +
+            $"({(100.0 * _terrainAtlasHits /
+                Math.Max(1, _terrainResolves)):F1}%) " +
+            $"catalog={_terrainAtlasCatalogHits} " +
+            $"anchor={_terrainAtlasAnchorHits} " +
+            $"miss={_terrainAtlasMisses}");
+    }
+
     ulong BlocksRevision(int x0, int y0, int x1, int y1)
     {
         ulong revision = 0;
@@ -892,6 +1017,11 @@ internal sealed class TextureReplacementAtlas : IDisposable
                 $"{_terrainAtlasHits}/{_terrainResolves} " +
                 $"({(100.0 * _terrainAtlasHits /
                     Math.Max(1, _terrainResolves)):F1}%)");
+            Console.WriteLine(
+                $"[TexturePack] terrain atlas resolution " +
+                $"catalog={_terrainAtlasCatalogHits} " +
+                $"anchor={_terrainAtlasAnchorHits} " +
+                $"miss={_terrainAtlasMisses}");
         }
         if (_texture != 0) _gl.DeleteTexture(_texture);
         _texture = 0;

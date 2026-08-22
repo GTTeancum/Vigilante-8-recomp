@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply durable native selector and Dreamland seams to generated V8:2 code.
+"""Apply durable native selector seams to generated V8:2 code.
 
 RecompOne's regular patches operate on whole functions. These two generated
 sites are deliberately narrower: the native carousel's current FP slot and
@@ -48,9 +48,32 @@ REPLACEMENTS = (
         c.SP = c.SP + 0x78u;
 """,
         """        c.V0 = c.V0 + c.V1;
+        c.V0 = RecompOne.Runtime.Sdk.V82ArenaRegistry.NativeSelectedLocationRecord(m, c.V0);
         c.LoadWord(2, m, (c.V0 + 0xCu));
         c.V0 = RecompOne.Runtime.Sdk.V82ArenaRegistry.ResolveLaunchPath(c, m, c.V0);
         c.SP = c.SP + 0x78u;
+""",
+    ),
+    (
+        """        c.S0 = c.S4 << 4;
+        c.S0 = c.S0 + c.V0;
+        c.V0 = m.ReadU16((c.S0 + 0x8u));
+""",
+        """        c.S0 = c.S4 << 4;
+        c.S0 = c.S0 + c.V0;
+        c.S0 = RecompOne.Runtime.Sdk.V82ArenaRegistry.NativeLocationRecordAddress(m, c.S4, c.S0);
+        c.V0 = m.ReadU16((c.S0 + 0x8u));
+""",
+    ),
+    (
+        """        c.V1 = c.S0 << 4;
+        c.S4 = c.V1 + c.V0;
+        c.V0 = m.ReadU16((c.S4 + 0x8u));
+""",
+        """        c.V1 = c.S0 << 4;
+        c.S4 = c.V1 + c.V0;
+        c.S4 = RecompOne.Runtime.Sdk.V82ArenaRegistry.NativeLocationRecordAddress(m, c.S0, c.S4);
+        c.V0 = m.ReadU16((c.S4 + 0x8u));
 """,
     ),
     # The vehicle carousel slot seam at L80106800 is no longer here: it is declared in
@@ -58,14 +81,11 @@ REPLACEMENTS = (
     # the recompiler emits directly. Two mechanisms writing the same line meant
     # neither anchor matched after a regeneration.
     (
-        """        c.A3 = 0x0000002Du;
-        c.V0 = c.S4 << 2;
-        c.V0 = c.S7 + c.V0;
+        """        c.LoadWord(4, m, (c.S7 + 0x4Cu));
+        c.T3 = c.SP + 0x48u;
 """,
-        """        c.A3 = 0x0000002Du;
-        RecompOne.Runtime.Sdk.V82ArenaRegistry.TrackNativeLocationHighlight(c.S4);
-        c.V0 = RecompOne.Runtime.Sdk.V82ArenaRegistry.NativeLocationArtIndex(c.S4) << 2;
-        c.V0 = c.S7 + c.V0;
+        """        c.A0 = RecompOne.Runtime.Sdk.V82ArenaRegistry.NativeLocationBackgroundOffset(m, c.S7);
+        c.T3 = c.SP + 0x48u;
 """,
     ),
     (
@@ -94,7 +114,7 @@ REPLACEMENTS = (
     ),
 )
 
-MAIN_REPLACEMENTS = (
+OBSOLETE_DREAMLAND_REPLACEMENTS = (
     (
         """        c.RA = 0x8002DDA0u;
         Dispatcher.Call(c, m, c.V0);
@@ -136,17 +156,127 @@ MAIN_REPLACEMENTS = (
         c.SP = c.SP - 0x40u;
 """,
     ),
+    (
+        """        c.LoadWord(16, m, (c.SP + 0x30u));
+        c.SP = c.SP + 0x40u;
+        return;
+    }
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static void func_8004DC20(CpuContext c, IMemory m)
+""",
+        """        c.LoadWord(16, m, (c.SP + 0x30u));
+        c.SP = c.SP + 0x40u;
+        RecompOne.Runtime.Sdk.V82Compat.TraceNativeModelLifecycleEnd(c, m);
+        return;
+    }
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static void func_8004DC20(CpuContext c, IMemory m)
+""",
+    ),
 )
 
+MAIN_MIGRATIONS = tuple(
+    (compatibility, native)
+    for native, compatibility in OBSOLETE_DREAMLAND_REPLACEMENTS
+)
+
+OBSOLETE_MAIN_DIAGNOSTICS = (
+    (
+        """        c.RA = 0x8002BFCCu;
+        Vigilante82PC.func_8001FD18(c, m);
+        c.StoreWord(2, m, (c.S0 + 0x40u));
+""",
+        """        c.RA = 0x8002BFCCu;
+        Vigilante82PC.func_8001FD18(c, m);
+        c.StoreWord(2, m, (c.S0 + 0x40u));
+        RecompOne.Runtime.Sdk.V82Compat.TraceNativeObjectModelAssigned(c, m);
+""",
+    ),
+    (
+        """    public static void func_8002D1DC(CpuContext c, IMemory m)
+    {
+        c.SP = c.SP - 0x18u;
+""",
+        """    public static void func_8002D1DC(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Sdk.V82Compat.TraceNativeObjectExtent(c, m);
+        c.SP = c.SP - 0x18u;
+""",
+    ),
+    (
+        """    public static void func_8001FD18(CpuContext c, IMemory m)
+    {
+        c.SP = c.SP - 0x18u;
+""",
+        """    public static void func_8001FD18(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Sdk.V82Compat.TraceNativeModelResolveBegin(c, m);
+        c.SP = c.SP - 0x18u;
+""",
+    ),
+    (
+        """        c.LoadWord(16, m, (c.SP + 0x10u));
+        c.SP = c.SP + 0x18u;
+        return;
+    }
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static void func_8001FE58(CpuContext c, IMemory m)
+""",
+        """        c.LoadWord(16, m, (c.SP + 0x10u));
+        c.SP = c.SP + 0x18u;
+        RecompOne.Runtime.Sdk.V82Compat.TraceNativeModelResolveEnd(c, m);
+        return;
+    }
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static void func_8001FE58(CpuContext c, IMemory m)
+""",
+    ),
+    (
+        """    public static void func_8001FEB8(CpuContext c, IMemory m)
+    {
+        c.SP = c.SP - 0x8u;
+""",
+        """    public static void func_8001FEB8(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Sdk.V82Compat.TraceNativeModelRelease(c, m);
+        c.SP = c.SP - 0x8u;
+""",
+    ),
+    (
+        """    public static void func_8004DB00(CpuContext c, IMemory m)
+    {
+        c.SP = c.SP - 0x40u;
+""",
+        """    public static void func_8004DB00(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Sdk.V82Compat.TraceNativeModelLifecycle(c, m);
+        c.SP = c.SP - 0x40u;
+""",
+    ),
+)
+
+# These model-lifecycle probes isolated the malformed converted hierarchy and
+# are intentionally absent from production builds now that the converter emits
+# native links. Keep only the cleanup patterns so an already-instrumented
+# generated tree is normalized on the next patch pass.
+MAIN_DIAGNOSTICS: tuple[tuple[str, str], ...] = ()
+
 SOURCE_MIGRATIONS = (
+    (
+        """        c.LoadWord(4, m, (c.S7 + 0x4Cu));
+        c.T3 = c.SP + 0x48u;
+""",
+        """        c.A0 = RecompOne.Runtime.Sdk.V82ArenaRegistry.NativeLocationBackgroundOffset(m, c.S7);
+        c.T3 = c.SP + 0x48u;
+""",
+    ),
     (
         """        c.A3 = 0x0000002Du;
         c.V0 = RecompOne.Runtime.Sdk.V82ArenaRegistry.NativeLocationArtIndex(c.S4) << 2;
         c.V0 = c.S7 + c.V0;
 """,
         """        c.A3 = 0x0000002Du;
-        RecompOne.Runtime.Sdk.V82ArenaRegistry.TrackNativeLocationHighlight(c.S4);
-        c.V0 = RecompOne.Runtime.Sdk.V82ArenaRegistry.NativeLocationArtIndex(c.S4) << 2;
+        c.V0 = c.S4 << 2;
         c.V0 = c.S7 + c.V0;
 """,
     ),
@@ -155,8 +285,18 @@ SOURCE_MIGRATIONS = (
         c.V0 = RecompOne.Runtime.Sdk.V82ArenaRegistry.ResolveNativeLocationArt(c, m, c.S4, c.S7);
 """,
         """        c.A3 = 0x0000002Du;
+        c.V0 = c.S4 << 2;
+        c.V0 = c.S7 + c.V0;
+""",
+    ),
+    (
+        """        c.A3 = 0x0000002Du;
         RecompOne.Runtime.Sdk.V82ArenaRegistry.TrackNativeLocationHighlight(c.S4);
         c.V0 = RecompOne.Runtime.Sdk.V82ArenaRegistry.NativeLocationArtIndex(c.S4) << 2;
+        c.V0 = c.S7 + c.V0;
+""",
+        """        c.A3 = 0x0000002Du;
+        c.V0 = c.S4 << 2;
         c.V0 = c.S7 + c.V0;
 """,
     ),
@@ -224,6 +364,26 @@ def apply_replacements(
     return changed
 
 
+def remove_obsolete_main_diagnostics(source: Path) -> int:
+    text = source.read_text(encoding="utf-8")
+    changed = 0
+    obsolete = (*OBSOLETE_MAIN_DIAGNOSTICS, *OBSOLETE_DREAMLAND_REPLACEMENTS)
+    for native, instrumented in obsolete:
+        if instrumented in text:
+            text = text.replace(instrumented, native, 1)
+            changed += 1
+    lifecycle_end = (
+        "        RecompOne.Runtime.Sdk.V82Compat."
+        "TraceNativeModelLifecycleEnd(c, m);\n"
+    )
+    if lifecycle_end in text:
+        text = text.replace(lifecycle_end, "")
+        changed += 1
+    if changed:
+        source.write_text(text, encoding="utf-8")
+    return changed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
@@ -232,14 +392,20 @@ def main() -> int:
 
     source = args.source.resolve()
     main_source = args.main_source.resolve()
-    changed = apply_replacements(
+    changed = remove_obsolete_main_diagnostics(main_source)
+    changed += apply_replacements(
         source,
         REPLACEMENTS,
         "native-selector",
         SOURCE_MIGRATIONS,
     )
-    changed += apply_replacements(main_source, MAIN_REPLACEMENTS, "Dreamland animation")
-    print(f"V8:2 native selector and Dreamland seams ready ({changed} applied)")
+    changed += apply_replacements(
+        main_source,
+        MAIN_DIAGNOSTICS,
+        "native main callback",
+        MAIN_MIGRATIONS,
+    )
+    print(f"V8:2 native selector seams ready ({changed} applied)")
     return 0
 
 

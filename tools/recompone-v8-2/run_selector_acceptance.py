@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -56,6 +57,14 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--timeout", type=float, default=420.0)
     parser.add_argument("--heartbeat-timeout", type=float, default=45.0)
+    parser.add_argument(
+        "--text-only",
+        action="store_true",
+        help=(
+            "verify the complete selector lifecycle from verbose runtime "
+            "diagnostics without producing presentation captures"
+        ),
+    )
     args = parser.parse_args()
 
     exe = args.exe.resolve()
@@ -67,7 +76,9 @@ def main() -> int:
         *output.glob("*.ppm"),
         output / "stdout.log",
         output / "stderr.log",
+        output / "runtime.log",
         output / "acceptance.json",
+        output / "audit.json",
         output / "all-guests-contact.bmp",
         output / "vehicle-materials.json",
     ):
@@ -93,12 +104,25 @@ def main() -> int:
             "RECOMPONE_SUPPRESS_RUMBLE": "1",
             "RECOMPONE_UNTHROTTLED": "0",
             "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS": "10500",
-            "RECOMPONE_PRESENTATION_CAPTURE": "1",
+            "RECOMPONE_PRESENTATION_CAPTURE": (
+                "0" if args.text_only else "1"
+            ),
             "RECOMPONE_PRESENTATION_RESOLUTION": "1280x720",
-            "RECOMPONE_CAPTURE_NATIVE_GUEST_SELECTOR": "1",
+            "RECOMPONE_CAPTURE_NATIVE_GUEST_SELECTOR": (
+                "0" if args.text_only else "1"
+            ),
             "RECOMPONE_CAPTURE_V82_SELECTOR_TURNS": "0",
             "RECOMPONE_CAPTURE_DIR": str(output),
             "RECOMPONE_TRACE_VEHICLE_MATERIALS": "1",
+            "RECOMPONE_TRACE_SELECTOR_RENDER_STATE": "1",
+            "RECOMPONE_TRACE_PACKET_ARENAS": "1",
+            "RECOMPONE_TRACE_V82_SELECTOR": "1",
+            "RECOMPONE_TRACE_V82_SELECTOR_PHYSICS": "1",
+            "RECOMPONE_TRACE_NATIVE_OPTIONS": "1",
+            "RECOMPONE_DISPLAY_PROBE_IMAGES": (
+                "0" if args.text_only else "1"
+            ),
+            "RECOMPONE_LOG_PATH": str(output / "runtime.log"),
         }
     )
     env.pop("RECOMPONE_HEADLESS", None)
@@ -184,13 +208,13 @@ def main() -> int:
     )
     passed = (
         not reason
-        and captures == list(range(12))
+        and (args.text_only or captures == list(range(12)))
         and complete_double_roster
         and enemy_stage
-        and enemy_capture
+        and (args.text_only or enemy_capture)
         and clean_exit
     )
-    if not reason and captures != list(range(12)):
+    if not args.text_only and not reason and captures != list(range(12)):
         reason = f"selector captures {captures}, expected 0-11"
     if not reason and not complete_double_roster:
         reason = (
@@ -199,7 +223,7 @@ def main() -> int:
         )
     if not reason and not enemy_stage:
         reason = "enemy selector was not reached"
-    if not reason and not enemy_capture:
+    if not args.text_only and not reason and not enemy_capture:
         reason = "enemy selector proof frame was not captured"
     if not reason and not clean_exit:
         reason = f"process exit was not clean: {process.returncode}"
@@ -230,7 +254,7 @@ def main() -> int:
             "classified as glass"
         )
         passed = False
-    if len(guest_images) == 12 and all(
+    if not args.text_only and len(guest_images) == 12 and all(
             image.is_file() for image in guest_images):
         subprocess.run(
             [
@@ -245,13 +269,33 @@ def main() -> int:
             ],
             check=True,
         )
-    if not reason and not contact_sheet.is_file():
+    if not args.text_only and not reason and not contact_sheet.is_file():
         reason = "full-roster visual contact sheet was not produced"
         passed = False
+
+    churn_report = output / "audit.json"
+    if args.text_only:
+        churn_exit = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).with_name(
+                    "analyze_selector_render_churn.py")),
+                str(output / "runtime.log"),
+                "--output",
+                str(churn_report),
+                "--minimum-generations",
+                "2",
+            ],
+            check=False,
+        ).returncode
+        if churn_exit != 0:
+            reason = "selector render/lifecycle churn audit failed"
+            passed = False
 
     report = {
         "schema": 1,
         "passed": passed,
+        "text_only": args.text_only,
         "reason": reason or "complete native selector lifecycle",
         "executable": str(exe),
         "executable_sha256":
@@ -267,6 +311,9 @@ def main() -> int:
         "visual_contact_sheet": str(contact_sheet),
         "vehicle_material_report": str(material_report),
         "vehicle_materials_passed": material_exit == 0,
+        "selector_churn_report": (
+            str(churn_report) if args.text_only else None
+        ),
     }
     (output / "acceptance.json").write_text(
         json.dumps(report, indent=2) + "\n", encoding="utf-8")

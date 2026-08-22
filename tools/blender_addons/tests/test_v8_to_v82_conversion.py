@@ -20,6 +20,7 @@ from build_v8_to_v82_guest_roster import (  # noqa: E402
     decode_bank,
 )
 from vigilante8_vehicle_tools import (  # noqa: E402
+    conversion,
     iff,
     project,
     registry,
@@ -93,6 +94,25 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
         rebuilt = registry.compile_package(decoded)
         self.assertEqual(package.archive, rebuilt.archive)
         self.assertEqual(package.registry, rebuilt.registry)
+
+    def test_v8_minus_two_arena_sentinel_preserves_native_class_f(self) -> None:
+        source = project.ObjectBank(
+            groups=(),
+            slots=(
+                project.Slot(
+                    name="v8_minus_two",
+                    render_group=None,
+                    collision=None,
+                    key=0xFFFE,
+                ),
+            ),
+            collisions=(),
+            textures=(),
+            animations=(),
+        )
+        converted = conversion.v8_bank_to_v82(source)
+        self.assertEqual(0xF7FF, converted.slots[0].key)
+        self.assertIsNone(converted.slots[0].render_group)
 
     def test_v8_body_anchors_and_all_sequel_mounts_are_preserved(self) -> None:
         for vehicle in self.vehicles:
@@ -218,7 +238,7 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
             | (0x80 if native_packet_type & 0x40 else 0)
         )
 
-    def test_v8_environment_materials_preserve_retail_render_mode(
+    def test_v8_environment_materials_translate_authored_gloss_role(
         self,
     ) -> None:
         for vehicle in self.vehicles:
@@ -233,56 +253,63 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
             ):
                 self.assertIsNotNone(source_bank)
                 self.assertIsNotNone(converted_bank)
-                source_faces = [
-                    face
-                    for group in source_bank.groups
-                    for face in group.faces
-                    if face.packet_kind == 12
-                ]
-                converted_faces = [
-                    face
-                    for group in converted_bank.groups
-                    for face in group.faces
-                    if face.packet_kind == 12
-                ]
-                self.assertTrue(source_faces, f"{vehicle.stable_id}: {label}")
-                self.assertEqual(len(source_faces), len(converted_faces))
-                for source_face, converted_face in zip(
-                    source_faces, converted_faces
+                for source_group, converted_group in zip(
+                    source_bank.groups, converted_bank.groups
                 ):
-                    source_type = 12 | source_face.packet_flags
-                    converted_type = 12 | converted_face.packet_flags
-                    self.assertEqual(
-                        self._retail_render_mode(source_type),
-                        self._retail_render_mode(converted_type),
-                        f"{vehicle.stable_id}: {label}",
-                    )
-                    expected_flags = source_face.packet_flags & ~0x20
-                    self.assertEqual(
-                        converted_face.packet_flags,
-                        expected_flags,
-                        f"{vehicle.stable_id}: {label}",
-                    )
-                    source_environment = (
-                        source_face.environment_parameters[0]
-                    )
-                    expected_environment = source_environment
-                    if (source_environment & 0x3FFF) == 0x3FFF:
-                        expected_environment = (
-                            0x7FFE
-                            if source_face.packet_flags & 0x10
-                            else 0x3FFF
+                    source_faces = [
+                        face
+                        for face in source_group.faces
+                        if face.packet_kind == 12
+                    ]
+                    converted_faces = [
+                        face
+                        for face in converted_group.faces
+                        if face.packet_kind == 12
+                    ]
+                    if not source_faces:
+                        continue
+                    self.assertEqual(len(source_faces), len(converted_faces))
+                    for source_face, converted_face in zip(
+                        source_faces, converted_faces
+                    ):
+                        source_type = 12 | source_face.packet_flags
+                        converted_type = 12 | converted_face.packet_flags
+                        expected_mode = self._retail_render_mode(source_type)
+                        if source_face.packet_flags & 0x20:
+                            expected_mode |= 0x02
+                        self.assertEqual(
+                            expected_mode,
+                            self._retail_render_mode(converted_type),
+                            f"{vehicle.stable_id}: {label}",
                         )
-                    self.assertEqual(
-                        converted_face.environment_parameters,
-                        (
-                            expected_environment,
-                            0x8080,
-                            0,
-                            0,
-                        ),
-                        f"{vehicle.stable_id}: {label}",
-                    )
+                        expected_flags = source_face.packet_flags & ~0x20
+                        if source_face.packet_flags & 0x20:
+                            expected_flags |= 0x10
+                        self.assertEqual(
+                            converted_face.packet_flags,
+                            expected_flags,
+                            f"{vehicle.stable_id}: {label}",
+                        )
+                        source_environment = (
+                            source_face.environment_parameters[0]
+                        )
+                        expected_environment = source_environment
+                        if (source_environment & 0x3FFF) == 0x3FFF:
+                            expected_environment = (
+                                0x7FFE
+                                if source_face.packet_flags & 0x30
+                                else 0x3FFF
+                            )
+                        self.assertEqual(
+                            converted_face.environment_parameters,
+                            (
+                                expected_environment,
+                                0x8080,
+                                0,
+                                0,
+                            ),
+                            f"{vehicle.stable_id}: {label}",
+                        )
 
     def test_beezwax_environment_faces_use_only_retail_v82_roles(
         self,

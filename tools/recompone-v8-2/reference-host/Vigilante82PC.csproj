@@ -48,7 +48,7 @@
   <ItemGroup Condition="'$(Configuration)' == 'Release'">
     <!-- GLFW uses the dynamic MSVC runtime. Bundle the official redistributable
          app-locally so the single-file release has no VC Redist prerequisite. -->
-    <Content Include="runtime\win-x64\vcruntime140.dll"
+    <Content Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\reference-host\runtime\win-x64\vcruntime140.dll"
              Link="vcruntime140.dll"
              TargetPath="vcruntime140.dll"
              CopyToOutputDirectory="PreserveNewest"
@@ -77,6 +77,9 @@
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_vehicle_engine_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_selector_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot; --main-source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_options_patches.py&quot; --shell-source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot; --main-source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
+  </Target>
+  <Target Name="GenerateConvertedDreamlandOverlay"
+          BeforeTargets="CoreCompile">
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\port_dreamland_overlay.py&quot;" />
   </Target>
 </Project>

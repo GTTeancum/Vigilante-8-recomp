@@ -121,6 +121,9 @@ internal static class HostWindow
         int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_DISPLAY_PROBE_INTERVAL"), out int interval)
             ? Math.Max(1, interval)
             : 0;
+    static readonly bool _writeDisplayProbeImages =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_DISPLAY_PROBE_IMAGES") != "0";
     static readonly string? _captureDirectory =
         Environment.GetEnvironmentVariable("RECOMPONE_CAPTURE_DIR");
 
@@ -940,14 +943,25 @@ internal static class HostWindow
         {
             _lastDisplayHash = hash;
             Console.WriteLine($"[GPU] framebuffer {w}x{h} nonzero={nonzero} hash=0x{hash:X8}");
-            WriteDisplayPpm("recompone_vram_latest.ppm", w, h, pixels);
+            if (_writeDisplayProbeImages)
+                WriteDisplayPpm("recompone_vram_latest.ppm", w, h, pixels);
         }
 
         if (!string.IsNullOrEmpty(captureLabel))
         {
-            string path = $"recompone_capture_{captureLabel}.ppm";
-            WriteDisplayPpm(path, w, h, pixels);
-            Console.WriteLine($"[GPU] captured stage '{captureLabel}' to {path}");
+            if (_writeDisplayProbeImages)
+            {
+                string path = $"recompone_capture_{captureLabel}.ppm";
+                WriteDisplayPpm(path, w, h, pixels);
+                Console.WriteLine(
+                    $"[GPU] captured stage '{captureLabel}' to {path}");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"[GPU] observed stage '{captureLabel}' " +
+                    $"without image retention");
+            }
             if (_capturePresentation)
                 _pendingPresentationCapture = captureLabel;
         }

@@ -6,6 +6,10 @@ namespace RecompOne.Runtime.Dispatch;
 
 public static class Dispatcher
 {
+    static readonly bool TraceOverlayCalls =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_OVERLAY_CALLS") == "1";
+    static readonly Dictionary<(string Overlay, uint Address, uint Event), uint>
+        OverlayCallCounts = [];
     static readonly Dictionary<string, IOverlay> _registry = new(StringComparer.OrdinalIgnoreCase);
     static readonly Dictionary<int, string> _lbaToName = [];
     static readonly List<string> _active = [];
@@ -16,7 +20,6 @@ public static class Dispatcher
     static readonly Dictionary<uint, (uint Base, uint Size, uint Delta)> _objectOwners = [];
     static readonly List<(IOverlay Overlay, uint Delta)> _relocatedImages = [];
     private static IOverlay? _pending;
-    static int _dreamlandInvalidObjectCallbacks;
     public static void Register(string name, IOverlay overlay)
     {
         _registry[name] = overlay;
@@ -349,18 +352,6 @@ public static class Dispatcher
             TryLoadRelocatedOverlay(m, addr);
         if (!_funcMap.TryGetValue(addr, out var fn))
         {
-            if (Sdk.V82ArenaRegistry.IsDreamlandSelected &&
-                objectCallback &&
-                addr < 0x80000000u)
-            {
-                c.V0 = 0u;
-                if (_dreamlandInvalidObjectCallbacks++ < 8)
-                    Console.Error.WriteLine(
-                        "[V82DreamlandDispatch] ignored invalid object " +
-                        $"callback=0x{addr:X8} object=0x{c.A0:X8} " +
-                        $"event=0x{c.A1:X8} caller=0x{c.RA:X8}");
-                return;
-            }
             throw new InvalidOperationException(
                 $"unmapped call: 0x{addr:X8}; {DescribeCallContext(c, m)}; " +
                 $"overlay images: {DescribeOverlayImages(m, addr)}");
@@ -373,6 +364,21 @@ public static class Dispatcher
             {
                 callMemory = new RelocatedMemory(m, relocation.Overlay.Base,
                     relocation.Overlay.Size, relocation.Delta);
+            }
+            if (TraceOverlayCalls &&
+                relocation.Overlay.Name.StartsWith("LEVELS_", StringComparison.Ordinal))
+            {
+                var key = (relocation.Overlay.Name, addr, c.A1);
+                uint count = OverlayCallCounts.TryGetValue(key, out uint prior)
+                    ? prior + 1
+                    : 1;
+                OverlayCallCounts[key] = count;
+                if (count <= 3 || count % 60 == 0)
+                    Console.Error.WriteLine(
+                        $"[OverlayCall] overlay={key.Item1} " +
+                        $"address=0x{key.Item2:X8} linked=0x{addr - relocation.Delta:X8} " +
+                        $"event={key.Item3} count={count} object=0x{c.A0:X8} " +
+                        $"caller=0x{c.RA:X8} gp=0x{c.GP:X8}");
             }
         }
         fn(c, callMemory);

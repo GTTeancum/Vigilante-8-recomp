@@ -41,6 +41,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     static readonly bool TraceEnhancedRenderer =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_ENHANCED_RENDERER") == "1";
+    static readonly bool TraceConvertedSurfaces =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_CONVERTED_SURFACES") == "1";
     static readonly bool TraceTerrainVram =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VRAM") == "1";
     static readonly bool TraceTextureRegions =
@@ -51,9 +54,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             "RECOMPONE_TRACE_VEHICLE_TEXTURE_REPLACEMENTS") == "1";
     static readonly bool DisableRasterDepth =
         Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_RASTER_DEPTH") == "1";
-    static readonly bool TraceDreamlandWaterOcclusion =
-        Environment.GetEnvironmentVariable(
-            "RECOMPONE_TRACE_DREAMLAND_WATER_OCCLUSION") == "1";
     static readonly bool DisableProjectiveTextures =
         Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_PROJECTIVE_TEXTURES") == "1";
     static readonly bool TerrainPacketProjection =
@@ -78,10 +78,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     static readonly bool TraceTerrainFrames =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_V82_TRACE_TERRAIN_FRAME") == "1";
+    static readonly bool TraceFog =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_FOG") == "1";
     static readonly bool DisableStockPaintCorrection =
         Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_STOCK_PAINT_CORRECTION") == "1";
-    static readonly bool DisableImportedShadow =
-        Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_IMPORTED_SHADOW") == "1";
     static readonly bool DisableVehicleTriangles =
         Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_VEHICLE_TRIANGLES") == "1";
     static readonly HashSet<string> DisabledVehicleMaterials =
@@ -102,9 +103,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     static bool IsOpaqueVehicleGlassMaterial(in PrimFlags f) =>
-        f.Material is
-            HleMaterialKind.VehicleReflection or
-            HleMaterialKind.OpaqueVehicleGlass;
+        f.Material == HleMaterialKind.OpaqueVehicleGlass;
 
     static int _modalRectLines;
     static int _modalTriLines;
@@ -129,6 +128,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     static readonly bool TraceVehicleMaterials =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_VEHICLE_MATERIALS") == "1";
+    static readonly bool TraceSelectorRenderState =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_SELECTOR_RENDER_STATE") == "1";
     static readonly (int Start, int End)? TraceVehicleMaterialTicks =
         ParseTickRange(
             Environment.GetEnvironmentVariable(
@@ -161,6 +163,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         ParseTickRange(
             Environment.GetEnvironmentVariable(
                 "RECOMPONE_TRACE_TERRAIN_CELL_TICKS"));
+    static readonly bool TraceTerrainShade =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_TERRAIN_SHADE") == "1";
     static readonly int[] TraceTerrainScanlines =
         ParseScanlines(
             Environment.GetEnvironmentVariable(
@@ -186,10 +191,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     long _traceOpaqueTriangles;
     long _traceTransparentTriangles;
     long _traceDepthTestedTriangles;
-    long _tracePainterOrderedTransparentTriangles;
-    long _traceDreamlandWaterDepthTriangles;
-    long _traceGlassDepthTriangles;
-    long _traceUnexpectedTransparentDepthTriangles;
+    long _tracePainterOrderedWorldTriangles;
+    long _tracePainterOrderedScreenTriangles;
+    long _traceTransparentWorldDepthTriangles;
     long _traceProjectiveTriangles;
     long _traceMissingOtTriangles;
     long _traceEnhancedTriangles;
@@ -203,10 +207,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     long _traceTerrainRouteDepthWriteTriangles;
     long _traceTerrainRouteDepthTestTriangles;
     long _traceTerrainRouteDepthCompareWriteTriangles;
-    long _traceDreamlandWaterTriangles;
-    long _traceDreamlandWaterOpaqueTriangles;
-    long _traceDreamlandWaterTransparentTriangles;
-    long _traceDreamlandWaterCoherentTriangles;
     long _terrainFrameTriangles;
     long _terrainFrameWorldTriangles;
     // Non-terrain world geometry binned by where it lands across the widened
@@ -489,6 +489,13 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     long _traceEffectFallbackTriangles;
     long _traceVisibleWorldTriangles;
     long _traceVisibleWorldFallbackTriangles;
+    long _traceConvertedSurfaceTriangles;
+    long _traceVisibleConvertedSurfaceTriangles;
+    long _traceDepthTestedConvertedSurfaceTriangles;
+    long _traceProjectiveConvertedSurfaceTriangles;
+    long _traceModernConvertedSurfaceTriangles;
+    double _traceConvertedSurfaceArea;
+    double _traceConvertedSurfaceMaxArea;
     long _traceVehicleTriangles;
     long _traceVehicleFallbackTriangles;
     long _traceVisibleVehicleTriangles;
@@ -506,7 +513,20 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     long _tracePresentationSourceSwitches;
     long _tracePresentationExtentSwitches;
     int _traceVehicleMaterialTriangles;
+    readonly Dictionary<HleMaterialKind, int> _selectorMaterialTriangles = [];
+    int _selectorRenderGuest = -1;
+    int _selectorRenderGeneration = -1;
+    int _selectorRenderStableFrame = -1;
+    uint _selectorRenderObject;
+    int _selectorOpaqueReflections;
+    int _selectorGlossReflections;
+    double _selectorTriangleArea;
+    double _selectorReflectionArea;
+    double _selectorMaxTriangleArea;
+    float _selectorMaxSpanX;
+    float _selectorMaxSpanY;
     int _traceTerrainCellTriangles;
+    int _traceTerrainShadePackets;
     int _traceTerrainScanlineTriangles;
     int _traceRectangleProbeHits;
     long _tracePresentTicks;
@@ -521,29 +541,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     long _traceSetMaskFlushes;
     long _tracePartialWritebacks;
     long _tracePartialWritebackPixels;
-    ulong _waterTraceBatches;
-    ulong _waterTraceTriangles;
-    ulong _waterTraceCandidateSamples;
-    ulong _waterTraceVisibleSamples;
-    ulong _waterTraceOccludedSamples;
-    ulong _waterTraceActualSamples;
-    ulong _waterTraceLeakSamples;
-    ulong _waterTraceDepthEnabledBatches;
-    ulong _waterTraceDepthDisabledBatches;
-    ulong _waterTraceTotalBatches;
-    ulong _waterTraceTotalTriangles;
-    ulong _waterTraceTotalCandidateSamples;
-    ulong _waterTraceTotalVisibleSamples;
-    ulong _waterTraceTotalOccludedSamples;
-    ulong _waterTraceTotalActualSamples;
-    ulong _waterTraceTotalLeakSamples;
-    ulong _waterTraceTotalDepthEnabledBatches;
-    ulong _waterTraceTotalDepthDisabledBatches;
-    long _waterTraceSamplingFrame = long.MinValue;
-    long _waterTraceLastWaterSampleFrame = long.MinValue / 2;
-    int _waterTraceSamplesThisFrame;
-    readonly List<GlVertex[]> _waterTraceDeferredBatches = [];
-    bool _waterTraceDeferredDepthEnabled;
     int _traceMinOt = int.MaxValue;
     int _traceMaxOt;
     readonly HashSet<string> _traceRectangleShapes = [];
@@ -664,7 +661,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     bool _kDepthWrite;
     bool _kSourceDepthCompareWrite;
     HleMaterialKind _kMaterial;
-    bool _kDreamlandWater;
     int _kBlend, _kSetMask, _kCheckMask;
     int _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY;
     int _kClipX0, _kClipY0, _kClipX1, _kClipY1, _kTextureSmoothing;
@@ -688,13 +684,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         int ClipX1,
         int ClipY1,
         int TextureSmoothing);
-    readonly List<DeferredBatch> _deferredDreamlandWater = [];
     readonly List<DeferredBatch> _deferredLoadingPrompt = [];
-    bool _replayingDreamlandWater;
     int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv;
     int _uTextureSmoothing, _uTextureMipmaps, _uAnisotropy;
     int _uEnhancedShadows, _uEnhancedParticles, _uEnhancedFog;
-    int _uFogColor, _uFogColorValid, _uDreamlandN64Fog;
+    int _uFogColor, _uFogColorValid;
     // The arena's own horizon colour, harvested from the full-display backdrop
     // quad the engine draws behind every gameplay frame. Distance fog has to
     // converge on this, not on a synthetic haze, or far geometry never joins
@@ -705,14 +699,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     int _fogColorOt = int.MinValue;
     float _fogColorSpan;
     int _fogColorLogged;
-    bool _dreamlandFogProfileLogged;
     int _uPerspectiveCorrectTextures, _uPerspectiveCorrectColors, _uTrueColor;
     int _uVectorFonts, _uVectorIcons;
     int _uPresentOrigin, _uPresentSize, _uPresentTexSize, _uPresent24Origin, _uPresent24Size;
-    uint _waterCandidateQuery;
-    uint _waterVisibleQuery;
-    uint _waterOccludedQuery;
-    uint _waterActualQuery;
 
     public bool Ready { get; private set; }
 
@@ -724,16 +713,96 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _kTarget = null;
         _backdropPending.Clear();
         _backdropPackets.Clear();
-        _deferredDreamlandWater.Clear();
         _deferredLoadingPrompt.Clear();
-        _replayingDreamlandWater = false;
-        _waterTraceDeferredBatches.Clear();
-        _waterTraceDeferredDepthEnabled = false;
         _hasFogColor = false;
         _fogColorFrame = long.MinValue;
         _fogColorOt = int.MinValue;
         _fogColorSpan = 0f;
-        _dreamlandFogProfileLogged = false;
+    }
+
+    void TraceSelectorTriangle(
+        in HleVertex a,
+        in HleVertex b,
+        in HleVertex c,
+        in PrimFlags f)
+    {
+        if (!TraceSelectorRenderState || GpuHle.GameplayActive || !f.Vehicle)
+            return;
+        int guest = Sdk.V82VehicleRegistry.NativeSelectorGuestIndex;
+        if (guest < 0)
+            return;
+
+        _selectorRenderGuest = guest;
+        _selectorRenderGeneration =
+            Sdk.V82VehicleRegistry.NativeSelectorGeneration;
+        _selectorRenderStableFrame =
+            Sdk.V82VehicleRegistry.NativeSelectorStableFrame;
+        _selectorRenderObject =
+            Sdk.V82VehicleRegistry.NativeSelectorPreviewObject;
+        _selectorMaterialTriangles[f.Material] =
+            _selectorMaterialTriangles.GetValueOrDefault(f.Material) + 1;
+        if (f.Material == HleMaterialKind.VehicleReflection)
+        {
+            if (f.SemiTrans)
+                _selectorGlossReflections++;
+            else
+                _selectorOpaqueReflections++;
+        }
+
+        double twiceArea = Math.Abs(
+            (b.X - a.X) * (c.Y - a.Y) -
+            (c.X - a.X) * (b.Y - a.Y));
+        double area = twiceArea * 0.5;
+        _selectorTriangleArea += area;
+        if (f.Material == HleMaterialKind.VehicleReflection)
+            _selectorReflectionArea += area;
+        _selectorMaxTriangleArea = Math.Max(_selectorMaxTriangleArea, area);
+        _selectorMaxSpanX = Math.Max(
+            _selectorMaxSpanX,
+            Math.Max(a.X, Math.Max(b.X, c.X)) -
+            Math.Min(a.X, Math.Min(b.X, c.X)));
+        _selectorMaxSpanY = Math.Max(
+            _selectorMaxSpanY,
+            Math.Max(a.Y, Math.Max(b.Y, c.Y)) -
+            Math.Min(a.Y, Math.Min(b.Y, c.Y)));
+    }
+
+    void FlushSelectorRenderTrace()
+    {
+        if (_selectorMaterialTriangles.Count == 0)
+            return;
+        int triangleCount = _selectorMaterialTriangles.Values.Sum();
+        string materials = string.Join(
+            ',',
+            _selectorMaterialTriangles
+                .OrderBy(pair => pair.Key.ToString(), StringComparer.Ordinal)
+                .Select(pair => $"{pair.Key}:{pair.Value}"));
+        Console.Error.WriteLine(
+            "[V82SelectorRenderFrame] " +
+            $"present={_frame} guest={_selectorRenderGuest} " +
+            $"generation={_selectorRenderGeneration} " +
+            $"stable={_selectorRenderStableFrame} " +
+            $"object=0x{_selectorRenderObject:X8} " +
+            $"triangles={triangleCount} " +
+            $"reflection-opaque={_selectorOpaqueReflections} " +
+            $"reflection-gloss={_selectorGlossReflections} " +
+            $"area={_selectorTriangleArea:F3} " +
+            $"reflection-area={_selectorReflectionArea:F3} " +
+            $"max-area={_selectorMaxTriangleArea:F3} " +
+            $"max-span={_selectorMaxSpanX:F3},{_selectorMaxSpanY:F3} " +
+            $"materials={materials}");
+        _selectorMaterialTriangles.Clear();
+        _selectorRenderGuest = -1;
+        _selectorRenderGeneration = -1;
+        _selectorRenderStableFrame = -1;
+        _selectorRenderObject = 0u;
+        _selectorOpaqueReflections = 0;
+        _selectorGlossReflections = 0;
+        _selectorTriangleArea = 0.0;
+        _selectorReflectionArea = 0.0;
+        _selectorMaxTriangleArea = 0.0;
+        _selectorMaxSpanX = 0f;
+        _selectorMaxSpanY = 0f;
     }
 
     public void ApplyResolutionScale(
@@ -789,8 +858,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _uEnhancedFog = _gl.GetUniformLocation(_progPrim, "uEnhancedFog");
         _uFogColor = _gl.GetUniformLocation(_progPrim, "uFogColor");
         _uFogColorValid = _gl.GetUniformLocation(_progPrim, "uFogColorValid");
-        _uDreamlandN64Fog =
-            _gl.GetUniformLocation(_progPrim, "uDreamlandN64Fog");
         _uPerspectiveCorrectTextures =
             _gl.GetUniformLocation(_progPrim, "uPerspectiveCorrectTextures");
         _uPerspectiveCorrectColors =
@@ -876,17 +943,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _presentFbo);
         _gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, _presentTex, 0);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
-
-        if (TraceDreamlandWaterOcclusion)
-        {
-            _waterCandidateQuery = _gl.GenQuery();
-            _waterVisibleQuery = _gl.GenQuery();
-            _waterOccludedQuery = _gl.GenQuery();
-            _waterActualQuery = _gl.GenQuery();
-            Console.Error.WriteLine(
-                "[DreamlandWaterOcclusion] " +
-                "{\"kind\":\"init\",\"query\":\"GL_SAMPLES_PASSED\"}");
-        }
 
         _kClipX1 = 1023; _kClipY1 = 511;
         Ready = true;
@@ -1184,8 +1240,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                  depthTest,
                  depthWrite,
                  sourceDepthCompareWrite,
-                 material) ||
-             _kDreamlandWater != f.DreamlandWater)) Flush();
+                 material))) Flush();
         if (_count + vertsNeeded > MaxVerts) Flush();
         _kTarget = target;
         _kTransparent = transparent; _kBlend = blend;
@@ -1193,7 +1248,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _kDepthWrite = depthWrite;
         _kSourceDepthCompareWrite = sourceDepthCompareWrite;
         _kMaterial = material;
-        _kDreamlandWater = f.DreamlandWater;
         _kSetMask = _env.SetMask ? 1 : 0; _kCheckMask = _env.CheckMask ? 1 : 0;
         _kTwAndX = ~(_env.TwMaskX * 8) & 0xFF; _kTwAndY = ~(_env.TwMaskY * 8) & 0xFF;
         _kTwOrX = (_env.TwOffX & _env.TwMaskX) * 8; _kTwOrY = (_env.TwOffY & _env.TwMaskY) * 8;
@@ -1555,7 +1609,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             f.Material is HleMaterialKind.Particle or
                 HleMaterialKind.Additive or
                 HleMaterialKind.Subtractive or
-                HleMaterialKind.ImportedShadow or
                 HleMaterialKind.VehicleReflection or
                 HleMaterialKind.OpaqueVehicleGlass ||
             (uiMaterial && !allowUiReplacement))
@@ -1636,6 +1689,30 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     // paused frame only ~38 carry neither view space nor a GTE Z.
     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
+        GpuHle.CoarseTerrainPacket coarseTerrain = default;
+        bool hasCoarseTerrain =
+            !f.Textured &&
+            GpuHle.TryGetCoarseTerrainPacket(
+                f.PacketAddress, out coarseTerrain);
+        GpuHle.TerrainTransitionPacket terrainTransition = default;
+        bool hasTerrainTransition =
+            !f.Textured &&
+            GpuHle.TryGetTerrainTransitionPacket(
+                f.PacketAddress, out terrainTransition);
+        if (hasCoarseTerrain &&
+            f.Material == HleMaterialKind.TerrainRoute)
+        {
+            DrawTexturedCoarseTerrainHalf(a, b, c, f, coarseTerrain);
+            return;
+        }
+        if (hasTerrainTransition &&
+            f.Material == HleMaterialKind.TerrainRoute)
+        {
+            DrawTexturedTerrainTransition(
+                a, b, c, f, terrainTransition);
+            return;
+        }
+
         HleVertex authoredA = a, authoredB = b, authoredC = c;
         float authoredMinU = MathF.Min(a.U, MathF.Min(b.U, c.U));
         float authoredMinV = MathF.Min(a.V, MathF.Min(b.V, c.V));
@@ -1664,6 +1741,351 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             return;
         }
         DrawTriCore(authoredA, authoredB, authoredC, f);
+    }
+
+    void DrawTexturedCoarseTerrainHalf(
+        in HleVertex a,
+        in HleVertex b,
+        in HleVertex c,
+        in PrimFlags flags,
+        in GpuHle.CoarseTerrainPacket coarse)
+    {
+        GpuHle.TerrainCellTextures textures = coarse.Textures;
+        int size = textures.GridSize;
+        if (TraceTerrainShade && _traceTerrainShadePackets++ < 4096)
+        {
+            int minimumR = 255, minimumG = 255, minimumB = 255;
+            int maximumR = 0, maximumG = 0, maximumB = 0;
+            var textureIds = new System.Text.StringBuilder();
+            for (int sampleX = 0; sampleX < size; sampleX++)
+            {
+                for (int sampleZ = 0; sampleZ < size; sampleZ++)
+                {
+                    GpuHle.TerrainTextureDescriptor sample =
+                        textures.Get(sampleX, sampleZ);
+                    minimumR = Math.Min(minimumR, sample.AverageR);
+                    minimumG = Math.Min(minimumG, sample.AverageG);
+                    minimumB = Math.Min(minimumB, sample.AverageB);
+                    maximumR = Math.Max(maximumR, sample.AverageR);
+                    maximumG = Math.Max(maximumG, sample.AverageG);
+                    maximumB = Math.Max(maximumB, sample.AverageB);
+                    if (textureIds.Length != 0)
+                        textureIds.Append(',');
+                    textureIds.Append(sample.TextureId);
+                }
+            }
+            Console.Error.WriteLine(
+                "[V82TerrainShade] " +
+                $"frame={_frame} tick={GpuHle.DebugGameplayTick} " +
+                $"cell={coarse.X},{coarse.Z} source={coarse.Source} " +
+                $"half={(coarse.SecondHalf ? 1 : 0)} grid={size} " +
+                $"packet-rgb={a.R},{a.G},{a.B};{b.R},{b.G},{b.B};" +
+                $"{c.R},{c.G},{c.B} " +
+                $"packet-xy={a.X:F2},{a.Y:F2};{b.X:F2},{b.Y:F2};" +
+                $"{c.X:F2},{c.Y:F2} " +
+                $"view-z={a.ViewZ:F2},{b.ViewZ:F2},{c.ViewZ:F2} " +
+                $"xtin-average={minimumR},{minimumG},{minimumB}.." +
+                $"{maximumR},{maximumG},{maximumB} " +
+                $"textures={textureIds}");
+        }
+        for (int x = 0; x < size; x++)
+        {
+            for (int z = 0; z < size; z++)
+            {
+                GpuHle.TerrainTextureDescriptor texture =
+                    textures.Get(x, z);
+                if ((texture.Flags & 1) != 0)
+                    continue;
+
+                if (!coarse.SecondHalf)
+                {
+                    int diagonal = x + z;
+                    if (diagonal == size - 1)
+                        DrawTerrainTextureTriangle(
+                            FirstTerrainGridPoint(a, b, c, size, x, z),
+                            texture.Uv00,
+                            FirstTerrainGridPoint(a, b, c, size, x + 1, z),
+                            texture.Uv01,
+                            FirstTerrainGridPoint(a, b, c, size, x, z + 1),
+                            texture.Uv10,
+                            flags, texture);
+                    else if (diagonal < size - 1)
+                        DrawTerrainTextureSquare(
+                            FirstTerrainGridPoint(a, b, c, size, x, z),
+                            FirstTerrainGridPoint(a, b, c, size, x + 1, z),
+                            FirstTerrainGridPoint(a, b, c, size, x, z + 1),
+                            FirstTerrainGridPoint(
+                                a, b, c, size, x + 1, z + 1),
+                            flags, texture);
+                    continue;
+                }
+
+                int secondDiagonal = x + z;
+                if (secondDiagonal == size - 1)
+                    DrawTerrainTextureTriangle(
+                        SecondTerrainGridPoint(
+                            a, b, c, size, x + 1, z + 1),
+                        texture.Uv11,
+                        SecondTerrainGridPoint(a, b, c, size, x + 1, z),
+                        texture.Uv01,
+                        SecondTerrainGridPoint(a, b, c, size, x, z + 1),
+                        texture.Uv10,
+                        flags, texture);
+                else if (secondDiagonal >= size)
+                    DrawTerrainTextureSquare(
+                        SecondTerrainGridPoint(a, b, c, size, x, z),
+                        SecondTerrainGridPoint(a, b, c, size, x + 1, z),
+                        SecondTerrainGridPoint(a, b, c, size, x, z + 1),
+                        SecondTerrainGridPoint(
+                            a, b, c, size, x + 1, z + 1),
+                        flags, texture);
+            }
+        }
+    }
+
+    void DrawTerrainTextureSquare(
+        in HleVertex topLeft,
+        in HleVertex topRight,
+        in HleVertex bottomLeft,
+        in HleVertex bottomRight,
+        in PrimFlags flags,
+        in GpuHle.TerrainTextureDescriptor texture)
+    {
+        if ((texture.Flags & 2) != 0)
+        {
+            DrawTerrainTextureTriangle(
+                topLeft, texture.Uv00,
+                topRight, texture.Uv01,
+                bottomRight, texture.Uv11,
+                flags, texture);
+            DrawTerrainTextureTriangle(
+                topLeft, texture.Uv00,
+                bottomLeft, texture.Uv10,
+                bottomRight, texture.Uv11,
+                flags, texture);
+            return;
+        }
+
+        DrawTerrainTextureTriangle(
+            topLeft, texture.Uv00,
+            topRight, texture.Uv01,
+            bottomLeft, texture.Uv10,
+            flags, texture);
+        DrawTerrainTextureTriangle(
+            bottomRight, texture.Uv11,
+            topRight, texture.Uv01,
+            bottomLeft, texture.Uv10,
+            flags, texture);
+    }
+
+    readonly record struct TerrainClipVertex(
+        HleVertex Vertex,
+        float X,
+        float Z);
+
+    void DrawTexturedTerrainTransition(
+        in HleVertex a,
+        in HleVertex b,
+        in HleVertex c,
+        in PrimFlags flags,
+        in GpuHle.TerrainTransitionPacket transition)
+    {
+        GpuHle.TerrainCellTextures textures = transition.Textures;
+        List<TerrainClipVertex> source =
+        [
+            new TerrainClipVertex(a, transition.Ax, transition.Az),
+            new TerrainClipVertex(b, transition.Bx, transition.Bz),
+            new TerrainClipVertex(c, transition.Cx, transition.Cz),
+        ];
+        for (int x = 0; x < textures.GridSize; x++)
+        {
+            for (int z = 0; z < textures.GridSize; z++)
+            {
+                GpuHle.TerrainTextureDescriptor texture =
+                    textures.Get(x, z);
+                if ((texture.Flags & 1) != 0)
+                    continue;
+
+                List<TerrainClipVertex> clipped =
+                    ClipTerrainTransition(source, xAxis: true, x, keepHigh: true);
+                clipped = ClipTerrainTransition(
+                    clipped, xAxis: true, x + 1, keepHigh: false);
+                clipped = ClipTerrainTransition(
+                    clipped, xAxis: false, z, keepHigh: true);
+                clipped = ClipTerrainTransition(
+                    clipped, xAxis: false, z + 1, keepHigh: false);
+                if (clipped.Count < 3)
+                    continue;
+
+                for (int index = 1; index + 1 < clipped.Count; index++)
+                    DrawTerrainTextureTriangle(
+                        clipped[0],
+                        clipped[index],
+                        clipped[index + 1],
+                        x, z,
+                        flags,
+                        texture);
+            }
+        }
+    }
+
+    static List<TerrainClipVertex> ClipTerrainTransition(
+        List<TerrainClipVertex> source,
+        bool xAxis,
+        float boundary,
+        bool keepHigh)
+    {
+        if (source.Count == 0)
+            return source;
+
+        var output = new List<TerrainClipVertex>(source.Count + 1);
+        TerrainClipVertex previous = source[^1];
+        float previousCoordinate = xAxis ? previous.X : previous.Z;
+        bool previousInside = keepHigh
+            ? previousCoordinate >= boundary
+            : previousCoordinate <= boundary;
+        foreach (TerrainClipVertex current in source)
+        {
+            float currentCoordinate = xAxis ? current.X : current.Z;
+            bool currentInside = keepHigh
+                ? currentCoordinate >= boundary
+                : currentCoordinate <= boundary;
+            if (currentInside != previousInside)
+            {
+                float span = currentCoordinate - previousCoordinate;
+                float amount = MathF.Abs(span) < 0.0001f
+                    ? 0f
+                    : (boundary - previousCoordinate) / span;
+                output.Add(new TerrainClipVertex(
+                    LerpVertex(
+                        previous.Vertex,
+                        current.Vertex,
+                        Math.Clamp(amount, 0f, 1f)),
+                    previous.X + (current.X - previous.X) * amount,
+                    previous.Z + (current.Z - previous.Z) * amount));
+            }
+            if (currentInside)
+                output.Add(current);
+            previous = current;
+            previousCoordinate = currentCoordinate;
+            previousInside = currentInside;
+        }
+        return output;
+    }
+
+    void DrawTerrainTextureTriangle(
+        in TerrainClipVertex a,
+        in TerrainClipVertex b,
+        in TerrainClipVertex c,
+        int tileX,
+        int tileZ,
+        in PrimFlags flags,
+        in GpuHle.TerrainTextureDescriptor texture)
+    {
+        HleVertex texturedA = WithTerrainUv(
+            a.Vertex, texture, a.X - tileX, a.Z - tileZ);
+        HleVertex texturedB = WithTerrainUv(
+            b.Vertex, texture, b.X - tileX, b.Z - tileZ);
+        HleVertex texturedC = WithTerrainUv(
+            c.Vertex, texture, c.X - tileX, c.Z - tileZ);
+        PrimFlags texturedFlags = flags;
+        texturedFlags.Textured = true;
+        texturedFlags.RawTexture = false;
+        texturedFlags.Gouraud = true;
+        texturedFlags.TPage = texture.TPage;
+        texturedFlags.Clut = texture.Clut;
+        DrawTri(texturedA, texturedB, texturedC, texturedFlags);
+    }
+
+    static HleVertex FirstTerrainGridPoint(
+        in HleVertex a,
+        in HleVertex b,
+        in HleVertex c,
+        int size,
+        int x,
+        int z)
+    {
+        float row = z / (float)size;
+        HleVertex left = LerpVertex(a, c, row);
+        HleVertex right = LerpVertex(b, c, row);
+        int rowWidth = size - z;
+        return rowWidth == 0
+            ? left
+            : LerpVertex(left, right, x / (float)rowWidth);
+    }
+
+    static HleVertex SecondTerrainGridPoint(
+        in HleVertex a,
+        in HleVertex b,
+        in HleVertex c,
+        int size,
+        int x,
+        int z)
+    {
+        float row = z / (float)size;
+        HleVertex left = LerpVertex(a, b, row);
+        HleVertex right = LerpVertex(a, c, row);
+        int rowWidth = z;
+        return rowWidth == 0
+            ? left
+            : LerpVertex(
+                left, right, (x - (size - z)) / (float)rowWidth);
+    }
+
+    void DrawTerrainTextureTriangle(
+        in HleVertex a,
+        ushort uvA,
+        in HleVertex b,
+        ushort uvB,
+        in HleVertex c,
+        ushort uvC,
+        in PrimFlags flags,
+        in GpuHle.TerrainTextureDescriptor texture)
+    {
+        HleVertex texturedA = WithTerrainUv(a, uvA);
+        HleVertex texturedB = WithTerrainUv(b, uvB);
+        HleVertex texturedC = WithTerrainUv(c, uvC);
+        PrimFlags texturedFlags = flags;
+        texturedFlags.Textured = true;
+        texturedFlags.RawTexture = false;
+        texturedFlags.Gouraud = true;
+        texturedFlags.TPage = texture.TPage;
+        texturedFlags.Clut = texture.Clut;
+        DrawTri(texturedA, texturedB, texturedC, texturedFlags);
+    }
+
+    static HleVertex WithTerrainUv(in HleVertex source, ushort packedUv)
+    {
+        HleVertex result = source;
+        result.U = (byte)packedUv;
+        result.V = (byte)(packedUv >> 8);
+        result.HasAuthoredUvBounds = false;
+        return result;
+    }
+
+    static HleVertex WithTerrainUv(
+        in HleVertex source,
+        in GpuHle.TerrainTextureDescriptor texture,
+        float x,
+        float z)
+    {
+        x = Math.Clamp(x, 0f, 1f);
+        z = Math.Clamp(z, 0f, 1f);
+        float topU = (byte)texture.Uv00 +
+            ((byte)texture.Uv01 - (byte)texture.Uv00) * x;
+        float bottomU = (byte)texture.Uv10 +
+            ((byte)texture.Uv11 - (byte)texture.Uv10) * x;
+        float topV = (byte)(texture.Uv00 >> 8) +
+            ((byte)(texture.Uv01 >> 8) - (byte)(texture.Uv00 >> 8)) * x;
+        float bottomV = (byte)(texture.Uv10 >> 8) +
+            ((byte)(texture.Uv11 >> 8) - (byte)(texture.Uv10 >> 8)) * x;
+        HleVertex result = source;
+        result.U = (short)Math.Clamp(
+            (int)MathF.Round(topU + (bottomU - topU) * z), 0, 255);
+        result.V = (short)Math.Clamp(
+            (int)MathF.Round(topV + (bottomV - topV) * z), 0, 255);
+        result.HasAuthoredUvBounds = false;
+        return result;
     }
 
     void DrawTriCore(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
@@ -1736,6 +2158,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             }
             _traceModernOverspanTriangles++;
         }
+        TraceSelectorTriangle(a, b, c, f);
         if (TraceVehicleMaterials &&
             f.Vehicle &&
             (TraceVehicleMaterialTicks is not { } materialTicks ||
@@ -1743,6 +2166,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
               GpuHle.DebugGameplayTick <= materialTicks.End)) &&
             _traceVehicleMaterialTriangles++ < 200000)
         {
+            string ps1ZeroKey = f.Material == HleMaterialKind.VehicleReflection
+                ? "discard"
+                : "standard";
             Console.Error.WriteLine(
                 "[VehicleMaterialTriangle] " +
                 $"gameplay={(GpuHle.GameplayActive ? 1 : 0)} " +
@@ -1750,8 +2176,12 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 $"packet=0x{f.PacketAddress:X8} ot={f.OtIndex} " +
                 $"owner=\"{GpuHle.DescribePacketOwner(f.PacketAddress)}\" " +
                 $"material={f.Material} tex={(f.Textured ? 1 : 0)} " +
+                $"semi={(f.SemiTrans ? 1 : 0)} " +
                 $"raw={(f.RawTexture ? 1 : 0)} " +
                 $"tpage=0x{f.TPage:X3} clut=0x{f.Clut:X4} " +
+                $"tw={_kTwAndX:X2},{_kTwAndY:X2}," +
+                    $"{_kTwOrX:X2},{_kTwOrY:X2} " +
+                $"ps1-zero-key={ps1ZeroKey} " +
                 $"xy=({a.X},{a.Y})({b.X},{b.Y})({c.X},{c.Y}) " +
                 $"uv=({a.U},{a.V})({b.U},{b.V})({c.U},{c.V}) " +
                 $"rgb=({a.R},{a.G},{a.B})({b.R},{b.G},{b.B})" +
@@ -1759,12 +2189,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 $"gte=({(a.HasGteZ ? 1 : 0)},{(b.HasGteZ ? 1 : 0)}," +
                 $"{(c.HasGteZ ? 1 : 0)})");
         }
-        // Diagnostic negative control: the imported shadow must be removable
-        // independently of the vehicle mesh so a captured dark region can be
-        // attributed to this material path instead of visual guesswork.
-        if (DisableImportedShadow &&
-            f.Material == HleMaterialKind.ImportedShadow)
-            return;
         if (DisableVehicleTriangles && f.Vehicle)
             return;
         if (f.Vehicle &&
@@ -1786,7 +2210,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         // Use per-vertex GTE depth only when all three packet vertices were
         // correlated to one native projection group. Independent XY lookups
         // can select unrelated overlapping surfaces; that was the source of
-        // both object flicker and Dreamland water leaking through land.
+        // both object flicker and translucent world geometry leaking through
+        // opaque land.
         bool coherentRasterDepth =
             modernGeometry ||
             a.HasCoherentGteZ &&
@@ -1801,32 +2226,20 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             (ConfigManager.View.HighResolution3D ||
              ConfigManager.View.PerspectiveCorrectTextures) &&
             (modernGeometry || f.OtIndex > 0);
-        // Preserve the PS1 ordering table as the visibility contract for
-        // ordinary geometry. Converted N64 XRTP flags are translated before
-        // the PS1 loader sees them: Dreamland's road is opaque and writes Z in
-        // the source RDP, despite source descriptor bit 0x0100. Only primitives
-        // carrying explicit source provenance for an occluded surface, plus
-        // actual glass materials, may test against the auxiliary depth image.
+        // Preserve the PS1 ordering table for opaque world geometry. Source
+        // route surfaces that explicitly carry an RDP compare/update contract
+        // populate the shared depth image; semitransparent world primitives
+        // test it without writing it.
         bool depthWrite =
             depthEligible &&
             (!f.SemiTrans || IsOpaqueVehicleGlassMaterial(f));
-        // Dreamland water carries explicit source provenance and must remain
-        // behind terrain. V8:2 does not preserve one coherent GTE projection
-        // group for these imported packets, so fall back to their native OT
-        // bucket depth instead of disabling occlusion altogether.
-        bool sourceOccludedTransparent = f.DreamlandWater;
-        bool glassTransparent =
-            f.Material is HleMaterialKind.Glass or
-                HleMaterialKind.ImportedGlass;
         bool sourceOpaqueDepthTest =
             f.N64RouteDepthCompare &&
             !f.SemiTrans &&
             coherentRasterDepth;
         bool depthTest =
             depthEligible &&
-            (sourceOpaqueDepthTest ||
-             f.SemiTrans &&
-             (sourceOccludedTransparent || glassTransparent));
+            (sourceOpaqueDepthTest || f.SemiTrans);
         bool sourceDepthCompareWrite =
             sourceOpaqueDepthTest && depthTest && depthWrite;
         GlDisplayRt? backdropTarget =
@@ -1843,10 +2256,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             Math.Min(a.X, Math.Min(b.X, c.X)) <= fullWidthTarget.X &&
             Math.Max(a.X, Math.Max(b.X, c.X)) >=
                 fullWidthTarget.X + fullWidthTarget.W;
-        bool dreamlandMarginFill =
-            fullWidthGameplayFill &&
-            backdropTarget != null &&
-            Sdk.V82ArenaRegistry.IsDreamlandSelected;
         CheckTextureFeedback(
             f,
             Math.Min(a.U, Math.Min(b.U, c.U)),
@@ -1855,7 +2264,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             Math.Max(a.V, Math.Max(b.V, c.V)));
         Begin(
             f,
-            dreamlandMarginFill ? 15 : 3,
+            3,
             depthTest,
             depthWrite,
             sourceDepthCompareWrite);
@@ -1870,6 +2279,39 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             f.Material is not
                 (HleMaterialKind.Ui or HleMaterialKind.ScreenEffect) &&
             hasProjectiveW;
+        if (TraceConvertedSurfaces && GpuHle.GameplayActive &&
+            !f.Vehicle && f.Textured && f.SemiTrans &&
+            f.Material == HleMaterialKind.Additive &&
+            a.R > 0 && a.R <= 48 && a.G > 0 && a.G <= 48 &&
+            a.B > 0 && a.B <= 48 &&
+            b.R > 0 && b.R <= 48 && b.G > 0 && b.G <= 48 &&
+            b.B > 0 && b.B <= 48 &&
+            c.R > 0 && c.R <= 48 && c.G > 0 && c.G <= 48 &&
+            c.B > 0 && c.B <= 48)
+        {
+            float minX = Math.Min(a.X, Math.Min(b.X, c.X));
+            float maxX = Math.Max(a.X, Math.Max(b.X, c.X));
+            float minY = Math.Min(a.Y, Math.Min(b.Y, c.Y));
+            float maxY = Math.Max(a.Y, Math.Max(b.Y, c.Y));
+            bool visible =
+                maxX >= _env.ClipX0 && minX <= _env.ClipX1 &&
+                maxY >= _env.ClipY0 && minY <= _env.ClipY1;
+            double area = Math.Abs(
+                (b.X - a.X) * (c.Y - a.Y) -
+                (b.Y - a.Y) * (c.X - a.X)) * 0.5;
+            _traceConvertedSurfaceTriangles++;
+            if (visible && area > 0.0)
+                _traceVisibleConvertedSurfaceTriangles++;
+            if (depthTest)
+                _traceDepthTestedConvertedSurfaceTriangles++;
+            if (perspectiveCorrect)
+                _traceProjectiveConvertedSurfaceTriangles++;
+            if (modernGeometry)
+                _traceModernConvertedSurfaceTriangles++;
+            _traceConvertedSurfaceArea += area;
+            _traceConvertedSurfaceMaxArea = Math.Max(
+                _traceConvertedSurfaceMaxArea, area);
+        }
         if (TraceEnhancedRenderer && GpuHle.GameplayActive &&
             f.Material != HleMaterialKind.Ui)
         {
@@ -1878,7 +2320,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 HleMaterialKind.Opaque or
                 HleMaterialKind.AlphaTest or
                 HleMaterialKind.Glass or
-                HleMaterialKind.ImportedGlass or
                 HleMaterialKind.VehicleReflection or
                 HleMaterialKind.OpaqueVehicleGlass or
                 HleMaterialKind.TerrainRoute;
@@ -1935,7 +2376,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                         _traceAlphaTestFallbackTriangles++;
                         break;
                     case HleMaterialKind.Glass:
-                    case HleMaterialKind.ImportedGlass:
                         _traceGlassFallbackTriangles++;
                         break;
                     case HleMaterialKind.VehicleReflection:
@@ -1944,8 +2384,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                         break;
                 }
             }
-            if (f.Material is HleMaterialKind.Glass or
-                HleMaterialKind.ImportedGlass)
+            if (f.Material == HleMaterialKind.Glass)
                 _traceGlassTriangles++;
             if (f.Material == HleMaterialKind.TerrainRoute)
             {
@@ -1960,16 +2399,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     _traceTerrainRouteDepthTestTriangles++;
                 if (sourceDepthCompareWrite)
                     _traceTerrainRouteDepthCompareWriteTriangles++;
-            }
-            if (f.DreamlandWater)
-            {
-                _traceDreamlandWaterTriangles++;
-                if (f.SemiTrans)
-                    _traceDreamlandWaterTransparentTriangles++;
-                else
-                    _traceDreamlandWaterOpaqueTriangles++;
-                if (coherentRasterDepth)
-                    _traceDreamlandWaterCoherentTriangles++;
             }
         }
         if (TraceEnhancedFallbacks && GpuHle.GameplayActive &&
@@ -1998,13 +2427,15 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             else _traceOpaqueTriangles++;
             if (depthTest) _traceDepthTestedTriangles++;
             if (f.SemiTrans && !depthTest)
-                _tracePainterOrderedTransparentTriangles++;
-            if (depthTest && f.DreamlandWater)
-                _traceDreamlandWaterDepthTriangles++;
-            else if (depthTest && glassTransparent)
-                _traceGlassDepthTriangles++;
-            else if (depthTest && f.SemiTrans)
-                _traceUnexpectedTransparentDepthTriangles++;
+            {
+                if (f.Material is HleMaterialKind.Ui or
+                    HleMaterialKind.ScreenEffect)
+                    _tracePainterOrderedScreenTriangles++;
+                else
+                    _tracePainterOrderedWorldTriangles++;
+            }
+            if (depthTest && f.SemiTrans)
+                _traceTransparentWorldDepthTriangles++;
             if (perspectiveCorrect) _traceProjectiveTriangles++;
             if (f.OtIndex <= 0) _traceMissingOtTriangles++;
             else
@@ -2013,9 +2444,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 _traceMaxOt = Math.Max(_traceMaxOt, f.OtIndex);
             }
         }
-        bool particle = f.Material is
-            HleMaterialKind.Particle or
-            HleMaterialKind.ImportedShadow;
+        bool particle = f.Material == HleMaterialKind.Particle;
         bool shadow = !f.Textured && f.SemiTrans && a.HasGteZ && b.HasGteZ && c.HasGteZ &&
             a.R < 96 && a.G < 96 && a.B < 96 && b.R < 96 && b.G < 96 && b.B < 96 &&
             c.R < 96 && c.G < 96 && c.B < 96;
@@ -2039,7 +2468,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             // a wall long enough to span two buckets gets a single flat depth
             // per primitive, and the half whose bucket sits behind the terrain
             // is discarded - a straight vertical cut through a solid object.
-            if (TrueVertexDepth &&
+            if (TrueVertexDepth && useCoherentDepth &&
                 vertex.HasViewSpace &&
                 !vertex.ReconstructedViewSpace &&
                 vertex.ViewZ >= 1f)
@@ -2096,8 +2525,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             RecordAtmosphereColor(a, b, c, f);
         bool fullWidthGameplayBackdrop =
             fullWidthGameplayFill &&
-            backdropTarget != null &&
-            !Sdk.V82ArenaRegistry.IsDreamlandSelected;
+            backdropTarget != null;
         if (fullWidthGameplayBackdrop)
         {
             // Native V8 clears/fills the authored 320-pixel display with
@@ -2482,78 +2910,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             else if (vertex.X >= target.X + target.W)
                 vertex.X += target.Margin;
         }
-        static uint AverageColor(in GlVertex a, in GlVertex b, in GlVertex c)
-        {
-            uint r = ((a.Color & 0xFF) + (b.Color & 0xFF) +
-                (c.Color & 0xFF)) / 3;
-            uint g = (((a.Color >> 8) & 0xFF) +
-                ((b.Color >> 8) & 0xFF) +
-                ((c.Color >> 8) & 0xFF)) / 3;
-            uint blue = (((a.Color >> 16) & 0xFF) +
-                ((b.Color >> 16) & 0xFF) +
-                ((c.Color >> 16) & 0xFF)) / 3;
-            return r | (g << 8) | (blue << 16);
-        }
-        void EmitDreamlandFillMarginRect(
-            in GlVertex source,
-            uint color,
-            float x0,
-            float x1,
-            float y0,
-            float y1)
-        {
-            if (x1 <= x0 || y1 <= y0)
-                return;
-
-            GlVertex baseVertex = source;
-            GlVertex Corner(float x, float y, float bx, float by, float bz)
-            {
-                GlVertex v = baseVertex;
-                v.X = x;
-                v.Y = y;
-                v.Color = color;
-                v.BaryX = bx;
-                v.BaryY = by;
-                v.BaryZ = bz;
-                v.HasViewSpace = 0f;
-                return v;
-            }
-
-            _verts[_count++] = Corner(x0, y0, 1f, 0f, 0f);
-            _verts[_count++] = Corner(x1, y0, 0f, 1f, 0f);
-            _verts[_count++] = Corner(x0, y1, 0f, 0f, 1f);
-            _verts[_count++] = Corner(x0, y1, 1f, 0f, 0f);
-            _verts[_count++] = Corner(x1, y0, 0f, 1f, 0f);
-            _verts[_count++] = Corner(x1, y1, 0f, 0f, 1f);
-        }
-        void EmitDreamlandFullDisplayFillMargins(
-            in GlVertex a,
-            in GlVertex b,
-            in GlVertex c,
-            GlDisplayRt target)
-        {
-            float y0 = MathF.Max(
-                target.Y,
-                MathF.Min(a.Y, MathF.Min(b.Y, c.Y)));
-            float y1 = MathF.Min(
-                target.Y + target.H,
-                MathF.Max(a.Y, MathF.Max(b.Y, c.Y)));
-            uint color = AverageColor(a, b, c);
-            EmitDreamlandFillMarginRect(
-                a,
-                color,
-                target.X - target.Margin,
-                target.X,
-                y0,
-                y1);
-            EmitDreamlandFillMarginRect(
-                a,
-                color,
-                target.X + target.W,
-                target.X + target.W + target.Margin,
-                y0,
-                y1);
-        }
         float uvMinX = a.HasAuthoredUvBounds
             ? a.AuthoredMinU
             : MathF.Min(a.U, MathF.Min(b.U, c.U));
@@ -2587,8 +2943,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             va.Texpage |= 0x4000; vb.Texpage |= 0x4000; vc.Texpage |= 0x4000;
             va.Clut = vb.Clut = vc.Clut = longest;
         }
-        if (dreamlandMarginFill && backdropTarget != null)
-            EmitDreamlandFullDisplayFillMargins(va, vb, vc, backdropTarget);
         _verts[_count++] = va; _verts[_count++] = vb; _verts[_count++] = vc;
     }
 
@@ -3265,218 +3619,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         }
     }
 
-    uint MeasureWaterSamples(
-        uint query,
-        bool depthTest,
-        DepthFunction depthFunction)
-    {
-        _gl.ColorMask(false, false, false, false);
-        _gl.DepthMask(false);
-        if (depthTest)
-        {
-            _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthFunc(depthFunction);
-        }
-        else
-        {
-            _gl.Disable(EnableCap.DepthTest);
-        }
-        _gl.BeginQuery(QueryTarget.SamplesPassed, query);
-        _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
-        _gl.EndQuery(QueryTarget.SamplesPassed);
-        _gl.GetQueryObject(
-            query,
-            QueryObjectParameterName.Result,
-            out uint samples);
-        return samples;
-    }
-
-    void RestoreBatchDepthState()
-    {
-        _gl.ColorMask(true, true, true, true);
-        if (_kSourceDepthCompareWrite)
-        {
-            Debug.Assert(_kDepthTest && _kDepthWrite && !_kTransparent);
-            _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthFunc(DepthFunction.Lequal);
-            _gl.DepthMask(true);
-        }
-        else if (_kDepthTest)
-        {
-            _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthFunc(DepthFunction.Lequal);
-            _gl.DepthMask(false);
-        }
-        else if (_kDepthWrite)
-        {
-            _gl.Disable(EnableCap.DepthTest);
-            _gl.DepthMask(false);
-        }
-        else
-        {
-            _gl.Disable(EnableCap.DepthTest);
-            _gl.DepthMask(false);
-        }
-    }
-
-    void RecordWaterTrace(
-        uint candidate,
-        uint visible,
-        uint occluded,
-        uint actual,
-        ulong batches,
-        ulong triangles,
-        bool depthEnabled)
-    {
-        ulong leaks = depthEnabled
-            ? actual > visible ? actual - visible : 0u
-            : occluded;
-
-        _waterTraceBatches += batches;
-        _waterTraceTriangles += triangles;
-        _waterTraceCandidateSamples += candidate;
-        _waterTraceVisibleSamples += visible;
-        _waterTraceOccludedSamples += occluded;
-        _waterTraceActualSamples += actual;
-        _waterTraceLeakSamples += leaks;
-        if (depthEnabled) _waterTraceDepthEnabledBatches += batches;
-        else _waterTraceDepthDisabledBatches += batches;
-
-        _waterTraceTotalBatches += batches;
-        _waterTraceTotalTriangles += triangles;
-        _waterTraceTotalCandidateSamples += candidate;
-        _waterTraceTotalVisibleSamples += visible;
-        _waterTraceTotalOccludedSamples += occluded;
-        _waterTraceTotalActualSamples += actual;
-        _waterTraceTotalLeakSamples += leaks;
-        if (depthEnabled) _waterTraceTotalDepthEnabledBatches += batches;
-        else _waterTraceTotalDepthDisabledBatches += batches;
-    }
-
-    uint MeasureDeferredWaterSamples(
-        bool depthTest,
-        DepthFunction depthFunction)
-    {
-        _gl.ColorMask(false, false, false, false);
-        _gl.DepthMask(false);
-        if (depthTest)
-        {
-            _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthFunc(depthFunction);
-        }
-        else
-        {
-            _gl.Disable(EnableCap.DepthTest);
-        }
-        _gl.BeginQuery(QueryTarget.SamplesPassed, _waterCandidateQuery);
-        foreach (GlVertex[] batch in _waterTraceDeferredBatches)
-        {
-            _gl.BufferSubData<GlVertex>(
-                BufferTargetARB.ArrayBuffer,
-                0,
-                batch);
-            _gl.DrawArrays(
-                PrimitiveType.Triangles,
-                0,
-                (uint)batch.Length);
-        }
-        _gl.EndQuery(QueryTarget.SamplesPassed);
-        _gl.GetQueryObject(
-            _waterCandidateQuery,
-            QueryObjectParameterName.Result,
-            out uint samples);
-        return samples;
-    }
-
-    void MeasureDeferredWaterTrace()
-    {
-        if (_waterTraceDeferredBatches.Count == 0)
-            return;
-
-        uint candidate = MeasureDeferredWaterSamples(
-            false,
-            DepthFunction.Always);
-        uint visible = MeasureDeferredWaterSamples(
-            true,
-            DepthFunction.Lequal);
-        uint occluded = MeasureDeferredWaterSamples(
-            true,
-            DepthFunction.Greater);
-        uint actual = MeasureDeferredWaterSamples(
-            _waterTraceDeferredDepthEnabled,
-            DepthFunction.Lequal);
-        ulong triangles = (ulong)_waterTraceDeferredBatches.Sum(
-            batch => batch.Length / 3);
-        RecordWaterTrace(
-            candidate,
-            visible,
-            occluded,
-            actual,
-            (ulong)_waterTraceDeferredBatches.Count,
-            triangles,
-            _waterTraceDeferredDepthEnabled);
-        _waterTraceDeferredBatches.Clear();
-        _gl.ColorMask(true, true, true, true);
-    }
-
-    void EmitWaterTraceInterval()
-    {
-        if (_waterTraceBatches == 0)
-            return;
-        Console.Error.WriteLine(
-            "[DreamlandWaterOcclusion] {" +
-            $"\"kind\":\"interval\",\"frames\":\"{Math.Max(1, _frame - 59)}-{_frame}\"," +
-            $"\"batches\":{_waterTraceBatches}," +
-            $"\"triangles\":{_waterTraceTriangles}," +
-            $"\"candidate_samples\":{_waterTraceCandidateSamples}," +
-            $"\"visible_samples\":{_waterTraceVisibleSamples}," +
-            $"\"occluded_samples\":{_waterTraceOccludedSamples}," +
-            $"\"actual_samples\":{_waterTraceActualSamples}," +
-            $"\"leak_samples\":{_waterTraceLeakSamples}," +
-            $"\"depth_enabled_batches\":{_waterTraceDepthEnabledBatches}," +
-            $"\"depth_disabled_batches\":{_waterTraceDepthDisabledBatches}," +
-            $"\"raster_depth_disabled\":{(DisableRasterDepth ? "true" : "false")}" +
-            "}");
-        _waterTraceBatches = 0;
-        _waterTraceTriangles = 0;
-        _waterTraceCandidateSamples = 0;
-        _waterTraceVisibleSamples = 0;
-        _waterTraceOccludedSamples = 0;
-        _waterTraceActualSamples = 0;
-        _waterTraceLeakSamples = 0;
-        _waterTraceDepthEnabledBatches = 0;
-        _waterTraceDepthDisabledBatches = 0;
-    }
-
-    void EmitWaterTraceSummary()
-    {
-        Console.Error.WriteLine(
-            "[DreamlandWaterOcclusion] {" +
-            "\"kind\":\"summary\"," +
-            $"\"batches\":{_waterTraceTotalBatches}," +
-            $"\"triangles\":{_waterTraceTotalTriangles}," +
-            $"\"candidate_samples\":{_waterTraceTotalCandidateSamples}," +
-            $"\"visible_samples\":{_waterTraceTotalVisibleSamples}," +
-            $"\"occluded_samples\":{_waterTraceTotalOccludedSamples}," +
-            $"\"actual_samples\":{_waterTraceTotalActualSamples}," +
-            $"\"leak_samples\":{_waterTraceTotalLeakSamples}," +
-            $"\"depth_enabled_batches\":{_waterTraceTotalDepthEnabledBatches}," +
-            $"\"depth_disabled_batches\":{_waterTraceTotalDepthDisabledBatches}," +
-            $"\"raster_depth_disabled\":{(DisableRasterDepth ? "true" : "false")}" +
-            "}");
-    }
-
     public unsafe void Flush()
     {
         if (_count == 0) return;
-        if (_kDreamlandWater && !_replayingDreamlandWater &&
-            Sdk.V82ArenaRegistry.IsDreamlandSelected)
-        {
-            _deferredDreamlandWater.Add(CaptureDeferredBatch(
-                _verts.AsSpan(0, _count).ToArray()));
-            _count = 0;
-            return;
-        }
         ApplyBackdropBatchOuterEdges();
         if (TracePerformance)
         {
@@ -3510,10 +3655,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
         if (_kSourceDepthCompareWrite)
         {
-            // Converted N64 XRTP route surfaces use the source RDP's opaque
-            // Z-compare/Z-update contract. A single color draw must both test
-            // and update depth so later triangles in this batch see earlier
-            // route triangles, matching RDP submission order.
+            // Converted N64 XRTP route surfaces retain the source RDP's
+            // opaque Z-compare/Z-update contract. A single color draw must
+            // both test and update depth so later route triangles see earlier
+            // route triangles in source submission order.
             Debug.Assert(_kDepthTest && _kDepthWrite && !_kTransparent);
             _gl.Enable(EnableCap.DepthTest);
             _gl.DepthFunc(DepthFunction.Lequal);
@@ -3596,32 +3741,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 _uEnhancedParticles,
                 ConfigManager.View.EnhancedParticles ? 1 : 0);
             _gl.Uniform1(_uEnhancedFog, ConfigManager.View.EnhancedFog ? 1 : 0);
-            bool v82Dreamland =
-                Sdk.V82ArenaRegistry.IsDreamlandSelected;
-            float fogColorR =
-                v82Dreamland && !_hasFogColor ? 254f / 255f : _fogColorR;
-            float fogColorG =
-                v82Dreamland && !_hasFogColor ? 200f / 255f : _fogColorG;
-            float fogColorB =
-                v82Dreamland && !_hasFogColor ? 127f / 255f : _fogColorB;
-            _gl.Uniform3(_uFogColor, fogColorR, fogColorG, fogColorB);
+            _gl.Uniform3(_uFogColor, _fogColorR, _fogColorG, _fogColorB);
             _gl.Uniform1(
                 _uFogColorValid,
-                v82Dreamland || _hasFogColor ? 1 : 0);
-            bool dreamlandN64Fog =
-                ConfigManager.View.EnhancedFog &&
-                GpuHle.GameplayActive &&
-                (Sdk.V8ArenaRegistry.IsDreamlandSelected || v82Dreamland);
-            _gl.Uniform1(_uDreamlandN64Fog, dreamlandN64Fog ? 1 : 0);
-            if (dreamlandN64Fog && !_dreamlandFogProfileLogged)
-            {
-                _dreamlandFogProfileLogged = true;
-                Console.Error.WriteLine(
-                    "[EnhancedFog] source profile DREAMLND " +
-                    "projectionA=1.0143737793 projectionB=-1.0071868896 " +
-                    "scaleShift=8 factor=9846,-9550 " +
-                    "mappedViewZ=5802.40..13985.41");
-            }
+                _hasFogColor ? 1 : 0);
             _gl.Uniform1(
                 _uPerspectiveCorrectTextures,
                 ConfigManager.View.PerspectiveCorrectTextures ? 1 : 0);
@@ -3637,57 +3760,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
         _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, 0, _verts.AsSpan(0, _count));
-
-        if (_waterTraceSamplingFrame != _frame)
-        {
-            _waterTraceSamplingFrame = _frame;
-            _waterTraceSamplesThisFrame = 0;
-        }
-        bool traceWater =
-            TraceDreamlandWaterOcclusion &&
-            _kDreamlandWater &&
-            GpuHle.GameplayActive &&
-            (_waterTraceSamplesThisFrame > 0 ||
-             _frame - _waterTraceLastWaterSampleFrame >= 120) &&
-            _waterTraceSamplesThisFrame < 256;
-        if (traceWater)
-        {
-            if (_waterTraceSamplesThisFrame++ == 0)
-            {
-                _waterTraceLastWaterSampleFrame = _frame;
-                uint candidate = MeasureWaterSamples(
-                    _waterCandidateQuery,
-                    false,
-                    DepthFunction.Always);
-                uint visible = MeasureWaterSamples(
-                    _waterVisibleQuery,
-                    true,
-                    DepthFunction.Lequal);
-                uint occluded = MeasureWaterSamples(
-                    _waterOccludedQuery,
-                    true,
-                    DepthFunction.Greater);
-                uint actual = MeasureWaterSamples(
-                    _waterActualQuery,
-                    _kDepthTest,
-                    DepthFunction.Lequal);
-                RecordWaterTrace(
-                    candidate,
-                    visible,
-                    occluded,
-                    actual,
-                    1u,
-                    (ulong)(_count / 3),
-                    _kDepthTest);
-                RestoreBatchDepthState();
-            }
-            else
-            {
-                _waterTraceDeferredDepthEnabled = _kDepthTest;
-                _waterTraceDeferredBatches.Add(
-                    _verts.AsSpan(0, _count).ToArray());
-            }
-        }
 
         void DrawBatch()
         {
@@ -3715,30 +3787,12 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         else
         {
             _gl.Enable(EnableCap.Blend);
-            if (_kMaterial is HleMaterialKind.Glass or
-                HleMaterialKind.ImportedGlass)
+            if (_kMaterial == HleMaterialKind.Glass)
             {
                 _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
                 _gl.BlendFunc(
                     BlendingFactor.SrcAlpha,
                     BlendingFactor.OneMinusSrcAlpha);
-                DrawBatch();
-            }
-            else if (_kMaterial == HleMaterialKind.ImportedShadow)
-            {
-                // The converted V8 shadow sheet is authored for the PS1's
-                // absolute subtractive blend.  That operation clamps dark
-                // terrain to black and exposes the entire projected card in
-                // Enhanced mode.  Consume the shader's reconstructed mask as
-                // relative destination coverage instead; preserve framebuffer
-                // alpha/mask state because this pass only shades existing
-                // colour.
-                _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
-                _gl.BlendFuncSeparate(
-                    BlendingFactor.Zero,
-                    BlendingFactor.OneMinusSrcAlpha,
-                    BlendingFactor.Zero,
-                    BlendingFactor.One);
                 DrawBatch();
             }
             else
@@ -3796,14 +3850,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _kClipY1,
         _kTextureSmoothing);
 
-    void ReplayDeferredBatches(
-        List<DeferredBatch> batches,
-        bool dreamlandWater)
+    void ReplayDeferredBatches(List<DeferredBatch> batches)
     {
         if (batches.Count == 0)
             return;
 
-        _replayingDreamlandWater = true;
         foreach (var batch in batches)
         {
             Debug.Assert(batch.Vertices.Length <= MaxVerts);
@@ -3815,7 +3866,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _kDepthWrite = batch.DepthWrite;
             _kSourceDepthCompareWrite = batch.SourceDepthCompareWrite;
             _kMaterial = batch.Material;
-            _kDreamlandWater = dreamlandWater;
             _kBlend = batch.Blend;
             _kSetMask = batch.SetMask;
             _kCheckMask = batch.CheckMask;
@@ -3831,7 +3881,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             Flush();
         }
         batches.Clear();
-        _replayingDreamlandWater = false;
     }
 
     void SetBlend(float src, float dst) => _gl.Uniform4(_uBlend, src, src, src, dst);
@@ -4026,6 +4075,16 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         ReportWorldGaps();
         ReportSeveredGeometry();
         ReportSegmentPops();
+        if (TraceFog && GpuHle.GameplayActive &&
+            (_frame < 8 || (_frame % 60) == 0))
+            Console.Error.WriteLine(
+                "[EnhancedFogFrame] " +
+                $"frame={_frame} tick={GpuHle.DebugGameplayTick} " +
+                $"valid={(_hasFogColor ? 1 : 0)} " +
+                $"selected-frame={_fogColorFrame} ot={_fogColorOt} " +
+                $"span={_fogColorSpan:F1} " +
+                $"rgb={_fogColorR:F6},{_fogColorG:F6},{_fogColorB:F6}");
+        FlushSelectorRenderTrace();
         _frame++;
         // Re-armed each frame the modal is drawn, so it follows the overlay
         // rather than lingering after it closes.
@@ -4056,12 +4115,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     $"[V8TriangleProbeContinuous] frame={_frame} {triangle}");
         _pendingProbeTriangles.Clear();
         Flush();
-        ReplayDeferredBatches(_deferredLoadingPrompt, false);
-        ReplayDeferredBatches(_deferredDreamlandWater, true);
-        if (TraceDreamlandWaterOcclusion)
-            MeasureDeferredWaterTrace();
-        if (TraceDreamlandWaterOcclusion && (_frame % 60) == 0)
-            EmitWaterTraceInterval();
+        ReplayDeferredBatches(_deferredLoadingPrompt);
         if (TraceTerrainVram && GpuHle.GameplayActive &&
             _frame - _terrainVramTraceFrame >= 120)
         {
@@ -4088,26 +4142,43 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 $"opaque-tris={_traceOpaqueTriangles} " +
                 $"transparent-tris={_traceTransparentTriangles} " +
                 $"depth-tested={_traceDepthTestedTriangles} " +
-                $"painter-transparent=" +
-                    $"{_tracePainterOrderedTransparentTriangles} " +
-                $"water-depth={_traceDreamlandWaterDepthTriangles} " +
-                $"glass-depth={_traceGlassDepthTriangles} " +
-                $"unexpected-transparent-depth=" +
-                    $"{_traceUnexpectedTransparentDepthTriangles} " +
+                $"painter-world={_tracePainterOrderedWorldTriangles} " +
+                $"painter-screen={_tracePainterOrderedScreenTriangles} " +
+                $"world-transparent-depth=" +
+                    $"{_traceTransparentWorldDepthTriangles} " +
                 $"projective={_traceProjectiveTriangles} " +
                 $"missing-ot={_traceMissingOtTriangles} " +
                 $"ot-range={minOt}..{_traceMaxOt}");
             _traceOpaqueTriangles = 0;
             _traceTransparentTriangles = 0;
             _traceDepthTestedTriangles = 0;
-            _tracePainterOrderedTransparentTriangles = 0;
-            _traceDreamlandWaterDepthTriangles = 0;
-            _traceGlassDepthTriangles = 0;
-            _traceUnexpectedTransparentDepthTriangles = 0;
+            _tracePainterOrderedWorldTriangles = 0;
+            _tracePainterOrderedScreenTriangles = 0;
+            _traceTransparentWorldDepthTriangles = 0;
             _traceProjectiveTriangles = 0;
             _traceMissingOtTriangles = 0;
             _traceMinOt = int.MaxValue;
             _traceMaxOt = 0;
+        }
+        if (TraceConvertedSurfaces && (_frame % 60) == 0)
+        {
+            Console.Error.WriteLine(
+                $"[ConvertedSurface] frames={_frame - 59}-{_frame} " +
+                $"tick={GpuHle.DebugGameplayTick} " +
+                $"triangles={_traceConvertedSurfaceTriangles} " +
+                $"visible={_traceVisibleConvertedSurfaceTriangles} " +
+                $"depth-tested={_traceDepthTestedConvertedSurfaceTriangles} " +
+                $"projective={_traceProjectiveConvertedSurfaceTriangles} " +
+                $"modern={_traceModernConvertedSurfaceTriangles} " +
+                $"screen-area={_traceConvertedSurfaceArea:F3} " +
+                $"max-area={_traceConvertedSurfaceMaxArea:F3}");
+            _traceConvertedSurfaceTriangles = 0;
+            _traceVisibleConvertedSurfaceTriangles = 0;
+            _traceDepthTestedConvertedSurfaceTriangles = 0;
+            _traceProjectiveConvertedSurfaceTriangles = 0;
+            _traceModernConvertedSurfaceTriangles = 0;
+            _traceConvertedSurfaceArea = 0.0;
+            _traceConvertedSurfaceMaxArea = 0.0;
         }
         if (TraceEnhancedRenderer && (_frame % 60) == 0)
         {
@@ -4150,10 +4221,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 $"route-depth-write={_traceTerrainRouteDepthWriteTriangles} " +
                 $"route-depth-test={_traceTerrainRouteDepthTestTriangles} " +
                 $"route-depth-compare-write={_traceTerrainRouteDepthCompareWriteTriangles} " +
-                $"dreamland-water={_traceDreamlandWaterTriangles} " +
-                $"water-opaque={_traceDreamlandWaterOpaqueTriangles} " +
-                $"water-transparent={_traceDreamlandWaterTransparentTriangles} " +
-                $"water-coherent={_traceDreamlandWaterCoherentTriangles} " +
                 $"modern-overspan={_traceModernOverspanTriangles} " +
                 $"native-overspan-rejected=" +
                     $"{_traceNativeOverspanRejectedTriangles}");
@@ -4168,10 +4235,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _traceTerrainRouteDepthWriteTriangles = 0;
             _traceTerrainRouteDepthTestTriangles = 0;
             _traceTerrainRouteDepthCompareWriteTriangles = 0;
-            _traceDreamlandWaterTriangles = 0;
-            _traceDreamlandWaterOpaqueTriangles = 0;
-            _traceDreamlandWaterTransparentTriangles = 0;
-            _traceDreamlandWaterCoherentTriangles = 0;
             _traceWorldTriangles = 0;
             _traceWorldFallbackTriangles = 0;
             _traceEffectFallbackTriangles = 0;
@@ -4388,11 +4451,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
     public void Dispose()
     {
-        if (TraceDreamlandWaterOcclusion)
-        {
-            EmitWaterTraceInterval();
-            EmitWaterTraceSummary();
-        }
         foreach (var rt in _rts) rt?.Destroy(_gl);
         _textureReplacements?.Dispose();
         _hudSvg?.Dispose();
@@ -4406,13 +4464,5 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         if (_progPresent24 != 0) _gl.DeleteProgram(_progPresent24);
         if (_presentTex != 0) _gl.DeleteTexture(_presentTex);
         if (_presentFbo != 0) _gl.DeleteFramebuffer(_presentFbo);
-        if (_waterCandidateQuery != 0)
-            _gl.DeleteQuery(_waterCandidateQuery);
-        if (_waterVisibleQuery != 0)
-            _gl.DeleteQuery(_waterVisibleQuery);
-        if (_waterOccludedQuery != 0)
-            _gl.DeleteQuery(_waterOccludedQuery);
-        if (_waterActualQuery != 0)
-            _gl.DeleteQuery(_waterActualQuery);
     }
 }

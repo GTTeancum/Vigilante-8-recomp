@@ -4,9 +4,9 @@
 The N64 location-wheel object is decoded to semantic geometry, collision, and
 texture fields, then independently compiled and appended after all twelve
 retail PS1 wheel objects. The N64 JPEG loading art is decoded to pixels,
-letterboxed to the PS1 shell's 320x112 layout, and encoded as native MDEC BS
-v2. No ROM range, donor object, or opaque source payload is copied to either
-game asset.
+fitted to the selected game's native MDEC dimensions, and encoded as native
+MDEC BS v2. No ROM range, donor object, or opaque source payload is copied to
+either game asset.
 
 The loading image encoder is the open-source psxavenc command-line tool:
 https://github.com/WonderfulToolchain/psxavenc
@@ -25,7 +25,7 @@ import subprocess
 import sys
 import tempfile
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -280,7 +280,11 @@ def _trim_sbs_frame(data: bytes) -> bytes:
 
 
 def build_loading_chunk(
-    n64_xlsc: bytes, psxavenc: Path, preview_path: Path
+    n64_xlsc: bytes,
+    psxavenc: Path,
+    preview_path: Path,
+    *,
+    target_size: tuple[int, int] = (320, 112),
 ) -> tuple[bytes, dict[str, object]]:
     if len(n64_xlsc) < 8 or n64_xlsc[4:6] != b"\xFF\xD8":
         raise ValueError("Dreamland XLSC does not contain its native JPEG")
@@ -288,8 +292,15 @@ def build_loading_chunk(
     if source.size != (320, 100):
         raise ValueError(f"unexpected Dreamland loading art size {source.size}")
 
-    canvas = Image.new("RGB", (320, 112), (0, 0, 0))
-    canvas.paste(source, (0, 6))
+    target_width, target_height = target_size
+    if target_width != 320 or target_height <= 0 or target_height & 15:
+        raise ValueError("native MDEC target must be 320 pixels wide and 16-row aligned")
+    canvas = ImageOps.fit(
+        source,
+        target_size,
+        method=Image.Resampling.LANCZOS,
+        centering=(0.5, 0.5),
+    )
     preview_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(preview_path)
 
@@ -299,7 +310,7 @@ def build_loading_chunk(
         temp = Path(temp_name)
         # The official Windows psxavenc build's FFmpeg input set accepts BMP
         # consistently, while some builds omit the standalone PNG demuxer.
-        bitmap = temp / "dreamland_load_320x112.bmp"
+        bitmap = temp / f"dreamland_load_{target_width}x{target_height}.bmp"
         sbs = temp / "dreamland_load.sbs"
         canvas.save(bitmap)
         subprocess.run(
@@ -311,7 +322,7 @@ def build_loading_chunk(
                 "-v",
                 "v2",
                 "-s",
-                "320x112",
+                f"{target_width}x{target_height}",
                 "-I",
                 "-a",
                 "32768",
@@ -323,11 +334,11 @@ def build_loading_chunk(
         )
         bs = _trim_sbs_frame(sbs.read_bytes())
 
-    payload = n64_xlsc[:4] + struct.pack("<HH", 320, 112) + bs
+    payload = n64_xlsc[:4] + struct.pack("<HH", target_width, target_height) + bs
     return payload, {
         "source_dimensions": [320, 100],
-        "native_ps1_dimensions": [320, 112],
-        "letterbox_rows": {"top": 6, "bottom": 6},
+        "native_ps1_dimensions": [target_width, target_height],
+        "fit": "center crop to native target",
         "codec": "PlayStation MDEC BS v2",
         "mdec_bytes": len(bs),
         "xlsc_bytes": len(payload),
