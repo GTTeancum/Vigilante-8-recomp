@@ -1798,7 +1798,17 @@ public static class V8Compat
                 var line = new System.Text.StringBuilder()
                     .Append("[V8SelectorPhysics] frame=")
                     .Append(selectorTick)
-                    .Append(" vehicle=0x").Append(c.A0.ToString("X8"));
+                    .Append(" vehicle=0x").Append(c.A0.ToString("X8"))
+                    .Append(" pos=(")
+                    .Append(unchecked((int)m.ReadU32(c.A0 + 0x24u))).Append(',')
+                    .Append(unchecked((int)m.ReadU32(c.A0 + 0x28u))).Append(',')
+                    .Append(unchecked((int)m.ReadU32(c.A0 + 0x2Cu))).Append(')')
+                    .Append(" vel=(")
+                    .Append(unchecked((int)m.ReadU32(c.A0 + 0x80u))).Append(',')
+                    .Append(unchecked((int)m.ReadU32(c.A0 + 0x84u))).Append(',')
+                    .Append(unchecked((int)m.ReadU32(c.A0 + 0x88u))).Append(')')
+                    .Append(" mass=")
+                    .Append(unchecked((int)m.ReadU32(c.A0 + 0xD8u)));
                 for (int index = 0; index < 4; index++)
                 {
                     uint wheel = m.ReadU32(
@@ -3135,7 +3145,11 @@ public static class V8Compat
     public static void UnlockNativeSelectorRoster(CpuContext c, IMemory m)
     {
         if (_unlockNativeSelectorRoster)
-            c.A0 &= ~0x0FFFu;
+            // The selector is a thirteen-slot carousel. Bits 0..11 gate the
+            // ordinary roster and bit 12 gates Y; leaving that final bit set
+            // made the extraction fixture wrap from Sid back to Chassey and
+            // mislabeled Chassey's settled banner as Y's.
+            c.A0 &= ~0x1FFFu;
     }
 
     static bool TryGetLocationStage(string text, out string? stage)

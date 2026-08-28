@@ -1,0 +1,65 @@
+# Reproduce the user-reported lifecycle in one process: launch Florida with Y,
+# force a native defeat/quit, return through a relocated SHELL overlay, choose
+# Super Dreamland 64, then select Y from the appended carousel again.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+1450+2=RIGHT
+1480+2=RIGHT
+1510+2=RIGHT
+2020+3=CROSS
+
+# SHELL returns at roughly absolute poll 4390 without replaying the boot FMV.
+# Enter the one-player arcade path from that returned title/menu. Location and
+# player selection themselves are stage-relative below so overlay load time
+# cannot consume them.
+4930+3=START
+5050+2=SELECT
+5110+3=CROSS
+
+# Florida remains the native baseline after the first match. Fifteen forward
+# steps reach appended slot 18 (Super Dreamland 64) in the 19-entry carousel.
+[choose_location_2]
+350+2=RIGHT
+590+2=RIGHT
+830+2=RIGHT
+1070+2=RIGHT
+1310+2=RIGHT
+1550+2=RIGHT
+1790+2=RIGHT
+2030+2=RIGHT
+2270+2=RIGHT
+2510+2=RIGHT
+2750+2=RIGHT
+2990+2=RIGHT
+3230+2=RIGHT
+3470+2=RIGHT
+3710+2=RIGHT
+# The three late retail previews have substantially longer native load/settle
+# gates. These follow-up edge presses are intentionally separated by 900 polls
+# and advance 15 -> 16 -> 17 -> appended Dreamland 18.
+4500+2=RIGHT
+5400+2=RIGHT
+6300+2=RIGHT
+7200+3=CROSS
+
+# Stage-relative entries must follow every absolute entry because a stage
+# header remains active for all subsequent lines. The same carousel action
+# executes on both selector visits. The 350-poll delay is deliberately after
+# the imported preview reaches its ready state; the earlier 120-poll pulse was
+# consumed while the retail preview still owned the selector.
+[choose_player]
+350+2=LEFT
+650+3=CROSS
+
+[choose_enemies]
+220+3=CROSS
+470+3=CROSS
+
+[defeated]
+700+2=SELECT
+1000+30=CROSS

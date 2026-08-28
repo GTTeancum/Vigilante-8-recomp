@@ -42,6 +42,9 @@ public static class GpuHle
         CoarseTerrainPackets = [];
     static readonly Dictionary<uint, TerrainTransitionPacket>
         TerrainTransitionPackets = [];
+    static readonly Dictionary<uint, TriangleNclipPacket>
+        TriangleNclipPackets = [];
+    static readonly HashSet<uint> TriangleNclipHeaderPending = [];
     static readonly Dictionary<uint, string> PacketOwners = [];
     static readonly bool TracePacketArenas =
         Environment.GetEnvironmentVariable(
@@ -93,6 +96,22 @@ public static class GpuHle
         uint X,
         uint Z);
 
+    public readonly record struct TriangleNclipPacket(
+        long Sequence,
+        long PackedArea,
+        double PreciseArea,
+        bool HasPreciseArea,
+        bool HasPacketOrder,
+        byte Gte0PacketIndex,
+        byte Gte1PacketIndex,
+        byte Gte2PacketIndex,
+        int X0,
+        int Y0,
+        int X1,
+        int Y1,
+        int X2,
+        int Y2);
+
     static uint NormalizePacketAddress(uint address)
     {
         uint ramSize = Runtime.Mode == RunMode.Devkit
@@ -139,6 +158,27 @@ public static class GpuHle
     public static void RegisterVehicleReflectionPacket(uint address) =>
         VehicleReflectionPackets.Add(NormalizePacketAddress(address));
 
+    public static void RegisterTriangleNclipPacket(
+        uint address,
+        in TriangleNclipPacket packet)
+    {
+        address = NormalizePacketAddress(address);
+        TriangleNclipPackets[address] = packet;
+        // The shared emitter registers after writing the payload but just
+        // before linking the packet into the ordering table.  That final link
+        // writes the packet header at +0 and is not packet reuse; let exactly
+        // that write pass without retiring the winding metadata.  A later
+        // non-triangle reuse still retires the old entry at its header write,
+        // while a triangle reuse replaces it before linking.
+        TriangleNclipHeaderPending.Add(address);
+    }
+
+    public static bool TryGetTriangleNclipPacket(
+        uint address,
+        out TriangleNclipPacket packet) =>
+        TriangleNclipPackets.TryGetValue(
+            NormalizePacketAddress(address), out packet);
+
     // The original engine has a dedicated route-strip renderer at
     // FUN_80040E38/FUN_80040E5C. Its call-stack scope provides source
     // provenance without inferring material identity from tpage, CLUT, UV,
@@ -163,6 +203,8 @@ public static class GpuHle
         // ownership, even when the replacement also belongs to terrain.
         CoarseTerrainPackets.Remove(address);
         TerrainTransitionPackets.Remove(address);
+        if (!TriangleNclipHeaderPending.Remove(address))
+            TriangleNclipPackets.Remove(address);
         if (_terrainRouteWriteScopeDepth > 0)
         {
             TerrainRoutePackets.Add(address);
@@ -338,12 +380,19 @@ public static class GpuHle
         TerrainRoutePackets.Clear();
         CoarseTerrainPackets.Clear();
         TerrainTransitionPackets.Clear();
+        TriangleNclipPackets.Clear();
+        TriangleNclipHeaderPending.Clear();
         PacketOwners.Clear();
         _terrainRouteWriteScopeDepth = 0;
         _terrainRouteColorRamp = null;
         DebugGameplayTick = 0;
         NativeModalHold = 0;
         Backend?.ResetTransientState();
+    }
+
+    public static void ResetMatchAtmosphere()
+    {
+        Backend?.ResetAtmosphereState();
     }
 
     public static void BeginPacketArena(uint start, uint end)
@@ -380,6 +429,12 @@ public static class GpuHle
                      .Where(address => address >= start && address < end)
                      .ToArray())
             TerrainTransitionPackets.Remove(address);
+        foreach (uint address in TriangleNclipPackets.Keys
+                     .Where(address => address >= start && address < end)
+                     .ToArray())
+            TriangleNclipPackets.Remove(address);
+        TriangleNclipHeaderPending.RemoveWhere(address =>
+            address >= start && address < end);
         foreach (uint address in PacketOwners.Keys
                      .Where(address => address >= start && address < end)
                      .ToArray())

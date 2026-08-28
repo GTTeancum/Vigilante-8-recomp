@@ -15,6 +15,7 @@ for path in (TESTS, ADDONS):
 from build_v8_to_v82_guest_roster import (  # noqa: E402
     VEHICLES,
     V8_COMMON,
+    V8_EXECUTABLE_CONTACT_ANCHORS,
     V8_SELECTOR_VEHICLES,
     build_projects,
     decode_bank,
@@ -42,6 +43,7 @@ EXPECTED_IDS = (
     "guest.v8.beezwax",
     "guest.v8.molo",
     "guest.v8.sid_burn",
+    "guest.v8.y_the_alien",
 )
 
 
@@ -64,12 +66,30 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
 
         self.assertEqual("V8_2", game)
         self.assertEqual(EXPECTED_IDS, tuple(v.stable_id for v in self.vehicles))
-        self.assertEqual(len(EXPECTED_IDS) * 3, len(forms))
         self.assertEqual(
-            tuple(
-                (index * 3, index * 3 + 1, index * 3 + 2)
-                for index in range(len(EXPECTED_IDS))
+            sum(
+                2 + (vehicle.transformation_bank is not None)
+                for vehicle in self.vehicles
             ),
+            len(forms),
+        )
+        expected_indices = []
+        next_index = 0
+        for vehicle in self.vehicles:
+            body = next_index
+            next_index += 1
+            transform = (
+                next_index
+                if vehicle.transformation_bank is not None
+                else None
+            )
+            if transform is not None:
+                next_index += 1
+            selector = next_index
+            next_index += 1
+            expected_indices.append((body, transform, selector))
+        self.assertEqual(
+            tuple(expected_indices),
             tuple(
                 (
                     entry.archive_index,
@@ -88,7 +108,8 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
                 entry.selector_preview_archive_index,
             )
         }
-        self.assertEqual(set(range(len(EXPECTED_IDS) * 3)), referenced)
+        referenced.discard(None)
+        self.assertEqual(set(range(len(forms))), referenced)
 
         decoded = registry.decompile_package(package.archive, package.registry)
         rebuilt = registry.compile_package(decoded)
@@ -133,6 +154,34 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
                 vehicle.stable_id,
             )
 
+    def test_y_executable_contact_topology_is_materialized_in_both_banks(self) -> None:
+        y = self.vehicles[12]
+        expected = V8_EXECUTABLE_CONTACT_ANCHORS[12]
+        for bank in (
+            project.ObjectBank(
+                groups=y.groups,
+                slots=y.slots,
+                collisions=y.collisions,
+                textures=y.textures,
+                animations=y.animations,
+            ),
+            y.selector_preview_bank,
+        ):
+            self.assertIsNotNone(bank)
+            anchors = tuple(
+                slot.position
+                for slot in sorted(
+                    (
+                        slot
+                        for slot in bank.slots
+                        if slot.parent == y.body_kind
+                        and slot.key in range(0x8000, 0x8004)
+                    ),
+                    key=lambda slot: slot.key,
+                )
+            )
+            self.assertEqual(expected, anchors)
+
     def test_clyde_suspension_travel_markers_use_native_v82_key(self) -> None:
         clyde = self.vehicles[1]
         for bank in (
@@ -165,6 +214,26 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
     def test_every_transformation_selector_is_an_owned_valid_root(self) -> None:
         for vehicle in self.vehicles:
             bank = vehicle.transformation_bank
+            if not vehicle.supports_transformations:
+                self.assertIsNotNone(bank)
+                self.assertEqual((), vehicle.transform_modes)
+                self.assertEqual(1, len(bank.groups))
+                self.assertEqual((), bank.groups[0].faces)
+                self.assertEqual((), bank.groups[0].controls)
+                self.assertEqual((), bank.textures)
+                self.assertEqual((), bank.animations)
+                roots = {
+                    index
+                    for index, slot in enumerate(bank.slots)
+                    if slot.parent is None
+                }
+                self.assertIn(vehicle.stats["wheel_kind_front"], roots)
+                self.assertIn(vehicle.stats["wheel_kind_rear"], roots)
+                for root in roots:
+                    self.assertEqual(0, bank.slots[root].render_group)
+                    self.assertIsNotNone(bank.slots[root].collision)
+                vehicle.validate()
+                continue
             self.assertIsNotNone(bank)
             roots = {
                 index

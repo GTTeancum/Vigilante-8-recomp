@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -57,6 +58,28 @@ EXPECTED_OVERLAYS = [
     "LEVELS_N64_DREAMLND",
 ]
 
+EXPECTED_TERRAIN_ATLASES = [
+    "levels/route66",
+    "levels/olympic",
+    "levels/bayou",
+    "levels/launch",
+    "levels/steelmil",
+    "levels/nuclear",
+    "levels/oilfield",
+    "levels/harbor",
+    "levels/v8/scrtbase",
+    "levels/v8/sandfact",
+    "levels/v8/oilfield",
+    "levels/v8/airgrave",
+    "levels/v8/wildwest",
+    "levels/v8/hoovrdam",
+    "levels/v8/vallyfrm",
+    "levels/v8/casnocty",
+    "levels/v8/canynlnd",
+    "levels/v8/skiresrt",
+    "mods/v82_n64_super_dreamland/files/levels/n64/dreamlnd",
+]
+
 EXPECTED_POWERUPS = [
     "radar-jammer",
     "repair-wrench",
@@ -102,6 +125,10 @@ class RunResult:
     special_commands: list[str]
     powerups: list[str]
     power_state_changes: int
+    hd_loading_cards_loaded: bool
+    hd_loading_card_selected: bool
+    hd_terrain_active: bool
+    hd_terrain_hits: int
     stdout_log: str
     stderr_log: str
     runtime_log: str
@@ -157,6 +184,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--cycles", type=int, default=1)
     parser.add_argument(
+        "--unthrottled",
+        action="store_true",
+        help="run deterministic hidden/silent frames without real-time pacing",
+    )
+    parser.add_argument(
+        "--require-hd-textures",
+        action="store_true",
+        help=(
+            "fail a run unless all loading-card overlays load and the selected "
+            "arena activates and hits its HD terrain atlas"
+        ),
+    )
+    parser.add_argument(
         "--campaign-hours",
         type=float,
         help="continue cycling all selected maps until this wall-time budget expires",
@@ -190,11 +230,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--coverage-profile",
-        choices=("combined", "weapons", "powerups"),
+        choices=("combined", "weapons", "powerups", "physics"),
         default="combined",
         help=(
-            "exercise everything together, or isolate weapon and power-up/"
-            "transformation coverage to avoid cross-feature stress effects"
+            "exercise everything together, isolate weapon or power-up/"
+            "transformation coverage, or run controls and physics without "
+            "injecting either feature"
         ),
     )
     parser.add_argument("--stop-on-failure", action="store_true")
@@ -421,6 +462,7 @@ def clean_capture_sources(directory: Path, started: float) -> None:
 def run_one(
     exe: Path,
     source_args: list[str],
+    mods_directory: Path | None,
     output: Path,
     cycle: int,
     slot: int,
@@ -438,6 +480,8 @@ def run_one(
     text_only: bool,
     verbose_log: bool,
     conversion_log: bool,
+    require_hd_textures: bool,
+    unthrottled: bool,
     location_settle_frames: int,
     loading_prompt_hold_frames: int,
     input_script: Path | None,
@@ -478,10 +522,10 @@ def run_one(
             "RECOMPONE_SOAK_TEARDOWN_FRAMES": str(frames),
             "RECOMPONE_V82_SOAK_START_KIND": str(weapon_start_kind),
             "RECOMPONE_V82_SOAK_POWERUPS": (
-                "0" if coverage_profile == "weapons" else "1"
+                "0" if coverage_profile in {"weapons", "physics"} else "1"
             ),
             "RECOMPONE_V82_SOAK_WEAPONS": (
-                "0" if coverage_profile == "powerups" else "1"
+                "0" if coverage_profile in {"powerups", "physics"} else "1"
             ),
             "RECOMPONE_V82_SOAK_CAPTURE_TRANSFORMS": (
                 "1" if coverage_profile == "powerups" else "0"
@@ -491,7 +535,7 @@ def run_one(
                 "RECOMPONE_CAPTURE_SCRIPTED_STAGE", "gameplay"),
             "RECOMPONE_SUPPRESS_RUMBLE": "1",
             "RECOMPONE_MUTE": "1",
-            "RECOMPONE_UNTHROTTLED": "0",
+            "RECOMPONE_UNTHROTTLED": "1" if unthrottled else "0",
             "RECOMPONE_LOOSE_DIR": "0",
             # Parallel matrix workers share the staged loose-files directory.
             # Keep every worker's framebuffer and presentation captures in its
@@ -503,6 +547,8 @@ def run_one(
             "RECOMPONE_LOG_PATH": str(runtime_path.resolve()),
         }
     )
+    if mods_directory is not None:
+        env["RECOMPONE_MOD_DIR"] = str(mods_directory)
     if guest_vehicle is None:
         env["RECOMPONE_V82_PLAYER_TYPE"] = str(character_slot)
     else:
@@ -800,6 +846,38 @@ def run_one(
         set(re.findall(r"\[V82Coverage\] powerup=([a-z0-9-]+)", text))
     )
     power_states = len(re.findall(r"\[V82Coverage\] power-state ", text))
+    expected_terrain = EXPECTED_TERRAIN_ATLASES[slot]
+    hd_loading_cards_loaded = (
+        "[TexturePack] loaded 19 loading card overlays" in text
+    )
+    hd_loading_card_selected = (
+        f"selected loading card overlay arena={expected}:" in text
+    )
+    hd_terrain_active = (
+        f"active terrain atlas={expected_terrain} " in text
+    )
+    hd_terrain_hits = text.count("[TexturePack] terrain atlas hit key=")
+    rejected_transform_modes = sorted(
+        {
+            int(value)
+            for value in re.findall(
+                r"\[V82VehicleCapability\] rejected direct transform "
+                r"mode=(\d+)",
+                text,
+            )
+        }
+    )
+    inactive_transform_attempts = sorted(
+        {
+            int(mode)
+            for mode, active, timer in re.findall(
+                r"\[V82Coverage\] powerup=transform-(\d+) .*?"
+                r"active=(\d+) timer=(\d+)",
+                text,
+            )
+            if active == "0" and timer == "0"
+        }
+    )
 
     if passed and actual != expected:
         passed = False
@@ -813,6 +891,18 @@ def run_one(
     if passed and len(callbacks) < 8:
         passed = False
         reason = "insufficient gameplay callback coverage"
+    if passed and require_hd_textures and not hd_loading_cards_loaded:
+        passed = False
+        reason = "HD loading-card pack did not load all 19 overlays"
+    if passed and require_hd_textures and not hd_loading_card_selected:
+        passed = False
+        reason = f"HD loading card was not selected for {expected}"
+    if passed and require_hd_textures and not hd_terrain_active:
+        passed = False
+        reason = f"HD terrain atlas was not activated for {expected_terrain}"
+    if passed and require_hd_textures and hd_terrain_hits < 1:
+        passed = False
+        reason = f"HD terrain atlas produced no runtime hit for {expected_terrain}"
     if (
         passed
         and frames >= 2700
@@ -834,11 +924,17 @@ def run_one(
         and frames >= 2700
         and coverage_profile == "powerups"
         and len(transformation_captures) != 3
+        and not (
+            rejected_transform_modes == [1, 2, 3]
+            and inactive_transform_attempts == [1, 2, 3]
+        )
     ):
         passed = False
         reason = (
-            "incomplete transformation capture coverage: "
-            f"{len(transformation_captures)}/3"
+            "incomplete transformation coverage: "
+            f"captures={len(transformation_captures)}/3 "
+            f"rejected={rejected_transform_modes} "
+            f"inactive={inactive_transform_attempts}"
         )
 
     ended = time.time()
@@ -865,6 +961,10 @@ def run_one(
         special_commands=special_commands,
         powerups=powerups,
         power_state_changes=power_states,
+        hd_loading_cards_loaded=hd_loading_cards_loaded,
+        hd_loading_card_selected=hd_loading_card_selected,
+        hd_terrain_active=hd_terrain_active,
+        hd_terrain_hits=hd_terrain_hits,
         stdout_log=str(stdout_path),
         stderr_log=str(stderr_path),
         runtime_log=str(runtime_path),
@@ -886,8 +986,11 @@ def run_one(
 def write_summary(
     output: Path, args: argparse.Namespace, results: list[RunResult], started: float
 ) -> None:
+    exe = args.exe.resolve()
     payload = {
         "schema": "v82-reference-soak-v1",
+        "executable": str(exe),
+        "executableSha256": hashlib.sha256(exe.read_bytes()).hexdigest().upper(),
         "startedUtc": datetime.fromtimestamp(started, timezone.utc).isoformat(),
         "updatedUtc": datetime.now(timezone.utc).isoformat(),
         "requestedFrames": args.frames,
@@ -941,12 +1044,14 @@ def main() -> int:
             raise SystemExit(
                 f"Standalone sequel root lacks SYSTEM.CNF: {loose_root}")
         source_args = ["--loose", str(loose_root)]
+        mods_directory = loose_root / "mods"
     else:
         cue = args.cue.resolve()
         if not cue.is_file():
             raise SystemExit(
                 f"Vigilante 8: 2nd Offense CUE not found: {cue}")
         source_args = [str(cue)]
+        mods_directory = None
     if args.frames < 2700:
         print(
             "[soak] warning: fewer than 2700 frames cannot cover all seven "
@@ -1009,6 +1114,7 @@ def main() -> int:
             result = run_one(
                 exe,
                 source_args,
+                mods_directory,
                 output,
                 cycle,
                 slot,
@@ -1026,6 +1132,8 @@ def main() -> int:
                 args.text_only,
                 args.verbose_log,
                 args.conversion_log,
+                args.require_hd_textures,
+                args.unthrottled,
                 args.location_settle_frames,
                 args.loading_prompt_hold_frames,
                 input_script,

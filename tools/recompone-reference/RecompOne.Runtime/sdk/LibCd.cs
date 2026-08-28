@@ -1,6 +1,7 @@
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Dispatch;
 using RecompOne.Runtime.Memory;
+using RecompOne.Runtime.Enhanced;
 
 namespace RecompOne.Runtime.Sdk;
 
@@ -131,6 +132,14 @@ public static class LibCd
             lock (DiscLock) data = Runtime.Cd!.ReadSectorData(lba + i, size);
             for (int j = 0; j < data.Length; j++)
                 m.WriteU8(buf + (uint)(i * size + j), data[j]);
+            if (TryDescribeLocatedFile(
+                    lba + i, out string fileName,
+                    out int fileStartLba, out _))
+                FontFileProvenance.TrackFileRead(
+                    fileName,
+                    buf + (uint)(i * size),
+                    (lba + i - fileStartLba) * size,
+                    data.Length);
         }
         _lastIntr = Complete;
         c.V0 = 1;
@@ -158,21 +167,35 @@ public static class LibCd
 
     internal static bool TryDescribeLocatedFile(int lba, out string name, out int endLba)
     {
+        bool found = TryDescribeLocatedFile(
+            lba, out name, out _, out endLba);
+        return found;
+    }
+
+    internal static bool TryDescribeLocatedFile(
+        int lba, out string name, out int startLba, out int endLba)
+    {
         lock (_locatedFileGate)
         {
             foreach (var (start, file) in _locatedFiles)
             {
                 if (lba < start || lba >= file.EndLba) continue;
                 name = file.Name;
+                startLba = start;
                 endLba = file.EndLba;
                 return true;
             }
         }
 
         if (Runtime.Cd?.Fs.TryDescribeLba(lba, out name, out endLba) == true)
+        {
+            if (!Runtime.Cd.Fs.Locate(name, out startLba, out _))
+                startLba = lba;
             return true;
+        }
 
         name = $"LBA {lba}";
+        startLba = lba;
         endLba = int.MaxValue;
         return false;
     }
@@ -434,6 +457,12 @@ public static class LibCd
         int bytes = Math.Min(data.Length, words * 4);
         for (int j = 0; j < bytes; j++)
             m.WriteU8(madr + (uint)j, data[j]);
+        if (TryDescribeLocatedFile(
+                lba, out string fileName, out int fileStartLba, out _))
+            FontFileProvenance.TrackFileRead(
+                fileName, madr,
+                (lba - fileStartLba) * data.Length,
+                bytes);
         if (TraceCd)
         {
             string prefix = Convert.ToHexString(data.AsSpan(0, Math.Min(32, data.Length)));

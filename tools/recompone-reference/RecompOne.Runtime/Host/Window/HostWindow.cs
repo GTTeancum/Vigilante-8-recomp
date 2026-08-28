@@ -359,15 +359,17 @@ internal static class HostWindow
             Environment.GetEnvironmentVariable("RECOMPONE_GPU_HLE");
         if (rendererOverride == "1")
             return true;
-        if (rendererOverride == "0")
+        if (rendererOverride == "0" &&
+            Config.ViewConfig.OriginalRendererOracleEnabled)
             return false;
 
-        // Renderer choice and internal resolution are independent.  Original
-        // explicitly selects the preserved software renderer; Enhanced and
-        // Custom remain on the modern renderer even when a user chooses 1x.
-        return !ConfigManager.View.GraphicsPreset.Equals(
-            "Original",
-            StringComparison.OrdinalIgnoreCase);
+        // Enhanced GL is the only shipping renderer. The preserved software
+        // path is reachable solely through the explicit developer-oracle gate
+        // and never through an ordinary user INI or settings choice.
+        return !Config.ViewConfig.OriginalRendererOracleEnabled ||
+            !ConfigManager.View.GraphicsPreset.Equals(
+                "Original",
+                StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool IsKeyDown(Key k) => InputManager.IsKeyDown(k);
@@ -441,7 +443,9 @@ internal static class HostWindow
 
         string? graphicsPresetOverride =
             Environment.GetEnvironmentVariable("RECOMPONE_GRAPHICS_PRESET");
-        if (graphicsPresetOverride is "Original" or "Enhanced")
+        if (graphicsPresetOverride == "Enhanced" ||
+            (graphicsPresetOverride == "Original" &&
+             Config.ViewConfig.OriginalRendererOracleEnabled))
             ConfigManager.View.ApplyGraphicsPreset(graphicsPresetOverride);
         string? widescreenOverride =
             Environment.GetEnvironmentVariable("RECOMPONE_WIDESCREEN");

@@ -7,7 +7,7 @@ BIN/ANM byte range, a retail registry entry, or an archive reference.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 from . import project
 
@@ -611,6 +611,118 @@ def add_v82_flamethrower_mount(
                 parent=body_kind,
             ),
         ),
+    )
+
+
+def add_v82_contact_anchors(
+    body: project.ObjectBank,
+    body_kind: int,
+    anchors: Sequence[tuple[int, int, int]],
+) -> project.ObjectBank:
+    """Materialize source-authored contact points in V8:2's native slots.
+
+    Ordinary V8 cars already carry direct 0x8000..0x8003 wheel anchors in
+    their object banks.  Some source controller classes construct the same
+    contact topology from executable-owned vehicle data instead.  Imported
+    assets must make those points explicit so V8:2's unchanged constructor can
+    build its selector/contact children without a runtime vehicle exception.
+    """
+
+    if body_kind < 0 or body_kind >= len(body.slots):
+        raise ValueError("contact-anchor body kind is outside the object bank")
+    if len(anchors) not in (4, 6):
+        raise ValueError("V8:2 contact topology must contain four or six anchors")
+    existing = {
+        slot.key
+        for slot in body.slots
+        if slot.parent == body_kind
+        and slot.key is not None
+        and 0x8000 <= slot.key <= 0x8005
+    }
+    expected = {0x8000 + index for index in range(len(anchors))}
+    if existing:
+        if existing != expected:
+            raise ValueError(
+                f"existing V8:2 contact anchors {sorted(existing)} do not "
+                f"match requested topology {sorted(expected)}"
+            )
+        return body
+
+    slots = list(body.slots)
+    for index, position in enumerate(anchors):
+        if len(position) != 3:
+            raise ValueError("contact anchor must contain exactly three coordinates")
+        slots.append(
+            project.Slot(
+                name=f"slot_{len(slots):03d}",
+                render_group=None,
+                collision=None,
+                key=0x8000 + index,
+                position=tuple(int(value) for value in position),
+                rotation_yxz=(0, 0, 0),
+                flags=-21846,
+                parent=body_kind,
+            )
+        )
+    return replace(body, slots=tuple(slots))
+
+
+def collision_only_contact_bank(
+    source: project.ObjectBank,
+) -> project.ObjectBank:
+    """Keep native contact collision while removing renderable wheel geometry.
+
+    V8:2 constructs suspension/contact children from an independently owned
+    object bank.  Ground vehicles use visible wheel roots there, but controller
+    classes whose authored contact supports are not wheels still need the same
+    native collision contract.  Convert every slot in the already-extracted
+    contact bank to a non-rendering slot while preserving its transforms,
+    hierarchy, flags, and collision streams.  This is capability-driven asset
+    conversion; runtime code does not inspect a vehicle identity.
+    """
+
+    if not source.slots:
+        raise ValueError("contact bank has no native object roots")
+    if any(
+        slot.parent is None and slot.collision is None
+        for slot in source.slots
+    ):
+        raise ValueError("contact bank root has no native collision stream")
+
+    rendered_slots = [
+        slot for slot in source.slots if slot.render_group is not None
+    ]
+    if not rendered_slots:
+        raise ValueError(
+            "contact bank has no native object group to construct"
+        )
+    source_group = source.groups[rendered_slots[0].render_group]
+    inert_group = project.RenderGroup(
+        name="group_000",
+        scale_shift=source_group.scale_shift,
+        vertices=((0, 0, 0),),
+        faces=(),
+        normals=(),
+        controls=(),
+        texture_slot_count=0,
+        render_extent=0,
+    )
+    return project.ObjectBank(
+        # V8:2's constructor requires a native group-bearing object before it
+        # instantiates the collision support.  An inert zero-packet group keeps
+        # that construction contract without drawing wheel pixels.
+        groups=(inert_group,),
+        slots=tuple(
+            replace(
+                slot,
+                render_group=(0 if slot.render_group is not None else None),
+                render_flags=0,
+            )
+            for slot in source.slots
+        ),
+        collisions=source.collisions,
+        textures=(),
+        animations=(),
     )
 
 

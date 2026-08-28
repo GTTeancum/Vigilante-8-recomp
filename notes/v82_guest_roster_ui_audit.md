@@ -77,6 +77,11 @@ pause/quit, and return to player select.
 
 ## Conversion follow-ups
 
+Review status: the Y conversion, flying-controller capability, non-transformable
+gates, selector/AI integration, and text-only regression evidence are staged in
+`V8_2_LOOSE`. The items remain open until the user performs the required
+visual/gameplay review; they are not being marked complete by automation.
+
 - [ ] Convert OG V8's Y the Alien and his flying saucer as a distinct legacy
   guest entry, even though V8:2 has its own native Y vehicle. Route the saucer
   through the same V8-to-V8:2 model, packet, material, selector, registry, and

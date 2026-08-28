@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using RecompOne.Runtime.Context;
+using RecompOne.Runtime.Host;
 using RecompOne.Runtime.Memory;
 
 namespace RecompOne.Runtime.Sdk;
@@ -26,13 +27,29 @@ public static class V82ArenaRegistry
     static uint _nativeRecords;
     static ArenaEntry? _selected;
     static bool _resourceTableLogged;
+    static int _selectorGeneration;
     static bool _subtitleLayoutExpanded;
     static ushort _subtitleLayoutX;
     static ushort _subtitleLayoutWidth;
     static readonly HashSet<uint> LoggedImportedRecordSlots = [];
+    static readonly bool TraceSelector =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_V82_ARENA_SELECTOR") == "1";
+    static int _lastTracedSelectedSlot = -1;
+    static readonly int[] SmokeArenaSlotSequence =
+        ParseSmokeArenaSlotSequence();
+    static int _smokeArenaSlotSequenceIndex;
+    static int _smokeRequestedSlot = -1;
 
     public static bool IsImportedArenaSelected => _selected != null;
     public static string? SelectedStableId => _selected?.StableId;
+    public static string? SelectedOverlayName =>
+        _selected == null
+            ? null
+            : Path.ChangeExtension(_selected.Path, null)
+                .Replace('\\', '_')
+                .Replace('/', '_')
+                .ToUpperInvariant();
 
     public static uint BeginNativeLocationSelector(
         CpuContext c, IMemory m, uint retailCount)
@@ -45,15 +62,46 @@ public static class V82ArenaRegistry
         _selected = null;
         _resourceTableLogged = false;
         LoggedImportedRecordSlots.Clear();
+        _lastTracedSelectedSlot = -1;
+        int generation = ++_selectorGeneration;
+        uint total = checked((uint)(RetailCount + Entries.Count));
+        byte baselineSlot = m.ReadU8(SelectedLocationAddress);
+        _smokeRequestedSlot = -1;
+        if (_smokeArenaSlotSequenceIndex < SmokeArenaSlotSequence.Length)
+        {
+            int sequenceIndex = _smokeArenaSlotSequenceIndex++;
+            int requestedSlot = SmokeArenaSlotSequence[sequenceIndex];
+            if ((uint)requestedSlot >= total)
+                throw new InvalidDataException(
+                    $"smoke arena slot {requestedSlot} is outside " +
+                    $"the native selector range 0..{total - 1}");
+            _smokeRequestedSlot = requestedSlot;
+            Console.Error.WriteLine(
+                $"[V82TransitionSmoke] arena-slot-sequence " +
+                $"generation={generation} index={sequenceIndex} " +
+                $"slot={requestedSlot}");
+        }
+        InputManager.SignalScriptStage($"choose_location_{generation}");
         Console.WriteLine(
-            $"[V82Arena] native locations retail={RetailCount} " +
-            $"imported={Entries.Count} total={RetailCount + Entries.Count}");
-        return checked((uint)(RetailCount + Entries.Count));
+            $"[V82Arena] native locations generation={_selectorGeneration} " +
+            $"retail={RetailCount} " +
+            $"imported={Entries.Count} total={RetailCount + Entries.Count} " +
+            $"baseline-slot={baselineSlot}");
+        return total;
     }
 
     public static void EndNativeLocationSelector(CpuContext c, IMemory m)
     {
         EnsureLoaded();
+        if (_smokeRequestedSlot >= 0)
+        {
+            c.V0 = checked((uint)_smokeRequestedSlot);
+            m.WriteU8(
+                SelectedLocationAddress, checked((byte)_smokeRequestedSlot));
+            Console.Error.WriteLine(
+                $"[V82TransitionSmoke] accepted arena-slot=" +
+                $"{_smokeRequestedSlot} generation={_selectorGeneration}");
+        }
         _selected = EntryForSlot(c.V0);
         RestoreNativeSubtitleLayout(m);
         Console.WriteLine(
@@ -103,6 +151,13 @@ public static class V82ArenaRegistry
         IMemory m, uint retailAddress)
     {
         uint slot = m.ReadU8(SelectedLocationAddress);
+        if (TraceSelector && slot != _lastTracedSelectedSlot)
+        {
+            Console.Error.WriteLine(
+                $"[V82ArenaSelector] generation={_selectorGeneration} " +
+                $"selected-slot={slot}");
+            _lastTracedSelectedSlot = checked((int)slot);
+        }
         return NativeLocationRecordAddress(m, slot, retailAddress);
     }
 
@@ -153,6 +208,28 @@ public static class V82ArenaRegistry
             return null;
         int index = checked((int)slot - RetailCount);
         return (uint)index < (uint)Entries.Count ? Entries[index] : null;
+    }
+
+    static int[] ParseSmokeArenaSlotSequence()
+    {
+        string? text = Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_ARENA_SLOT_SEQUENCE");
+        if (string.IsNullOrWhiteSpace(text))
+            return [];
+        try
+        {
+            return text.Split(
+                    ',', StringSplitOptions.RemoveEmptyEntries |
+                         StringSplitOptions.TrimEntries)
+                .Select(int.Parse)
+                .ToArray();
+        }
+        catch (FormatException ex)
+        {
+            throw new InvalidDataException(
+                "RECOMPONE_V82_ARENA_SLOT_SEQUENCE must be a " +
+                "comma-separated integer list", ex);
+        }
     }
 
     static void ExpandNativeSubtitleLayout(IMemory m)

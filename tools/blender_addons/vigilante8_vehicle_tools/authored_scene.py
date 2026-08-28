@@ -1201,17 +1201,18 @@ def _transformation_roles(
     for field_name, axle_name in standard_fields:
         root = int(vehicle_collection[f"v8_stat_{field_name}"])
         assignments.setdefault(root, []).append(("Standard", axle_name))
-    for mode_index in range(1, project.V82_TRANSFORM_MODE_COUNT):
-        for wheel in range(project.V82_TRANSFORM_WHEEL_COUNT):
-            root = int(
-                vehicle_collection[f"v8_transform_{mode_index}_{wheel}"]
-            )
-            assignments.setdefault(root, []).append(
-                (
-                    TRANSFORM_MODE_NAMES[mode_index],
-                    TRANSFORM_WHEEL_NAMES[wheel],
+    if bool(vehicle_collection.get("v8_supports_transformations", True)):
+        for mode_index in range(1, project.V82_TRANSFORM_MODE_COUNT):
+            for wheel in range(project.V82_TRANSFORM_WHEEL_COUNT):
+                root = int(
+                    vehicle_collection[f"v8_transform_{mode_index}_{wheel}"]
                 )
-            )
+                assignments.setdefault(root, []).append(
+                    (
+                        TRANSFORM_MODE_NAMES[mode_index],
+                        TRANSFORM_WHEEL_NAMES[wheel],
+                    )
+                )
     result = {}
     for root, uses in assignments.items():
         modes = {mode for mode, _wheel in uses}
@@ -1311,6 +1312,10 @@ def update_transformation_preview(
         rear = int(vehicle_collection["v8_stat_wheel_kind_rear"])
         roots = (front, front, rear, rear, rear, rear)
     else:
+        if not bool(
+            vehicle_collection.get("v8_supports_transformations", True)
+        ):
+            return
         mode_index = {"HOVER": 1, "FLOAT": 2, "SKI": 3}.get(mode_name)
         if mode_index is None:
             return
@@ -2263,6 +2268,10 @@ def project_to_scene(context, vehicle: project.VehicleProject) -> bpy.types.Coll
     collection["v8_stable_id"] = vehicle.stable_id
     collection["v8_display_name"] = vehicle.display_name
     collection["v8_body_kind"] = vehicle.body_kind
+    collection["v8_controller_class"] = vehicle.controller_class
+    collection["v8_supports_transformations"] = (
+        vehicle.supports_transformations
+    )
     collection["v8_selector_preview_body_kind"] = (
         vehicle.selector_preview_body_kind
     )
@@ -2875,10 +2884,20 @@ def scene_to_project(
     if prepare_collision:
         update_automatic_collision_boxes(collection)
     game = str(collection["v8_game"])
+    controller_class = str(collection.get("v8_controller_class", "ground"))
+    supports_transformations = bool(
+        collection.get("v8_supports_transformations", game == "V8_2")
+    )
     profile = stats.PROFILES[game]
     body = _export_bank(collection, "body")
     transform = (
-        _export_bank(collection, "transformation") if game == "V8_2" else None
+        _export_bank(collection, "transformation")
+        if game == "V8_2" and any(
+            child.get("v8_role") == ROLE_BANK
+            and child.get("v8_bank") == "transformation"
+            for child in collection.children
+        )
+        else None
     )
     selector_preview = (
         _export_bank(collection, "selector_preview")
@@ -2918,7 +2937,7 @@ def scene_to_project(
                 )
                 for mode in range(project.V82_TRANSFORM_MODE_COUNT)
             )
-            if game == "V8_2"
+            if game == "V8_2" and supports_transformations
             else ()
         ),
         powerups=(
@@ -2929,6 +2948,8 @@ def scene_to_project(
             if game == "V8_2"
             else {}
         ),
+        controller_class=controller_class,
+        supports_transformations=supports_transformations,
     )
     vehicle.validate()
     return vehicle

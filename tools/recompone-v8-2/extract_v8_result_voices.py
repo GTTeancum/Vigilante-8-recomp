@@ -8,8 +8,7 @@ from pathlib import Path
 
 
 SECTOR_SIZE = 2336
-DRIVER_COUNT = 12
-FIRST_DRIVER_CHANNEL = 1
+DRIVER_SOURCE_CHANNELS = (*range(1, 13), 0)
 NATIVE_MONO_INTERLEAVE = 8
 
 
@@ -69,12 +68,11 @@ def extract(bank: Path, output: Path, prefix: str) -> None:
         data[offset : offset + SECTOR_SIZE]
         for offset in range(0, len(data), SECTOR_SIZE)
     ]
-    # Channel zero is the bank's non-driver/control lane.  The twelve
-    # playable drivers occupy XA filter channels 1..12 in roster order.
-    # Treating channel zero as Chassey shifted every imported voice by one and
-    # made Sid consume Molo's line.
-    for output_channel in range(DRIVER_COUNT):
-        source_channel = FIRST_DRIVER_CHANNEL + output_channel
+    # The twelve ordinary drivers occupy XA filter channels 1..12 in roster
+    # order. Secret driver Y uses the remaining audio-bearing channel zero.
+    # Treating channel zero as Chassey shifts every ordinary imported voice;
+    # omitting it drops Y's canonical result lines entirely.
+    for output_channel, source_channel in enumerate(DRIVER_SOURCE_CHANNELS):
         selected: list[bytes] = []
         for source in sectors:
             # Raw Mode-2 sectors begin with the duplicated XA subheader.

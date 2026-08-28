@@ -70,22 +70,28 @@ def extract_tips(path: Path) -> list[str]:
 
 def collect_uses(trace_dirs: list[Path]) -> dict[Path, list[GlyphUse]]:
     pattern = re.compile(
-        r"V82LoadingUiResolve.*key=([0-9a-f]{16}) hit=[01] "
-        r"screen=([0-9.]+),([0-9.]+)-[^ ]+ "
+        r"V82LoadingUiResolve.*frame=([0-9]+) "
+        r"key=([0-9a-f]{16}) hit=[01] "
+        r"screen=(-?[0-9.]+),(-?[0-9.]+)-[^ ]+ "
         r"size=([0-9]+)x([0-9]+) uv=([^ ]+) "
         r"tpage=(0x0(?:08|A5)) clut=(0x780[0C])"
     )
     by_log: dict[Path, list[GlyphUse]] = {}
     for trace_dir in trace_dirs:
-        for log in sorted(trace_dir.glob("*.stderr.log")):
-            uses: list[GlyphUse] = []
+        logs = set(trace_dir.glob("*.stderr.log"))
+        direct_log = trace_dir / "stderr.log"
+        if direct_log.is_file():
+            logs.add(direct_log)
+        for log in sorted(logs):
+            uses_by_frame: dict[int, list[GlyphUse]] = {}
             for line in log.read_text(encoding="utf-8", errors="ignore").splitlines():
                 match = pattern.search(line)
                 if match is None:
                     continue
-                key, x_text, y_text, width_text, height_text, uv, tpage, clut = (
-                    match.groups()
-                )
+                (
+                    frame_text, key, x_text, y_text, width_text,
+                    height_text, uv, tpage, clut,
+                ) = match.groups()
                 width = int(width_text)
                 height = int(height_text)
                 loading_tip_glyph = height == 18
@@ -94,7 +100,7 @@ def collect_uses(trace_dirs: list[Path]) -> dict[Path, list[GlyphUse]]:
                 )
                 if not (loading_tip_glyph or start_prompt_glyph):
                     continue
-                uses.append(
+                uses_by_frame.setdefault(int(frame_text), []).append(
                     GlyphUse(
                         key,
                         width,
@@ -106,8 +112,20 @@ def collect_uses(trace_dirs: list[Path]) -> dict[Path, list[GlyphUse]]:
                         float(y_text),
                     )
                 )
-            if uses:
-                by_log[log] = uses
+            # The trace can contain several matches.  Keep each loading page
+            # independent, and attach its prompt frame to the immediately
+            # preceding tip frame.  Combining all frames by screen Y made two
+            # visits look like one doubled paragraph and defeated text
+            # matching precisely when a transition smoke covered re-entry.
+            scene: Path | None = None
+            for frame, uses in sorted(uses_by_frame.items()):
+                has_tip = any(use.tpage == "0x008" for use in uses)
+                has_prompt = any(use.tpage == "0x0A5" for use in uses)
+                if has_tip or scene is None:
+                    scene = Path(f"{log}#loading-frame-{frame}")
+                    by_log[scene] = list(uses)
+                elif has_prompt:
+                    by_log[scene].extend(uses)
     return by_log
 
 

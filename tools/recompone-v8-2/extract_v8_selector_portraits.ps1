@@ -1,5 +1,5 @@
 param(
-    [string]$Source = "PS1 game\SHELL\CHARSEL1.TBL",
+    [string]$Source = "artifacts\v8-retail-extract-20260820\SHELL\CHARSEL1.TBL",
     [string]$Destination = "V8_2_LOOSE\SHELL",
     [string]$CaptureDirectory = "artifacts\v8_full_roster_headless"
 )
@@ -69,7 +69,7 @@ foreach ($background in $backgrounds) {
         "size=256x480 mode=0x00020008")
 }
 
-for ($outputIndex = 0; $outputIndex -lt 12; $outputIndex++) {
+for ($outputIndex = 0; $outputIndex -lt 13; $outputIndex++) {
     $start = [int]$offsets[$outputIndex]
     $end = if ($outputIndex + 1 -lt $count) {
         [int]$offsets[$outputIndex + 1]
@@ -108,7 +108,7 @@ for ($outputIndex = 0; $outputIndex -lt 12; $outputIndex++) {
 # sequel loads these through its ordinary TIM/image path; no host overlay or
 # second front-end renderer is involved.
 $capturePath = (Resolve-Path -LiteralPath $CaptureDirectory).Path
-for ($outputIndex = 0; $outputIndex -lt 12; $outputIndex++) {
+for ($outputIndex = 0; $outputIndex -lt 13; $outputIndex++) {
     $poll = 5 + $outputIndex * 20
     $capture = Join-Path $capturePath (
         "recompone_capture_choose_player_{0:D4}.ppm" -f $poll)
@@ -152,3 +152,22 @@ for ($outputIndex = 0; $outputIndex -lt 12; $outputIndex++) {
         "$output`: capture=$([IO.Path]::GetFileName($capture)) " +
         "size=260x422 bytes=$($banner.Length)")
 }
+
+# A locked source roster wraps before Y. That failure previously produced a
+# syntactically valid thirteen-file set whose late entries were duplicates of
+# early characters. Treat duplicate completed banners as an extraction error
+# so a locked or mis-timed reference capture can never be packaged silently.
+$portraitHashes = @{}
+for ($outputIndex = 0; $outputIndex -lt 13; $outputIndex++) {
+    $portrait = Join-Path $destinationPath (
+        "SELECTOR_{0:D2}.PPM" -f $outputIndex)
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $portrait).Hash
+    if ($portraitHashes.ContainsKey($hash)) {
+        throw (
+            "selector portrait $outputIndex duplicates portrait " +
+            "$($portraitHashes[$hash]); the original V8 roster was not " +
+            "fully unlocked or the captures did not settle")
+    }
+    $portraitHashes[$hash] = $outputIndex
+}
+Write-Output "validated 13 distinct original V8 selector banners"

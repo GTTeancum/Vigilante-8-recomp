@@ -12,6 +12,10 @@ public class ViewConfig
     public const int MaximumWorldTextureClass = 512;
     public const int MaximumUiTextureClass = 1024;
 
+    public static bool OriginalRendererOracleEnabled =>
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_ORIGINAL_RENDERER_ORACLE") == "1";
+
     static bool IsV82 =>
         Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal);
 
@@ -254,7 +258,8 @@ public class ViewConfig
                 original || !IsV82 ? "Stock" : "Maximum",
                 StringComparison.OrdinalIgnoreCase);
 
-        if (Matches(original: true)) return "Original";
+        if (Matches(original: true))
+            return OriginalRendererOracleEnabled ? "Original" : "Custom";
         if (Matches(original: false)) return "Enhanced";
         return "Custom";
     }
@@ -262,8 +267,14 @@ public class ViewConfig
     public void ReconcileNamedGraphicsPreset()
     {
         string preset = GraphicsPreset;
-        if (preset.Equals("Original", StringComparison.OrdinalIgnoreCase) ||
-            preset.Equals("Enhanced", StringComparison.OrdinalIgnoreCase))
+        if (preset.Equals("Original", StringComparison.OrdinalIgnoreCase))
+        {
+            // The software renderer is retained as a developer oracle, not a
+            // shipping option. Old user INIs cannot silently select it.
+            ApplyGraphicsPreset(
+                OriginalRendererOracleEnabled ? "Original" : "Enhanced");
+        }
+        else if (preset.Equals("Enhanced", StringComparison.OrdinalIgnoreCase))
         {
             // A named preset is authoritative. This repairs old/stale
             // interface.ini files where the label changed but one or more
@@ -278,7 +289,8 @@ public class ViewConfig
 
     public void ApplyGraphicsPreset(string preset)
     {
-        bool original = preset.Equals("Original", StringComparison.OrdinalIgnoreCase);
+        bool original = OriginalRendererOracleEnabled &&
+            preset.Equals("Original", StringComparison.OrdinalIgnoreCase);
         GraphicsPreset = original ? "Original" : "Enhanced";
         HighResolution3D = !original;
         InternalResolutionScale = original ? 1 : 3;

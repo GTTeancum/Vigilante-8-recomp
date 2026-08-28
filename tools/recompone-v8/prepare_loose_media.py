@@ -266,6 +266,11 @@ def main() -> int:
     parser.add_argument("--cue", required=True, type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--loose-root", type=Path)
+    parser.add_argument(
+        "--skip-music",
+        action="store_true",
+        help="preserve an existing loose music directory while extracting the data track",
+    )
     args = parser.parse_args()
 
     cue_path = args.cue.resolve()
@@ -290,7 +295,8 @@ def main() -> int:
         if args.loose_root:
             loose_root = args.loose_root.resolve()
             write_loose_tree(data_track, files, loose_root)
-            write_music_tracks(tracks, loose_root)
+            if not args.skip_music:
+                write_music_tracks(tracks, loose_root)
     finally:
         data_track.close()
 

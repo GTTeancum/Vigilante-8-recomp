@@ -10,8 +10,7 @@ from pathlib import Path
 
 
 SECTOR_SIZE = 2336
-DRIVER_COUNT = 12
-FIRST_DRIVER_CHANNEL = 1
+DRIVER_SOURCE_CHANNELS = (*range(1, 13), 0)
 NATIVE_INTERLEAVE = 8
 
 
@@ -44,8 +43,7 @@ def audit_bank(
 ) -> list[VoiceAudit]:
     source = sectors(source_path)
     results: list[VoiceAudit] = []
-    for driver_index in range(DRIVER_COUNT):
-        source_channel = FIRST_DRIVER_CHANNEL + driver_index
+    for driver_index, source_channel in enumerate(DRIVER_SOURCE_CHANNELS):
         expected = [
             sector
             for sector in source
@@ -137,7 +135,7 @@ def main() -> int:
         "[ResultVoiceContent] PASS "
         f"voices={report['voices']} "
         f"payload-bytes={report['payload_bytes_verified']} "
-        "mapping=retail-channels-1..12"
+        "mapping=retail-channels-1..12-plus-y-channel-0"
     )
     for result in results:
         print(

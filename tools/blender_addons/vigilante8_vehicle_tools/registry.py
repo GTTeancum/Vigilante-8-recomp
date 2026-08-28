@@ -23,6 +23,30 @@ LEGACY_ENTRY_SIZE = struct.calcsize(LEGACY_ENTRY_FORMAT)
 PREVIEWLESS_ENTRY_SIZE = struct.calcsize(PREVIEWLESS_ENTRY_FORMAT)
 ENTRY_SIZE = struct.calcsize(ENTRY_FORMAT)
 NO_ARCHIVE_INDEX = 0xFFFF
+FLAG_NON_TRANSFORMABLE = 1 << 0
+CONTROLLER_CLASS_SHIFT = 8
+CONTROLLER_CLASS_MASK = 0xF << CONTROLLER_CLASS_SHIFT
+CONTROLLER_CLASS_IDS = {"ground": 0, "flying": 1}
+SUPPORTED_FLAGS = FLAG_NON_TRANSFORMABLE | CONTROLLER_CLASS_MASK
+
+
+def vehicle_flags(vehicle: project.VehicleProject) -> int:
+    """Encode reusable behavior capabilities without vehicle identities."""
+
+    flags = CONTROLLER_CLASS_IDS[vehicle.controller_class] << CONTROLLER_CLASS_SHIFT
+    if not vehicle.supports_transformations:
+        flags |= FLAG_NON_TRANSFORMABLE
+    return flags
+
+
+def decode_vehicle_flags(flags: int) -> tuple[str, bool]:
+    if flags & ~SUPPORTED_FLAGS:
+        raise ValueError("vehicle registry contains unsupported capability flags")
+    controller_id = (flags & CONTROLLER_CLASS_MASK) >> CONTROLLER_CLASS_SHIFT
+    controller_classes = {value: name for name, value in CONTROLLER_CLASS_IDS.items()}
+    if controller_id not in controller_classes:
+        raise ValueError("vehicle registry controller class is unsupported")
+    return controller_classes[controller_id], not bool(flags & FLAG_NON_TRANSFORMABLE)
 
 
 @dataclass(frozen=True)
@@ -40,6 +64,8 @@ class RegistryEntry:
     rear_suspension_damping: int | None
     transform_modes: tuple[tuple[int, ...], ...]
     powerups: dict[str, int]
+    controller_class: str
+    supports_transformations: bool
 
 
 @dataclass(frozen=True)
@@ -117,9 +143,12 @@ def compile_registry(vehicles: Iterable[project.VehicleProject]) -> bytes:
     powerup_offsets = []
     for vehicle in projects:
         if vehicle.game == "V8_2":
-            transform_offsets.append(len(output))
-            for mode in vehicle.transform_modes:
-                output += struct.pack("<6H", *mode)
+            if vehicle.supports_transformations:
+                transform_offsets.append(len(output))
+                for mode in vehicle.transform_modes:
+                    output += struct.pack("<6H", *mode)
+            else:
+                transform_offsets.append(0)
             powerup_offsets.append(len(output))
             output += struct.pack(
                 "<5I",
@@ -157,7 +186,7 @@ def compile_registry(vehicles: Iterable[project.VehicleProject]) -> bytes:
                 display_offset,
                 body_archive_index,
                 transform_archive_index,
-                0,
+                vehicle_flags(vehicle),
                 len(stat_records[index]),
                 vehicle.body_kind,
                 index,
@@ -278,6 +307,7 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
         if stat_offset + stat_size > len(data):
             raise ValueError("vehicle registry entry is invalid")
         game = games[game_id]
+        controller_class, supports_transformations = decode_vehicle_flags(flags)
         transform_modes: tuple[tuple[int, ...], ...] = ()
         powerups: dict[str, int] = {}
         if game == "V8_2":
@@ -295,24 +325,30 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
                 * 2
             )
             powerup_size = len(project.V82_POWERUP_FIELDS) * 4
-            if (
-                transform_archive_index == NO_ARCHIVE_INDEX
-                or transform_offset == 0
-                or transform_offset + transform_size > len(data)
-                or powerup_offset == 0
-                or powerup_offset + powerup_size > len(data)
-            ):
+            if powerup_offset == 0 or powerup_offset + powerup_size > len(data):
                 raise ValueError("V8:2 registry transformation data is invalid")
-            flat_modes = struct.unpack_from("<24H", data, transform_offset)
-            transform_modes = tuple(
-                tuple(
-                    flat_modes[
-                        mode * project.V82_TRANSFORM_WHEEL_COUNT :
-                        (mode + 1) * project.V82_TRANSFORM_WHEEL_COUNT
-                    ]
+            if supports_transformations:
+                if (
+                    transform_archive_index == NO_ARCHIVE_INDEX
+                    or transform_offset == 0
+                    or transform_offset + transform_size > len(data)
+                ):
+                    raise ValueError("V8:2 registry transformation data is invalid")
+                flat_modes = struct.unpack_from("<24H", data, transform_offset)
+                transform_modes = tuple(
+                    tuple(
+                        flat_modes[
+                            mode * project.V82_TRANSFORM_WHEEL_COUNT :
+                            (mode + 1) * project.V82_TRANSFORM_WHEEL_COUNT
+                        ]
+                    )
+                    for mode in range(project.V82_TRANSFORM_MODE_COUNT)
                 )
-                for mode in range(project.V82_TRANSFORM_MODE_COUNT)
-            )
+            elif transform_offset != 0:
+                raise ValueError(
+                    "non-transformable V8:2 registry entry owns a "
+                    "transformation mode table"
+                )
             powerup_values = struct.unpack_from("<5I", data, powerup_offset)
             powerups = dict(zip(project.V82_POWERUP_FIELDS, powerup_values))
         elif (
@@ -345,6 +381,8 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
                 rear_suspension_damping=rear_suspension_damping,
                 transform_modes=transform_modes,
                 powerups=powerups,
+                controller_class=controller_class,
+                supports_transformations=supports_transformations,
             )
         )
     return games[game_id], tuple(entries)
@@ -700,7 +738,7 @@ def decompile_package(
     vehicles = []
     profile = stats.PROFILES[game]
     for index, entry in enumerate(entries):
-        if entry.flags != 0 or entry.selection_order != index:
+        if entry.selection_order != index:
             raise ValueError("vehicle registry contains unsupported entry metadata")
         if len(entry.stats_record) != profile.record_size:
             raise ValueError("vehicle registry stat record size is invalid")
@@ -758,6 +796,8 @@ def decompile_package(
             selector_preview_body_kind=entry.selector_preview_body_kind,
             transform_modes=entry.transform_modes,
             powerups=entry.powerups,
+            controller_class=entry.controller_class,
+            supports_transformations=entry.supports_transformations,
         )
         vehicle.validate()
         vehicles.append(vehicle)

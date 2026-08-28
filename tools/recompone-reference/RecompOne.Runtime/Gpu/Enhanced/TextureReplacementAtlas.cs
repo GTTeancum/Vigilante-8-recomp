@@ -29,11 +29,17 @@ internal sealed class TextureReplacementAtlas : IDisposable
         HleMaterialKind Material);
     readonly record struct Cached(ulong Revision, Rect Rect, ulong Key);
     readonly record struct PendingEntry(
-        ulong Key, string Image, int X, int Y, int Width, int Height);
+        ulong Key, string Image, int X, int Y, int Width, int Height,
+        string Source);
+    readonly record struct EntryInfo(
+        string Image, int X, int Y, int Width, int Height, string Source);
     readonly record struct PendingTerrainAtlas(
         string Name, string Image, int Width, int Height,
         int ImageX, int ImageY, int Depth, ulong IndexHash,
         byte[] Indices, ushort[] Palette);
+    readonly record struct PendingFontFile(
+        string Path, string Image, int SourceWidth, int SourceHeight,
+        int UploadWidthWords, int UploadHeight);
     readonly record struct TerrainTileKey(int Width, int Height, ulong Hash);
     readonly record struct TerrainAnchor(
         int LiveX, int LiveY, int SourceX, int SourceY);
@@ -55,22 +61,37 @@ internal sealed class TextureReplacementAtlas : IDisposable
         public required Dictionary<TerrainTileKey, (int X, int Y)> Tiles { get; init; }
         public List<TerrainAnchor> Anchors { get; } = [];
     }
+    sealed class FileFont
+    {
+        public required string Path { get; init; }
+        public required LooseImage Image { get; init; }
+        public required int SourceWidth { get; init; }
+        public required int SourceHeight { get; init; }
+        public required int UploadWidthWords { get; init; }
+        public required int UploadHeight { get; init; }
+        public required int PackedX { get; init; }
+        public required int PackedY { get; init; }
+    }
 
     readonly GL _gl;
     readonly ushort[] _native = new ushort[VramShadow.Width * VramShadow.Height];
     readonly ulong[] _blockRevision = new ulong[16 * 8];
     readonly Dictionary<Signature, Cached> _cache = [];
     readonly Dictionary<ulong, Rect> _entries = [];
+    readonly Dictionary<ulong, EntryInfo> _entryInfo = [];
+    readonly Dictionary<ulong, string> _entryShadows = [];
     readonly HashSet<ulong> _routeEntries = [];
-    readonly HashSet<ulong> _fontEntries = [];
     readonly List<TerrainAtlas> _terrainAtlases = [];
+    readonly List<FileFont> _fileFonts = [];
+    readonly HashSet<string> _loggedFileFontHits =
+        new(StringComparer.OrdinalIgnoreCase);
+    readonly HashSet<string> _loggedFileFontFallbacks =
+        new(StringComparer.OrdinalIgnoreCase);
     TerrainAtlas? _activeTerrainAtlas;
     readonly HashSet<ulong> _dumped = [];
     readonly HashSet<ulong> _loggedTerrain = [];
-    readonly HashSet<ulong> _loggedFonts = [];
     readonly string? _dumpDirectory;
     readonly bool _dumpTerrainOnly;
-    readonly bool _traceFontEntries;
     readonly bool _traceTerrainAtlasFragments;
     int _terrainAtlasCatalogTraceCount;
     int _terrainAtlasAnchorTraceCount;
@@ -86,7 +107,7 @@ internal sealed class TextureReplacementAtlas : IDisposable
     public uint Texture => _texture;
     public int Width => _width;
     public int Height => _height;
-    public int Count => _entries.Count + _terrainAtlases.Count;
+    public int Count => _entries.Count + _terrainAtlases.Count + _fileFonts.Count;
 
     public TextureReplacementAtlas(GL gl)
     {
@@ -95,8 +116,6 @@ internal sealed class TextureReplacementAtlas : IDisposable
             "RECOMPONE_TEXTURE_DUMP_DIR");
         _dumpTerrainOnly = Environment.GetEnvironmentVariable(
             "RECOMPONE_TEXTURE_DUMP_TERRAIN_ONLY") == "1";
-        _traceFontEntries = Environment.GetEnvironmentVariable(
-            "RECOMPONE_TRACE_FONT_TEXTURES") == "1";
         _traceTerrainAtlasFragments = Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_TERRAIN_ATLAS_FRAGMENTS") == "1";
         if (!string.IsNullOrWhiteSpace(_dumpDirectory))
@@ -132,6 +151,19 @@ internal sealed class TextureReplacementAtlas : IDisposable
         if (format is not (2 or 3))
             throw new InvalidDataException(
                 "Texture replacement manifest is not loose DDS format 2 or 3");
+        var sourceLabels = new Dictionary<ulong, string>();
+        if (rootElement.TryGetProperty("sources", out JsonElement sources))
+        foreach (JsonProperty source in sources.EnumerateObject())
+        {
+            if (!ulong.TryParse(
+                    source.Name, NumberStyles.HexNumber,
+                    CultureInfo.InvariantCulture, out ulong key))
+                continue;
+            sourceLabels[key] = source.Value.ValueKind == JsonValueKind.Array
+                ? string.Join(" | ", source.Value.EnumerateArray().Select(
+                    value => value.GetString() ?? ""))
+                : source.Value.ToString();
+        }
         var pending = new List<PendingEntry>();
         foreach (JsonElement entry in rootElement.GetProperty("entries").EnumerateArray())
         {
@@ -147,13 +179,11 @@ internal sealed class TextureReplacementAtlas : IDisposable
                 entry.GetProperty("x").GetInt32(),
                 entry.GetProperty("y").GetInt32(),
                 entry.GetProperty("width").GetInt32(),
-                entry.GetProperty("height").GetInt32()));
+                entry.GetProperty("height").GetInt32(),
+                sourceLabels.GetValueOrDefault(key, "unlabelled")));
             if (pending[^1].Image.StartsWith(
                     "images/route/", StringComparison.OrdinalIgnoreCase))
                 _routeEntries.Add(key);
-            if (pending[^1].Image.Contains(
-                    "_fnt_", StringComparison.OrdinalIgnoreCase))
-                _fontEntries.Add(key);
         }
         var pendingTerrain = new List<PendingTerrainAtlas>();
         if (rootElement.TryGetProperty("terrainAtlases", out JsonElement terrain))
@@ -194,6 +224,31 @@ internal sealed class TextureReplacementAtlas : IDisposable
                     entry.GetProperty("indices").GetString() ?? ""),
                 palette));
         }
+        var pendingFonts = new List<PendingFontFile>();
+        if (rootElement.TryGetProperty("fontFiles", out JsonElement fontFiles))
+        foreach (JsonElement entry in fontFiles.EnumerateArray())
+        {
+            string path = FontFileProvenance.Normalize(
+                entry.GetProperty("path").GetString() ?? "");
+            int uploadWidthWords = entry.TryGetProperty(
+                "uploadWidthWords", out JsonElement uploadWidthElement)
+                ? uploadWidthElement.GetInt32() : 0;
+            int uploadHeight = entry.TryGetProperty(
+                "uploadHeight", out JsonElement uploadHeightElement)
+                ? uploadHeightElement.GetInt32() : 0;
+            if ((uploadWidthWords == 0) != (uploadHeight == 0) ||
+                uploadWidthWords < 0 || uploadHeight < 0)
+                throw new InvalidDataException(
+                    $"Font replacement has an invalid upload extent: {path}");
+            pendingFonts.Add(new PendingFontFile(
+                path,
+                entry.GetProperty("image").GetString() ?? "",
+                entry.GetProperty("sourceWidth").GetInt32(),
+                entry.GetProperty("sourceHeight").GetInt32(),
+                uploadWidthWords,
+                uploadHeight));
+            FontFileProvenance.RegisterTrackedPath(path);
+        }
 
         string directoryPrefix = directory.TrimEnd(
             Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
@@ -202,6 +257,7 @@ internal sealed class TextureReplacementAtlas : IDisposable
             StringComparer.OrdinalIgnoreCase);
         foreach (string relative in pending.Select(e => e.Image)
                      .Concat(pendingTerrain.Select(e => e.Image))
+                     .Concat(pendingFonts.Select(e => e.Image))
                      .Distinct(StringComparer.OrdinalIgnoreCase))
         {
             string normalized = relative.Replace(
@@ -243,9 +299,25 @@ internal sealed class TextureReplacementAtlas : IDisposable
                 throw new InvalidDataException(
                     $"Texture replacement crop is outside {entry.Image}");
             (int x, int y) = placements[entry.Image];
+            if (_entryInfo.TryGetValue(entry.Key, out EntryInfo previous))
+            {
+                string relation =
+                    entry.Width * entry.Height < previous.Width * previous.Height
+                        ? "lower-resolution-winner"
+                        : entry.Width * entry.Height > previous.Width * previous.Height
+                            ? "higher-resolution-winner"
+                            : "equal-resolution-winner";
+                _entryShadows[entry.Key] =
+                    $"{relation}:previous={previous.Image}@" +
+                    $"{previous.Width}x{previous.Height}:winner=" +
+                    $"{entry.Image}@{entry.Width}x{entry.Height}";
+            }
             _entries[entry.Key] = new Rect(
                 x + entry.X, y + entry.Y,
                 entry.Width, entry.Height);
+            _entryInfo[entry.Key] = new EntryInfo(
+                entry.Image, entry.X, entry.Y,
+                entry.Width, entry.Height, entry.Source);
         }
         foreach (PendingTerrainAtlas entry in pendingTerrain)
         {
@@ -282,6 +354,28 @@ internal sealed class TextureReplacementAtlas : IDisposable
                     entry.Depth, tileSize),
             });
         }
+        foreach (PendingFontFile entry in pendingFonts)
+        {
+            LooseImage image = images[entry.Image];
+            if (entry.SourceWidth <= 0 || entry.SourceHeight <= 0 ||
+                image.Width % entry.SourceWidth != 0 ||
+                image.Height % entry.SourceHeight != 0 ||
+                image.Width / entry.SourceWidth !=
+                    image.Height / entry.SourceHeight)
+                throw new InvalidDataException(
+                    $"Font DDS has an invalid integer scale: {entry.Image}");
+            (int x, int y) = placements[entry.Image];
+            _fileFonts.Add(new FileFont {
+                Path = entry.Path,
+                Image = image,
+                SourceWidth = entry.SourceWidth,
+                SourceHeight = entry.SourceHeight,
+                UploadWidthWords = entry.UploadWidthWords,
+                UploadHeight = entry.UploadHeight,
+                PackedX = x,
+                PackedY = y,
+            });
+        }
 
         _texture = _gl.GenTexture();
         _gl.BindTexture(TextureTarget.Texture2D, _texture);
@@ -309,9 +403,105 @@ internal sealed class TextureReplacementAtlas : IDisposable
         Console.WriteLine(
             $"[TexturePack] loaded {images.Count} loose DDS files / " +
             $"{_entries.Count} regions / {_routeEntries.Count} route regions / " +
-            $"{_terrainAtlases.Count} terrain atlases " +
+            $"{_terrainAtlases.Count} terrain atlases / " +
+            $"{_fileFonts.Count} file-font atlases " +
             $"from {directory} " +
             $"runtime-atlas={_width}x{_height}");
+        Console.WriteLine(
+            $"[TexturePack] manifest key shadows={_entryShadows.Count}");
+    }
+
+    public Rect ResolveFontFile(
+        int tpage,
+        int minU, int minV, int maxU, int maxV,
+        int twAndX, int twAndY, int twOrX, int twOrY,
+        out string sourcePath, out bool recognized)
+    {
+        sourcePath = "";
+        recognized = false;
+        if (!FontFileProvenance.TryResolve(
+                tpage, minU, minV, maxU, maxV,
+                twAndX, twAndY, twOrX, twOrY,
+                out string path, out int x, out int y,
+                out int width, out int height,
+                out int sourceWidthWords, out int sourceHeight))
+            return default;
+        recognized = true;
+        sourcePath = path;
+        FileFont? font = _fileFonts.FirstOrDefault(candidate =>
+            candidate.Path.Equals(path, StringComparison.OrdinalIgnoreCase) &&
+            (candidate.UploadWidthWords == 0 ||
+             candidate.UploadWidthWords == sourceWidthWords) &&
+            (candidate.UploadHeight == 0 ||
+             candidate.UploadHeight == sourceHeight));
+        if (font == null)
+        {
+            string identity = $"{path}:{sourceWidthWords}x{sourceHeight}";
+            if (_loggedFileFontFallbacks.Add(identity))
+                Console.WriteLine(
+                    $"[FontFiles] fallback original path={path} " +
+                    $"upload={sourceWidthWords}x{sourceHeight} " +
+                    "reason=no-hd-sidecar-for-subresource");
+            return default;
+        }
+        if (x < 0 || y < 0 || x + width > font.SourceWidth ||
+            y + height > font.SourceHeight)
+        {
+            if (_loggedFileFontFallbacks.Add(path + ":bounds"))
+                Console.WriteLine(
+                    $"[FontFiles] fallback original path={path} " +
+                    $"reason=crop-outside-source crop={x},{y},{width},{height} " +
+                    $"source={font.SourceWidth}x{font.SourceHeight}");
+            return default;
+        }
+        int scale = font.Image.Width / font.SourceWidth;
+        string hitIdentity =
+            $"{path}:{font.UploadWidthWords}x{font.UploadHeight}";
+        if (_loggedFileFontHits.Add(hitIdentity))
+            Console.WriteLine(
+                $"[FontFiles] HD replacement path={path} " +
+                $"upload={sourceWidthWords}x{sourceHeight} " +
+                $"source={font.SourceWidth}x{font.SourceHeight} " +
+                $"dds={font.Image.Width}x{font.Image.Height} scale={scale}x");
+        return new Rect(
+            font.PackedX + x * scale,
+            font.PackedY + y * scale,
+            width * scale,
+            height * scale);
+    }
+
+    public string DescribeResolution(
+        ulong key, int sourceWidth, int sourceHeight)
+    {
+        if (_entryInfo.TryGetValue(key, out EntryInfo info))
+        {
+            float scaleX = info.Width / (float)Math.Max(1, sourceWidth);
+            float scaleY = info.Height / (float)Math.Max(1, sourceHeight);
+            string shadow = _entryShadows.GetValueOrDefault(key, "none");
+            return
+                $"kind=entry image=\"{info.Image}\" " +
+                $"source-label=\"{info.Source.Replace("\"", "'")}\" " +
+                $"source-crop={info.X},{info.Y},{info.Width},{info.Height} " +
+                $"replacement-scale={scaleX:F3}x{scaleY:F3} " +
+                $"shadow=\"{shadow}\"";
+        }
+
+        TerrainAtlas? terrain = _terrainAtlases.FirstOrDefault(
+            atlas => atlas.IndexHash == key);
+        if (terrain != null)
+        {
+            float scale = terrain.Image.Width / (float)terrain.SourceWidth;
+            return
+                $"kind=terrain-atlas image=\"{terrain.Image.Name}\" " +
+                $"source-label=\"{terrain.Name}\" " +
+                $"source-atlas={terrain.SourceWidth}x{terrain.SourceHeight} " +
+                $"replacement-atlas={terrain.Image.Width}x{terrain.Image.Height} " +
+                $"replacement-scale={scale:F3}x{scale:F3} shadow=\"none\"";
+        }
+
+        return key == 0
+            ? "kind=none source-label=\"none\" shadow=\"none\""
+            : $"kind=unmatched key={key:x16} source-label=\"none\" shadow=\"none\"";
     }
 
     static Dictionary<TerrainTileKey, (int X, int Y)> BuildTerrainTiles(
@@ -533,14 +723,6 @@ internal sealed class TextureReplacementAtlas : IDisposable
             ? found
             : default;
         if (rect.Valid) _hits++;
-        if (_traceFontEntries &&
-            rect.Valid && _fontEntries.Contains(hash) &&
-            _loggedFonts.Count < 256 && _loggedFonts.Add(hash))
-            Console.WriteLine(
-                $"[TexturePack] FNT DDS hit key={hash:x16} " +
-                $"size={width}x{height} tpage=0x{tpage:X3} clut=0x{clut:X4} " +
-                $"uv={minU},{minV}-{maxU},{maxV} " +
-                $"window={twAndX:x2},{twAndY:x2},{twOrX:x2},{twOrY:x2}");
         if (material == HleMaterialKind.TerrainRoute &&
             _loggedTerrain.Count < 128 && _loggedTerrain.Add(hash))
             Console.WriteLine(
@@ -696,6 +878,9 @@ internal sealed class TextureReplacementAtlas : IDisposable
                 $"atlas={match.Name} depth={depth} " +
                 $"live={globalX},{globalY} source={tile.X},{tile.Y} " +
                 $"size={sourceWidth}x{sourceHeight} " +
+                $"rect={rect.X:F0},{rect.Y:F0},{rect.W:F0},{rect.H:F0} " +
+                $"scale={colorScale.X:F4},{colorScale.Y:F4},{colorScale.Z:F4} " +
+                $"bias={colorBias.X:F4},{colorBias.Y:F4},{colorBias.Z:F4} " +
                 $"indexHash={liveHash:x16} anchors={match.Anchors.Count}");
         return true;
     }

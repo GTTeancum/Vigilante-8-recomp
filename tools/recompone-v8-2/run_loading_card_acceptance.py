@@ -26,8 +26,7 @@ DEFAULT_RUNNER = Path(__file__).with_name("run_reference_soak.py")
 DEFAULT_ASSET_DIR = (
     DEFAULT_LOOSE_ROOT / "mods" / "enhanced_textures_2x" / "loading_cards"
 )
-ACCEPTANCE_ARENAS = [*ARENAS, "LEVELS_N64_DREAMLND"]
-CARD_HEIGHTS["LEVELS_N64_DREAMLND"] = 112
+ACCEPTANCE_ARENAS = [*ARENAS]
 
 
 def parse_args() -> argparse.Namespace:
@@ -204,14 +203,6 @@ def run_slot(args: argparse.Namespace, slot: int, width: int, height: int) -> di
 
 
 def loading_card_asset(args: argparse.Namespace, arena: str) -> Path:
-    if arena == "LEVELS_N64_DREAMLND":
-        return (
-            args.loose_root
-            / "mods"
-            / "v82_n64_super_dreamland"
-            / "loading_cards"
-            / "n64_dreamlnd_loading_card_4x.ppm"
-        )
     return args.asset_dir / f"{arena_stem(arena)}_loading_card_4x.ppm"
 
 

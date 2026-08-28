@@ -291,7 +291,7 @@ PROVEN_PATCHES = [
         "mode": "inline",
         "position": "after",
     },
-    # Widescreen terrain traversal. Six calls stack at the entry of
+    # Widescreen and modern-detail terrain traversal. Seven calls stack at the entry of
     # func_8001BECC; "pre" cannot express that because PreHookTarget is a
     # single field and each would clobber the last, so they are inline seams
     # on the first instruction and emit in declaration order.
@@ -299,6 +299,16 @@ PROVEN_PATCHES = [
         "overlay": "main",
         "address": "8001BECC",
         "target": "RecompOne.Runtime.Sdk.V82Compat.ScaleTerrainTraversalRange",
+        "mode": "inline",
+        "position": "before",
+    },
+    {
+        # The native texture/detail plane is nearer than the terrain far
+        # plane, creating a jagged cell-by-cell texture pop line in the modern
+        # renderer. Keep every visible terrain cell detailed under Maximum LOD.
+        "overlay": "main",
+        "address": "8001BECC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ExtendTerrainTextureDetail",
         "mode": "inline",
         "position": "before",
     },
@@ -348,6 +358,20 @@ PROVEN_PATCHES = [
         "position": "before",
     },
     {
+        # Extend the carousel only after SHELL has accepted a left/right step,
+        # completed its modulo-18 wrap, and skipped unavailable retail slots.
+        # This is the authoritative navigation seam; the 80106800 hook only
+        # projects an already-selected guest through fixed retail tables.
+        "overlay": "SHELL_SHELL",
+        "address": "80107938",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82VehicleRegistry."
+            "ApplyNativeSelectorNavigation"
+        ),
+        "mode": "inline",
+        "position": "before",
+    },
+    {
         # The enemy editor keeps four retail type bytes and indexes fixed
         # sequel tables with them. Extend each row through registered guests
         # after native left/right handling while retaining a safe proxy byte.
@@ -380,7 +404,13 @@ PROVEN_PATCHES = [
     {
         "overlay": "main",
         "address": "8001D414",
-        "target": "RecompOne.Runtime.Sdk.V82Compat.RecordPoolLink",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.LinkExpandedEdgePool",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8001D484",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.ProcessExpandedEdgePool",
         "mode": "pre",
     },
     {
@@ -932,6 +962,33 @@ PROVEN_PATCHES = [
         "position": "before",
     },
     {
+        # Every primitive handler converges on 0x80022F1C before it links the
+        # emitted packet into the active ordering table. Enhanced keeps some
+        # near-plane geometry that retail GTE flags rejected, so normalize an
+        # underflowed target into the native 0x80-byte near guard before the
+        # first linked primitive and every continuation entry execute it.
+        "overlay": "main",
+        "address": "80022F20",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "GuardGeometryOrderingTarget"
+        ),
+        "mode": "inline",
+        "position": "before",
+    },
+    {
+        # The terminal primitive takes the shorter 0x80022F9C path and links
+        # through the same computed A3 target without visiting 0x80022F20.
+        "overlay": "main",
+        "address": "80022FA4",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82Compat."
+            "GuardGeometryOrderingTarget"
+        ),
+        "mode": "inline",
+        "position": "before",
+    },
+    {
         # func_8002E22C is the per-object frustum test. Its three planes are
         # built for the authored 4:3 view, so widescreen culls objects that are
         # still on screen at the left and right edges.
@@ -982,6 +1039,39 @@ PROVEN_PATCHES = [
         "overlay": "main",
         "address": "80036C2C",
         "target": "RecompOne.Runtime.Sdk.V82Compat.TraceVehicleCreateRequest",
+        "mode": "pre",
+    },
+    {
+        # Reject hover/float/ski at the pickup callback boundary for any
+        # vehicle whose authored capability says transformations are absent.
+        "overlay": "main",
+        "address": "80049D54",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82VehicleRegistry."
+            "RejectUnsupportedTransformationPickup"
+        ),
+        "mode": "pre",
+    },
+    {
+        # Cover script/debug transformation requests which bypass pickups.
+        "overlay": "main",
+        "address": "8003E32C",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82VehicleRegistry."
+            "RejectUnsupportedTransformationActivation"
+        ),
+        "mode": "pre",
+    },
+    {
+        # Preserve V8:2-native input, AI, weapons, damage and action handling.
+        # At the ground-suspension integrator, registry metadata either keeps
+        # the retail path or substitutes the source-authored controller.
+        "overlay": "main",
+        "address": "8003AC84",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82VehicleRegistry."
+            "BeginControllerPhysics"
+        ),
         "mode": "pre",
     },
     {
@@ -1066,6 +1156,19 @@ PROVEN_PATCHES = [
         "overlay": "main",
         "address": "8001A3B0",
         "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.OverrideNativeSelectorText",
+        "mode": "pre",
+    },
+    {
+        # Selector landing impacts are chosen from suspension compression.
+        # Registry-authored flying controllers have no suspension, so skip
+        # only those native player/NPC contact calls while retaining the
+        # general preview cue and every selection voice.
+        "overlay": "main",
+        "address": "8001E28C",
+        "target": (
+            "RecompOne.Runtime.Sdk.V82VehicleRegistry."
+            "AllowNativeSelectorSuspensionSound"
+        ),
         "mode": "pre",
     },
     # The retail SHELL text renderer is observed too, rather than introducing a
@@ -1313,6 +1416,16 @@ PROVEN_PATCHES = [
         "address": "80109704",
         "target": "RecompOne.Runtime.Sdk.V82Compat.RunLoadVlc",
         "mode": "replace",
+    },
+    {
+        # Test-only deterministic loading-tip selection.  The runtime helper
+        # is a strict no-op unless the explicit test environment variable is
+        # present, so ordinary builds retain LOAD.DLL's native RNG choice.
+        "overlay": "SHELL_LOAD",
+        "address": "80103F68",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.OverrideLoadingTipRandom",
+        "mode": "inline",
+        "position": "after",
     },
     {
         # SHELL uses the same hand-written, tail-entered VLC decoder shape as

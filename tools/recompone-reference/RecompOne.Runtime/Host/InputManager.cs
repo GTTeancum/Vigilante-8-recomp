@@ -71,8 +71,16 @@ internal static unsafe class InputManager
     static bool _forcePad2Connected;
     static bool _traceInput;
     static string? _captureScriptedStage;
+    static bool _disableScriptStageCaptures;
+    static HashSet<string>? _scriptStageCaptureFilter;
     static bool _suppressRumble;
     static int _scriptExitAfterPoll = -1;
+    static string? _scriptExitAfterStage;
+    static int _scriptExitAfterStageVisits = -1;
+    static readonly Dictionary<string, int> _scriptStageVisits =
+        new(StringComparer.OrdinalIgnoreCase);
+    static readonly Dictionary<string, int> _scriptStageStartPolls =
+        new(StringComparer.OrdinalIgnoreCase);
     static int _nativeGameplayMenuPolls;
     static readonly (byte Large, byte Small)[] _lastRumble =
         [(byte.MaxValue, byte.MaxValue), (byte.MaxValue, byte.MaxValue)];
@@ -137,6 +145,20 @@ internal static unsafe class InputManager
         _captureScriptedStage = string.IsNullOrWhiteSpace(captureScriptedStage)
             ? null
             : NormalizeStage(captureScriptedStage);
+        _disableScriptStageCaptures =
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_DISABLE_SCRIPT_STAGE_CAPTURES") == "1";
+        string? scriptStageCaptureFilter =
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_SCRIPT_STAGE_CAPTURE_FILTER");
+        _scriptStageCaptureFilter = string.IsNullOrWhiteSpace(
+                scriptStageCaptureFilter)
+            ? null
+            : scriptStageCaptureFilter
+                .Split(',', StringSplitOptions.RemoveEmptyEntries |
+                            StringSplitOptions.TrimEntries)
+                .Select(NormalizeStage)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
         _suppressRumble =
             Environment.GetEnvironmentVariable("RECOMPONE_SUPPRESS_RUMBLE") == "1";
         string? exitAfterPoll =
@@ -146,6 +168,20 @@ internal static unsafe class InputManager
             int.TryParse(exitAfterPoll, out int parsedExitPoll) &&
             parsedExitPoll > 0
                 ? parsedExitPoll
+                : -1;
+        string? exitAfterStage =
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_SCRIPT_EXIT_AFTER_STAGE");
+        _scriptExitAfterStage = string.IsNullOrWhiteSpace(exitAfterStage)
+            ? null
+            : NormalizeStage(exitAfterStage);
+        string? exitAfterStageVisits =
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_SCRIPT_EXIT_AFTER_STAGE_VISITS");
+        _scriptExitAfterStageVisits =
+            int.TryParse(exitAfterStageVisits, out int parsedStageVisits) &&
+            parsedStageVisits > 0
+                ? parsedStageVisits
                 : -1;
         ParseScriptedInput();
         if (_disableLiveInput)
@@ -199,6 +235,8 @@ internal static unsafe class InputManager
         _stagePoll = 0;
         _stageCapturePoll = -1;
         _stageCaptureLabel = null;
+        _scriptStageVisits.Clear();
+        _scriptStageStartPolls.Clear();
 
         string? script = Environment.GetEnvironmentVariable("RECOMPONE_INPUT_SCRIPT");
         string? scriptFile = Environment.GetEnvironmentVariable("RECOMPONE_INPUT_FILE");
@@ -221,9 +259,15 @@ internal static unsafe class InputManager
         {
             if (raw.StartsWith('[') && raw.EndsWith(']'))
             {
-                stage = NormalizeStage(raw[1..^1]);
-                if (stage.Length == 0)
-                    throw new InvalidOperationException("Scripted input stage name cannot be empty");
+                string header = raw[1..^1].Trim();
+                bool afterStage = header.StartsWith(
+                    "after:", StringComparison.OrdinalIgnoreCase);
+                string normalized = NormalizeStage(
+                    afterStage ? header[6..] : header);
+                if (normalized.Length == 0)
+                    throw new InvalidOperationException(
+                        "Scripted input stage name cannot be empty");
+                stage = afterStage ? $"after:{normalized}" : normalized;
                 continue;
             }
 
@@ -314,30 +358,74 @@ internal static unsafe class InputManager
     static string NormalizeStage(string stage) =>
         stage.Trim().ToLowerInvariant().Replace(' ', '_').Replace('-', '_');
 
+    static int GetLatchedStagePoll(string stageSpec, int absolutePoll)
+    {
+        string stage = stageSpec;
+        int requiredVisit = -1;
+        int visitSeparator = stageSpec.LastIndexOf('@');
+        if (visitSeparator >= 0)
+        {
+            string visitText = stageSpec[(visitSeparator + 1)..];
+            if (!int.TryParse(visitText, out requiredVisit) || requiredVisit <= 0)
+                throw new InvalidOperationException(
+                    $"Invalid latched scripted-input stage visit: {stageSpec}");
+            stage = stageSpec[..visitSeparator];
+        }
+        if (requiredVisit > 0 &&
+            (!_scriptStageVisits.TryGetValue(stage, out int visits) ||
+             visits != requiredVisit))
+            return -1;
+        return _scriptStageStartPolls.TryGetValue(stage, out int originPoll)
+            ? absolutePoll - originPoll
+            : -1;
+    }
+
     internal static void SignalScriptStage(string stage, int captureDelayPolls = 0)
     {
         if (_scriptedInput.Count == 0) return;
         stage = NormalizeStage(stage);
         if (_scriptStage == stage) return;
 
+        _scriptStageStartPolls[stage] = _inputPoll;
+        int visits = _scriptStageVisits.TryGetValue(stage, out int count)
+            ? count + 1
+            : 1;
+        _scriptStageVisits[stage] = visits;
         _scriptStage = stage;
         _stagePoll = 0;
-        _stageCapturePoll = captureDelayPolls;
-        _stageCaptureLabel = stage;
-        if (captureDelayPolls == 0)
+        bool captureStage =
+            !_disableScriptStageCaptures &&
+            (_scriptStageCaptureFilter == null ||
+             _scriptStageCaptureFilter.Contains(stage));
+        _stageCapturePoll = captureStage ? captureDelayPolls : -1;
+        _stageCaptureLabel = captureStage ? stage : null;
+        if (captureDelayPolls == 0 && captureStage)
         {
             HostWindow.RequestDisplayCapture(stage);
             _stageCapturePoll = -1;
             _stageCaptureLabel = null;
         }
         Console.Error.WriteLine($"[Input] stage '{stage}' at absolute poll {_inputPoll}");
+        if (_scriptExitAfterStageVisits > 0 &&
+            stage.Equals(
+                _scriptExitAfterStage,
+                StringComparison.OrdinalIgnoreCase) &&
+            visits >= _scriptExitAfterStageVisits)
+        {
+            Console.Error.WriteLine(
+                $"[Input] deterministic replay completed after " +
+                $"stage '{stage}' visit {visits}");
+            Runtime.Shutdown();
+            Environment.Exit(0);
+        }
     }
 
     static void ApplyScriptedInput()
     {
         int poll = _inputPoll++;
         int stagePoll = _stagePoll++;
-        if (_stageCapturePoll == stagePoll && _stageCaptureLabel != null)
+        if (!_disableScriptStageCaptures &&
+            _stageCapturePoll == stagePoll && _stageCaptureLabel != null)
         {
             HostWindow.RequestDisplayCapture(_stageCaptureLabel);
             Console.Error.WriteLine(
@@ -350,6 +438,11 @@ internal static unsafe class InputManager
             int currentPoll;
             if (pulse.Stage == null)
                 currentPoll = poll;
+            else if (pulse.Stage.StartsWith(
+                         "after:", StringComparison.OrdinalIgnoreCase))
+            {
+                currentPoll = GetLatchedStagePoll(pulse.Stage[6..], poll);
+            }
             else if (pulse.Stage == _scriptStage)
                 currentPoll = stagePoll;
             else
@@ -360,6 +453,10 @@ internal static unsafe class InputManager
             {
                 string location = pulse.Stage == null
                     ? $"absolute poll {poll}"
+                    : pulse.Stage.StartsWith(
+                        "after:", StringComparison.OrdinalIgnoreCase)
+                        ? $"after stage '{pulse.Stage[6..]}' poll " +
+                          $"{currentPoll} (absolute {poll})"
                     : $"stage '{pulse.Stage}' poll {stagePoll} (absolute {poll})";
                 Console.Error.WriteLine(
                     $"[Input] scripted pulse at {location}: " +
@@ -367,8 +464,9 @@ internal static unsafe class InputManager
                 // "*" is a proof-run mode: capture every deterministic input
                 // checkpoint, including absolute boot/FMV/menu pulses as well
                 // as stage-relative gameplay checkpoints.
-                if (_captureScriptedStage == "*" ||
-                    _captureScriptedStage == pulse.Stage)
+                if (_captureScriptedStage != null &&
+                    (_captureScriptedStage == "*" ||
+                     _captureScriptedStage == pulse.Stage))
                     HostWindow.RequestDisplayCapture($"{pulse.Stage}_{stagePoll:0000}");
             }
             Controller.State &= (ushort)~pulse.Pad1Mask;
@@ -380,8 +478,16 @@ internal static unsafe class InputManager
             _fakePressed[1].Clear();
             foreach (var pulse in _scriptedPhysical)
             {
-                int currentPoll = pulse.Stage == null ? poll
-                    : pulse.Stage == _scriptStage ? stagePoll : -1;
+                int currentPoll;
+                if (pulse.Stage == null)
+                    currentPoll = poll;
+                else if (pulse.Stage.StartsWith(
+                             "after:", StringComparison.OrdinalIgnoreCase))
+                {
+                    currentPoll = GetLatchedStagePoll(pulse.Stage[6..], poll);
+                }
+                else
+                    currentPoll = pulse.Stage == _scriptStage ? stagePoll : -1;
                 if (currentPoll < pulse.Start || currentPoll >= pulse.End) continue;
                 int pad = Math.Clamp(pulse.Pad, 0, 1);
                 foreach (int code in pulse.Codes) _fakePressed[pad].Add(code);

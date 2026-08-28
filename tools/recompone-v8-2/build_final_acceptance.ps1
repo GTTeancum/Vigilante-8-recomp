@@ -45,16 +45,12 @@ $media = Read-Json (Join-Path $artifactPath "boot-media\acceptance.json")
 $harbor = Read-Json (Join-Path $artifactPath "harbor-long\summary.json")
 $harborRenderer =
     Read-Json (Join-Path $artifactPath "harbor-long\renderer-acceptance.json")
-$stock = Read-Json (Join-Path $artifactPath "stock-fallback\summary.json")
 
 $config = Get-Content -LiteralPath $configPath -Raw
 $bootStdout =
     Get-Content -LiteralPath (Join-Path $artifactPath "boot-media\stdout.log") -Raw
 $bootStderr =
     Get-Content -LiteralPath (Join-Path $artifactPath "boot-media\stderr.log") -Raw
-$stockLogPath = Join-Path $artifactPath `
-    "stock-fallback\01_c00_00_levels_route66.stdout.log"
-$stockStdout = Get-Content -LiteralPath $stockLogPath -Raw
 $matrixCases = [string]$matrix.cases_passed + "/" +
     [string]$matrix.cases_total
 $transitionCases = [string]$transitions.cases_passed + "/" +
@@ -65,9 +61,9 @@ $harborVisibleWorldFallback = @(
     $harborRenderer.renderer_logs)[0].maximum_visible_world_fallback_percent
 
 Require $matrix.passed "Enhanced renderer matrix failed."
-Require ($matrix.cases_passed -eq 30 -and $matrix.cases_total -eq 30) `
+Require ($matrix.cases_passed -eq 31 -and $matrix.cases_total -eq 31) `
     "Enhanced renderer matrix is incomplete."
-Require ($matrix.stock_cases -eq 18 -and $matrix.guest_cases -eq 12) `
+Require ($matrix.stock_cases -eq 18 -and $matrix.guest_cases -eq 13) `
     "Enhanced renderer matrix did not cover all stock maps and guests."
 Require ($matrix.executable_sha256 -eq $executableHash) `
     "Enhanced renderer matrix was not run against the staged executable."
@@ -80,7 +76,7 @@ Require ($transitions.executable_sha256 -eq $executableHash) `
     "Transition sweep was not run against the staged executable."
 
 Require $selector.passed "Native selector lifecycle failed."
-Require ($selector.captures.Count -eq 12) `
+Require ($selector.captures.Count -eq 13) `
     "Native selector did not capture all imported vehicles."
 Require ($selector.enemy_stage -and $selector.enemy_capture -and
          $selector.clean_exit) `
@@ -135,13 +131,6 @@ Require ($harbor.totals.collisionStreamRejections -eq 0) `
     "Long Harbor coverage rejected a collision stream."
 Require $harborRenderer.passed "Long Harbor renderer acceptance failed."
 
-Require ($stock.totals.passed -eq 1 -and $stock.totals.failed -eq 0) `
-    "Stock fallback smoke failed."
-Require ($stock.requestedFrames -eq 720) `
-    "Stock fallback smoke is shorter than required."
-Require ($stockStdout -match "hle=False") `
-    "Stock fallback did not use the preserved software renderer."
-
 $requiredConfig = @(
     "GraphicsPreset=Enhanced",
     "PerspectiveCorrectTextures=True",
@@ -190,8 +179,9 @@ $report = [ordered]@{
     shipping_default = [ordered]@{
         preset = "Enhanced"
         config = $configPath
-        stock_renderer_retained = $true
-        stock_renderer_smoke_frames = $stock.requestedFrames
+        renderer = "Enhanced GL"
+        original_renderer_shipping_option = $false
+        original_renderer_oracle_only = $true
     }
     acceptance = [ordered]@{
         enhanced_renderer = [ordered]@{
@@ -250,8 +240,7 @@ $report = [ordered]@{
         "ui/acceptance.json",
         "boot-media/acceptance.json",
         "harbor-long/summary.json",
-        "harbor-long/renderer-acceptance.json",
-        "stock-fallback/summary.json"
+        "harbor-long/renderer-acceptance.json"
     )
 }
 

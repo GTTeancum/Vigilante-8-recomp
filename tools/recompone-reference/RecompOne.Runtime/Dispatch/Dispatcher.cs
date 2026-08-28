@@ -19,6 +19,7 @@ public static class Dispatcher
     static readonly Dictionary<uint, uint> _relocatedAliases = [];
     static readonly Dictionary<uint, (uint Base, uint Size, uint Delta)> _objectOwners = [];
     static readonly List<(IOverlay Overlay, uint Delta)> _relocatedImages = [];
+    static string? _latestLevelName;
     private static IOverlay? _pending;
     public static void Register(string name, IOverlay overlay)
     {
@@ -30,6 +31,8 @@ public static class Dispatcher
     {
         get { lock (_active) return _active.ToArray(); }
     }
+
+    public static string? LatestLevelName => _latestLevelName;
     
     public static IReadOnlyDictionary<string, IOverlay> Overlays => _registry;
 
@@ -167,6 +170,8 @@ public static class Dispatcher
         foreach (var (addr, fn) in overlay.Functions)
             _funcMap[addr] = fn;
 
+        if (name.StartsWith("LEVELS_", StringComparison.OrdinalIgnoreCase))
+            _latestLevelName = name;
         Sdk.LibCd.NotifyOverlayLoaded(name);
         if (already) return;
         Runtime.OverlayLog.Record(name, OverlayEventKind.Loaded);
@@ -445,6 +450,9 @@ public static class Dispatcher
         Rebuild();
         Runtime.OverlayLog.Record(overlay.Name, OverlayEventKind.Loaded,
             $"relocated by 0x{delta:X8}");
+        if (overlay.Name.StartsWith(
+                "LEVELS_", StringComparison.OrdinalIgnoreCase))
+            _latestLevelName = overlay.Name;
         Sdk.LibCd.NotifyOverlayLoaded(overlay.Name);
         Console.WriteLine($"[Dispatcher] loaded relocated overlay: {overlay.Name} base=0x{actualBase:X8} delta=0x{delta:X8}");
     }

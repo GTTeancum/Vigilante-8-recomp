@@ -27,6 +27,7 @@ V82_POWERUP_FIELDS = (
 )
 V82_TRANSFORM_MODE_COUNT = 4
 V82_TRANSFORM_WHEEL_COUNT = 6
+VEHICLE_CONTROLLER_CLASSES = ("ground", "flying")
 
 
 def _strict(mapping: Mapping[str, Any], allowed: set[str], context: str) -> None:
@@ -571,6 +572,8 @@ class VehicleProject:
     quest: Mapping[str, Any] = field(default_factory=dict)
     unlock: Mapping[str, Any] = field(default_factory=dict)
     sounds: tuple[Mapping[str, Any], ...] = ()
+    controller_class: str = "ground"
+    supports_transformations: bool = True
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "VehicleProject":
@@ -596,6 +599,8 @@ class VehicleProject:
                 "quest",
                 "unlock",
                 "sounds",
+                "controller_class",
+                "supports_transformations",
             },
             "vehicle project",
         )
@@ -652,6 +657,12 @@ class VehicleProject:
             quest=dict(value.get("quest", {})),
             unlock=dict(value.get("unlock", {})),
             sounds=tuple(dict(sound) for sound in value.get("sounds", ())),
+            controller_class=str(
+                value.get("controller_class", "ground")
+            ).lower(),
+            supports_transformations=bool(
+                value.get("supports_transformations", True)
+            ),
         )
         project.validate()
         return project
@@ -664,6 +675,10 @@ class VehicleProject:
             )
         if self.game not in {"V8", "V8_2"}:
             raise ValueError("game must be V8 or V8_2")
+        if self.controller_class not in VEHICLE_CONTROLLER_CLASSES:
+            raise ValueError(
+                "controller_class must be ground or flying"
+            )
         if not self.stable_id or any(
             character not in "abcdefghijklmnopqrstuvwxyz0123456789_.-"
             for character in self.stable_id
@@ -678,7 +693,11 @@ class VehicleProject:
         if self.body_kind not in roots:
             raise ValueError("body_kind must select a top-level body object")
         if self.transformation_bank is not None:
-            self._validate_bank(self.transformation_bank, "transformation")
+            self._validate_bank(
+                self.transformation_bank,
+                "transformation",
+                allow_collision_only=not self.supports_transformations,
+            )
         if self.selector_preview_bank is not None:
             self._validate_bank(self.selector_preview_bank, "selector preview")
             preview_roots = {
@@ -706,7 +725,14 @@ class VehicleProject:
         )
         for name in ("wheel_kind_front", "wheel_kind_rear"):
             wheel_kind = self.stats.get(name)
-            if wheel_kind is not None and wheel_kind not in wheel_roots:
+            if (
+                wheel_kind is not None
+                and (
+                    self.game == "V8"
+                    or self.transformation_bank is not None
+                )
+                and wheel_kind not in wheel_roots
+            ):
                 bank_name = "body" if self.game == "V8" else "wheel/transformation"
                 raise ValueError(
                     f"{name} must select a top-level object in the {bank_name} bank"
@@ -717,10 +743,25 @@ class VehicleProject:
             if self.powerups:
                 raise ValueError("native vehicle powerup profiles are V8:2-only")
         else:
-            if len(self.transform_modes) != V82_TRANSFORM_MODE_COUNT:
-                raise ValueError("V8:2 requires four explicit transformation modes")
-            if any(self.transform_modes[0]):
-                raise ValueError("V8:2 transformation mode 0 must use normal wheels")
+            if self.supports_transformations:
+                if self.transformation_bank is None:
+                    raise ValueError(
+                        "transformable V8:2 vehicles require a transformation bank"
+                    )
+                if len(self.transform_modes) != V82_TRANSFORM_MODE_COUNT:
+                    raise ValueError(
+                        "transformable V8:2 vehicles require four explicit "
+                        "transformation modes"
+                    )
+                if any(self.transform_modes[0]):
+                    raise ValueError(
+                        "V8:2 transformation mode 0 must use normal wheels"
+                    )
+            elif self.transform_modes:
+                raise ValueError(
+                    "non-transformable V8:2 vehicles cannot own transformation "
+                    "modes"
+                )
             transform_roots = (
                 set()
                 if self.transformation_bank is None
@@ -837,12 +878,25 @@ class VehicleProject:
             )
 
     def _validate_bank(
-        self, bank: "VehicleProject | ObjectBank", label: str
+        self,
+        bank: "VehicleProject | ObjectBank",
+        label: str,
+        *,
+        allow_collision_only: bool = False,
     ) -> None:
-        if not bank.groups:
+        if not bank.groups and not allow_collision_only:
             raise ValueError(f"{label} bank needs at least one render group")
         if not bank.slots:
             raise ValueError(f"{label} bank needs at least one object slot")
+        if allow_collision_only:
+            if bank.textures or bank.animations:
+                raise ValueError(
+                    f"{label} collision-only bank cannot own render assets"
+                )
+            if any(group.faces or group.controls for group in bank.groups):
+                raise ValueError(
+                    f"{label} collision-only bank cannot own render packets"
+                )
         for group_index, group in enumerate(bank.groups):
             if not 0 <= group.scale_shift <= 15:
                 raise ValueError(
@@ -1356,6 +1410,8 @@ def to_dict(vehicle: VehicleProject) -> dict[str, Any]:
         "quest": dict(vehicle.quest),
         "unlock": dict(vehicle.unlock),
         "sounds": [dict(sound) for sound in vehicle.sounds],
+        "controller_class": vehicle.controller_class,
+        "supports_transformations": vehicle.supports_transformations,
     }
     result["transformation_bank"] = (
         None

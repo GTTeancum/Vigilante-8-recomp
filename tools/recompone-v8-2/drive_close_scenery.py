@@ -20,8 +20,18 @@ import run_reference_soak as soak
 _original = soak.build_input_script
 
 
-def build_input_script(slot: int, character_slot: int = 0) -> str:
-    script = _original(slot, character_slot)
+def build_input_script(
+    slot: int,
+    character_slot: int = 0,
+    location_settle_frames: int = 60,
+    loading_prompt_hold_frames: int = 0,
+) -> str:
+    script = _original(
+        slot,
+        character_slot,
+        location_settle_frames,
+        loading_prompt_hold_frames,
+    )
     first = os.environ.get("V82_CLOSE_STEER", "RIGHT").strip().upper()
     if first not in ("LEFT", "RIGHT"):
         raise SystemExit("V82_CLOSE_STEER must be LEFT or RIGHT")

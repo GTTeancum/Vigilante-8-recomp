@@ -348,6 +348,13 @@ internal static class GlShaders
                 smoothedTexture(uvf + axis, nearestTexel).rgb * 0.5;
             return vec4(rgb, nearestTexel.a);
         }
+        vec4 replacementSample(
+            vec2 atlasPixel, vec2 minPixel, vec2 maxPixel,
+            vec2 atlasSize) {
+            return texture(
+                uReplacementAtlas,
+                clamp(atlasPixel, minPixel, maxPixel) / atlasSize);
+        }
         vec4 replacementTexture(vec2 uvf) {
             vec2 sourceSize = vec2(
                 max(vUvBounds.z - vUvBounds.x + 1, 1),
@@ -376,25 +383,79 @@ internal static class GlShaders
                         vReplacementRect.xy,
                         vReplacementRect.xy + vReplacementRect.zw - vec2(1.0))),
                     0)
-                : texture(
-                    uReplacementAtlas,
-                    clamp(atlasPixel, minPixel, maxPixel) / atlasSize);
+                : replacementSample(
+                    atlasPixel, minPixel, maxPixel, atlasSize);
+            vec2 atlasDx = dFdx(atlasPixel);
+            vec2 atlasDy = dFdy(atlasPixel);
+            float atlasDxLength = length(atlasDx);
+            float atlasDyLength = length(atlasDy);
+            float replacementFootprint = max(
+                atlasDxLength, atlasDyLength);
+            if (!exactUiReplacement && vUiTexture == 0 &&
+                (uTextureMipmaps != 0 || uAnisotropy > 1) &&
+                replacementFootprint > 1.0) {
+                // The replacement atlas deliberately has no hardware mip
+                // chain: conventional atlas mip levels blend unrelated
+                // packed images. Reconstruct one screen-pixel footprint
+                // inside this primitive's clamped rectangle instead. Eight
+                // bounded taps keep adjacent terrain cells on the same
+                // minification curve without leaking into neighbouring atlas
+                // entries.
+                vec2 major = atlasDxLength >= atlasDyLength
+                    ? atlasDx : atlasDy;
+                vec2 minor = atlasDxLength >= atlasDyLength
+                    ? atlasDy : atlasDx;
+                vec4 filtered = vec4(0.0);
+                filtered += replacementSample(
+                    atlasPixel + major * -0.375 + minor * -0.25,
+                    minPixel, maxPixel, atlasSize);
+                filtered += replacementSample(
+                    atlasPixel + major * -0.375 + minor * 0.25,
+                    minPixel, maxPixel, atlasSize);
+                filtered += replacementSample(
+                    atlasPixel + major * -0.125 + minor * -0.25,
+                    minPixel, maxPixel, atlasSize);
+                filtered += replacementSample(
+                    atlasPixel + major * -0.125 + minor * 0.25,
+                    minPixel, maxPixel, atlasSize);
+                filtered += replacementSample(
+                    atlasPixel + major * 0.125 + minor * -0.25,
+                    minPixel, maxPixel, atlasSize);
+                filtered += replacementSample(
+                    atlasPixel + major * 0.125 + minor * 0.25,
+                    minPixel, maxPixel, atlasSize);
+                filtered += replacementSample(
+                    atlasPixel + major * 0.375 + minor * -0.25,
+                    minPixel, maxPixel, atlasSize);
+                filtered += replacementSample(
+                    atlasPixel + major * 0.375 + minor * 0.25,
+                    minPixel, maxPixel, atlasSize);
+                float filterAmount = uTextureMipmaps != 0
+                    ? smoothstep(1.0, 2.25, replacementFootprint)
+                    : smoothstep(
+                        1.0, 2.25,
+                        replacementFootprint /
+                            max(min(atlasDxLength, atlasDyLength), 1.0));
+                texel = mix(texel, filtered * 0.125, filterAmount);
+            }
             if (vMaterial == MaterialTerrainRoute) {
                 vec3 neighbours = (
-                    texture(uReplacementAtlas,
-                        clamp(atlasPixel + vec2(1.0, 0.0), minPixel, maxPixel) /
-                        atlasSize).rgb +
-                    texture(uReplacementAtlas,
-                        clamp(atlasPixel + vec2(-1.0, 0.0), minPixel, maxPixel) /
-                        atlasSize).rgb +
-                    texture(uReplacementAtlas,
-                        clamp(atlasPixel + vec2(0.0, 1.0), minPixel, maxPixel) /
-                        atlasSize).rgb +
-                    texture(uReplacementAtlas,
-                        clamp(atlasPixel + vec2(0.0, -1.0), minPixel, maxPixel) /
-                        atlasSize).rgb) * 0.25;
+                    replacementSample(
+                        atlasPixel + vec2(1.0, 0.0),
+                        minPixel, maxPixel, atlasSize).rgb +
+                    replacementSample(
+                        atlasPixel + vec2(-1.0, 0.0),
+                        minPixel, maxPixel, atlasSize).rgb +
+                    replacementSample(
+                        atlasPixel + vec2(0.0, 1.0),
+                        minPixel, maxPixel, atlasSize).rgb +
+                    replacementSample(
+                        atlasPixel + vec2(0.0, -1.0),
+                        minPixel, maxPixel, atlasSize).rgb) * 0.25;
+                float sharpen = 1.0 - smoothstep(
+                    0.75, 2.0, replacementFootprint);
                 texel.rgb = clamp(
-                    texel.rgb + (texel.rgb - neighbours) * 1.0,
+                    texel.rgb + (texel.rgb - neighbours) * sharpen,
                     vec3(0.0), vec3(1.0));
             }
             texel.rgb = clamp(
@@ -482,12 +543,25 @@ internal static class GlShaders
             if (uEnhancedFog == 0 ||
                 vUiTexture != 0 ||
                 vShadow != 0 ||
+                vMaterial == MaterialTerrainRoute ||
                 vDepth <= 1.0) {
                 return rgb;
             }
-            float fogDepth = rasterCameraDepth();
+            // Terrain packets already carry the engine's authored distance
+            // lighting in their Gouraud colours. Applying host atmosphere to
+            // that material a second time erases the visible texture and
+            // turns bright-sky horizons white. Other world materials still
+            // use the recovered-depth atmosphere below.
+            // vDepth is recovered camera/projective depth whenever the
+            // conversion seam owns it, and falls back to the native ordering
+            // table estimate only for legacy packet-space geometry. Hardware
+            // Z cannot be used as the atmosphere distance here: the default
+            // depth contract deliberately preserves coarse PS1 OT buckets for
+            // visibility, so a nearby wall in a far bucket can otherwise fog
+            // as if it were on the horizon.
+            float fogDepth = max(vDepth, 1.0);
 
-            // Fade every world material using camera/OT depth after texture
+            // Fade every world material using recovered camera/OT depth after texture
             // modulation. The previous textured-only pre-modulation haze was
             // undone by bright vertex colours and skipped meshes without an
             // exact GTE SZ, leaving distant buildings fully saturated.
@@ -513,9 +587,19 @@ internal static class GlShaders
                     mix(rgb, mix(cool, warm, warmth), amount), 0.0, 1.0);
             }
 
-            // The terrain walker stops at roughly 20000 camera units, so the
-            // generic curve has to be complete there.
-            float amount = pow(smoothstep(2200.0, 20500.0, fogDepth), 0.62);
+            // The terrain walker stops at roughly 20000 camera units. Native
+            // packets already carry authored distance lighting in their
+            // vertex modulation, so a bright sky plate must remain only a
+            // light atmospheric tint. A strong second blend erases terrain
+            // texture and converts distant structures into white cutouts.
+            // Darker backdrops can still absorb the last row completely.
+            float targetLuma = dot(
+                uFogColor, vec3(0.299, 0.587, 0.114));
+            float brightTarget = smoothstep(0.82, 0.94, targetLuma);
+            float maximumAmount = mix(1.0, 0.24, brightTarget);
+            float amount =
+                pow(smoothstep(2200.0, 20500.0, fogDepth), 0.62) *
+                maximumAmount;
             return clamp(mix(rgb, uFogColor, amount), 0.0, 1.0);
         }
         vec3 stockPaintCorrection8(ivec3 c8) {
@@ -599,22 +683,14 @@ internal static class GlShaders
                 vMaterial == MaterialVehicleReflection;
             bool fontPrimitive =
                 vUiTexture != 0 && vParticle != 0;
-            // A supplied high-resolution font is already the authored
-            // silhouette only when it carries real alpha. Some texture-pack
-            // glyph sheets are opaque RGB cells, so treating their alpha as
-            // coverage draws the whole cell as a white block. Those fall back
-            // to the native glyph silhouette below.
-            bool replacementFont =
-                hasReplacement && fontPrimitive &&
-                texel.a < 0.999;
-            bool opaqueReplacementFont =
-                hasReplacement && fontPrimitive && !replacementFont;
-            if (opaqueReplacementFont) {
-                texel = nearestTexel;
-            }
+            // Font replacement validity belongs to the resolved atlas entry,
+            // not to the alpha of the fragment currently being shaded. An
+            // opaque interior pixel is still part of an alpha-authored glyph;
+            // treating it as an opaque atlas made every glyph fall back to the
+            // native low-resolution sheet except along its antialiased edge.
+            bool replacementFont = hasReplacement && fontPrimitive;
             bool vectorFont =
-                fontPrimitive && uVectorFonts != 0 &&
-                !opaqueReplacementFont;
+                fontPrimitive && uVectorFonts != 0 && !replacementFont;
             bool vectorIcon =
                 vUiTexture != 0 && vShadow != 0 && uVectorIcons != 0;
             bool enhancedParticle =

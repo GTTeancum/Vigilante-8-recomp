@@ -213,16 +213,15 @@ public static class Gte
     // geometry statistic detected it - only a whole-frame image comparison
     // did (T69). Gate any change here with whole_frame_gate.py, whose control
     // run establishes the ~1.8% noise floor.
-    // Retail culling neutralised. All four mesh emitters reject a triangle
-    // when NCLIP's area comes out <= 0, computed from coordinates the PS1
-    // could represent. Enhanced draws from camera space and does not need that
-    // decision made for it, so this forces the result positive and lets the
-    // renderer decide what is visible. Diagnostic sledgehammer first: if
-    // geometry the engine was dropping still does not appear with this on, the
-    // rejection is not NCLIP at all.
+    // Enhanced replaces the retail object cull as one coupled operation: let
+    // packets with exact camera-space provenance reach the renderer, carry the
+    // GTE-order winding with them, then cull there from the unsaturated
+    // projection.  Terrain retains its separately gated native walker.  The
+    // renderer half must remain enabled whenever this half is enabled; setting
+    // both switches to zero restores the retail diagnostic oracle.
     static readonly bool NoRetailCull =
         Environment.GetEnvironmentVariable(
-            "RECOMPONE_V82_NO_RETAIL_CULL") == "1";
+            "RECOMPONE_V82_NO_RETAIL_CULL") != "0";
 
     static readonly bool WidePreciseNclip =
         Environment.GetEnvironmentVariable(
@@ -315,6 +314,9 @@ public static class Gte
     /// </summary>
     public static int NclipX0, NclipY0, NclipX1, NclipY1, NclipX2, NclipY2;
     public static int NclipResult;
+    public static long NclipPackedArea;
+    public static double NclipPreciseArea;
+    public static bool NclipHasPreciseArea;
     public static long NclipCount;
     static readonly uint[] RGB = new uint[3];
     // GPU packets contain only projected XY coordinates, so enhanced texture
@@ -1355,23 +1357,27 @@ public static class Gte
                 Rtp(V[6], V[7], V[8], sf, lm, true);
                 break;
             case 0x06:
-                if (NoRetailCull &&
-                    _terrainProjectionDepth == 0 &&
-                    ConfigManager.View.HighResolution3D &&
-                    GpuHle.GameplayActive)
-                {
-                    // Diagnostic. Never let the engine reject an object
-                    // primitive on its own backface test, so a scene can be
-                    // driven to see whether that test is what removes geometry
-                    // beside the camera. Terrain is excluded: NCLIP is the only
-                    // thing culling terrain back faces, and without it the
-                    // ground renders as a checkerboard of undersides.
-                    //
-                    // Object back faces WILL be drawn with this on. It is not
-                    // shippable; it answers one question.
-                    MAC0 = 0x01000000;
-                    break;
-                }
+                bool terrainNclip = _terrainProjectionDepth > 0;
+                long packedNclipArea =
+                    (long)SX[0] * (SY[1] - SY[2]) +
+                    (long)SX[1] * (SY[2] - SY[0]) +
+                    (long)SX[2] * (SY[0] - SY[1]);
+                bool hasPreciseNclipArea =
+                    SxyHasPrecisePosition[0] &&
+                    SxyHasPrecisePosition[1] &&
+                    SxyHasPrecisePosition[2];
+                float[] preciseNclipX = terrainNclip
+                    ? SxyPreciseX : SxyUnclampedX;
+                float[] preciseNclipY = terrainNclip
+                    ? SxyPreciseY : SxyUnclampedY;
+                double preciseNclipArea = hasPreciseNclipArea
+                    ? (double)preciseNclipX[0] *
+                        (preciseNclipY[1] - preciseNclipY[2]) +
+                      (double)preciseNclipX[1] *
+                        (preciseNclipY[2] - preciseNclipY[0]) +
+                      (double)preciseNclipX[2] *
+                        (preciseNclipY[0] - preciseNclipY[1])
+                    : packedNclipArea;
                 // NCLIP is game-visible GTE state. The engine branches on
                 // MAC0 while traversing terrain, so replacing the native
                 // integer-SXY result with host fractional coordinates changes
@@ -1394,9 +1400,7 @@ public static class Gte
                       ConfigManager.View.HighResolution3D &&
                       GpuHle.GameplayActive &&
                       GpuHle.WideAspect > GpuHle.BaseAspect + 0.001f)) &&
-                    SxyHasPrecisePosition[0] &&
-                    SxyHasPrecisePosition[1] &&
-                    SxyHasPrecisePosition[2])
+                    hasPreciseNclipArea)
                 {
                     // Terrain keeps the clamped projection. That path was
                     // tuned against it to close the horizon slits, and feeding
@@ -1404,27 +1408,18 @@ public static class Gte
                     // depends on - it shreds the ground. Only object geometry,
                     // where saturation is what deletes triangles beside the
                     // camera, uses the unclamped projection.
-                    bool terrainScope = _terrainProjectionDepth > 0;
-                    float[] ax = terrainScope ? SxyPreciseX : SxyUnclampedX;
-                    float[] ay = terrainScope ? SxyPreciseY : SxyUnclampedY;
-                    double area =
-                        (double)ax[0] * (ay[1] - ay[2]) +
-                        (double)ax[1] * (ay[2] - ay[0]) +
-                        (double)ax[2] * (ay[0] - ay[1]);
                     // A strip whose true area is a fraction of a pixel still
                     // has to survive the engine's integer sign test, so keep
                     // the sign when truncation would erase it.
                     MAC0 = (int)Math.Clamp(
-                        area >= 0d ? Math.Ceiling(area) : Math.Floor(area),
+                        preciseNclipArea >= 0d
+                            ? Math.Ceiling(preciseNclipArea)
+                            : Math.Floor(preciseNclipArea),
                         int.MinValue,
                         int.MaxValue);
-                    long packed =
-                        (long)SX[0] * (SY[1] - SY[2]) +
-                        (long)SX[1] * (SY[2] - SY[0]) +
-                        (long)SX[2] * (SY[0] - SY[1]);
                     // Only a polygon whose two tests disagree changes what the
                     // engine submits, so count those and nothing else.
-                    if ((packed > 0) != (MAC0 > 0))
+                    if ((packedNclipArea > 0) != (MAC0 > 0))
                     {
                         if (_terrainProjectionDepth > 0)
                             _nclipTerrainCorrections++;
@@ -1445,21 +1440,31 @@ public static class Gte
                             _nclipOwnerTraceCount++ < 4096)
                             Console.Error.WriteLine(
                                 $"[NclipOwner] tick={GpuHle.DebugGameplayTick} " +
-                                $"terrain={(terrainScope ? 1 : 0)} " +
-                                $"packed={packed} precise={area:F6} " +
+                                $"terrain={(terrainNclip ? 1 : 0)} " +
+                                $"packed={packedNclipArea} " +
+                                $"precise={preciseNclipArea:F6} " +
                                 $"result={MAC0} owner={_nclipOwner}");
                     }
                 }
                 else
                 {
-                    MAC0 = (int)CheckMac0(
-                        (long)SX[0] * (SY[1] - SY[2]) +
-                        (long)SX[1] * (SY[2] - SY[0]) +
-                        (long)SX[2] * (SY[0] - SY[1]));
+                    MAC0 = (int)CheckMac0(packedNclipArea);
                 }
                 NclipX0 = SX[0]; NclipY0 = SY[0];
                 NclipX1 = SX[1]; NclipY1 = SY[1];
                 NclipX2 = SX[2]; NclipY2 = SY[2];
+                NclipPackedArea = packedNclipArea;
+                NclipPreciseArea = preciseNclipArea;
+                NclipHasPreciseArea = hasPreciseNclipArea;
+                // Enhanced can preserve a submitted packet's exact GTE-order
+                // winding and make the cull after near-plane clipping.  Only
+                // bypass the retail object rejection when that replacement
+                // decision is available; terrain keeps its native walker.
+                if (NoRetailCull && !terrainNclip &&
+                    hasPreciseNclipArea &&
+                    ConfigManager.View.HighResolution3D &&
+                    GpuHle.GameplayActive)
+                    MAC0 = 0x01000000;
                 NclipResult = MAC0;
                 NclipCount++;
                 break;

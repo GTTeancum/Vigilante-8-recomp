@@ -17,15 +17,15 @@ import struct
 
 V8_ROSTER_RECORD_OFFSET = 0x11C68
 V8_ROSTER_RECORD_SIZE = 20
-V8_ROSTER_COUNT = 12
+V8_ROSTER_COUNT = 13
 V8_SELECTION_VOICE_OFFSET = 0x0C
 V82_RETAIL_SHELL_ENTRY_COUNT = 14
 
 # Chassey, Clyde, Sheila, Torque, Dave, Convoy, Loki, Houston, Boogie,
-# Beezwax, Molo, Sid.  These are decoded from the original roster records,
+# Beezwax, Molo, Sid, Y. These are decoded from the original roster records,
 # not inferred from SND entry order.
 EXPECTED_V8_SELECTION_VOICES = (
-    29, 25, 27, 17, 21, 20, 22, 28, 19, 18, 23, 24,
+    29, 25, 27, 17, 21, 20, 22, 28, 19, 18, 23, 24, 26,
 )
 
 
@@ -100,8 +100,17 @@ def build(
     v8_entries, v8_payload = parse_bank(v8_snd)
     v82_entries, v82_payload = parse_bank(v82_snd)
     original_v82_count = len(v82_entries)
-    if original_v82_count == V82_RETAIL_SHELL_ENTRY_COUNT + V8_ROSTER_COUNT:
-        for roster_index, source_index in enumerate(voices):
+    appended_count = original_v82_count - V82_RETAIL_SHELL_ENTRY_COUNT
+    if appended_count < 0 or appended_count > V8_ROSTER_COUNT:
+        raise ValueError(
+            "V8:2 shell SND bank must contain the retail 14 entries "
+            "followed by a prefix of the validated V8 selector voices; "
+            f"found {original_v82_count} entries"
+        )
+    if appended_count:
+        for roster_index, source_index in enumerate(
+            voices[:appended_count]
+        ):
             destination_index = V82_RETAIL_SHELL_ENTRY_COUNT + roster_index
             if (
                 v82_entries[destination_index][1]
@@ -115,22 +124,19 @@ def build(
                     "existing appended V8 selector voice bank does not "
                     f"match roster index {roster_index}"
                 )
+    if appended_count == V8_ROSTER_COUNT:
         return v82_snd, {
             "original_v82_entries": V82_RETAIL_SHELL_ENTRY_COUNT,
             "extended_v82_entries": original_v82_count,
             "appended_payload_bytes": 0,
             "entries": [],
         }
-    if original_v82_count != V82_RETAIL_SHELL_ENTRY_COUNT:
-        raise ValueError(
-            "V8:2 shell SND bank must contain either the retail 14 entries "
-            "or the validated 26-entry V8 extension; "
-            f"found {original_v82_count}"
-        )
 
     appended = bytearray()
     report_entries: list[dict[str, int]] = []
-    for roster_index, source_index in enumerate(voices):
+    for roster_index, source_index in enumerate(
+        voices[appended_count:], start=appended_count
+    ):
         source = sample_bytes(v8_entries, v8_payload, source_index)
         destination_index = len(v82_entries)
         destination_offset = (len(v82_payload) + len(appended)) // 8
@@ -158,7 +164,7 @@ def build(
     header += b"".join(struct.pack("<HH", *entry) for entry in v82_entries)
     output = header + payload
     reparsed, reparsed_payload = parse_bank(output)
-    if len(reparsed) != original_v82_count + V8_ROSTER_COUNT:
+    if len(reparsed) != V82_RETAIL_SHELL_ENTRY_COUNT + V8_ROSTER_COUNT:
         raise AssertionError("extended SND entry count is incorrect")
     if reparsed_payload[: len(v82_payload)] != v82_payload:
         raise AssertionError("the original V8:2 SND payload changed")

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,11 @@ import re
 import subprocess
 import sys
 
-from PIL import Image
+from PIL import Image, ImageOps
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from v8_n64_level import V8N64Rom, root_children  # noqa: E402
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -44,11 +49,13 @@ ARENAS = [
     "LEVELS_V8_CASNOCTY",
     "LEVELS_V8_CANYNLND",
     "LEVELS_V8_SKIRESRT",
+    "LEVELS_N64_DREAMLND",
 ]
 
 CARD_HEIGHTS = {
     "LEVELS_V8_SCRTBASE": 112,
     "LEVELS_V8_CANYNLND": 112,
+    "LEVELS_N64_DREAMLND": 112,
 }
 
 STRIP_RE = re.compile(
@@ -65,6 +72,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--asset-dir", type=Path, default=DEFAULT_ASSET_DIR)
     parser.add_argument("--runner", type=Path, default=DEFAULT_RUNNER)
     parser.add_argument("--upscaler", type=Path, default=DEFAULT_UPSCALER)
+    parser.add_argument(
+        "--n64-rom",
+        type=Path,
+        default=REPO / "Vigilante 8 (U) (!).n64",
+        help="canonical source for Super Dreamland 64's native JPEG card",
+    )
     parser.add_argument("--model", default="realesrgan-x4plus-anime")
     parser.add_argument("--tile-size", type=int, default=64)
     parser.add_argument(
@@ -173,6 +186,35 @@ def reconstruct_card(
     return ordered
 
 
+def reconstruct_dreamland_card(
+    rom_path: Path, output: Path, height: int
+) -> None:
+    if height != 112:
+        raise RuntimeError(
+            f"Dreamland native loading card must be 320x112, got height={height}")
+    rom = V8N64Rom(rom_path)
+    loading = [
+        child.payload
+        for child in root_children(rom.decoded("DREAMLND.EXP"))
+        if child.tag == b"XLSC"
+    ]
+    if len(loading) != 1 or len(loading[0]) < 8 or loading[0][4:6] != b"\xFF\xD8":
+        raise RuntimeError(
+            f"canonical Dreamland source contains {len(loading)} valid JPEG cards")
+    source = Image.open(BytesIO(loading[0][4:])).convert("RGB")
+    if source.size != (320, 100):
+        raise RuntimeError(
+            f"canonical Dreamland loading art is {source.size}, expected 320x100")
+    native = ImageOps.fit(
+        source,
+        (320, height),
+        method=Image.Resampling.LANCZOS,
+        centering=(0.5, 0.5),
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    native.save(output)
+
+
 def upscale_card(
     upscaler: Path,
     model: str,
@@ -216,7 +258,9 @@ def upscale_card(
 
 def main() -> int:
     args = parse_args()
-    for required in (args.exe, args.loose_root, args.runner, args.upscaler):
+    for required in (
+        args.exe, args.loose_root, args.runner, args.upscaler, args.n64_rom
+    ):
         if not required.exists():
             raise SystemExit(f"required input does not exist: {required}")
 
@@ -229,10 +273,15 @@ def main() -> int:
         native_height = CARD_HEIGHTS.get(arena, 96)
         work_dir = args.output / "native" / stem
         strip_dir = work_dir / "strips"
-        if not args.reuse_captures:
-            capture_strips(args, slot, strip_dir)
         native_path = work_dir / f"{stem}_loading_card_native.ppm"
-        strips = reconstruct_card(strip_dir, native_path, native_height)
+        if arena == "LEVELS_N64_DREAMLND":
+            reconstruct_dreamland_card(
+                args.n64_rom.resolve(), native_path, native_height)
+            strips: list[Path] = []
+        else:
+            if not args.reuse_captures:
+                capture_strips(args, slot, strip_dir)
+            strips = reconstruct_card(strip_dir, native_path, native_height)
         asset_path = args.asset_dir / f"{stem}_loading_card_4x.ppm"
         if not args.skip_upscale:
             upscale_card(

@@ -175,6 +175,11 @@ foreach ($cacheDirectory in Get-ChildItem -LiteralPath $repoRoot `
     Remove-RepoPath -LiteralPath $cacheDirectory.FullName
 }
 
+# Once the portable N64 reference emulator has been extracted, retaining its
+# download archive only duplicates the same regenerable oracle in the repo.
+Remove-RepoPath -LiteralPath (Join-Path $repoRoot `
+    'tools\n64_reference\vendor\RMG-Portable-Windows64-v0.9.0.zip')
+
 foreach ($pattern in @('*.obj', '*.o', '*.pdb')) {
     foreach ($file in Get-ChildItem -LiteralPath $repoRoot -File -Filter $pattern `
              -Force -ErrorAction SilentlyContinue) {

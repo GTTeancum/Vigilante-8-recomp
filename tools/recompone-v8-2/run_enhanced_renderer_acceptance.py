@@ -54,6 +54,7 @@ GUESTS = (
     "guest.v8.beezwax",
     "guest.v8.molo",
     "guest.v8.sid_burn",
+    "guest.v8.y_the_alien",
 )
 
 

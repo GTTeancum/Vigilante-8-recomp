@@ -254,6 +254,28 @@ def compose_atlases(
     return native, high
 
 
+def compose_hd_atlas_for_metrics(
+    glyphs: list[CompiledGlyph],
+    rendered,
+    width: int,
+    height: int,
+    row_height: int,
+    scale: int,
+) -> Image.Image:
+    """Render a higher-resolution sidecar without changing native metrics."""
+    high = Image.new("L", (width * scale, height * scale), 0)
+    for glyph in glyphs:
+        if glyph.width == 0:
+            continue
+        mask = rendered[glyph.code][1]
+        cell = fit_mask_to_runtime_cell(
+            mask,
+            (glyph.width * scale, row_height * scale),
+        )
+        high.paste(cell, (glyph.x * scale, glyph.y * scale))
+    return high
+
+
 def read_tim_header(template_path: Path) -> tuple[bytes, list[int], tuple[int, int]]:
     payload = template_path.read_bytes()
     tim_offset = struct.unpack_from("<I", payload, 0)[0]
@@ -354,12 +376,12 @@ def fit_mask_to_runtime_cell(
     return cell
 
 
-def clean_previous_font_entries(manifest: dict, label: str) -> None:
+def clean_previous_font_entries(manifest: dict, source_prefix: str) -> None:
     sources = manifest.setdefault("sources", {})
     stale_keys = {
         key
         for key, values in sources.items()
-        if any(str(value).startswith(f"{label} ") for value in values)
+        if any(str(value).startswith(source_prefix) for value in values)
     }
     manifest["entries"] = [
         entry for entry in manifest["entries"]
@@ -385,11 +407,18 @@ def update_texture_pack(
     atlas_name = f"game_fnt_compiled_{font_stem}_{scale}x.dds"
     atlas_path = texture_pack / "images" / "ui" / atlas_name
     atlas_path.parent.mkdir(parents=True, exist_ok=True)
+    # Match the previously accepted loading-font asset: literal two-color
+    # coverage in the 4x atlas, with bounded linear sampling providing only
+    # the final presentation edge.  Fractional FreeType coverage here makes
+    # the small loading copy visibly soft.
     alpha_rgba(binary_alpha(high_atlas, alpha_threshold)).save(atlas_path)
     deployed = Image.open(atlas_path).convert("RGBA")
 
     label = "GAME.FNT"
-    clean_previous_font_entries(manifest, label)
+    # Rebuilding the canonical atlas must not erase exact live loading-screen
+    # variants collected by earlier map runs.  Those keys are cumulative: a
+    # single-map trace cannot describe every loading tip used by the game.
+    clean_previous_font_entries(manifest, f"{label} compiled glyph ")
     sources = manifest.setdefault("sources", {})
     entries_by_key: dict[str, dict] = {}
     source_by_key: dict[str, list[str]] = {}
@@ -475,19 +504,22 @@ def update_live_loading_keys(
         prompt = [
             use for use in sorted(uses, key=lambda item: (item.y, item.x))
             if use.tpage == "0x0A5" and use.clut == "0x7800" and
-            use.height == sheet.max_height and use.width > 0 and
+            # The retail loading overlay crops this row to 15 pixels in some
+            # presentation paths even though GAME.FNT's authored cell height
+            # is 18.  The texture key therefore belongs to the clipped live
+            # rectangle, not the full source cell.
+            use.height >= 8 and use.height <= sheet.max_height and
+            use.width > 0 and
             use.key != "0000000000000000"
         ]
         # Keep the native controller symbol in the sixth position. It is not
         # the Latin X glyph even though the displayed instruction reads X.
-        prompt_chars: list[str | None] = list("Press") + [None] + list("tostart...")
+        prompt_chars = list("Press") + [chr(0x82)] + list("tostart...")
         if prompt and len(prompt) != len(prompt_chars):
             raise ValueError(
                 f"{log} has {len(prompt)} prompt glyphs, expected {len(prompt_chars)}"
             )
         for char, use in zip(prompt_chars, prompt):
-            if char is None:
-                continue
             previous = key_chars.get(use.key)
             if previous is not None and previous != char:
                 raise ValueError(
@@ -504,7 +536,26 @@ def update_live_loading_keys(
     placements: list[tuple[str, str, object, Image.Image, int, int]] = []
     padding = max(2, scale // 2)
     atlas_width = 1936
-    x = y = row_height = padding
+    live_name = (
+        f"game_fnt_compiled_{font_path.stem.lower()}_live_{scale}x.dds"
+    )
+    live_path = texture_pack / "images" / "ui" / live_name
+    live_path.parent.mkdir(parents=True, exist_ok=True)
+    image_name = f"images/ui/{live_name}"
+    existing_live_entries = [
+        entry for entry in manifest["entries"]
+        if str(entry.get("image", "")) == image_name
+    ]
+    existing_live_atlas = None
+    if existing_live_entries and live_path.is_file():
+        existing_live_atlas = Image.open(live_path).convert("RGBA")
+    x = padding
+    y = (
+        existing_live_atlas.height + padding
+        if existing_live_atlas is not None
+        else padding
+    )
+    row_height = padding
     for key, char in sorted(key_chars.items()):
         if key == "0000000000000000" or key in existing:
             continue
@@ -543,15 +594,12 @@ def update_live_loading_keys(
         x += cell.width + padding
         row_height = max(row_height, cell.height)
 
+    live_height = y + row_height + padding
     live_atlas = Image.new(
-        "RGBA", (atlas_width, y + row_height + padding), (0, 0, 0, 0)
+        "RGBA", (atlas_width, live_height), (0, 0, 0, 0)
     )
-    live_name = (
-        f"game_fnt_compiled_{font_path.stem.lower()}_live_{scale}x.dds"
-    )
-    live_path = texture_pack / "images" / "ui" / live_name
-    live_path.parent.mkdir(parents=True, exist_ok=True)
-    image_name = f"images/ui/{live_name}"
+    if existing_live_atlas is not None:
+        live_atlas.alpha_composite(existing_live_atlas, (0, 0))
     added = 0
     for key, char, use, cell, px, py in placements:
         live_atlas.alpha_composite(cell, (px, py))
@@ -572,7 +620,8 @@ def update_live_loading_keys(
         existing.add(key)
         added += 1
 
-    live_atlas.save(live_path)
+    if placements or not live_path.is_file():
+        live_atlas.save(live_path)
 
     suffix = "; GAME.FNT live compiled loading keys"
     if suffix not in manifest.get("generator", ""):
@@ -698,25 +747,44 @@ def main() -> None:
     if count != 221:
         raise ValueError(f"expected 221 GAME.FNT records, found {count}")
 
-    rendered, baseline = build_glyphs(
-        template, args.font, args.point_size, args.scale
+    # Native FNT metrics were explicitly accepted from the 4x compiler.  Keep
+    # those byte-stable while allowing the external whole-file atlas to use a
+    # higher raster scale.
+    native_compile_scale = 4
+    rendered, native_baseline = build_glyphs(
+        template, args.font, args.point_size, native_compile_scale
     )
     glyphs, atlas_height = pack_glyphs(
         rendered,
         template.first_char,
         count,
         template.max_height,
-        args.scale,
+        native_compile_scale,
         args.atlas_width,
         args.gutter,
     )
-    native, high = compose_atlases(
+    native, native_high = compose_atlases(
         glyphs,
         args.atlas_width,
         atlas_height,
         template.max_height,
-        args.scale,
+        native_compile_scale,
     )
+    if args.scale == native_compile_scale:
+        high = native_high
+        baseline = native_baseline
+    else:
+        hd_rendered, baseline = build_glyphs(
+            template, args.font, args.point_size, args.scale
+        )
+        high = compose_hd_atlas_for_metrics(
+            glyphs,
+            hd_rendered,
+            args.atlas_width,
+            atlas_height,
+            template.max_height,
+            args.scale,
+        )
 
     relative_fnt = Path("SHARED") / args.template.name
     output_fnt = args.mod_dir / "files" / relative_fnt
@@ -779,8 +847,10 @@ def main() -> None:
         )
     proof_dir = args.mod_dir / "proof"
     proof_dir.mkdir(parents=True, exist_ok=True)
+    # This proof atlas is also the whole-file HD sidecar source.  Preserve the
+    # accepted binary coverage contract used by the runtime replacement.
     alpha_rgba(binary_alpha(high, args.alpha_threshold)).save(
-        proof_dir / "compiled_game_fnt_atlas_4x.tga"
+        proof_dir / f"compiled_game_fnt_atlas_{args.scale}x.tga"
     )
     render_metric_proof(
         glyphs,

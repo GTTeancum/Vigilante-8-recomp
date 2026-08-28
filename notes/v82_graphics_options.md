@@ -1,12 +1,14 @@
 # Vigilante 8: 2nd Offense graphics options
 
-The wrapper exposes three graphics profiles:
+The wrapper exposes two shipping graphics profiles:
 
-- **Original** restores the authored 4:3 presentation, stock distance LOD,
-  native texture sampling, PS1 dithering, and stock effects.
 - **Enhanced** is the recommended Dreamcast/PS2-style profile. It enables the
   complete enhancement set below.
 - **Custom** is selected automatically when any individual option changes.
+
+Both profiles use the Enhanced GL renderer. The preserved PS1 software
+renderer is a developer-only, read-only visual oracle and is not exposed in
+the shipping settings UI.
 
 Every enhancement remains independently selectable:
 
@@ -38,6 +40,8 @@ Every enhancement remains independently selectable:
    - Enhanced haze adds a subtle far-depth blend in the host renderer without
      modifying simulation or collision state.
 
-`RECOMPONE_GRAPHICS_PRESET=Original` and
-`RECOMPONE_GRAPHICS_PRESET=Enhanced` are non-persistent automation overrides.
+`RECOMPONE_GRAPHICS_PRESET=Enhanced` is a non-persistent automation override.
+An isolated developer oracle run must set
+`RECOMPONE_ORIGINAL_RENDERER_ORACLE=1` together with either
+`RECOMPONE_GRAPHICS_PRESET=Original` or `RECOMPONE_GPU_HLE=0`.
 All ordinary menu changes persist in `settings.json`.

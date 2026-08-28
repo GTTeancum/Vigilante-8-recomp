@@ -11,11 +11,100 @@ namespace RecompOne.Runtime.Sdk;
 
 public static class V82Compat
 {
-    // Generated sources made during the rejected close-culling experiment may
-    // still contain this instrumentation hook until the next full reference
-    // regeneration. Keep it behavior-free; the experiment itself is gone.
+    static long _lastRegisteredTriangleNclip;
+
+    // The mesh emitter writes packet vertices in layouts that do not all use
+    // the GTE FIFO's vertex order. Carry the source NCLIP decision with the
+    // completed packet so Enhanced can replace the retail saturated-coordinate
+    // cull without guessing packet winding.
     public static void RegisterTrianglePacketNclip(CpuContext c, IMemory m)
     {
+        if (Gte.NclipCount <= _lastRegisteredTriangleNclip)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint packet = MemoryMap.ToPhysical(c.A2);
+        if (packet >= MemoryMap.RamWindow)
+            return;
+        byte command = (byte)(m.ReadU32(packet + 4u) >> 24);
+        if (command is < 0x20 or > 0x3F || (command & 8) != 0)
+            return;
+
+        bool gouraud = (command & 0x10) != 0;
+        bool textured = (command & 0x04) != 0;
+        int xy1Offset = gouraud
+            ? (textured ? 20 : 16)
+            : (textured ? 16 : 12);
+        int xy2Offset = gouraud
+            ? (textured ? 32 : 24)
+            : (textured ? 24 : 16);
+        Span<int> packetX = stackalloc int[3];
+        Span<int> packetY = stackalloc int[3];
+        ReadPacketXy(m, packet + 8u, out packetX[0], out packetY[0]);
+        ReadPacketXy(
+            m, packet + (uint)xy1Offset,
+            out packetX[1], out packetY[1]);
+        ReadPacketXy(
+            m, packet + (uint)xy2Offset,
+            out packetX[2], out packetY[2]);
+
+        ReadOnlySpan<byte> permutations =
+        [
+            0, 1, 2,
+            0, 2, 1,
+            1, 0, 2,
+            1, 2, 0,
+            2, 0, 1,
+            2, 1, 0,
+        ];
+        byte order0 = byte.MaxValue;
+        byte order1 = byte.MaxValue;
+        byte order2 = byte.MaxValue;
+        int matchingOrders = 0;
+        for (int index = 0; index < permutations.Length; index += 3)
+        {
+            byte a = permutations[index];
+            byte b = permutations[index + 1];
+            byte d = permutations[index + 2];
+            if (packetX[a] != Gte.NclipX0 ||
+                packetY[a] != Gte.NclipY0 ||
+                packetX[b] != Gte.NclipX1 ||
+                packetY[b] != Gte.NclipY1 ||
+                packetX[d] != Gte.NclipX2 ||
+                packetY[d] != Gte.NclipY2)
+                continue;
+            order0 = a;
+            order1 = b;
+            order2 = d;
+            matchingOrders++;
+        }
+
+        _lastRegisteredTriangleNclip = Gte.NclipCount;
+        GpuHle.RegisterTriangleNclipPacket(
+            packet,
+            new GpuHle.TriangleNclipPacket(
+                Gte.NclipCount,
+                Gte.NclipPackedArea,
+                Gte.NclipPreciseArea,
+                Gte.NclipHasPreciseArea,
+                matchingOrders == 1,
+                order0,
+                order1,
+                order2,
+                Gte.NclipX0,
+                Gte.NclipY0,
+                Gte.NclipX1,
+                Gte.NclipY1,
+                Gte.NclipX2,
+                Gte.NclipY2));
+    }
+
+    static void ReadPacketXy(
+        IMemory memory, uint address, out int x, out int y)
+    {
+        uint packed = memory.ReadU32(address);
+        x = (short)packed;
+        y = (short)(packed >> 16);
     }
 
     static readonly bool TraceNativeOptions =
@@ -149,6 +238,33 @@ public static class V82Compat
     // which single-frame captures do not show.
     const uint ExpandedPrimitiveBufferBase = 0x80200000u;
     const uint ExpandedPrimitiveBufferSize = 0x00080000u;
+    // func_8001D414's retail edge/clip-repair queue holds only 64 entries.
+    // Maximum terrain detail can offer more without exhausting the packet
+    // arena itself, and silently dropping the excess produces view-edge holes.
+    // Keep one queue in the protected tail of each double-buffered host arena;
+    // normal packet allocation stops before it, while GPU links may still
+    // traverse the complete arena range.
+    const uint ExpandedEdgePoolReserve = 0x00004000u;
+    const uint ExpandedEdgePoolRecordSize = 0x10u;
+    // func_8001CFA4 initializes every retail edge-repair record as a two-word
+    // monochrome 1x1 tile packet before func_8001D414 links it into the OT.
+    // Expanded host records live in reused packet-arena tail memory, so this
+    // template must be restored on every allocation rather than inherited
+    // accidentally from a previous frame.
+    const uint EdgeRepairPacketLength = 0x02000000u;
+    const uint EdgeRepairTileCommand = 0x68FFFFFFu;
+    const int ExpandedEdgePoolCapacity =
+        (int)((ExpandedEdgePoolReserve - 4u) / ExpandedEdgePoolRecordSize);
+    // Each retail GPU buffer owns a 4096-entry ordering table followed by
+    // 0x400 bytes of display/packet state. func_80031678 temporarily advances
+    // the active table by 0x80 bytes, providing 32 near-depth buckets for
+    // the terrain pass. Enhanced can also retain near object primitives whose
+    // PS1 projection flags would have rejected them; those objects use the
+    // unshifted table and therefore need the same lower-bound contract.
+    const uint NativeOrderingTableBase = 0x8006C268u;
+    const uint NativeOrderingTableStride = 0x00004400u;
+    const uint NativeOrderingTableSize = 0x00004000u;
+    const uint NativeOrderingTableNearGuard = 0x00000080u;
     const uint PcHeapBase =
         ExpandedPrimitiveBufferBase + ExpandedPrimitiveBufferSize * 2u;
     const uint PcHeapEnd = 0x80800000u;
@@ -207,6 +323,9 @@ public static class V82Compat
             out uint traceObjectAddress)
             ? traceObjectAddress
             : 0u;
+    static readonly bool TraceFlyingEnvironmentMutations =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_V82_FLYING_MUTATIONS") == "1";
     static int _rendererOwnershipTraceCount;
     static int _traceObjectCount;
     static readonly HashSet<uint> TracedRenderObjects = [];
@@ -387,6 +506,7 @@ public static class V82Compat
             ? Math.Clamp(terrainRangeScale, 1d, MaximumTerrainRangeScale)
             : 0d;
     static bool _terrainRangeLogged;
+    static long _terrainDetailRangeSamples;
     // Off by default: it closes the widescreen edge exactly as well as the row
     // padding above, but it does so by rewriting the traversal polygon, and a
     // widened polygon intermittently starves the walker. Retained as an
@@ -673,11 +793,13 @@ public static class V82Compat
     public static int CamX, CamY, CamZ;
     public static readonly short[] CamMatrix = new short[9];
 
-    // func_8001D414 links a packet into the ordering table, but only while a
-    // pool counter is under 64. Past that the packet is dropped silently -
-    // a polygon-level loss with no flag, no cull and no trace. Count how often
-    // that happens and how deep the offered geometry was.
-    public static long PoolLinked, PoolDropped;
+    // func_8001D414 links an edge/clip-repair record into the ordering table,
+    // but its retail pool counter is capped at 64. Past that the record is
+    // dropped silently - a polygon-level loss with no flag, no cull and no
+    // trace. Maximum LOD uses the shared expanded queue below; other paths
+    // retain this telemetry around the unmodified retail function.
+    public static long PoolLinked, PoolDropped, PoolNearDepthRemapped;
+    public static long GeometryOrderingNearDepthRemapped;
     public static long EmitterNearTotal, EmitterNearDropped;
 
     public readonly record struct RejectedTriangle(
@@ -687,9 +809,26 @@ public static class V82Compat
     public static readonly List<RejectedTriangle> RejectedTriangles = [];
     public static int PoolHighWater;
 
-    public static void RecordPoolLink(CpuContext c, IMemory m)
+    static bool ExpandedEdgePoolActive(IMemory m, uint gp)
     {
-        m = Dispatcher.UnwrapMemory(m);
+        if (Runtime.Mode != RunMode.Devkit ||
+            !GpuHle.GameplayActive ||
+            !_expandedPrimitiveBuffersActive ||
+            !IsMaximumLevelOfDetail())
+            return false;
+
+        uint buffer = m.ReadU32(gp + 0x20u) & 1u;
+        uint cursor = m.ReadU32(gp + 0x610u);
+        uint arenaBase = ExpandedPrimitiveBase(buffer);
+        return cursor >= arenaBase && cursor < ExpandedEdgePoolBase(buffer);
+    }
+
+    static uint ExpandedEdgePoolBase(uint buffer) =>
+        ExpandedPrimitiveBase(buffer) + ExpandedPrimitiveBufferSize -
+        ExpandedEdgePoolReserve;
+
+    static void RecordRetailPoolLink(CpuContext c, IMemory m)
+    {
         uint bufferBase = 0x800C0000u - 0x2A90u;
         if (m.ReadU32(c.GP + 0x20u) != 0u)
             bufferBase += 0x404u;
@@ -700,6 +839,215 @@ public static class V82Compat
             PoolLinked++;
         else
             PoolDropped++;
+    }
+
+    // Pre-hook for func_8001D414. Returning false replaces only the Maximum-
+    // LOD link operation; returning true preserves the native retail path.
+    public static bool LinkExpandedEdgePool(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        bool expanded = ExpandedEdgePoolActive(m, c.GP);
+        uint buffer = m.ReadU32(c.GP + 0x20u) & 1u;
+        uint rawOrderingBase = NativeOrderingTableBase +
+            buffer * NativeOrderingTableStride;
+        uint orderingLimit = rawOrderingBase + NativeOrderingTableSize;
+        uint target = c.A1;
+
+        // Near-flag suppression is an Enhanced projection contract, not an
+        // expanded-packet-arena contract. Some object passes still use the
+        // retail 64-record pool even at Maximum LOD, so protect their OT link
+        // targets before choosing the retail or expanded storage path.
+        if (Runtime.Mode == RunMode.Devkit && GpuHle.GameplayActive &&
+            IsMaximumLevelOfDetail() && target < rawOrderingBase)
+        {
+            uint underflow = rawOrderingBase - target;
+            if (underflow > NativeOrderingTableNearGuard)
+                throw new InvalidOperationException(
+                    $"edge-pool ordering target 0x{target:X8} is " +
+                    $"{underflow} bytes below buffer {buffer} table " +
+                    $"0x{rawOrderingBase:X8}");
+            short groupBias = unchecked((short)m.ReadU16(c.S0 + 2u));
+            PoolNearDepthRemapped++;
+            Console.Error.WriteLine(
+                $"[V82EdgePoolTarget] remapped-near-depth " +
+                $"path={(expanded ? "expanded" : "retail")} " +
+                $"target=0x{target:X8} base=0x{rawOrderingBase:X8} " +
+                $"underflow={underflow} " +
+                $"group=0x{c.S0:X8} bias={groupBias} " +
+                $"biased-base=0x{c.S1:X8} " +
+                $"depth-offset={unchecked((int)c.T0)} " +
+                $"depth-shift={c.S4} caller=0x{c.RA:X8}");
+            target += NativeOrderingTableNearGuard;
+            // The retail function consumes A1 directly after this pre-hook.
+            // Keep its native storage path but give it the same guarded OT
+            // target used below by the expanded path.
+            c.A1 = target;
+        }
+
+        if (!expanded)
+        {
+            RecordRetailPoolLink(c, m);
+            return true;
+        }
+
+        uint poolBase = ExpandedEdgePoolBase(buffer);
+        if (target >= orderingLimit)
+            throw new InvalidOperationException(
+                $"edge-pool ordering target 0x{target:X8} exceeds " +
+                $"buffer {buffer} table limit 0x{orderingLimit:X8}");
+        int count = unchecked((int)m.ReadU32(poolBase));
+        if (count < 0 || count >= ExpandedEdgePoolCapacity)
+        {
+            PoolDropped++;
+            Console.Error.WriteLine(
+                $"[V82EdgePool] exhausted buffer={buffer} " +
+                $"count={count} capacity={ExpandedEdgePoolCapacity}");
+            return false;
+        }
+
+        uint record = poolBase + 4u + (uint)count * ExpandedEdgePoolRecordSize;
+        int nextCount = count + 1;
+        m.WriteU32(poolBase, (uint)nextCount);
+        PoolLinked++;
+        if (nextCount > PoolHighWater)
+        {
+            PoolHighWater = nextCount;
+            if (nextCount == 65 || (nextCount & 63) == 0)
+                Console.Error.WriteLine(
+                    $"[V82EdgePool] high-water={nextCount}/" +
+                    $"{ExpandedEdgePoolCapacity} buffer={buffer}");
+        }
+
+        // Preserve precise GTE metadata exactly as the generated native stores
+        // do. A raw WriteU32 for A3 loses the projected-vertex side channel.
+        // Restore func_8001CFA4's packet template first: leaving these words
+        // as reused arena contents turns the OT link into an arbitrary-length
+        // GPU command stream and corrupts the complete presentation.
+        m.WriteU32(record + 4u, EdgeRepairTileCommand);
+        c.StoreWord(4, m, record + 8u);
+        c.StoreWord(7, m, record + 12u);
+        uint oldTag = m.ReadU32(target);
+        m.WriteU32(target, record & 0x00FFFFFFu);
+        m.WriteU32(record, EdgeRepairPacketLength | oldTag);
+        return false;
+    }
+
+    /// <summary>
+    /// Normalizes the shared geometry emitter's computed ordering-table
+    /// target after the retail depth math and before either of its two packet
+    /// link sites. Enhanced deliberately retains near-plane primitives whose
+    /// retail GTE flags rejected them. The native terrain pass already moves
+    /// its table base forward by 0x80 bytes for those negative buckets; a
+    /// depth one bucket beyond that guard would otherwise write a packet
+    /// pointer into the adjacent display environment and reinterpret VRAM as
+    /// the presented framebuffer.
+    /// </summary>
+    public static void GuardGeometryOrderingTarget(CpuContext c, IMemory m)
+    {
+        RegisterTrianglePacketNclip(c, m);
+        if (Runtime.Mode != RunMode.Devkit ||
+            !GpuHle.GameplayActive ||
+            !IsMaximumLevelOfDetail())
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint buffer = m.ReadU32(c.GP + 0x20u) & 1u;
+        uint rawOrderingBase = NativeOrderingTableBase +
+            buffer * NativeOrderingTableStride;
+        uint target = c.A3;
+        if (target >= rawOrderingBase)
+            return;
+
+        uint underflow = rawOrderingBase - target;
+        if (underflow > NativeOrderingTableNearGuard)
+            throw new InvalidOperationException(
+                $"geometry ordering target 0x{target:X8} is " +
+                $"{underflow} bytes below buffer {buffer} table " +
+                $"0x{rawOrderingBase:X8}");
+
+        c.A3 = target + NativeOrderingTableNearGuard;
+        long remapped = ++GeometryOrderingNearDepthRemapped;
+        if (remapped <= 16 || (remapped & (remapped - 1)) == 0)
+        {
+            short groupBias = unchecked((short)m.ReadU16(c.S0 + 2u));
+            Console.Error.WriteLine(
+                $"[V82GeometryTarget] remapped-near-depth " +
+                $"target=0x{target:X8} guarded=0x{c.A3:X8} " +
+                $"base=0x{rawOrderingBase:X8} underflow={underflow} " +
+                $"buffer={buffer} group=0x{c.S0:X8} bias={groupBias} " +
+                $"biased-base=0x{c.S1:X8} depth-offset={unchecked((int)c.T0)} " +
+                $"depth-shift={c.S4} count={remapped}");
+        }
+    }
+
+    // Pre-hook for func_8001D484. Retail links records into the buffer being
+    // built and consumes the opposite buffer after the flip; retain that
+    // double-buffer relationship while running the native projection and
+    // packet-builder functions for every expanded record.
+    public static bool ProcessExpandedEdgePool(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        if (!ExpandedEdgePoolActive(m, c.GP))
+            return true;
+
+        uint currentBuffer = m.ReadU32(c.GP + 0x20u) & 1u;
+        uint poolBase = ExpandedEdgePoolBase(currentBuffer ^ 1u);
+        int count = unchecked((int)m.ReadU32(poolBase));
+        if (count <= 0)
+        {
+            m.WriteU32(poolBase, 0u);
+            return false;
+        }
+        if (count > ExpandedEdgePoolCapacity)
+            throw new InvalidOperationException(
+                $"expanded edge pool count {count} exceeds " +
+                $"capacity {ExpandedEdgePoolCapacity}");
+
+        uint offsetX = c.A0;
+        uint offsetY = c.A1;
+        uint packetContext = c.A2;
+        var entryState = c.Snapshot();
+        uint scratch = c.SP - 0x38u;
+        m.WriteU16(scratch + 0x14u, (ushort)1);
+        m.WriteU16(scratch + 0x16u, (ushort)1);
+        try
+        {
+            for (int index = 0; index < count; index++)
+            {
+                uint record = poolBase + 4u +
+                    (uint)index * ExpandedEdgePoolRecordSize;
+                m.WriteU16(
+                    scratch + 0x10u,
+                    (ushort)(m.ReadU16(record + 12u) + offsetX));
+                m.WriteU16(
+                    scratch + 0x12u,
+                    (ushort)(m.ReadU16(record + 14u) + offsetY));
+
+                c.Restore(entryState);
+                c.SP = scratch;
+                c.A0 = scratch + 0x10u;
+                c.A1 = scratch + 0x18u;
+                c.RA = 0x8001D518u;
+                Dispatcher.Call(c, m, 0x8005C294u);
+                bool repair =
+                    (m.ReadU16(scratch + 0x18u) & 0x7FFFu) == 0x7FFFu;
+                if (!repair)
+                    continue;
+
+                c.Restore(entryState);
+                c.SP = scratch;
+                c.A0 = record;
+                c.A1 = packetContext;
+                c.RA = 0x8001D534u;
+                Dispatcher.Call(c, m, 0x8001D00Cu);
+            }
+        }
+        finally
+        {
+            m.WriteU32(poolBase, 0u);
+            c.Restore(entryState);
+        }
+        return false;
     }
 
     // TO-DO #1 (no reverse). The measurement that matters is not pixels or
@@ -837,6 +1185,18 @@ public static class V82Compat
         public uint EmittedMinZ = uint.MaxValue;
         public uint EmittedMaxZ;
         public readonly List<string> Rejected = [];
+        public readonly Dictionary<string, TerrainCellFrameCell> Cells = [];
+    }
+    sealed class TerrainCellFrameCell
+    {
+        public required string Key;
+        public required string Source;
+        public required uint X;
+        public required uint Z;
+        public required GpuHle.TerrainCellTextures Textures;
+        public bool Emitted;
+        public long PacketBytes;
+        public int Triangles;
     }
     // Cheap always-on counters so a per-frame terrain report can separate
     // "the walker selected nothing" from "the emit stage rejected everything".
@@ -856,6 +1216,12 @@ public static class V82Compat
     static readonly Stack<TerrainTransitionScope> TerrainTransitionScopes = [];
     static TerrainCellFrameStats? _terrainCellFrame;
     static int _terrainCellFramesLogged;
+    readonly record struct TerrainCellLogState(
+        string Source,
+        bool Emitted,
+        int Triangles,
+        ulong TextureSignature);
+    static Dictionary<string, TerrainCellLogState> _previousTerrainCells = [];
     static int _geometryTextureTraceCount;
     static readonly bool TraceGeometryTextures =
         Environment.GetEnvironmentVariable(
@@ -871,6 +1237,31 @@ public static class V82Compat
             ? Math.Max(1, testDefeatFrame)
             : 0;
     static bool _testDefeatInjected;
+    static readonly int? _testLoadingTipTableIndex =
+        ReadOptionalInt("RECOMPONE_V82_TEST_LOADING_TIP_INDEX");
+
+    // LOAD.DLL selects one of its 53 tip-table rows from a 15-bit random
+    // value.  A test can select that row deterministically so every authored
+    // glyph is reachable without changing the shipping path: with no
+    // environment value this hook is a strict no-op.
+    public static void OverrideLoadingTipRandom(CpuContext c, IMemory m)
+    {
+        _ = m;
+        if (_testLoadingTipTableIndex is not int tableIndex)
+            return;
+        if (tableIndex is < 0 or >= 53)
+            throw new InvalidOperationException(
+                "RECOMPONE_V82_TEST_LOADING_TIP_INDEX must be 0..52");
+
+        uint lower = (uint)((tableIndex * 32768L + 52L) / 53L);
+        uint upper = (uint)(
+            (((tableIndex + 1L) * 32768L + 52L) / 53L) - 1L);
+        c.V0 = lower + ((upper - lower) >> 1);
+        Console.Error.WriteLine(
+            $"[V82LoadingTipOverride] table-index={tableIndex} " +
+            $"random={c.V0} range={lower}-{upper}");
+    }
+
     // Generic, opt-in water lifecycle fixture.  Coordinates are supplied by
     // the test runner so this contains no arena identity or map-specific
     // behavior.  It teleports the native player object once, then records its
@@ -909,6 +1300,11 @@ public static class V82Compat
             out int soakPlayerType)
             ? Math.Clamp(soakPlayerType, 0, byte.MaxValue)
             : -1;
+    static readonly int[] _soakPlayerTypeSequence =
+        ParsePlayerTypeSequence(
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_V82_PLAYER_TYPE_SEQUENCE"));
+    static int _soakPlayerTypeSequenceIndex;
     static readonly bool _soakPowerUpsEnabled =
         Environment.GetEnvironmentVariable("RECOMPONE_V82_SOAK_POWERUPS") != "0";
     static readonly bool _soakWeaponsEnabled =
@@ -934,6 +1330,12 @@ public static class V82Compat
     // automation is also holding the gas and steering.
     static readonly bool _soakNoAutoInput =
         Environment.GetEnvironmentVariable("RECOMPONE_V82_SOAK_NO_AUTOINPUT") == "1";
+    // A route harness can own steering while still asking the retail weapon
+    // command path to supply only its button sequences. This remains test-only
+    // input and does not branch on arena identity or alter gameplay state.
+    static readonly bool _soakWeaponAutoInput =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_SOAK_WEAPON_AUTOINPUT") == "1";
     static ushort _soakAutomationInput;
     static int _soakInputPhase;
     static int _soakWeaponKind = -1;
@@ -945,9 +1347,24 @@ public static class V82Compat
     static int _soakWeaponAttachFrame;
     static uint _soakWeaponObject;
     static ushort _soakWeaponAmmo;
+    static bool _soakWeaponFiredForAttachment;
     static readonly HashSet<int> SoakWeaponsFired = new();
     static readonly HashSet<string> SoakSpecialCommands = new();
     static readonly HashSet<uint> SoakCallbacks = new();
+
+    static int[] ParsePlayerTypeSequence(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return [];
+        return value.Split(
+                ',', StringSplitOptions.RemoveEmptyEntries |
+                     StringSplitOptions.TrimEntries)
+            .Select(raw => int.TryParse(raw, out int type)
+                ? Math.Clamp(type, 0, byte.MaxValue)
+                : throw new InvalidOperationException(
+                    $"invalid transition-smoke player type '{raw}'"))
+            .ToArray();
+    }
     static readonly HashSet<string> CollisionShapeWarnings = new();
     static readonly Dictionary<uint, (uint HighMesh, uint LowMesh, uint Threshold)> LodThresholds = new();
     static bool _maximumLodLogged;
@@ -956,6 +1373,7 @@ public static class V82Compat
     static bool _expandedPrimitiveBuffersActive;
     static uint _previousPrimitiveHighWaterWords;
     static uint _previousPrimitiveUsedWords;
+    static uint _expandedPrimitiveHighWaterBytes;
     static readonly uint[] SoakDamageZoneOffsets = [0xF8u, 0xFCu, 0x100u];
     static bool _soakRepairWrenchCovered;
     static string? _lastSoakPowerState;
@@ -3076,6 +3494,47 @@ public static class V82Compat
     }
 
     /// <summary>
+    /// Keeps the native inner terrain subdivision active until the outer cell
+    /// LOD boundary while modern maximum detail is active.
+    ///
+    /// The retail emitter has two nested camera-depth limits.  Scratchpad
+    /// <c>+0x98</c> is the whole-cell boundary and <c>+0x9A</c> is the inner
+    /// subcell boundary.  Extending the inner boundary to the outer boundary
+    /// removes the intermediate transition without increasing the amount of
+    /// native geometry emitted for far cells.  The Enhanced backend owns
+    /// texturing the already-visible coarse cells; moving the outer boundary
+    /// itself can overflow the native edge arena and is therefore forbidden.
+    /// </summary>
+    public static void ExtendTerrainTextureDetail(CpuContext c, IMemory m)
+    {
+        if (!GpuHle.GameplayActive ||
+            !ConfigManager.View.HighResolution3D ||
+            !IsMaximumLevelOfDetail())
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        const uint scratchpad = 0x1F800000u;
+        ushort outerDetailPlane = m.ReadU16(scratchpad + 0x98u);
+        ushort innerDetailPlane = m.ReadU16(scratchpad + 0x9Au);
+        if (outerDetailPlane == 0 || innerDetailPlane == 0)
+            return;
+
+        ushort extendedInnerPlane = Math.Max(
+            innerDetailPlane, outerDetailPlane);
+        m.WriteU16(scratchpad + 0x9Au, extendedInnerPlane);
+        long sample = ++_terrainDetailRangeSamples;
+        if (sample == 1 || sample % 600 == 0)
+        {
+            Console.Error.WriteLine(
+                $"[V82TerrainDetailRange] " +
+                $"inner={innerDetailPlane}->{extendedInnerPlane} " +
+                $"outer={outerDetailPlane} " +
+                $"samples={sample} " +
+                $"tick={GpuHle.DebugGameplayTick}");
+        }
+    }
+
+    /// <summary>
     /// Fits the completed terrain traversal polygon to the widened Enhanced
     /// horizontal field of view.
     ///
@@ -3398,6 +3857,23 @@ public static class V82Compat
 
         uint packetEnd = c.V0;
         bool emitted = packetEnd > scope.PacketStart;
+        string key = $"{scope.X},{scope.Z}";
+        var cell = new TerrainCellFrameCell {
+            Key = key,
+            Source = scope.Source,
+            X = scope.X,
+            Z = scope.Z,
+            Textures = scope.Textures,
+            Emitted = emitted,
+            PacketBytes = emitted ? packetEnd - scope.PacketStart : 0,
+        };
+        if (emitted)
+        {
+            m = Dispatcher.UnwrapMemory(m);
+            cell.Triangles = CountGpuTriangles(
+                m, scope.PacketStart, packetEnd);
+        }
+        stats.Cells[key] = cell;
         stats.Calls++;
         stats.MinX = Math.Min(stats.MinX, scope.X);
         stats.MaxX = Math.Max(stats.MaxX, scope.X);
@@ -3646,10 +4122,74 @@ public static class V82Compat
         return new GpuHle.TerrainCellTextures(tiles, gridSize, true);
     }
 
+    static int CountGpuTriangles(IMemory m, uint start, uint end)
+    {
+        int triangles = 0;
+        uint cursor = start;
+        while (cursor + 4u <= end)
+        {
+            uint header = m.ReadU32(cursor);
+            uint words = (header >> 24) + 1u;
+            if (words == 0u || cursor + words * 4u > end)
+                break;
+            byte command = words > 1u
+                ? (byte)(m.ReadU32(cursor + 4u) >> 24)
+                : (byte)0;
+            if (command >= 0x20 && command <= 0x3F)
+                triangles += (command & 0x08) != 0 ? 2 : 1;
+            cursor += words * 4u;
+        }
+        return triangles;
+    }
+
+    static string DescribeTerrainTextures(
+        in GpuHle.TerrainCellTextures textures)
+    {
+        if (!textures.Valid || textures.Tiles == null)
+            return "grid=invalid textures=none";
+        return
+            $"grid={textures.GridSize} textures=" +
+            string.Join('|', textures.Tiles.Select(texture =>
+                $"{texture.TextureId}:tp{texture.TPage:X3}:cl{texture.Clut:X4}:" +
+                $"uv{texture.Uv00:X4}/{texture.Uv01:X4}/" +
+                $"{texture.Uv10:X4}/{texture.Uv11:X4}:" +
+                $"f{texture.Flags:X2}:avg{texture.AverageR}/" +
+                $"{texture.AverageG}/{texture.AverageB}"));
+    }
+
+    static ulong TerrainTextureSignature(
+        in GpuHle.TerrainCellTextures textures)
+    {
+        if (!textures.Valid || textures.Tiles == null)
+            return 0;
+        ulong hash = 14695981039346656037UL;
+        static void Mix(ref ulong value, uint input)
+        {
+            value ^= input;
+            value *= 1099511628211UL;
+        }
+        Mix(ref hash, (uint)textures.GridSize);
+        foreach (GpuHle.TerrainTextureDescriptor texture in textures.Tiles)
+        {
+            Mix(ref hash, texture.TextureId);
+            Mix(ref hash, texture.TPage);
+            Mix(ref hash, texture.Clut);
+            Mix(ref hash, texture.Uv00);
+            Mix(ref hash, texture.Uv01);
+            Mix(ref hash, texture.Uv10);
+            Mix(ref hash, texture.Uv11);
+            Mix(ref hash, texture.Flags);
+            Mix(ref hash, texture.AverageR);
+            Mix(ref hash, texture.AverageG);
+            Mix(ref hash, texture.AverageB);
+        }
+        return hash;
+    }
+
     static void FlushTerrainCellFrame()
     {
         TerrainCellFrameStats? stats = _terrainCellFrame;
-        if (stats is null || stats.Calls == 0 || _terrainCellFramesLogged >= 120)
+        if (stats is null || stats.Calls == 0 || _terrainCellFramesLogged >= 4096)
             return;
 
         _terrainCellFramesLogged++;
@@ -3667,6 +4207,37 @@ public static class V82Compat
             $"submittedBounds={submittedBounds} " +
             $"emittedBounds={emittedBounds} " +
             $"rejectedSample={string.Join(';', stats.Rejected)}");
+        Dictionary<string, TerrainCellLogState> current = [];
+        foreach (TerrainCellFrameCell cell in stats.Cells.Values
+                     .OrderBy(value => value.X)
+                     .ThenBy(value => value.Z))
+        {
+            ulong textureSignature = TerrainTextureSignature(cell.Textures);
+            var cellState = new TerrainCellLogState(
+                cell.Source,
+                cell.Emitted,
+                cell.Triangles,
+                textureSignature);
+            current[cell.Key] = cellState;
+            bool existed = _previousTerrainCells.TryGetValue(
+                cell.Key, out TerrainCellLogState previous);
+            if (existed && previous == cellState)
+                continue;
+            string state = existed ? "change" : "enter";
+            Console.Error.WriteLine(
+                "[V82TerrainCellDetail] " +
+                $"frame={stats.Frame} state={state} cell={cell.Key} " +
+                $"source={cell.Source} emitted={(cell.Emitted ? 1 : 0)} " +
+                $"packetBytes={cell.PacketBytes} triangles={cell.Triangles} " +
+                $"textureSignature={textureSignature:X16} " +
+                DescribeTerrainTextures(cell.Textures));
+        }
+        foreach (string left in _previousTerrainCells.Keys
+                     .Except(current.Keys).Order())
+            Console.Error.WriteLine(
+                $"[V82TerrainCellDetail] frame={stats.Frame} " +
+                $"state=leave cell={left}");
+        _previousTerrainCells = current;
     }
 
     /// <summary>
@@ -3840,6 +4411,9 @@ public static class V82Compat
         ExpandedPrimitiveBufferBase +
         (buffer & 1u) * ExpandedPrimitiveBufferSize;
 
+    static uint ExpandedPrimitiveLimit(uint buffer) =>
+        ExpandedEdgePoolBase(buffer);
+
     // func_80014B3C derives a packet high-water mark from the retail arena
     // before flipping buffers. Preserve the equivalent host-arena count so its
     // bookkeeping remains meaningful when the post-hook redirects the cursor.
@@ -3863,6 +4437,17 @@ public static class V82Compat
                 : cursor >= nativeBase && cursor <= nativeBase + 0x20000u
                     ? (cursor - nativeBase) >> 2
                     : 0u;
+        uint usedBytes = _previousPrimitiveUsedWords << 2;
+        uint usableBytes =
+            ExpandedPrimitiveBufferSize - ExpandedEdgePoolReserve;
+        if (usedBytes > _expandedPrimitiveHighWaterBytes)
+        {
+            _expandedPrimitiveHighWaterBytes = usedBytes;
+            Console.Error.WriteLine(
+                $"[V82PacketArenaUsage] high-water={usedBytes}/" +
+                $"{usableBytes} " +
+                $"percent={100.0 * usedBytes / usableBytes:F2}");
+        }
     }
 
     // Redirect both the packet cursor and its end pointer after the retail
@@ -3887,7 +4472,7 @@ public static class V82Compat
             expandedBase,
             expandedBase + ExpandedPrimitiveBufferSize);
         m.WriteU32(c.GP + 0x610u, expandedBase);
-        m.WriteU32(c.GP + 0xCDCu, expandedBase + ExpandedPrimitiveBufferSize);
+        m.WriteU32(c.GP + 0xCDCu, ExpandedPrimitiveLimit(buffer));
         m.WriteU32(
             c.GP + 0xCE4u,
             Math.Max(_previousPrimitiveHighWaterWords, _previousPrimitiveUsedWords));
@@ -3899,7 +4484,9 @@ public static class V82Compat
             Console.Error.WriteLine(
                 $"[V82LOD] Maximum packet arenas active: " +
                 $"0x{ExpandedPrimitiveBufferBase:X8}-0x{PcHeapBase:X8} " +
-                $"({ExpandedPrimitiveBufferSize >> 10} KiB each)");
+                $"({ExpandedPrimitiveBufferSize >> 10} KiB each; " +
+                $"{ExpandedEdgePoolReserve >> 10} KiB edge pool, " +
+                $"capacity {ExpandedEdgePoolCapacity})");
         }
     }
 
@@ -3961,10 +4548,16 @@ public static class V82Compat
     public static void TraceCommonObjectLoadPre(CpuContext c, IMemory m)
     {
         uint requestedMask = c.A0;
+        int sequenceIndex = Math.Min(
+            _soakPlayerTypeSequenceIndex,
+            Math.Max(0, _soakPlayerTypeSequence.Length - 1));
+        int requestedPlayerType = _soakPlayerTypeSequence.Length > 0
+            ? _soakPlayerTypeSequence[sequenceIndex]
+            : _soakPlayerType;
         for (int player = 0; player < 2; player++)
         {
-            int selectedPlayerType = player == 0 && _soakPlayerType >= 0
-                ? _soakPlayerType
+            int selectedPlayerType = player == 0 && requestedPlayerType >= 0
+                ? requestedPlayerType
                 : V82VehicleRegistry.SelectedTypeForPlayer(player);
             if (selectedPlayerType < 0)
                 continue;
@@ -3977,6 +4570,14 @@ public static class V82Compat
                 (byte)selectedPlayerType);
             Console.Error.WriteLine(
                 $"[V82Vehicles] player={player + 1} type={selectedPlayerType}");
+        }
+        if (_soakPlayerTypeSequence.Length > 0)
+        {
+            Console.Error.WriteLine(
+                $"[V82TransitionSmoke] player-type-sequence " +
+                $"match={_soakPlayerTypeSequenceIndex + 1} " +
+                $"index={sequenceIndex} type={requestedPlayerType}");
+            _soakPlayerTypeSequenceIndex++;
         }
         int primaryParticipants = (sbyte)m.ReadU8(c.GP + 0x31u) < 9 ? 2 : 4;
         V82VehicleRegistry.ApplySelectedNpcTypes(
@@ -4093,6 +4694,18 @@ public static class V82Compat
         ObjectRenderScopes.Clear();
         TracedRenderObjects.Clear();
         _rendererOwnershipTraceCount = 0;
+    }
+
+    static void ResetExpandedEdgePools(IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        m.WriteU32(ExpandedEdgePoolBase(0u), 0u);
+        m.WriteU32(ExpandedEdgePoolBase(1u), 0u);
+        PoolLinked = 0;
+        PoolDropped = 0;
+        PoolNearDepthRemapped = 0;
+        GeometryOrderingNearDepthRemapped = 0;
+        PoolHighWater = 0;
     }
 
     // The pre-game gate polls the retail pad callback without VSync while it
@@ -4249,6 +4862,27 @@ public static class V82Compat
                     uint callbackS6 = c.S6;
                     uint callbackS7 = c.S7;
                     uint primitiveBefore = m.ReadU32(c.GP + 0x610u);
+                    bool traceFlyingMutation =
+                        TraceFlyingEnvironmentMutations &&
+                        _playerVehicle >= 0x80010000u &&
+                        _playerVehicle < PcHeapEnd - 0x200u &&
+                        V82VehicleRegistry.UsesFlyingController(
+                            m, _playerVehicle);
+                    int flyingXBefore = traceFlyingMutation
+                        ? unchecked((int)m.ReadU32(_playerVehicle + 0x34u))
+                        : 0;
+                    int flyingYBefore = traceFlyingMutation
+                        ? unchecked((int)m.ReadU32(_playerVehicle + 0x38u))
+                        : 0;
+                    int flyingZBefore = traceFlyingMutation
+                        ? unchecked((int)m.ReadU32(_playerVehicle + 0x3Cu))
+                        : 0;
+                    uint flyingCallbackBefore = traceFlyingMutation
+                        ? m.ReadU32(_playerVehicle)
+                        : 0u;
+                    ushort flyingHealthBefore = traceFlyingMutation
+                        ? m.ReadU16(_playerVehicle + 0x1Cu)
+                        : (ushort)0;
                     c.A0 = objectAddress;
                     c.A1 = 0u;
                     c.A2 = schedulerArgument;
@@ -4265,6 +4899,40 @@ public static class V82Compat
                     c.S5 = callbackS5;
                     c.S6 = callbackS6;
                     c.S7 = callbackS7;
+                    if (traceFlyingMutation)
+                    {
+                        int flyingXAfter = unchecked((int)m.ReadU32(
+                            _playerVehicle + 0x34u));
+                        int flyingYAfter = unchecked((int)m.ReadU32(
+                            _playerVehicle + 0x38u));
+                        int flyingZAfter = unchecked((int)m.ReadU32(
+                            _playerVehicle + 0x3Cu));
+                        long dx = (long)flyingXAfter - flyingXBefore;
+                        long dy = (long)flyingYAfter - flyingYBefore;
+                        long dz = (long)flyingZAfter - flyingZBefore;
+                        const long mutationThreshold = 0x40000;
+                        if (Math.Abs(dx) >= mutationThreshold ||
+                            Math.Abs(dy) >= mutationThreshold ||
+                            Math.Abs(dz) >= mutationThreshold ||
+                            m.ReadU32(_playerVehicle) != flyingCallbackBefore)
+                        {
+                            Console.Error.WriteLine(
+                                $"[V82FlyingMutation] pass={_objectSchedulerPass + 1} " +
+                                $"source=0x{objectAddress:X8} " +
+                                $"source-kind={m.ReadU8(objectAddress + 8u)} " +
+                                $"source-id={(short)m.ReadU16(objectAddress + 0xAu)} " +
+                                $"callback=0x{callback:X8} " +
+                                $"resolved=0x{resolvedCallback:X8} " +
+                                $"player=0x{_playerVehicle:X8} " +
+                                $"player-callback=0x{flyingCallbackBefore:X8}->" +
+                                $"0x{m.ReadU32(_playerVehicle):X8} " +
+                                $"health={flyingHealthBefore}->" +
+                                $"{m.ReadU16(_playerVehicle + 0x1Cu)} " +
+                                $"pos=({flyingXBefore},{flyingYBefore},{flyingZBefore})->" +
+                                $"({flyingXAfter},{flyingYAfter},{flyingZAfter}) " +
+                                $"delta=({dx},{dy},{dz})");
+                        }
+                    }
                     uint primitiveAfter = m.ReadU32(c.GP + 0x610u);
                     if (traceObject)
                     {
@@ -4466,6 +5134,14 @@ public static class V82Compat
         var active = new HashSet<uint>();
         foreach (uint vehicle in candidates)
         {
+            // Drowning volumes model ground-vehicle water contact. Flight is
+            // an independent registry capability, so a hovering vehicle does
+            // not enter the ground-water dwell/destruction lifecycle.
+            if (V82VehicleRegistry.UsesFlyingController(m, vehicle))
+            {
+                ImportedWaterDwell.Remove(vehicle);
+                continue;
+            }
             uint callback = vehicle >= 0x80010000u && vehicle < PcHeapEnd - 0x200u
                 ? m.ReadU32(vehicle)
                 : 0u;
@@ -4577,6 +5253,12 @@ public static class V82Compat
             m.WriteU32(player + 0x74u, 0u);
             m.WriteU32(player + 0x78u, 0u);
             m.WriteU32(player + 0x7Cu, 0u);
+            if (V82VehicleRegistry.UsesFlyingController(m, player))
+            {
+                m.WriteU32(player + 0x80u, 0u);
+                m.WriteU32(player + 0x84u, 0u);
+                m.WriteU32(player + 0x88u, 0u);
+            }
             Console.Error.WriteLine(
                 $"[V82WaterLifecycle] injected frame={frame} " +
                 $"player=0x{player:X8} callback=0x{_testWaterInitialCallback:X8} " +
@@ -4710,8 +5392,9 @@ public static class V82Compat
                 _ => 0,
             });
         }
-        _soakAutomationInput =
-            _soakNoAutoInput ? (ushort)0 : (ushort)(movement | action);
+        _soakAutomationInput = _soakNoAutoInput
+            ? (_soakWeaponAutoInput ? action : (ushort)0)
+            : (ushort)(movement | action);
         _soakInputPhase = phase;
 
         if (_graphicsShowcaseCaptures && frame is 64 or 68 or 72 or 90 or 96)
@@ -4802,6 +5485,12 @@ public static class V82Compat
 
     static void MaintainSoakVehicle(IMemory m, uint player, int frame)
     {
+        // The soak keeps a vehicle alive only until the requested native
+        // defeat trigger. Converted callbacks can require several scheduler
+        // passes to reach the result flow, so repairing after that trigger
+        // resurrects them and prevents the transition from completing.
+        if (_testDefeatInjected)
+            return;
         if (player < PcHeapBase || player >= PcHeapEnd - 0x104u ||
             m.ReadU8(player + 8u) != 2)
             return;
@@ -4882,6 +5571,7 @@ public static class V82Compat
             _soakWeaponKind = kind;
             _soakWeaponAttachFrame = frame;
             _soakWeaponObject = m.ReadU32(player + 0x120u);
+            _soakWeaponFiredForAttachment = false;
             m.WriteU8(player + 0xAEu, 0);
             if (_soakWeaponObject >= PcHeapBase &&
                 _soakWeaponObject < PcHeapEnd - 0x80u)
@@ -4911,8 +5601,10 @@ public static class V82Compat
             m.ReadU32(player + 0x120u) == _soakWeaponObject)
         {
             ushort ammo = m.ReadU16(_soakWeaponObject + 0x1Cu);
-            if (ammo < _soakWeaponAmmo && SoakWeaponsFired.Add(_soakWeaponKind))
+            if (ammo < _soakWeaponAmmo && !_soakWeaponFiredForAttachment)
             {
+                _soakWeaponFiredForAttachment = true;
+                SoakWeaponsFired.Add(_soakWeaponKind);
                 Console.Error.WriteLine(
                     $"[V82Coverage] weapon-fired kind={_soakWeaponKind} " +
                     $"ammo={_soakWeaponAmmo}->{ammo} fired=" +
@@ -5417,6 +6109,16 @@ public static class V82Compat
     public static void ResetMatchVram(CpuContext c, IMemory m)
     {
         ResetRendererObjectTracking();
+        // An arena that emits no full-display backdrop must not inherit the
+        // previous arena's fog colour.  Reset only that match-scoped inference
+        // here: the shell-to-LOAD handoff still owns the surrounding packet
+        // tracking lifecycle.
+        GpuHle.ResetMatchAtmosphere();
+        ResetExpandedEdgePools(m);
+        // Loading-card presentation is intentionally keyed to gameplay tick
+        // zero. A later match in the same process must begin a fresh scene,
+        // not inherit the prior match's terminal tick.
+        GpuHle.DebugGameplayTick = 0;
         GpuHle.GameplayActive = true;
         var snapshot = c.Snapshot();
         c.A0 = 1u;
@@ -5443,7 +6145,10 @@ public static class V82Compat
         if (c.RA != 0x800137A0u)
             return;
         ResetRendererObjectTracking();
+        GpuHle.ResetMatchAtmosphere();
+        ResetExpandedEdgePools(m);
         _matchVramActive = true;
+        GpuHle.DebugGameplayTick = 0;
         GpuHle.GameplayActive = true;
         _matchVramSuccesses = 0;
         _matchVramFailures = 0;
@@ -6186,7 +6891,17 @@ public static class V82Compat
     // across the two heap allocations that precede the second read.
     public static void PreserveShellImageDecodePre(CpuContext c, IMemory m)
     {
+        bool returningFromGameplay = GpuHle.GameplayActive;
         GpuHle.GameplayActive = false;
+        if (returningFromGameplay)
+        {
+            GpuHle.WidescreenMenuReturnPending = true;
+            // A relocated shell image can remain registered across several
+            // matches, so later returns may execute it without another
+            // Dispatcher relocation event. The retail shell image decoder is
+            // the stable lifecycle seam shared by every gameplay return.
+            InputManager.SignalScriptStage("shell_transition");
+        }
         if (_traceVram)
         {
             Console.Error.WriteLine(

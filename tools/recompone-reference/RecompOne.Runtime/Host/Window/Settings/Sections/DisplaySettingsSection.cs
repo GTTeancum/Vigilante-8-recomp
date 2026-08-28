@@ -8,7 +8,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
     static readonly string[] OutputResolutions = ["1280x720", "1920x1080", "2560x1440", "3840x2160"];
     static readonly string[] AntiAliasingModes = ["Off", "FXAA"];
     static readonly string[] LevelOfDetailModes = ["Stock", "Maximum"];
-    static readonly string[] GraphicsPresets = ["Original", "Enhanced", "Custom"];
+    static readonly string[] GraphicsPresets = ["Enhanced", "Custom"];
     static readonly int[] MsaaModes = [0, 2, 4, 8];
     static readonly int[] AnisotropicModes = [1, 2, 4, 8, 16];
     static readonly int[] InternalResolutionScales = [1, 2, 3, 4];
@@ -36,7 +36,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
             }
             ImGui.EndCombo();
         }
-        ImGui.TextDisabled("Original restores PS1 presentation. Enhanced is the recommended Dreamcast/PS2-style setup.");
+        ImGui.TextDisabled("Enhanced GL is the shipping renderer; Custom changes its individual options.");
 
         string resolution = ConfigManager.View.OutputResolution;
         if (!OutputResolutions.Contains(resolution, StringComparer.OrdinalIgnoreCase))
@@ -106,7 +106,7 @@ internal sealed class DisplaySettingsSection : ISettingsSection
 
         ImGui.SeparatorText("3D rendering");
         bool highResolution3D = ConfigManager.View.HighResolution3D;
-        if (ImGui.Checkbox("Hardware enhanced renderer", ref highResolution3D))
+        if (ImGui.Checkbox("High-resolution 3D rendering", ref highResolution3D))
         {
             ConfigManager.View.HighResolution3D = highResolution3D;
             HostWindow.ApplyGraphicsConfiguration();

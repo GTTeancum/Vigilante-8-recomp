@@ -30,6 +30,8 @@ FATAL_MARKERS = (
     "out of vram",
     "outofmemoryexception",
 )
+DEFAULT_EXIT_AFTER_POLLS = 15000
+FORCED_GUEST_EXIT_AFTER_POLLS = 10200
 
 
 def read_ppm(path: Path) -> tuple[int, int, bytes]:
@@ -61,7 +63,7 @@ def read_ppm(path: Path) -> tuple[int, int, bytes]:
 def visual_metrics(output: Path) -> tuple[int, int]:
     preview_hashes: set[str] = set()
     quantity_band_white: list[int] = []
-    for index in range(12):
+    for index in range(13):
         path = output / (
             f"recompone_present_native_npc_{index:02d}_1280x720_off.ppm"
         )
@@ -101,7 +103,37 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--timeout", type=float, default=420.0)
     parser.add_argument("--heartbeat-timeout", type=float, default=60.0)
+    parser.add_argument(
+        "--text-only",
+        action="store_true",
+        help=(
+            "verify selector traversal, NPC construction, and HUD handoff "
+            "from verbose runtime diagnostics without producing captures"
+        ),
+    )
+    parser.add_argument(
+        "--expected-guest",
+        default="",
+        help=(
+            "optional stable guest ID that must be constructed for the "
+            "selected NPC"
+        ),
+    )
+    parser.add_argument(
+        "--force-expected-guest",
+        action="store_true",
+        help=(
+            "pin enemy row zero to --expected-guest through the generic "
+            "stable-ID automation seam"
+        ),
+    )
     args = parser.parse_args()
+    if args.force_expected_guest and not args.expected_guest:
+        parser.error("--force-expected-guest requires --expected-guest")
+    exit_after_polls = (
+        FORCED_GUEST_EXIT_AFTER_POLLS
+        if args.force_expected_guest else DEFAULT_EXIT_AFTER_POLLS
+    )
 
     exe = args.exe.resolve()
     loose = args.loose.resolve()
@@ -109,8 +141,8 @@ def main() -> int:
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     for stale in (*output.glob("*.ppm"), *output.glob("*.bmp"),
-                  output / "stdout.log", output / "stderr.log",
-                  output / "acceptance.json"):
+                   output / "stdout.log", output / "stderr.log",
+                   output / "runtime.log", output / "acceptance.json"):
         if stale.is_file():
             stale.unlink()
 
@@ -126,16 +158,32 @@ def main() -> int:
             "RECOMPONE_MUTE": "1",
             "RECOMPONE_SUPPRESS_RUMBLE": "1",
             "RECOMPONE_UNTHROTTLED": "0",
-            "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS": "15000",
-            "RECOMPONE_PRESENTATION_CAPTURE": "1",
+            "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS": str(exit_after_polls),
+            "RECOMPONE_PRESENTATION_CAPTURE": (
+                "0" if args.text_only else "1"
+            ),
             "RECOMPONE_PRESENTATION_RESOLUTION": "1280x720",
-            "RECOMPONE_CAPTURE_NATIVE_GUEST_SELECTOR": "1",
+            "RECOMPONE_CAPTURE_NATIVE_GUEST_SELECTOR": (
+                "0" if args.text_only else "1"
+            ),
             "RECOMPONE_CAPTURE_V82_SELECTOR_TURNS": "0",
             "RECOMPONE_TRACE_HUD": "1",
+            "RECOMPONE_TRACE_V82_SELECTOR": "1",
             "RECOMPONE_CAPTURE_DIR": str(output),
+            "RECOMPONE_LOG_PATH": str(output / "runtime.log"),
+            "RECOMPONE_DISPLAY_PROBE_IMAGES": (
+                "0" if args.text_only else "1"
+            ),
+            "RECOMPONE_CAPTURE_SCRIPTED_STAGE": (
+                "" if args.text_only else "gameplay"
+            ),
         }
     )
     env.pop("RECOMPONE_HEADLESS", None)
+    if args.force_expected_guest:
+        env["RECOMPONE_V82_TEST_NPC_GUEST"] = args.expected_guest
+    else:
+        env.pop("RECOMPONE_V82_TEST_NPC_GUEST", None)
 
     started = time.monotonic()
     last_progress = started
@@ -192,6 +240,11 @@ def main() -> int:
         int(value) for value in re.findall(
             r"\[V82NpcSelector\] row=\d+ guest=(\d+)", text)
     })
+    forced_guest_selected = (
+        bool(args.expected_guest)
+        and f"stable={args.expected_guest} " in text
+        and "[V82NpcSelectorTest] row=0 " in text
+    )
     injected_types = sorted({
         int(value) for value in re.findall(
             r"\[V82Vehicles\] NPC participant=\d+ row=\d+ "
@@ -200,6 +253,11 @@ def main() -> int:
     npc_objects = re.findall(
         r"\[V82Vehicles\] created (guest\.[a-z0-9_.-]+) "
         r"identity=(\d+) object=0x[0-9A-F]+", text)
+    expected_guest_constructed = (
+        any(guest == args.expected_guest
+            for guest, _identity in npc_objects)
+        if args.expected_guest else bool(npc_objects)
+    )
     status_geometry = sorted(set(re.findall(
         r"\[V82HudPacket\].*status-backing=1.*"
         r"draw-x=([0-9.-]+) draw-w=(\d+)", text)))
@@ -209,36 +267,57 @@ def main() -> int:
     gameplay = "[Input] stage 'gameplay'" in text
     clean_exit = (
         process.returncode == 0
-        and "deterministic replay completed at poll 15000" in text
+        and (
+            f"deterministic replay completed at poll {exit_after_polls}"
+            in text
+        )
     )
-    expected_guests = list(range(12))
-    try:
-        unique_preview_frames, max_quantity_band_white = visual_metrics(output)
-    except (FileNotFoundError, ValueError) as error:
-        unique_preview_frames = 0
-        max_quantity_band_white = 1_000_000
-        if not reason:
-            reason = f"visual evidence invalid: {error}"
+    expected_guests = list(range(13))
+    traversal_passed = (
+        forced_guest_selected if args.force_expected_guest
+        else traversed == expected_guests
+    )
+    if args.text_only:
+        unique_preview_frames = None
+        max_quantity_band_white = None
+    else:
+        try:
+            unique_preview_frames, max_quantity_band_white = visual_metrics(output)
+        except (FileNotFoundError, ValueError) as error:
+            unique_preview_frames = 0
+            max_quantity_band_white = 1_000_000
+            if not reason:
+                reason = f"visual evidence invalid: {error}"
     passed = (
         not reason
-        and captures == expected_guests
-        and traversed == expected_guests
-        and unique_preview_frames >= 10
-        and max_quantity_band_white < 1600
+        and (args.text_only or captures == expected_guests)
+        and traversal_passed
+        and (args.text_only or unique_preview_frames >= 10)
+        and (args.text_only or max_quantity_band_white < 1600)
         and bool(injected_types)
         and len(npc_objects) == 1
+        and expected_guest_constructed
         and ("74", "90") in status_geometry
         and ("76", "40") in target_icon_geometry
         and gameplay
         and clean_exit
     )
-    if not reason and captures != expected_guests:
+    if not args.text_only and not reason and captures != expected_guests:
         reason = f"NPC captures {captures}, expected {expected_guests}"
-    if not reason and traversed != expected_guests:
+    if (not args.force_expected_guest and not reason
+            and traversed != expected_guests):
         reason = f"NPC traversal {traversed}, expected {expected_guests}"
-    if not reason and unique_preview_frames < 10:
+    if (args.force_expected_guest and not reason
+            and not forced_guest_selected):
+        reason = (
+            "generic NPC automation did not select "
+            f"{args.expected_guest}"
+        )
+    if (not args.text_only and not reason
+            and unique_preview_frames < 10):
         reason = f"only {unique_preview_frames} distinct NPC preview frames"
-    if not reason and max_quantity_band_white >= 1600:
+    if (not args.text_only and not reason
+            and max_quantity_band_white >= 1600):
         reason = (
             "enemy quantity band retained stale text: "
             f"{max_quantity_band_white} white pixels"
@@ -249,6 +328,12 @@ def main() -> int:
         reason = (
             "x1 guest row constructed "
             f"{len(npc_objects)} guest NPC objects, expected 1"
+        )
+    if (args.expected_guest and not reason
+            and not expected_guest_constructed):
+        reason = (
+            f"selected NPC was {npc_objects}, expected "
+            f"{args.expected_guest}"
         )
     if not reason and ("74", "90") not in status_geometry:
         reason = f"enemy HUD backing geometry was {status_geometry}, expected 74x90"
@@ -264,15 +349,19 @@ def main() -> int:
     report = {
         "schema": 1,
         "passed": passed,
+        "text_only": args.text_only,
         "reason": reason or "complete guest NPC selector/gameplay lifecycle",
         "executable": str(exe),
         "executable_sha256": hashlib.sha256(exe.read_bytes()).hexdigest().upper(),
         "captures": captures,
         "traversed_guests": traversed,
+        "forced_guest_selected": forced_guest_selected,
         "unique_preview_frames": unique_preview_frames,
         "max_quantity_band_white_pixels": max_quantity_band_white,
         "injected_types": injected_types,
         "npc_objects": npc_objects,
+        "expected_guest": args.expected_guest,
+        "expected_guest_constructed": expected_guest_constructed,
         "expected_npc_objects": 1,
         "hud_status_geometry": status_geometry,
         "hud_target_icon_geometry": target_icon_geometry,

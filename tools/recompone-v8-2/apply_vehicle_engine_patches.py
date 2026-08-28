@@ -18,6 +18,14 @@ DEFAULT_SOURCE = REPO / "reference-v8-2" / "generated" / "recompiled" / "main.cs
 
 MIGRATIONS = (
     (
+        """        func_8003AC84_Impl(c, m);
+        RecompOne.Runtime.Sdk.V82VehicleRegistry.ApplyControllerPhysics(c, m);
+""",
+        """        func_8003AC84_Impl(c, m);
+        // The generic controller pre-hook owns any substituted movement.
+""",
+    ),
+    (
         """        RecompOne.Runtime.Sdk.V82Compat.EndTextureDecode(
             c, v82TextureDecodeCallerSp);
 """,
@@ -28,6 +36,73 @@ MIGRATIONS = (
 )
 
 REPLACEMENTS = (
+    (
+        """    public static void func_80049D54(CpuContext c, IMemory m)
+    {
+""",
+        """    public static void func_80049D54(CpuContext c, IMemory m)
+    {
+        if (!RecompOne.Runtime.Context.PreHook.Run(
+                RecompOne.Runtime.Sdk.V82VehicleRegistry.RejectUnsupportedTransformationPickup,
+                c, m)) return;
+""",
+    ),
+    (
+        """    public static void func_8003E32C(CpuContext c, IMemory m)
+    {
+""",
+        """    public static void func_8003E32C(CpuContext c, IMemory m)
+    {
+        if (!RecompOne.Runtime.Context.PreHook.Run(
+                RecompOne.Runtime.Sdk.V82VehicleRegistry.RejectUnsupportedTransformationActivation,
+                c, m)) return;
+""",
+    ),
+    (
+        """    public static void func_8003AC84(CpuContext c, IMemory m)
+    {
+        if (!RecompOne.Runtime.Context.PreHook.Run(RecompOne.Runtime.Sdk.V82VehicleRegistry.BeginControllerPhysics, c, m)) return;
+        c.SP = c.SP - 0x20u;
+""",
+        """    public static void func_8003AC84(CpuContext c, IMemory m)
+    {
+        if (!RecompOne.Runtime.Context.PreHook.Run(RecompOne.Runtime.Sdk.V82VehicleRegistry.BeginControllerPhysics, c, m)) return;
+        func_8003AC84_Impl(c, m);
+        // The generic controller pre-hook owns any substituted movement.
+    }
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static void func_8003AC84_Impl(CpuContext c, IMemory m)
+    {
+        c.SP = c.SP - 0x20u;
+""",
+    ),
+    (
+        """        L8003C584: ;
+        c.CopyRegister(18, 0);
+        c.CopyRegister(23, 20);
+        L8003C58C: ;
+""",
+        """        L8003C584: ;
+        c.CopyRegister(18, 0);
+        c.CopyRegister(23, 20);
+        if (RecompOne.Runtime.Sdk.V82VehicleRegistry.SkipWheelConstructionForObject(m, c.S4)) {
+            c.S2 = 6u;
+            goto L_V82FlyingNoWheels;
+        }
+        L8003C58C: ;
+""",
+    ),
+    (
+        """        c.S7 = c.S7 + 0x4u;
+        c.A0 = c.S4 + 0xA8u;
+        c.CopyRegister(5, 0);
+""",
+        """        c.S7 = c.S7 + 0x4u;
+        L_V82FlyingNoWheels: ;
+        c.A0 = c.S4 + 0xA8u;
+        c.CopyRegister(5, 0);
+""",
+    ),
     (
         """    public static void func_80022C54(CpuContext c, IMemory m)
     {

@@ -249,11 +249,11 @@ def main() -> int:
         r"\bsha256=([0-9A-F]{64})\b", roster_stdout
     )
     record(
-        "all_12_og_v8_previews_rebuild_with_stable_native_materials",
+        "all_13_og_v8_previews_rebuild_with_stable_native_materials",
         bool(roster.get("passed"))
         and roster.get("frame_count", 0) >= 7000
         and roster.get("created_preview_count", 0) >= 24
-        and len(revisited) == 12
+        and len(revisited) == 13
         and all(len(generations) >= 2 for generations in revisited.values())
         and all(roster.get("checks", {}).values())
         and roster_logged_hash is not None
@@ -352,7 +352,7 @@ def main() -> int:
     record(
         "logs_and_generated_media_clean",
         not root_logs and not generated_media
-        and len(retained_references) == 12 and len(live_selector_assets) == 12,
+        and len(retained_references) == 13 and len(live_selector_assets) == 13,
         {
             "rootLogs": root_logs,
             "generatedMediaOutsideReferences": generated_media,

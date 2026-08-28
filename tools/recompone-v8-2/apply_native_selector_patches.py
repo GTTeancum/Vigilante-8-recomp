@@ -81,6 +81,19 @@ REPLACEMENTS = (
     # the recompiler emits directly. Two mechanisms writing the same line meant
     # neither anchor matched after a regeneration.
     (
+        """        c.V0 = c.V0 & c.V1;
+        if (c.V0 == 0u) {
+            goto L80106800;
+        }
+""",
+        """        c.V0 = c.V0 & c.V1;
+        RecompOne.Runtime.Sdk.V82VehicleRegistry.ApplyNativeSelectorNavigation(c, m);
+        if (c.V0 == 0u) {
+            goto L80106800;
+        }
+""",
+    ),
+    (
         """        c.LoadWord(4, m, (c.S7 + 0x4Cu));
         c.T3 = c.SP + 0x48u;
 """,

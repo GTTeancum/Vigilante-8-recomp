@@ -55,6 +55,7 @@ GUESTS = (
     ("beezwax", "guest.v8.beezwax", 73, "V8VOICE/D09"),
     ("molo", "guest.v8.molo", 74, "V8VOICE/D10"),
     ("sid_burn", "guest.v8.sid_burn", 75, "V8VOICE/D11"),
+    ("y_the_alien", "guest.v8.y_the_alien", 76, "V8VOICE/D12"),
 )
 
 

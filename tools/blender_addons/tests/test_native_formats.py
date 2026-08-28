@@ -640,6 +640,89 @@ class DonorFreeCompilerTests(unittest.TestCase):
             2, len(tuple(archive.VehicleArchive(package.archive).entries()))
         )
 
+    def test_v82_flying_nontransformable_capabilities_round_trip(self) -> None:
+        value = project.to_dict(self._project("V8_2"))
+        value["controller_class"] = "flying"
+        value["supports_transformations"] = False
+        value["transformation_bank"] = None
+        value["transform_modes"] = []
+        authored = project.VehicleProject.from_dict(value)
+
+        package = registry.compile_package((authored,))
+        game, entries = registry.parse_registry(package.registry)
+        self.assertEqual("V8_2", game)
+        self.assertEqual(1, len(entries))
+        entry = entries[0]
+        self.assertEqual("flying", entry.controller_class)
+        self.assertFalse(entry.supports_transformations)
+        self.assertEqual(
+            registry.FLAG_NON_TRANSFORMABLE |
+            (registry.CONTROLLER_CLASS_IDS["flying"] <<
+             registry.CONTROLLER_CLASS_SHIFT),
+            entry.flags,
+        )
+        self.assertIsNone(entry.transformation_archive_index)
+        self.assertEqual((), entry.transform_modes)
+        self.assertEqual(1, len(tuple(
+            archive.VehicleArchive(package.archive).entries()
+        )))
+
+        decoded = registry.decompile_package(
+            package.archive, package.registry
+        )
+        self.assertEqual("flying", decoded[0].controller_class)
+        self.assertFalse(decoded[0].supports_transformations)
+        self.assertIsNone(decoded[0].transformation_bank)
+        self.assertEqual((), decoded[0].transform_modes)
+        rebuilt = registry.compile_package(decoded)
+        self.assertEqual(package.archive, rebuilt.archive)
+        self.assertEqual(package.registry, rebuilt.registry)
+
+    def test_v82_nontransformable_vehicle_can_own_contact_bank(self) -> None:
+        value = project.to_dict(self._project("V8_2"))
+        value["controller_class"] = "flying"
+        value["supports_transformations"] = False
+        value["transform_modes"] = []
+        authored = project.VehicleProject.from_dict(value)
+
+        package = registry.compile_package((authored,))
+        _game, entries = registry.parse_registry(package.registry)
+        entry = entries[0]
+        self.assertFalse(entry.supports_transformations)
+        self.assertEqual(1, entry.transformation_archive_index)
+        self.assertEqual((), entry.transform_modes)
+        self.assertEqual(2, len(tuple(
+            archive.VehicleArchive(package.archive).entries()
+        )))
+
+        decoded = registry.decompile_package(
+            package.archive, package.registry
+        )
+        self.assertIsNotNone(decoded[0].transformation_bank)
+        self.assertFalse(decoded[0].supports_transformations)
+        self.assertEqual((), decoded[0].transform_modes)
+        rebuilt = registry.compile_package(decoded)
+        self.assertEqual(package.archive, rebuilt.archive)
+        self.assertEqual(package.registry, rebuilt.registry)
+
+    def test_nontransformable_vehicle_rejects_transform_assets(self) -> None:
+        value = project.to_dict(self._project("V8_2"))
+        value["supports_transformations"] = False
+        with self.assertRaisesRegex(ValueError, "cannot own transformation"):
+            project.VehicleProject.from_dict(value)
+
+    def test_registry_rejects_unknown_controller_class_bits(self) -> None:
+        package = registry.compile_package((self._project("V8_2"),))
+        data = bytearray(package.registry)
+        struct.pack_into(
+            "<I",
+            data,
+            registry.HEADER_SIZE + 12,
+            0xF << registry.CONTROLLER_CLASS_SHIFT,
+        )
+        with self.assertRaisesRegex(ValueError, "controller class"):
+            registry.parse_registry(bytes(data))
+
     def test_native_package_decompiles_without_source_or_passthrough(self) -> None:
         for game in ("V8", "V8_2"):
             authored = self._project(game)

@@ -122,7 +122,15 @@ public sealed partial class Gpu
 
     public void WriteGp0(uint word, uint sourceAddress)
     {
-        if (_loadImage) { StoreImageHalfword((ushort)word); StoreImageHalfword((ushort)(word >> 16)); return; }
+        if (_loadImage)
+        {
+            StoreImageHalfword((ushort)word, sourceAddress);
+            StoreImageHalfword((ushort)(word >> 16),
+                sourceAddress == UnknownFifoSource
+                    ? UnknownFifoSource
+                    : sourceAddress + 2u);
+            return;
+        }
         if (_polyline)
         {
             if ((word & 0xF000F000u) == 0x50005000u) { _polyline = false; ExecutePolyline(); ClearFifo(); }
@@ -179,6 +187,7 @@ public sealed partial class Gpu
 
     void WriteGp1Display(uint op, uint p)
     {
+        Log.Gpu($"display op=0x{op:X2} payload=0x{p:X6}");
         switch (op)
         {
             case 0x05:
@@ -214,6 +223,7 @@ public sealed partial class Gpu
         _drawOffsetX = _drawOffsetY = 0;
         _setMask = _checkMask = false;
         _dispVramX = _dispVramY = 0;
+        Enhanced.FontFileProvenance.ResetVram();
     }
 
     void SetGpuInfo(uint p)

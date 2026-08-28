@@ -203,6 +203,12 @@ public static class LibGpu
         byte isrgb24 = m.ReadU8(env + 0x11);
         bool pal = gpu.Pal;
 
+        Log.Gpu(
+            $"PutDispEnv caller=0x{c.RA:X8} env=0x{env:X8} " +
+            $"disp={dispX},{dispY} {dispW}x{dispH} " +
+            $"screen={scrX},{scrY} {scrW}x{scrH} " +
+            $"interlace={isinter} rgb24={isrgb24}");
+
         gpu.WriteGp1(0x05000000u | (((uint)dispY & 0x3FF) << 10) | ((uint)dispX & 0x3FF));
 
         int hStart = scrX * 10 + 0x260;

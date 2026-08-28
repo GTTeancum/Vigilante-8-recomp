@@ -55,7 +55,11 @@ def collect_title_glyphs(trace_dir: Path) -> list[TitleGlyph]:
         r"tpage=0x0(?:28|48) clut=0x780C"
     )
     glyphs: dict[str, TitleGlyph] = {}
-    for log in sorted(trace_dir.glob("*.stderr.log")):
+    logs = set(trace_dir.glob("*.stderr.log"))
+    direct_log = trace_dir / "stderr.log"
+    if direct_log.is_file():
+        logs.add(direct_log)
+    for log in sorted(logs):
         for line in log.read_text(encoding="utf-8", errors="ignore").splitlines():
             match = pattern.search(line)
             if match is None:
@@ -218,15 +222,37 @@ def main() -> None:
     glyphs = collect_title_glyphs(args.trace_dir)
     if not glyphs:
         raise SystemExit(f"no loading-title glyphs found in {args.trace_dir}")
-    atlas, entries, sources, proof = build_atlas(glyphs, dump_dir, args.scale)
+    manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+    image_name = f"images/ui/loading_title_fnt_runtime_{args.scale}x.dds"
+    existing_keys = {
+        str(entry.get("key", ""))
+        for entry in manifest.get("entries", [])
+        if str(entry.get("image", "")) == image_name
+    }
+    glyphs = [glyph for glyph in glyphs if glyph.key not in existing_keys]
+    if not glyphs:
+        print("loading-title atlas already covers every traced glyph")
+        return
 
+    atlas, entries, sources, proof = build_atlas(glyphs, dump_dir, args.scale)
     pack_root = args.manifest.parent
-    atlas_path = pack_root / "images" / "ui" / f"loading_title_fnt_runtime_{args.scale}x.dds"
+    atlas_path = pack_root / image_name
     atlas_path.parent.mkdir(parents=True, exist_ok=True)
+    if atlas_path.is_file() and existing_keys:
+        existing_atlas = Image.open(atlas_path).convert("RGBA")
+        y_offset = existing_atlas.height
+        combined = Image.new(
+            "RGBA",
+            (max(existing_atlas.width, atlas.width), y_offset + atlas.height),
+            (0, 0, 0, 0),
+        )
+        combined.alpha_composite(existing_atlas, (0, 0))
+        combined.alpha_composite(atlas, (0, y_offset))
+        atlas = combined
+        for entry in entries:
+            entry["y"] = int(entry["y"]) + y_offset
     atlas.save(atlas_path)
 
-    manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    strip_existing(manifest)
     manifest["entries"].extend(entries)
     manifest_sources = manifest.setdefault("sources", {})
     manifest_sources.update(sources)

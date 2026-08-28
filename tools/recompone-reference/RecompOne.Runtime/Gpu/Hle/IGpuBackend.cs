@@ -25,4 +25,9 @@ public interface IGpuBackend
     // Drop submission state whose meaning is scoped to one gameplay scene.
     // Native VRAM and display targets deliberately survive menu transitions.
     void ResetTransientState() { }
+
+    // Forget atmosphere inferred from the previous gameplay scene without
+    // disturbing packet ownership or other renderer state still used while
+    // the shell hands control to the next arena.
+    void ResetAtmosphereState() { }
 }

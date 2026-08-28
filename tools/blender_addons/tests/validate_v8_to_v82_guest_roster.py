@@ -232,8 +232,11 @@ def main() -> None:
         "registry does not contain the complete V8-exclusive roster",
     )
     require(
-        len(forms) == len(EXPECTED_IDS) * 3,
-        "archive does not contain three owned banks per vehicle",
+        len(forms) == sum(
+            2 + (vehicle.transformation_bank is not None)
+            for vehicle in vehicles
+        ),
+        "archive does not contain the authored owned banks per vehicle",
     )
 
     bank_triples = tuple(
@@ -244,10 +247,24 @@ def main() -> None:
         )
         for entry in entries
     )
-    expected_triples = tuple(
-        (index * 3, index * 3 + 1, index * 3 + 2)
-        for index in range(len(EXPECTED_IDS))
-    )
+    expected_triples_list = []
+    next_bank = 0
+    for vehicle in vehicles:
+        body_bank = next_bank
+        next_bank += 1
+        transform_bank = (
+            next_bank
+            if vehicle.transformation_bank is not None
+            else None
+        )
+        if transform_bank is not None:
+            next_bank += 1
+        selector_bank = next_bank
+        next_bank += 1
+        expected_triples_list.append(
+            (body_bank, transform_bank, selector_bank)
+        )
+    expected_triples = tuple(expected_triples_list)
     require(
         bank_triples == expected_triples,
         "body/transformation/selector banks are not independently owned",
@@ -280,7 +297,7 @@ def main() -> None:
         )
         require(
             vehicle.transformation_bank is not None,
-            f"{vehicle.stable_id} has no owned transformation bank",
+            f"{vehicle.stable_id} has no authored wheel/contact bank",
         )
 
         direct_keys = {
@@ -288,10 +305,11 @@ def main() -> None:
             for slot in vehicle.slots
             if slot.parent == vehicle.body_kind and slot.key is not None
         }
+        expected_wheels = {0x8000, 0x8001, 0x8002, 0x8003}
         require(
             direct_keys & set(range(0x8000, 0x8006))
-            == {0x8000, 0x8001, 0x8002, 0x8003},
-            f"{vehicle.stable_id} does not preserve four wheel anchors",
+            == expected_wheels,
+            f"{vehicle.stable_id} does not expose four native contact anchors",
         )
         require(
             direct_keys & set(range(0x8010, 0x8017))
@@ -299,10 +317,39 @@ def main() -> None:
             f"{vehicle.stable_id} does not expose all sequel weapon mounts",
         )
         require(
-            len(vehicle.transform_modes) == 4
-            and all(len(mode) == 6 for mode in vehicle.transform_modes),
-            f"{vehicle.stable_id} lacks the native four-by-six mode table",
+            (
+                len(vehicle.transform_modes) == 4
+                and all(len(mode) == 6 for mode in vehicle.transform_modes)
+            )
+            if vehicle.supports_transformations
+            else vehicle.transform_modes == (),
+            f"{vehicle.stable_id} transform table contradicts capability",
         )
+        if not vehicle.supports_transformations:
+            contact_bank = vehicle.transformation_bank
+            require(
+                len(contact_bank.groups) == 1
+                and contact_bank.groups[0].faces == ()
+                and contact_bank.groups[0].controls == ()
+                and contact_bank.textures == ()
+                and contact_bank.animations == (),
+                f"{vehicle.stable_id} non-transformable contact bank renders geometry",
+            )
+            contact_roots = {
+                index
+                for index, slot in enumerate(contact_bank.slots)
+                if slot.parent is None
+            }
+            require(
+                vehicle.stats["wheel_kind_front"] in contact_roots
+                and vehicle.stats["wheel_kind_rear"] in contact_roots
+                and all(
+                    contact_bank.slots[root].render_group == 0
+                    and contact_bank.slots[root].collision is not None
+                    for root in contact_roots
+                ),
+                f"{vehicle.stable_id} contact roots are not native collision-only objects",
+            )
 
         source_index = VEHICLES[index][0]
         source_body = decode_bank(V8_COMMON, "V8", source_index)
@@ -336,6 +383,10 @@ def main() -> None:
                 "body_bank": bank_triples[index][0],
                 "transformation_bank": bank_triples[index][1],
                 "selector_bank": bank_triples[index][2],
+                "controller_class": vehicle.controller_class,
+                "supports_transformations": (
+                    vehicle.supports_transformations
+                ),
                 "body_environment": body_environment,
                 "selector_environment": selector_environment,
                 "source_project_sha256": digest(source_project),
@@ -374,7 +425,7 @@ def main() -> None:
     )
 
     report = {
-        "schema": "v8-to-v82-roster-validation-v2",
+        "schema": "v8-to-v82-roster-validation-v3",
         "result": "PASS",
         "source_game": "V8",
         "target_game": "V8_2",
@@ -410,7 +461,8 @@ def main() -> None:
         encoding="utf-8",
     )
     print(
-        "PASS: 12 vehicles, 36 exclusive native banks, deterministic "
+        f"PASS: {len(vehicles)} vehicles, {len(forms)} exclusive native "
+        "banks, deterministic "
         f"compile, {native_texture_count} retail-compatible texture records, "
         "byte-exact Blender round trip, and source-to-V8:2 environment-role "
         "parity"

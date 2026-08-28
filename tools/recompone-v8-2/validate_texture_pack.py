@@ -165,6 +165,38 @@ def main() -> int:
     if not route_names:
         raise ValueError("pack contains no 4x XRTP route textures")
 
+    font_identities: set[tuple[str, int, int]] = set()
+    for font in manifest.get("fontFiles", []):
+        source_path = str(font["path"]).replace("\\", "/").upper()
+        upload_width_words = int(font.get("uploadWidthWords", 0))
+        upload_height = int(font.get("uploadHeight", 0))
+        identity = (source_path, upload_width_words, upload_height)
+        if ((upload_width_words == 0) != (upload_height == 0) or
+                upload_width_words < 0 or upload_height < 0 or
+                identity in font_identities):
+            raise ValueError(
+                f"invalid or duplicate file-font identity: {identity}"
+            )
+        font_identities.add(identity)
+        source_width = int(font["sourceWidth"])
+        source_height = int(font["sourceHeight"])
+        path = resolve_dds(font["image"])
+        referenced.add(path)
+        size = size_of(font["image"])
+        if (size[0] % source_width != 0 or
+                size[1] % source_height != 0):
+            raise ValueError(
+                f"file font {source_path} is {size[0]}x{size[1]}; "
+                "dimensions must be integral multiples of its source atlas"
+            )
+        scale_x = size[0] // source_width
+        scale_y = size[1] // source_height
+        if scale_x != scale_y or scale_x < 4:
+            raise ValueError(
+                f"file font {source_path} uses {scale_x}x{scale_y}; "
+                "required scale is square and at least 4x"
+            )
+
     for key, source_list in manifest.get("sources", {}).items():
         if not any(":XRTP" in str(source) for source in source_list):
             continue
@@ -215,6 +247,7 @@ def main() -> int:
         f"{len(vehicle_images)} 4x vehicle DDS files, "
         f"{len(route_names)} 4x route DDS files, "
         f"{len(runtime_ui_images)} 4x runtime UI DDS files, "
+        f"{len(font_identities)} file-font DDS files, "
         f"maximum={maximum_width}x{maximum_height}, "
         f"generator={manifest.get('generator', 'unspecified')}"
     )

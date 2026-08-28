@@ -1,0 +1,15 @@
+# Enter the native V8:2 Arcade selector, hold LEFT until the append-only
+# carousel reaches Y, leave the saucer settled long enough for the native
+# suspension-impact path to be evaluated, then accept Y.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+2160+950=LEFT
+3300+3=CROSS

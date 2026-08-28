@@ -1,0 +1,29 @@
+# Enter the unlocked original-V8 one-player selector, advance to Y, and leave
+# the saucer active for a full 240-frame source trajectory before accepting.
+10+2=START
+
+[press_start]
+1+2=START
+
+[main_menu]
+1+2=DOWN
+10+2=CROSS
+
+[player_count]
+5+2=CROSS
+
+[location_oilfield]
+1+2=CROSS
+
+[choose_player]
+5+2=RIGHT
+25+2=RIGHT
+45+2=RIGHT
+65+2=RIGHT
+85+2=RIGHT
+105+2=RIGHT
+125+2=RIGHT
+145+2=RIGHT
+165+2=RIGHT
+185+2=RIGHT
+465+2=CROSS

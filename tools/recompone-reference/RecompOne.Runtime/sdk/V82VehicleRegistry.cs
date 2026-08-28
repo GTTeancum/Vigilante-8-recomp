@@ -23,6 +23,8 @@ public static class V82VehicleRegistry
     const uint BuildNativeBankAddress = 0x8001E914u;
     const uint CreateObjectAddress = 0x80031DDCu;
     const uint GenericVehicleDispatchAddress = 0x800367A4u;
+    const uint TerrainHeightAddress = 0x8001B750u;
+    const uint MatrixNormalizeAddress = 0x80059A0Cu;
 
     const int HeaderSize = 20;
     const int LegacyEntrySize = 36;
@@ -37,6 +39,11 @@ public static class V82VehicleRegistry
     const int PlayerSelectionCount = 4;
     const int NpcSelectionCount = 4;
     const ushort NoArchiveIndex = 0xFFFF;
+    const uint FlagNonTransformable = 1u << 0;
+    const int ControllerClassShift = 8;
+    const uint ControllerClassMask = 0xFu << ControllerClassShift;
+    const uint SupportedCapabilityFlags =
+        FlagNonTransformable | ControllerClassMask;
     const uint SelectorInputAddress = 0x8006B508u;
     // Gameplay and SHELL share six participant bytes at 0x8006B8F4. The
     // first two are players; the four enemy-row vehicle types start at +2.
@@ -59,10 +66,13 @@ public static class V82VehicleRegistry
     const uint SelectorPlayerHeaderText = 0x80100860u;
     const uint SelectorEnemyHeaderReturn = 0x80107A1Cu;
     const uint SelectorEnemyHeaderText = 0x801008E8u;
+    const uint SelectorPlayerSuspensionSoundReturn = 0x80106DE0u;
+    const uint SelectorNpcSuspensionSoundReturn = 0x8010838Cu;
     const uint SelectorSoundBankAddress = 0x80116738u;
     const uint NativeSoundPlayerAddress = 0x8001E28Cu;
     const int OriginalV8SelectionVoiceBase = 14;
-    const int OriginalV8SelectionVoiceCount = 12;
+    const int OriginalV8SelectionVoiceCount = 13;
+    const int OriginalV8ResultVoiceCount = 13;
     const int SelectorPortraitWidth = 260;
     const int SelectorPortraitHeight = 422;
     const int SelectorPortraitNativeWidth = 240;
@@ -76,6 +86,10 @@ public static class V82VehicleRegistry
     static readonly List<NativeVehicleBankSource> Banks = [];
     static readonly Dictionary<uint, int> ObjectEntries = [];
     static readonly Dictionary<uint, uint> ObjectUpgradeStatus = [];
+    static readonly HashSet<(uint Pickup, uint Vehicle, ushort Mode)>
+        RejectedTransformationPickups = [];
+    static readonly HashSet<uint> WheelLessConstructionLogged = [];
+    static readonly Dictionary<uint, ulong> ControllerPhysicsTicks = [];
     static bool _initialized;
     static bool _dispatchRegistered;
     static readonly int[] SelectedTypes = [-1, -1, -1, -1];
@@ -94,12 +108,21 @@ public static class V82VehicleRegistry
     static int _selectorLastRetailSlot;
     static int _selectorProxySlot;
     static int _selectorPreviousSlot = -1;
+    // The retail selector reports a direction every frame while a physical
+    // direction remains held. Retail preview loading naturally paces that
+    // repeat, but independently packaged previews can rebuild quickly enough
+    // for one human press to cross several guest entries. Latch the accepted
+    // native direction until the native input word returns to neutral so the
+    // appended carousel has one stable, reviewable entry per press.
+    static int _selectorDirectionLatch;
+    static int _selectorSuppressedHoldSteps;
     static int _selectorPlayer;
     static uint _selectorContext;
     static int _selectorStableFrames;
     static int _selectorStableGuest = -1;
     static bool _selectorEnemyPhase;
     static int _selectorEnemyFrames;
+    static bool _testNpcSelectionApplied;
     static int _selectorAcceptedGuest = -1;
     static int _selectorAcceptedProxySlot = -1;
     static uint _selectorPreviewObject;
@@ -120,6 +143,7 @@ public static class V82VehicleRegistry
         "'70 Stag Pickup",
         "'66 School Bus",
         "'69 Manta",
+        "'64 Luxo Saucer",
     ];
     static int _pendingResultVoiceChannel = -1;
     static readonly string? DefaultReplacementStableId =
@@ -146,6 +170,9 @@ public static class V82VehicleRegistry
     static readonly bool TraceNativeSelectorPhysics =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_V82_SELECTOR_PHYSICS") == "1";
+    static readonly string? TestNpcStableId =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TEST_NPC_GUEST");
 
     public static int Count => Entries.Count;
     public static int TotalVehicleCount => RetailVehicleCount + Entries.Count;
@@ -429,6 +456,8 @@ public static class V82VehicleRegistry
         _selectorFirstRetailSlot = 0;
         _selectorLastRetailSlot = RetailVehicleCount - 1;
         _selectorProxySlot = 0;
+        _selectorDirectionLatch = 0;
+        _selectorSuppressedHoldSteps = 0;
         // Native selector context 1 is player one and context 2 is player
         // two. Context 0 is the AI/enemy pass and must not displace player
         // one's accepted guest.
@@ -440,6 +469,7 @@ public static class V82VehicleRegistry
         _selectorStableGuest = -1;
         _selectorEnemyPhase = _selectorContext == 0u;
         _selectorEnemyFrames = 0;
+        _testNpcSelectionApplied = false;
         _selectorAcceptedGuest = -1;
         _selectorAcceptedProxySlot = -1;
         _selectorPreviewObject = 0u;
@@ -469,6 +499,8 @@ public static class V82VehicleRegistry
         _selectorAcceptedGuest = -1;
         _selectorAcceptedProxySlot = -1;
         _selectorPreviousSlot = -1;
+        _selectorDirectionLatch = 0;
+        _selectorSuppressedHoldSteps = 0;
         V82Compat.ReleaseSelectorVramReservation(c, m);
         ReleaseAllSelectorRuntimes(c, Dispatcher.UnwrapMemory(m), "selector-end");
         _selectorPreviewObject = 0u;
@@ -476,18 +508,18 @@ public static class V82VehicleRegistry
     }
 
     /// <summary>
-    /// Manifest form of <see cref="ResolveNativeSelectorSlot"/>. An inline
-    /// patch can only emit a bare call, so a hook that returns a value has to
-    /// be declared through a wrapper that stores it; declaring the resolver
-    /// directly silently discards the slot it computed.
+    /// Establishes the native retail baseline and projects an active guest
+    /// back through its safe retail slot. Navigation itself is handled at
+    /// the selector's accepted-step seam by
+    /// <see cref="ApplyNativeSelectorNavigation"/>.
     /// </summary>
     public static void ApplyNativeSelectorSlot(CpuContext c, IMemory m) =>
         c.FP = ResolveNativeSelectorSlot(c, m);
 
     /// <summary>
-    /// Extends the native 18-entry carousel without replacing it. The retail
-    /// selector still performs all input repeat, transition, and availability
-    /// handling; this seam inserts the packaged V8 entries only at the wrap.
+    /// Keeps the current logical guest projected through the native selector's
+    /// fixed retail tables. The first call records the actual first available
+    /// retail slot; it does not infer navigation from preview rebuilds.
     /// </summary>
     public static uint ResolveNativeSelectorSlot(CpuContext c, IMemory m)
     {
@@ -496,94 +528,141 @@ public static class V82VehicleRegistry
             return slot;
 
         int current = checked((int)slot);
-        uint input = m.ReadU32(SelectorInputAddress);
-        bool left = (input & 0x80000000u) != 0u;
-        bool right = (input & 0x20000000u) != 0u;
         int guest = NativeSelectorGuestIndex;
-        int previousGuest = guest;
-        if (TraceNativeSelectorInput && (left || right))
-            Console.Error.WriteLine(
-                $"[V82SelectorSlot] input=0x{input:X8} current={current} " +
-                $"previous={_selectorPreviousSlot} guest={guest} " +
-                $"proxy={_selectorProxySlot}");
 
         if (_selectorPreviousSlot < 0)
         {
             _selectorFirstRetailSlot = current;
-            _selectorLastRetailSlot = current;
+            _selectorLastRetailSlot = RetailVehicleCount - 1;
+            _selectorProxySlot = current;
             _selectorPreviousSlot = current;
+            Console.Error.WriteLine(
+                $"[V82SelectorCarousel] baseline retail={current} " +
+                $"total-retail={RetailVehicleCount} guests={Entries.Count}");
             return slot;
         }
 
         if (guest < 0)
         {
-            if (right && current < _selectorPreviousSlot)
-            {
-                _selectorFirstRetailSlot = current;
-                _selectorLastRetailSlot = _selectorPreviousSlot;
-                guest = 0;
-                _selectorProxySlot = _selectorFirstRetailSlot;
-                current = _selectorProxySlot;
-            }
-            else if (left && current > _selectorPreviousSlot)
-            {
-                _selectorFirstRetailSlot = _selectorPreviousSlot;
-                _selectorLastRetailSlot = current;
-                guest = Entries.Count - 1;
-                _selectorProxySlot = _selectorFirstRetailSlot;
-                current = _selectorProxySlot;
-            }
-            else
-            {
-                _selectorPreviousSlot = current;
-                return slot;
-            }
+            _selectorPreviousSlot = current;
+            return slot;
         }
-        else if (right && current != _selectorPreviousSlot)
+
+        current = _selectorProxySlot;
+        _selectorPreviousSlot = current;
+        // Circle is the native Hot Rod/custom modifier. Guest entries own one
+        // canonical bank, so consume it before the selector can enter the
+        // retail variant editor.
+        uint input = m.ReadU32(SelectorInputAddress);
+        m.WriteU32(SelectorInputAddress, input & ~0x00200000u);
+        return checked((uint)current);
+    }
+
+    /// <summary>
+    /// Extends the accepted navigation step produced by V8:2's own carousel.
+    /// This hook runs after native modulo/availability handling and before the
+    /// next preview is built, so guest identity never depends on a transient
+    /// render slot or on model-loading cadence.
+    /// </summary>
+    public static void ApplyNativeSelectorNavigation(CpuContext c, IMemory m)
+    {
+        if (Entries.Count == 0 || _selectorPreviousSlot < 0)
+            return;
+
+        uint input = m.ReadU32(SelectorInputAddress);
+        bool left = (input & 0x80000000u) != 0u;
+        bool right = (input & 0x20000000u) != 0u;
+        if (left == right)
+            return;
+
+        int direction = right ? 1 : -1;
+        int nativeTarget = checked((int)c.FP);
+        int previous = _selectorPreviousSlot;
+        int guest = NativeSelectorGuestIndex;
+
+        if (guest >= 0 && _selectorDirectionLatch == direction)
         {
-            if (guest + 1 < Entries.Count)
-            {
-                guest++;
-                current = _selectorProxySlot;
-            }
-            else
-            {
-                _selectorGuestIndex = -1;
-                _selectorPreviousSlot = _selectorFirstRetailSlot;
-                return checked((uint)_selectorFirstRetailSlot);
-            }
+            _selectorSuppressedHoldSteps++;
+            c.FP = checked((uint)_selectorProxySlot);
+            _selectorPreviousSlot = _selectorProxySlot;
+            return;
         }
-        else if (left && current != _selectorPreviousSlot)
+
+        string from;
+        string to;
+        if (guest < 0)
         {
-            if (guest > 0)
+            bool wrappedRight = right && nativeTarget < previous;
+            bool wrappedLeft = left && nativeTarget > previous;
+            if (!wrappedRight && !wrappedLeft)
             {
-                guest--;
-                current = _selectorProxySlot;
+                _selectorPreviousSlot = nativeTarget;
+                Console.Error.WriteLine(
+                    $"[V82SelectorCarousel] step direction=" +
+                    $"{(right ? "right" : "left")} " +
+                    $"from=retail.{previous} to=retail.{nativeTarget} " +
+                    $"native-target={nativeTarget} input=0x{input:X8}");
+                return;
             }
-            else
-            {
-                _selectorGuestIndex = -1;
-                _selectorPreviousSlot = _selectorLastRetailSlot;
-                return checked((uint)_selectorLastRetailSlot);
-            }
+
+            _selectorFirstRetailSlot = wrappedRight
+                ? nativeTarget
+                : previous;
+            _selectorLastRetailSlot = wrappedRight
+                ? previous
+                : nativeTarget;
+            _selectorProxySlot = _selectorFirstRetailSlot;
+            guest = wrappedRight ? 0 : Entries.Count - 1;
+            from = $"retail.{previous}";
+            to = $"guest.{guest}";
         }
         else
         {
-            current = _selectorProxySlot;
+            from = $"guest.{guest}";
+            if (right && guest + 1 < Entries.Count)
+            {
+                guest++;
+                to = $"guest.{guest}";
+            }
+            else if (left && guest > 0)
+            {
+                guest--;
+                to = $"guest.{guest}";
+            }
+            else
+            {
+                int retail = right
+                    ? _selectorFirstRetailSlot
+                    : _selectorLastRetailSlot;
+                _selectorGuestIndex = -1;
+                _selectorPreviousSlot = retail;
+                _selectorDirectionLatch = direction;
+                _selectorSuppressedHoldSteps = 0;
+                c.FP = checked((uint)retail);
+                Console.Error.WriteLine(
+                    $"[V82SelectorCarousel] step direction=" +
+                    $"{(right ? "right" : "left")} from={from} " +
+                    $"to=retail.{retail} native-target={nativeTarget} " +
+                    $"input=0x{input:X8}");
+                return;
+            }
         }
 
         _selectorGuestIndex = guest;
-        _selectorPreviousSlot = current;
+        _selectorPreviousSlot = _selectorProxySlot;
+        _selectorDirectionLatch = direction;
+        _selectorSuppressedHoldSteps = 0;
         if (_selectorStableGuest != guest)
         {
             _selectorStableGuest = guest;
             _selectorStableFrames = 0;
         }
-        // Circle is the native Hot Rod/custom modifier. Guest entries own one
-        // canonical bank, so consume it before the selector can enter the
-        // retail variant editor.
-        m.WriteU32(SelectorInputAddress, input & ~0x00200000u);
-        return checked((uint)current);
+        c.FP = checked((uint)_selectorProxySlot);
+        Console.Error.WriteLine(
+            $"[V82SelectorCarousel] step direction=" +
+            $"{(right ? "right" : "left")} from={from} to={to} " +
+            $"stable={Entries[guest].StableId} proxy={_selectorProxySlot} " +
+            $"native-target={nativeTarget} input=0x{input:X8}");
     }
 
     /// <summary>
@@ -606,6 +685,35 @@ public static class V82VehicleRegistry
         {
             ClearNpcSelection(row);
             EnsureNpcProxyIsolation(m);
+            return;
+        }
+
+        if (!_testNpcSelectionApplied && row == 0 &&
+            !string.IsNullOrWhiteSpace(TestNpcStableId))
+        {
+            int forcedGuest = Entries.FindIndex(entry =>
+                string.Equals(
+                    entry.StableId,
+                    TestNpcStableId,
+                    StringComparison.OrdinalIgnoreCase));
+            if (forcedGuest < 0)
+                throw new InvalidOperationException(
+                    $"requested NPC test guest '{TestNpcStableId}' " +
+                    "is not registered");
+
+            SelectorNpcGuests[row] = forcedGuest;
+            SelectorNpcProxySlots[row] = current;
+            SelectorNpcPreviousSlots[row] = current;
+            Volatile.Write(
+                ref SelectedNpcTypes[row], Entries[forcedGuest].Type);
+            SetActiveEnemySelectorGuest(row);
+            EnsureNpcProxyIsolation(m);
+            _testNpcSelectionApplied = true;
+            Console.Error.WriteLine(
+                $"[V82NpcSelectorTest] row={row} guest={forcedGuest} " +
+                $"stable={Entries[forcedGuest].StableId} " +
+                $"type={Entries[forcedGuest].Type} " +
+                $"proxy={SelectorNpcProxySlots[row]}");
             return;
         }
 
@@ -798,13 +906,35 @@ public static class V82VehicleRegistry
             return true;
         }
 
+        uint selectorInput = m.ReadU32(SelectorInputAddress);
+        ushort physicalPad = _selectorPlayer == 1
+            ? RecompOne.Runtime.Hardware.Controller.State2
+            : RecompOne.Runtime.Hardware.Controller.State;
+        bool physicalLeft =
+            (physicalPad & RecompOne.Runtime.Hardware.Controller.Left) == 0;
+        bool physicalRight =
+            (physicalPad & RecompOne.Runtime.Hardware.Controller.Right) == 0;
+        if (!physicalLeft && !physicalRight &&
+            _selectorDirectionLatch != 0)
+        {
+            Console.Error.WriteLine(
+                $"[V82SelectorCarousel] release direction=" +
+                $"{(_selectorDirectionLatch > 0 ? "right" : "left")} " +
+                $"suppressed={_selectorSuppressedHoldSteps} " +
+                $"guest={NativeSelectorGuestIndex} " +
+                $"raw-pad=0x{physicalPad:X4}");
+            _selectorDirectionLatch = 0;
+            _selectorSuppressedHoldSteps = 0;
+        }
+
         int guest = NativeSelectorGuestIndex;
         if (TraceNativeSelectorInput && guest >= 0)
         {
-            uint input = m.ReadU32(SelectorInputAddress);
-            if (input != 0u)
+            if (selectorInput != 0u)
                 Console.Error.WriteLine(
-                    $"[V82Selector] guest={guest} input=0x{input:X8}");
+                    $"[V82Selector] guest={guest} " +
+                    $"input=0x{selectorInput:X8} " +
+                    $"latch={_selectorDirectionLatch}");
         }
         if (guest < 0 || guest >= Entries.Count)
             return true;
@@ -884,8 +1014,8 @@ public static class V82VehicleRegistry
     /// <summary>
     /// Plays the original V8 driver-accept line through V8:2's native shell
     /// SND bank, voice allocator, SPU transfer, mixer, and lifetime handling.
-    /// The loose shell bank appends the twelve byte-exact V8 samples at
-    /// indices 14..25 in original roster order.
+    /// The loose shell bank appends the thirteen byte-exact V8 samples at
+    /// indices 14..26 in original roster order.
     /// </summary>
     static void PlayOriginalV8SelectionVoice(
         CpuContext c, IMemory m, int guest)
@@ -901,17 +1031,25 @@ public static class V82VehicleRegistry
             return;
         }
 
+        // SelectorSoundBankAddress is a SHELL-linked global.  SHELL can be
+        // reloaded at a relocated address after returning from gameplay, so
+        // resolve the global through the overlay-aware memory view before
+        // switching to raw memory for the heap-owned SND bank itself.
+        uint soundBankGlobal =
+            Dispatcher.ResolveLinkedAddress(m, SelectorSoundBankAddress);
+        uint bank = m.ReadU32(soundBankGlobal);
         m = Dispatcher.UnwrapMemory(m);
-        uint bank = m.ReadU32(SelectorSoundBankAddress);
         if (bank == 0u)
             throw new InvalidOperationException(
-                "V8:2 selector SND bank is not loaded");
+                $"V8:2 selector SND bank is not loaded " +
+                $"(global=0x{soundBankGlobal:X8})");
         int sample = OriginalV8SelectionVoiceBase + guest;
         int count = m.ReadU16(bank);
         if (count <= sample)
             throw new InvalidDataException(
                 $"V8:2 selector SND bank has {count} entries; " +
-                $"original V8 voice {sample} is unavailable");
+                $"original V8 voice {sample} is unavailable " +
+                $"(global=0x{soundBankGlobal:X8} bank=0x{bank:X8})");
 
         var state = c.Snapshot();
         try
@@ -933,6 +1071,7 @@ public static class V82VehicleRegistry
             $"[V82SelectionVoice] guest={guest} " +
             $"stable={Entries[guest].StableId} sample={sample} " +
             $"native_voice={3 + _selectorPlayer} " +
+            $"global=0x{soundBankGlobal:X8} bank=0x{bank:X8} entries={count} " +
             $"audio_frame={Audio.MixedFrames}");
     }
 
@@ -1226,6 +1365,31 @@ public static class V82VehicleRegistry
     }
 
     /// <summary>
+    /// The native selector chooses impact samples 1-3 from the preview
+    /// vehicle's suspension compression after it reaches the display floor.
+    /// Flying controllers have no suspension and retain their authored hover
+    /// descent, so only that contact-derived sound is skipped. The ordinary
+    /// preview-change cue, selection voice, and every ground-vehicle impact
+    /// continue through the unchanged native sound path.
+    /// </summary>
+    public static bool AllowNativeSelectorSuspensionSound(
+        CpuContext c, IMemory m)
+    {
+        if (c.RA != SelectorPlayerSuspensionSoundReturn &&
+            c.RA != SelectorNpcSuspensionSoundReturn)
+            return true;
+        if (!TrySelectorEntry(out VehicleEntry? entry) ||
+            entry?.ControllerClass != VehicleControllerClass.Flying)
+            return true;
+
+        Console.Error.WriteLine(
+            $"[V82SelectorSound] suppressed suspension-impact " +
+            $"stable={entry.StableId} controller={entry.ControllerClass} " +
+            $"sample={c.A2} voice={c.A0} caller=0x{c.RA:X8}");
+        return false;
+    }
+
+    /// <summary>
     /// Compatibility no-op for generated projects produced before object
     /// identity retirement moved into PcFree. Vehicle event 2 can call
     /// func_8002CC08 while retaining the destroyed vehicle for the result
@@ -1326,9 +1490,17 @@ public static class V82VehicleRegistry
             .Append(" frame=").Append(frame)
             .Append(" vehicle=0x").Append(vehicle.ToString("X8"))
             .Append(" pos=(")
-            .Append(S32(m.ReadU32(vehicle + 0x20u))).Append(',')
-            .Append(S32(m.ReadU32(vehicle + 0x24u))).Append(',')
-            .Append(S32(m.ReadU32(vehicle + 0x28u))).Append(')');
+            .Append(S32(m.ReadU32(vehicle + 0x34u))).Append(',')
+            .Append(S32(m.ReadU32(vehicle + 0x38u))).Append(',')
+            .Append(S32(m.ReadU32(vehicle + 0x3Cu))).Append(')')
+            .Append(" vel=(")
+            .Append(S32(m.ReadU32(vehicle + 0x80u))).Append(',')
+            .Append(S32(m.ReadU32(vehicle + 0x84u))).Append(',')
+            .Append(S32(m.ReadU32(vehicle + 0x88u))).Append(')')
+            .Append(" follow=(")
+            .Append(S32(m.ReadU32(vehicle + 0x4Cu))).Append(',')
+            .Append(S32(m.ReadU32(vehicle + 0x50u))).Append(',')
+            .Append(S32(m.ReadU32(vehicle + 0x54u))).Append(')');
         for (int index = 0; index < TransformWheelCount; index++)
         {
             uint wheel = m.ReadU32(
@@ -1435,6 +1607,9 @@ public static class V82VehicleRegistry
         Banks.Clear();
         ObjectEntries.Clear();
         ObjectUpgradeStatus.Clear();
+        RejectedTransformationPickups.Clear();
+        WheelLessConstructionLogged.Clear();
+        ControllerPhysicsTicks.Clear();
         SelectorPortraitPixels.Clear();
         _defaultReplacementEntry = null;
         ClearSelections();
@@ -1496,7 +1671,7 @@ public static class V82VehicleRegistry
             return null;
 
         int channel = type - FirstCustomType;
-        if ((uint)channel >= 12u)
+        if ((uint)channel >= OriginalV8ResultVoiceCount)
             throw new InvalidOperationException(
                 $"result voice channel {channel} for {entry.StableId} is invalid");
 
@@ -1672,9 +1847,10 @@ public static class V82VehicleRegistry
             result.AddRange(
                 Banks[bodyArchiveIndex].ReadVramAllocations(
                     palettesFirst: true));
-            result.AddRange(
-                Banks[entry.TransformArchiveIndex].ReadVramAllocations(
-                    palettesFirst: true));
+            if (entry.TransformArchiveIndex != NoArchiveIndex)
+                result.AddRange(
+                    Banks[entry.TransformArchiveIndex].ReadVramAllocations(
+                        palettesFirst: true));
         }
         return result;
     }
@@ -1692,16 +1868,19 @@ public static class V82VehicleRegistry
                     entry.BodyRuntime,
                     Banks[entry.BodyArchiveIndex].BinLength,
                     source) ||
-                PointerInBank(
-                    m,
-                    entry.TransformRuntime,
-                    Banks[entry.TransformArchiveIndex].BinLength,
-                    source) ||
-                PointerInBank(
-                    m,
-                    entry.SelectorTransformRuntime,
-                    Banks[entry.TransformArchiveIndex].BinLength,
-                    source) ||
+                entry.TransformArchiveIndex != NoArchiveIndex &&
+                (
+                    PointerInBank(
+                        m,
+                        entry.TransformRuntime,
+                        Banks[entry.TransformArchiveIndex].BinLength,
+                        source) ||
+                    PointerInBank(
+                        m,
+                        entry.SelectorTransformRuntime,
+                        Banks[entry.TransformArchiveIndex].BinLength,
+                        source)
+                ) ||
                 (
                     entry.SelectorPreviewArchiveIndex != NoArchiveIndex &&
                     PointerInBank(
@@ -1782,16 +1961,19 @@ public static class V82VehicleRegistry
                     entry.BodyRuntime,
                     Banks[entry.BodyArchiveIndex].BinLength,
                     address) ||
-                PointerInBank(
-                    m,
-                    entry.TransformRuntime,
-                    Banks[entry.TransformArchiveIndex].BinLength,
-                    address) ||
-                PointerInBank(
-                    m,
-                    entry.SelectorTransformRuntime,
-                    Banks[entry.TransformArchiveIndex].BinLength,
-                    address) ||
+                entry.TransformArchiveIndex != NoArchiveIndex &&
+                (
+                    PointerInBank(
+                        m,
+                        entry.TransformRuntime,
+                        Banks[entry.TransformArchiveIndex].BinLength,
+                        address) ||
+                    PointerInBank(
+                        m,
+                        entry.SelectorTransformRuntime,
+                        Banks[entry.TransformArchiveIndex].BinLength,
+                        address)
+                ) ||
                 entry.SelectorPreviewArchiveIndex != NoArchiveIndex &&
                 PointerInBank(
                     m,
@@ -1807,6 +1989,9 @@ public static class V82VehicleRegistry
     {
         ObjectEntries.Clear();
         ObjectUpgradeStatus.Clear();
+        RejectedTransformationPickups.Clear();
+        WheelLessConstructionLogged.Clear();
+        ControllerPhysicsTicks.Clear();
         _constructingEntry = null;
         _constructingSelectorPreview = false;
         foreach (VehicleEntry entry in Entries)
@@ -1914,7 +2099,8 @@ public static class V82VehicleRegistry
         if (vehicle == 0u)
             return false;
 
-        ApplyAuthoredSuspension(m, vehicle, entry);
+        if (entry.ControllerClass == VehicleControllerClass.Ground)
+            ApplyAuthoredSuspension(m, vehicle, entry);
 
         for (uint offset = 0xF8u; offset <= 0xFCu; offset += 4u)
         {
@@ -2008,11 +2194,304 @@ public static class V82VehicleRegistry
         uint runtime = selector
             ? entry.SelectorTransformRuntime
             : entry.TransformRuntime;
+        if (entry.TransformArchiveIndex == NoArchiveIndex)
+            return retailPointer;
         if (runtime == 0u)
             throw new InvalidOperationException(
                 $"custom vehicle 0x{vehicle:X8} has no owned " +
                 $"{(selector ? "selector " : "")}wheel bank");
         return runtime;
+    }
+
+    /// <summary>
+    /// Selects native contact construction from authored bank topology.
+    /// Movement controller and transformation eligibility are independent
+    /// capabilities: a flying vehicle may still own authored selector/contact
+    /// supports while rejecting transformation powerups.
+    /// </summary>
+    public static bool SkipWheelConstructionForObject(IMemory m, uint vehicle)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        VehicleEntry? entry = _constructingEntry;
+        if (entry == null &&
+            !TryEntryForObject(m, vehicle, out entry))
+            return false;
+        if (entry == null ||
+            entry.TransformArchiveIndex != NoArchiveIndex)
+            return false;
+
+        if (WheelLessConstructionLogged.Add(vehicle))
+            Console.Error.WriteLine(
+                $"[V82VehicleController] construct {entry.StableId} " +
+                $"object=0x{vehicle:X8} contact-bank=none " +
+                "suspension-children=0 native-body-lifecycle=1");
+        return true;
+    }
+
+    /// <summary>
+    /// Capture the native action-step vehicle before the generated function
+    /// restores its caller's saved registers. Controller selection remains
+    /// entirely registry-driven and ground vehicles retain the retail path.
+    /// </summary>
+    public static bool BeginControllerPhysics(CpuContext c, IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        uint vehicle = c.A0;
+        if (vehicle != 0u &&
+            TryEntryForObject(m, vehicle, out VehicleEntry? entry) &&
+            entry?.ControllerClass == VehicleControllerClass.Flying)
+        {
+            ApplyOriginalV8FlyingPhysics(c, m, vehicle, entry);
+            // The V8:2 function being hooked is the ground suspension
+            // integrator. A wheel-less controller must not execute it after
+            // its own source-authored movement step.
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Reports the registry-authored movement capability for an instantiated
+    /// vehicle. Environment systems use this to distinguish ground contact
+    /// from flight without identifying a particular guest, level, or asset.
+    /// </summary>
+    public static bool UsesFlyingController(IMemory m, uint vehicle)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        return vehicle != 0u &&
+            TryEntryForObject(m, vehicle, out VehicleEntry? entry) &&
+            entry?.ControllerClass == VehicleControllerClass.Flying;
+    }
+
+    static void ApplyOriginalV8FlyingPhysics(
+        CpuContext c, IMemory m, uint vehicle, VehicleEntry entry)
+    {
+        int posX = I32(m, vehicle + 0x34u);
+        int posY = I32(m, vehicle + 0x38u);
+        int posZ = I32(m, vehicle + 0x3Cu);
+        int terrainY = CallGuestI32(
+            c, m, TerrainHeightAddress,
+            unchecked((uint)posX), unchecked((uint)posZ));
+        int surfaceY = terrainY;
+        int waterPlane = unchecked((int)m.ReadU32(c.GP + 0xDB0u));
+        ushort waterTpage = m.ReadU16(c.GP + 0xDC8u);
+        ushort waterSize = m.ReadU16(c.GP + 0xDCAu);
+        bool nativeWaterActive =
+            waterPlane >= 0x10000 && waterPlane < 0x10000000 &&
+            waterTpage != 0 && waterSize != 0;
+        // Native water is a global horizontal surface clipped by the terrain.
+        // Y grows downward, so when the terrain lies below the active water
+        // plane the plane is the first surface a flying controller encounters.
+        // This preserves the source hover equation over both dry terrain and
+        // water without consulting a level or vehicle identity.
+        if (nativeWaterActive && terrainY > waterPlane)
+            surfaceY = waterPlane;
+        int depth = Rtz(Sub32(surfaceY, posY), 8);
+
+        int vx = I32(m, vehicle + 0x80u);
+        int vy = I32(m, vehicle + 0x84u);
+        int vz = I32(m, vehicle + 0x88u);
+        ulong speedSquared =
+            (ulong)((long)vx * vx) +
+            (ulong)((long)vy * vy) +
+            (ulong)((long)vz * vz);
+        WriteI32(m, vehicle + 0x8Cu,
+            unchecked((int)(IntegerSquareRoot(speedSquared) >> 7)));
+
+        int pitchRate = I32(m, vehicle + 0x90u);
+        int yawRate = unchecked((short)m.ReadU16(vehicle + 0xA8u) << 6);
+        int rollRate = I32(m, vehicle + 0x98u);
+        pitchRate = Add32(
+            pitchRate,
+            (short)m.ReadU16(vehicle + 0x2Au) < 1 ? -0x200 : 0x200);
+        rollRate = Add32(
+            rollRate,
+            (short)m.ReadU16(vehicle + 0x26u) < 0 ? 0x200 : -0x200);
+
+        int thrust = (short)m.ReadU16(vehicle + 0xAAu);
+        int lateral = Mul32(
+            (short)m.ReadU16(vehicle + 0x24u), thrust);
+        vx = Add32(vx, Rtz(lateral, 4));
+
+        int depthAbs = Abs32(depth);
+        int denominator = Mul32(depth, depthAbs);
+        if (denominator < 0x800)
+            denominator = 0x800;
+        // Original V8 initializes the flying controller's lift/drag term to
+        // 0x5000. V8:2 object +0xE4 is a native object pointer, not that
+        // source field, so keep this controller-owned state out of the native
+        // vehicle layout.
+        const int liftMass = 0x5000;
+        int liftNumerator = Mul32(liftMass, 0x1C00);
+        vy = Sub32(Add32(vy, 0x1C00), liftNumerator / denominator);
+
+        int longitudinal = Mul32(
+            (short)m.ReadU16(vehicle + 0x30u), thrust);
+        vz = Add32(vz, Rtz(longitudinal, 4));
+
+        WriteI32(m, vehicle + 0x80u, vx);
+        WriteI32(m, vehicle + 0x84u, vy);
+        WriteI32(m, vehicle + 0x88u, vz);
+        WriteI32(m, vehicle + 0x90u, pitchRate);
+        WriteI32(m, vehicle + 0x94u, yawRate);
+        WriteI32(m, vehicle + 0x98u, rollRate);
+
+        ApplySmallAngleRotation(
+            m, vehicle + 0x20u,
+            Rtz(pitchRate, 7),
+            Rtz(yawRate, 7),
+            Rtz(rollRate, 7));
+
+        posX = Add32(posX, Rtz(vx, 7));
+        posY = Add32(posY, Rtz(vy, 7));
+        posZ = Add32(posZ, Rtz(vz, 7));
+        WriteI32(m, vehicle + 0x34u, posX);
+        WriteI32(m, vehicle + 0x38u, posY);
+        WriteI32(m, vehicle + 0x3Cu, posZ);
+        NormalizeMatrix(c, m, vehicle + 0x20u);
+
+        WriteI32(m, vehicle + 0x90u, Mul32(pitchRate, 0xF80) >> 12);
+        WriteI32(m, vehicle + 0x94u, Mul32(yawRate, 0xF80) >> 12);
+        WriteI32(m, vehicle + 0x98u, Mul32(rollRate, 0xF80) >> 12);
+        WriteI32(m, vehicle + 0x80u, Sub32(vx, Rtz(vx, 6)));
+        WriteI32(m, vehicle + 0x84u, Sub32(vy, Rtz(vy, 6)));
+        WriteI32(m, vehicle + 0x88u, Sub32(vz, Rtz(vz, 6)));
+
+        if ((m.ReadU32(vehicle) & 0x00800000u) == 0u)
+        {
+            // V8:2 moved the object's current position from +0x24 to +0x34,
+            // but its physics-follow target is +0x4C rather than following
+            // that same +0x10 shift. In particular, +0x5C is the native XOBF
+            // bank pointer and must never receive positional state.
+            WriteI32(m, vehicle + 0x4Cu, posX);
+            WriteI32(m, vehicle + 0x50u, posY);
+            WriteI32(m, vehicle + 0x54u, posZ);
+        }
+
+        ulong tick = ControllerPhysicsTicks.TryGetValue(vehicle, out ulong old)
+            ? old + 1u
+            : 1u;
+        ControllerPhysicsTicks[vehicle] = tick;
+        if (tick == 1u || tick % 60u == 0u)
+            Console.Error.WriteLine(
+                $"[V82VehicleController] tick={tick} id={entry.StableId} " +
+                $"object=0x{vehicle:X8} controller=flying " +
+                $"pos=({posX},{posY},{posZ}) " +
+                $"vel=({vx},{vy},{vz}) terrain-y={terrainY} " +
+                $"water-plane={waterPlane} water-active={(nativeWaterActive ? 1 : 0)} " +
+                $"surface-y={surfaceY} depth={depth} " +
+                $"controls=({(short)m.ReadU16(vehicle + 0xA8u)}," +
+                $"{thrust}) speed={I32(m, vehicle + 0x8Cu)}");
+    }
+
+    static void ApplySmallAngleRotation(
+        IMemory m, uint matrix, int pitch, int yaw, int roll)
+    {
+        int[,] old = new int[3, 3];
+        for (int row = 0; row < 3; row++)
+            for (int column = 0; column < 3; column++)
+                old[row, column] = (short)m.ReadU16(
+                    matrix + (uint)((row * 3 + column) * 2));
+
+        int[,] small =
+        {
+            { 0x1000, -roll, yaw },
+            { roll, 0x1000, -pitch },
+            { -yaw, pitch, 0x1000 },
+        };
+        for (int row = 0; row < 3; row++)
+        {
+            for (int column = 0; column < 3; column++)
+            {
+                long value = 0;
+                for (int inner = 0; inner < 3; inner++)
+                    value += (long)old[row, inner] * small[inner, column];
+                int scaled = unchecked((int)(value >> 12));
+                scaled = Math.Clamp(scaled, short.MinValue, short.MaxValue);
+                m.WriteU16(
+                    matrix + (uint)((row * 3 + column) * 2),
+                    unchecked((ushort)(short)scaled));
+            }
+        }
+    }
+
+    static void NormalizeMatrix(CpuContext c, IMemory m, uint matrix)
+    {
+        var state = c.Snapshot();
+        try
+        {
+            c.A0 = matrix;
+            c.A1 = matrix;
+            Dispatcher.Call(c, m, MatrixNormalizeAddress);
+        }
+        finally
+        {
+            c.Restore(state);
+        }
+    }
+
+    static int CallGuestI32(
+        CpuContext c, IMemory m, uint address, uint a0, uint a1)
+    {
+        var state = c.Snapshot();
+        try
+        {
+            c.A0 = a0;
+            c.A1 = a1;
+            Dispatcher.Call(c, m, address);
+            return unchecked((int)c.V0);
+        }
+        finally
+        {
+            c.Restore(state);
+        }
+    }
+
+    static int I32(IMemory m, uint address) =>
+        unchecked((int)m.ReadU32(address));
+
+    static void WriteI32(IMemory m, uint address, int value) =>
+        m.WriteU32(address, unchecked((uint)value));
+
+    static int Add32(int left, int right) =>
+        unchecked((int)(unchecked((uint)left) + unchecked((uint)right)));
+
+    static int Sub32(int left, int right) =>
+        unchecked((int)(unchecked((uint)left) - unchecked((uint)right)));
+
+    static int Mul32(int left, int right) =>
+        unchecked((int)((long)left * right));
+
+    static int Abs32(int value) =>
+        value < 0 ? Sub32(0, value) : value;
+
+    static int Rtz(int value, int shift)
+    {
+        if (value < 0)
+            value = Add32(value, (1 << shift) - 1);
+        return value >> shift;
+    }
+
+    static ulong IntegerSquareRoot(ulong value)
+    {
+        ulong result = 0;
+        ulong bit = 1UL << 62;
+        while (bit > value)
+            bit >>= 2;
+        while (bit != 0)
+        {
+            if (value >= result + bit)
+            {
+                value -= result + bit;
+                result = (result >> 1) + bit;
+            }
+            else
+            {
+                result >>= 1;
+            }
+            bit >>= 2;
+        }
+        return result;
     }
 
     public static uint TransformBankForObject(
@@ -2035,6 +2514,58 @@ public static class V82VehicleRegistry
                entry.TransformTableRuntime != 0u
             ? entry.TransformTableRuntime
             : retailPointer;
+    }
+
+    /// <summary>
+    /// Reject hover/float/ski before the retail pickup callback mutates either
+    /// participant. Zero is its native "not collected" result, leaving the
+    /// pickup available. Capability metadata is the only vehicle authority.
+    /// </summary>
+    public static bool RejectUnsupportedTransformationPickup(
+        CpuContext c, IMemory m)
+    {
+        if (c.A1 != 3u || c.A0 == 0u || c.A2 == 0u)
+            return true;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint vehicle = m.ReadU32(c.A2);
+        if (vehicle == 0u ||
+            !TryEntryForObject(m, vehicle, out VehicleEntry? entry) ||
+            entry == null || entry.SupportsTransformations)
+            return true;
+
+        ushort itemKind = m.ReadU16(c.A0 + 0x1Au);
+        if (itemKind is < 7 or > 9)
+            return true;
+
+        ushort mode = checked((ushort)(itemKind - 6));
+        c.V0 = 0u;
+        if (RejectedTransformationPickups.Add((c.A0, vehicle, mode)))
+            Console.Error.WriteLine(
+                $"[V82VehicleCapability] rejected transform pickup " +
+                $"mode={mode} pickup=0x{c.A0:X8} vehicle=0x{vehicle:X8} " +
+                $"controller={entry.ControllerClass} consumed=0");
+        return false;
+    }
+
+    /// <summary>
+    /// Reject direct transformation requests from scripts/debug actions which
+    /// do not pass through the physical pickup callback.
+    /// </summary>
+    public static bool RejectUnsupportedTransformationActivation(
+        CpuContext c, IMemory m)
+    {
+        if (c.A1 == 0u ||
+            !TryEntryForObject(
+                Dispatcher.UnwrapMemory(m), c.A0, out VehicleEntry? entry) ||
+            entry == null || entry.SupportsTransformations)
+            return true;
+        c.V0 = 0u;
+        Console.Error.WriteLine(
+            $"[V82VehicleCapability] rejected direct transform " +
+            $"mode={c.A1} vehicle=0x{c.A0:X8} " +
+            $"controller={entry.ControllerClass}");
+        return false;
     }
 
     public static uint UpgradeStatusForObject(
@@ -2118,7 +2649,8 @@ public static class V82VehicleRegistry
         {
             if (entry.StatsRuntime == 0u)
                 entry.StatsRuntime = AllocateBytes(c, m, entry.Stats);
-            if (entry.TransformTableRuntime == 0u)
+            if (entry.SupportsTransformations &&
+                entry.TransformTableRuntime == 0u)
                 entry.TransformTableRuntime =
                     AllocateTransformTable(c, m, entry.TransformModes);
             if (entry.PowerupTableRuntime == 0u)
@@ -2126,7 +2658,8 @@ public static class V82VehicleRegistry
                     AllocatePowerupTable(c, m, entry.Powerups);
             entry.BodyRuntime =
                 BuildNativeBank(c, m, Banks[entry.BodyArchiveIndex]);
-            if (entry.TransformRuntime == 0u)
+            if (entry.TransformArchiveIndex != NoArchiveIndex &&
+                entry.TransformRuntime == 0u)
                 entry.TransformRuntime =
                     BuildNativeBank(c, m, Banks[entry.TransformArchiveIndex]);
             Console.Error.WriteLine(
@@ -2148,7 +2681,8 @@ public static class V82VehicleRegistry
         VehicleEntry entry, CpuContext c, IMemory m)
     {
         if (entry.SelectorPreviewRuntime != 0u &&
-            entry.SelectorTransformRuntime != 0u)
+            (entry.TransformArchiveIndex == NoArchiveIndex ||
+             entry.SelectorTransformRuntime != 0u))
             return;
         if (entry.SelectorPreviewArchiveIndex == NoArchiveIndex)
             throw new InvalidDataException(
@@ -2159,7 +2693,8 @@ public static class V82VehicleRegistry
         {
             if (entry.StatsRuntime == 0u)
                 entry.StatsRuntime = AllocateBytes(c, m, entry.Stats);
-            if (entry.SelectorTransformRuntime == 0u)
+            if (entry.TransformArchiveIndex != NoArchiveIndex &&
+                entry.SelectorTransformRuntime == 0u)
             {
                 entry.SelectorTransformAllocation = BuildOwnedNativeBank(
                     c, m, Banks[entry.TransformArchiveIndex]);
@@ -2909,11 +3444,22 @@ public static class V82VehicleRegistry
             ushort selectorPreviewBodyKind = previewCurrent
                 ? U16(data, record + 42)
                 : (ushort)0;
-            if (flags != 0 || statSize != StatsSize ||
-                transformArchiveIndex == NoArchiveIndex ||
+            uint controllerId =
+                (flags & ControllerClassMask) >> ControllerClassShift;
+            bool supportsTransformations =
+                (flags & FlagNonTransformable) == 0u;
+            if ((flags & ~SupportedCapabilityFlags) != 0u ||
+                controllerId > (uint)VehicleControllerClass.Flying ||
+                statSize != StatsSize ||
                 entryReserved != 0 || extensionReserved != 0)
                 throw new InvalidDataException(
                     $"custom vehicle entry {index} has unsupported flags or sizes");
+            if ((supportsTransformations &&
+                 (transformArchiveIndex == NoArchiveIndex || transformOffset == 0u)) ||
+                (!supportsTransformations && transformOffset != 0u))
+                throw new InvalidDataException(
+                    $"custom vehicle entry {index} has contradictory " +
+                    "transformation capability data");
 
             RequireRange(data, statOffset, StatsSize, $"entry {index} stats");
             if (legacy)
@@ -2922,8 +3468,9 @@ public static class V82VehicleRegistry
                 throw new InvalidDataException(
                     $"custom vehicle entry {index} rear suspension damping " +
                     "is outside the signed native coefficient range");
-            RequireRange(data, transformOffset, TransformTableSize,
-                $"entry {index} transformation table");
+            if (supportsTransformations)
+                RequireRange(data, transformOffset, TransformTableSize,
+                    $"entry {index} transformation table");
             RequireRange(data, powerupOffset, PowerupTableSize,
                 $"entry {index} powerup table");
             if (data[statOffset + 0x0D] != index)
@@ -2941,8 +3488,10 @@ public static class V82VehicleRegistry
 
             byte[] stats = data.AsSpan((int)statOffset, StatsSize).ToArray();
             stats[0x0D] = checked((byte)(FirstCustomType + index));
-            var transformModes = new ushort[TransformModeCount, TransformWheelCount];
-            for (int mode = 0; mode < TransformModeCount; mode++)
+            var transformModes = supportsTransformations
+                ? new ushort[TransformModeCount, TransformWheelCount]
+                : new ushort[0, 0];
+            for (int mode = 0; mode < transformModes.GetLength(0); mode++)
             {
                 for (int wheel = 0; wheel < TransformWheelCount; wheel++)
                 {
@@ -2951,7 +3500,7 @@ public static class V82VehicleRegistry
                         U16(data, transformOffset + (uint)(item * 2));
                 }
             }
-            for (int wheel = 0; wheel < TransformWheelCount; wheel++)
+            for (int wheel = 0; wheel < transformModes.GetLength(1); wheel++)
                 if (transformModes[0, wheel] != 0)
                     throw new InvalidDataException(
                         $"custom vehicle entry {index} normal transform mode is not zero");
@@ -2970,6 +3519,9 @@ public static class V82VehicleRegistry
                 bodyKind,
                 selectorPreviewBodyKind,
                 selectionOrder,
+                flags,
+                (VehicleControllerClass)controllerId,
+                supportsTransformations,
                 rearSuspensionDamping,
                 stats,
                 transformModes,
@@ -2986,12 +3538,16 @@ public static class V82VehicleRegistry
         foreach (VehicleEntry entry in Entries)
         {
             if (entry.BodyArchiveIndex >= Banks.Count ||
-                entry.TransformArchiveIndex >= Banks.Count ||
-                entry.BodyArchiveIndex == entry.TransformArchiveIndex ||
-                !referenced.Add(entry.BodyArchiveIndex) ||
-                !referenced.Add(entry.TransformArchiveIndex))
+                !referenced.Add(entry.BodyArchiveIndex))
                 throw new InvalidDataException(
                     $"vehicle {entry.StableId} has invalid or shared archive ownership");
+            if (entry.TransformArchiveIndex != NoArchiveIndex &&
+                (entry.TransformArchiveIndex >= Banks.Count ||
+                 entry.BodyArchiveIndex == entry.TransformArchiveIndex ||
+                 !referenced.Add(entry.TransformArchiveIndex)))
+                throw new InvalidDataException(
+                    $"vehicle {entry.StableId} has invalid or shared " +
+                    "transformation archive ownership");
             if (entry.SelectorPreviewArchiveIndex != NoArchiveIndex &&
                 (
                     entry.SelectorPreviewArchiveIndex >= Banks.Count ||
@@ -3000,7 +3556,6 @@ public static class V82VehicleRegistry
                 throw new InvalidDataException(
                     $"vehicle {entry.StableId} has invalid or shared selector preview ownership");
 
-            byte[] transform = Banks[entry.TransformArchiveIndex].ReadBin();
             byte[] body = Banks[entry.BodyArchiveIndex].ReadBin();
             int bodySlotCount = BinSlotCount(body);
             if (entry.BodyKind >= bodySlotCount ||
@@ -3019,7 +3574,22 @@ public static class V82VehicleRegistry
                         $"vehicle {entry.StableId} selector preview kind " +
                         "does not own a top-level object");
             }
+            if (entry.TransformArchiveIndex == NoArchiveIndex)
+                continue;
+            byte[] transform = Banks[entry.TransformArchiveIndex].ReadBin();
             int slotCount = BinSlotCount(transform);
+            for (int statOffset = 0; statOffset <= 2; statOffset += 2)
+            {
+                int kind = entry.Stats[statOffset] |
+                    entry.Stats[statOffset + 1] << 8;
+                if (kind >= slotCount ||
+                    !BinSlotIsTopLevel(transform, kind))
+                    throw new InvalidDataException(
+                        $"vehicle {entry.StableId} wheel/contact kind {kind} " +
+                        "does not own a top-level bank object");
+            }
+            if (!entry.SupportsTransformations)
+                continue;
             for (int mode = 1; mode < TransformModeCount; mode++)
             {
                 for (int wheel = 0; wheel < TransformWheelCount; wheel++)
@@ -3142,6 +3712,12 @@ public static class V82VehicleRegistry
             throw new InvalidDataException($"{context} is truncated");
     }
 
+    enum VehicleControllerClass
+    {
+        Ground = 0,
+        Flying = 1,
+    }
+
     sealed class VehicleEntry(
         int type,
         string stableId,
@@ -3152,6 +3728,9 @@ public static class V82VehicleRegistry
         int bodyKind,
         int selectorPreviewBodyKind,
         int selectionOrder,
+        uint flags,
+        VehicleControllerClass controllerClass,
+        bool supportsTransformations,
         ushort rearSuspensionDamping,
         byte[] stats,
         ushort[,] transformModes,
@@ -3168,6 +3747,11 @@ public static class V82VehicleRegistry
         public int SelectorPreviewBodyKind { get; } =
             selectorPreviewBodyKind;
         public int SelectionOrder { get; } = selectionOrder;
+        public uint Flags { get; } = flags;
+        public VehicleControllerClass ControllerClass { get; } =
+            controllerClass;
+        public bool SupportsTransformations { get; } =
+            supportsTransformations;
         public ushort RearSuspensionDamping { get; } = rearSuspensionDamping;
         public byte[] Stats { get; } = stats;
         public ushort[,] TransformModes { get; } = transformModes;

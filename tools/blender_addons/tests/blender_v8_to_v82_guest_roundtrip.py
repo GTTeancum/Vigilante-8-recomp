@@ -1,4 +1,4 @@
-"""Import, save/reopen, and export the three converted guests in Blender."""
+"""Import, save/reopen, and export all converted guests in Blender."""
 
 from __future__ import annotations
 
@@ -99,8 +99,18 @@ def record_for(vehicle: project.VehicleProject) -> dict:
         "body_slots": len(vehicle.slots),
         "body_groups": len(vehicle.groups),
         "body_textures": len(vehicle.textures),
-        "transform_slots": len(vehicle.transformation_bank.slots),
-        "transform_groups": len(vehicle.transformation_bank.groups),
+        "transform_slots": (
+            len(vehicle.transformation_bank.slots)
+            if vehicle.transformation_bank is not None
+            else 0
+        ),
+        "transform_groups": (
+            len(vehicle.transformation_bank.groups)
+            if vehicle.transformation_bank is not None
+            else 0
+        ),
+        "controller_class": vehicle.controller_class,
+        "supports_transformations": vehicle.supports_transformations,
     }
 
 
@@ -121,7 +131,7 @@ def finalize(originals: tuple[project.VehicleProject, ...]) -> None:
         project.to_dict(item) for item in exported
     ]:
         raise AssertionError(
-            "Blender-exported twelve-entry package changed on semantic decode"
+            "Blender-exported package changed on semantic decode"
         )
     FINAL.mkdir(parents=True, exist_ok=True)
     (FINAL / "CUSTOM.EXP").write_bytes(package.archive)

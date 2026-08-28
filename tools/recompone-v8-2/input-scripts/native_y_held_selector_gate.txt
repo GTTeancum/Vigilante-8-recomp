@@ -1,0 +1,15 @@
+# Reach the native player selector, then keep LEFT held long past the first
+# imported preview's ready point. A correct append-only carousel enters Y once,
+# keeps Y stable for the entire physical hold, and releases without visiting
+# Sid or any other guest.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+2160+950=LEFT

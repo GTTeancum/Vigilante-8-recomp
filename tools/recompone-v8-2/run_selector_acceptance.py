@@ -37,6 +37,7 @@ FATAL_MARKERS = (
     "out of vram",
     "outofmemoryexception",
 )
+EXIT_AFTER_POLLS = 12800
 
 
 def combined_text(*paths: Path) -> str:
@@ -57,6 +58,17 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--timeout", type=float, default=420.0)
     parser.add_argument("--heartbeat-timeout", type=float, default=45.0)
+    parser.add_argument(
+        "--complete-carousel",
+        action="store_true",
+        help=(
+            "verify a complete selectable-character lap in both directions: "
+            "the native mode mask plus all 13 imported entries"
+        ),
+    )
+    parser.add_argument(
+        "--exit-after-polls", type=int, default=EXIT_AFTER_POLLS,
+    )
     parser.add_argument(
         "--text-only",
         action="store_true",
@@ -103,7 +115,7 @@ def main() -> int:
             "RECOMPONE_MUTE": "1",
             "RECOMPONE_SUPPRESS_RUMBLE": "1",
             "RECOMPONE_UNTHROTTLED": "0",
-            "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS": "10500",
+            "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS": str(EXIT_AFTER_POLLS),
             "RECOMPONE_PRESENTATION_CAPTURE": (
                 "0" if args.text_only else "1"
             ),
@@ -126,6 +138,9 @@ def main() -> int:
         }
     )
     env.pop("RECOMPONE_HEADLESS", None)
+    env["RECOMPONE_SCRIPT_EXIT_AFTER_POLLS"] = str(args.exit_after_polls)
+    if args.complete_carousel:
+        env["RECOMPONE_V82_UNLOCK_ROSTER"] = "1"
 
     started = time.monotonic()
     last_progress = started
@@ -198,28 +213,100 @@ def main() -> int:
         r"\[V82Vehicles\] built (guest\.v8\.[a-z0-9_]+) selector=",
         text,
     ))
+    carousel_guests = [
+        int(value)
+        for value in re.findall(
+            r"\[V82SelectorCarousel\] step direction=(?:left|right) "
+            r"from=(?:retail|guest)\.\d+ to=guest\.(\d+)",
+            text,
+        )
+    ]
+    carousel_transitions = [
+        (direction, source, target)
+        for direction, source, target in re.findall(
+            r"\[V82SelectorCarousel\] step direction=(left|right) "
+            r"from=((?:retail|guest)\.\d+) "
+            r"to=((?:retail|guest)\.\d+)",
+            text,
+        )
+    ]
+    expected_carousel_guests = [
+        *range(12, -1, -1),
+        *range(1, 13),
+        *range(11, -1, -1),
+    ]
+    carousel_releases = [
+        (direction, int(suppressed), int(guest))
+        for direction, suppressed, guest in re.findall(
+            r"\[V82SelectorCarousel\] release direction=(left|right) "
+            r"suppressed=(\d+) guest=(-?\d+)",
+            text,
+        )
+    ]
+    held_step_suppressed = any(
+        suppressed > 0
+        for _, suppressed, guest in carousel_releases
+        if guest >= 0
+    )
+    # SHELL's Arcade player mask at this call site is 0x00038E38. The native
+    # selector treats its set bits as unavailable, so the selectable retail
+    # route is nine entries from the eighteen-type engine table. Preserve the
+    # native skip decisions; the imported roster extends that accepted route.
+    selectable_retail = [0, 1, 2, 6, 7, 8, 12, 13, 14]
+    expected_complete_transitions = [
+        *[("right", f"retail.{source}", f"retail.{target}")
+          for source, target in zip(
+              selectable_retail, selectable_retail[1:])],
+        ("right", "retail.14", "guest.0"),
+        *[("right", f"guest.{index}", f"guest.{index + 1}")
+          for index in range(12)],
+        ("right", "guest.12", "retail.0"),
+        ("left", "retail.0", "guest.12"),
+        *[("left", f"guest.{index}", f"guest.{index - 1}")
+          for index in range(12, 0, -1)],
+        ("left", "guest.0", "retail.14"),
+        *[("left", f"retail.{source}", f"retail.{target}")
+          for source, target in zip(
+              reversed(selectable_retail),
+              list(reversed(selectable_retail))[1:])],
+    ]
+    carousel_order_passed = (
+        carousel_transitions == expected_complete_transitions
+        if args.complete_carousel
+        else carousel_guests == expected_carousel_guests
+    )
     complete_double_roster = (
-        len(preview_build_counts) == 12
+        len(preview_build_counts) == 13
         and all(count >= 2 for count in preview_build_counts.values())
     )
     clean_exit = (
         process.returncode == 0
-        and "deterministic replay completed at poll 10500" in text
+        and (
+            f"deterministic replay completed at poll {args.exit_after_polls}"
+            in text
+        )
     )
     passed = (
         not reason
-        and (args.text_only or captures == list(range(12)))
+        and (args.text_only or captures == list(range(13)))
         and complete_double_roster
+        and carousel_order_passed
         and enemy_stage
         and (args.text_only or enemy_capture)
         and clean_exit
     )
-    if not args.text_only and not reason and captures != list(range(12)):
-        reason = f"selector captures {captures}, expected 0-11"
+    if not args.text_only and not reason and captures != list(range(13)):
+        reason = f"selector captures {captures}, expected 0-12"
     if not reason and not complete_double_roster:
         reason = (
             "selector did not construct every imported preview twice: "
             f"{dict(sorted(preview_build_counts.items()))}"
+        )
+    if not reason and not carousel_order_passed:
+        reason = (
+            "selector carousel order did not match the expected route: "
+            f"actual={carousel_transitions if args.complete_carousel else carousel_guests} "
+            f"expected={expected_complete_transitions if args.complete_carousel else expected_carousel_guests}"
         )
     if not reason and not enemy_stage:
         reason = "enemy selector was not reached"
@@ -229,7 +316,7 @@ def main() -> int:
         reason = f"process exit was not clean: {process.returncode}"
 
     guest_images = []
-    for index in range(12):
+    for index in range(13):
         matches = sorted(output.glob(
             f"recompone_present_native_guest_{index:02}_1280x720_*.ppm"
         ))
@@ -254,7 +341,7 @@ def main() -> int:
             "classified as glass"
         )
         passed = False
-    if not args.text_only and len(guest_images) == 12 and all(
+    if not args.text_only and len(guest_images) == 13 and all(
             image.is_file() for image in guest_images):
         subprocess.run(
             [
@@ -303,6 +390,19 @@ def main() -> int:
         "captures": captures,
         "preview_build_counts": dict(sorted(preview_build_counts.items())),
         "complete_double_roster": complete_double_roster,
+        "carousel_guests": carousel_guests,
+        "expected_carousel_guests": expected_carousel_guests,
+        "complete_carousel": args.complete_carousel,
+        "selectable_retail_slots": (
+            selectable_retail if args.complete_carousel else []
+        ),
+        "carousel_transitions": carousel_transitions,
+        "expected_complete_transitions": (
+            expected_complete_transitions if args.complete_carousel else []
+        ),
+        "carousel_order_passed": carousel_order_passed,
+        "carousel_releases": carousel_releases,
+        "held_step_suppressed": held_step_suppressed,
         "enemy_stage": enemy_stage,
         "enemy_capture": enemy_capture,
         "clean_exit": clean_exit,

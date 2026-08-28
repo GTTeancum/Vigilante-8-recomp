@@ -1,6 +1,9 @@
-# Enter V8:2's native selector and wrap left through every packaged V8 entry.
-# The 220-poll spacing lets the native preview settle and complete the
-# deterministic 31-frame proof rotation before moving to the next vehicle.
+# Enter V8:2's native selector and make one complete selectable-character lap
+# in each direction. This covers the nine retail entries admitted by the
+# Arcade mode mask and every packaged V8 guest, including Y.
+# Each 180-poll direction pulse is an extended human tap. The separate
+# native_y_held_selector_gate fixture holds through multiple ready points; the
+# 220-poll spacing here lets every native preview settle before the next step.
 540+3=START
 900+3=START
 1020+2=SELECT
@@ -9,46 +12,56 @@
 1260+3=CROSS
 1380+2=SELECT
 2020+3=CROSS
-2160+2=LEFT
-2380+2=LEFT
-2600+2=LEFT
-2820+2=LEFT
-3040+2=LEFT
-3260+2=LEFT
-3480+2=LEFT
-3700+2=LEFT
-3920+2=LEFT
-4140+2=LEFT
-4360+2=LEFT
-4580+2=LEFT
-# Traverse the complete imported roster again in the opposite direction. This
-# forces every preview through a second teardown/rebuild cycle after all other
-# guest texture banks have churned through native VRAM.
-4800+2=RIGHT
-5020+2=RIGHT
-5240+2=RIGHT
-5460+2=RIGHT
-5680+2=RIGHT
-5900+2=RIGHT
-6120+2=RIGHT
-6340+2=RIGHT
-6560+2=RIGHT
-6780+2=RIGHT
-7000+2=RIGHT
-7220+2=LEFT
-7440+2=LEFT
-7660+2=LEFT
-7880+2=LEFT
-8100+2=LEFT
-8320+2=LEFT
-8540+2=LEFT
-8760+2=LEFT
-8980+2=LEFT
-9200+2=LEFT
-9420+2=LEFT
-# Capture the second Chassey state, then enter the native enemy selector. The
+2160+180=RIGHT
+2380+180=RIGHT
+2600+180=RIGHT
+2820+180=RIGHT
+3040+180=RIGHT
+3260+180=RIGHT
+3480+180=RIGHT
+3700+180=RIGHT
+3920+180=RIGHT
+4140+180=RIGHT
+4360+180=RIGHT
+4580+180=RIGHT
+4800+180=RIGHT
+5020+180=RIGHT
+5240+180=RIGHT
+5460+180=RIGHT
+5680+180=RIGHT
+5900+180=RIGHT
+6120+180=RIGHT
+6340+180=RIGHT
+6560+180=RIGHT
+6780+180=RIGHT
+# Reverse through the same complete route. This forces every imported preview
+# through a second teardown/rebuild cycle after every other guest texture bank
+# has churned through native VRAM.
+7000+180=LEFT
+7220+180=LEFT
+7440+180=LEFT
+7660+180=LEFT
+7880+180=LEFT
+8100+180=LEFT
+8320+180=LEFT
+8540+180=LEFT
+8760+180=LEFT
+8980+180=LEFT
+9200+180=LEFT
+9420+180=LEFT
+9640+180=LEFT
+9860+180=LEFT
+10080+180=LEFT
+10300+180=LEFT
+10520+180=LEFT
+10740+180=LEFT
+10960+180=LEFT
+11180+180=LEFT
+11400+180=LEFT
+11620+180=LEFT
+# Capture the returned retail baseline, then enter the native enemy selector. The
 # enemy-stage capture proves the V8 player banner does not persist over it.
-9740+3=CROSS
+11940+3=CROSS
 
 [choose_enemies]
 250+3=CROSS

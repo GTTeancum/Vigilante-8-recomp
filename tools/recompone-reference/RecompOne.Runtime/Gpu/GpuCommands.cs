@@ -109,6 +109,8 @@ public sealed partial class Gpu
         int dx = (int)(_fifo[2] & 0x3FF), dy = (int)((_fifo[2] >> 16) & 0x1FF);
         int w = (int)(_fifo[3] & 0x3FF); if (w == 0) w = 0x400;
         int h = (int)((_fifo[3] >> 16) & 0x1FF); if (h == 0) h = 0x200;
+        Enhanced.FontFileProvenance.TrackVramCopy(
+            sx, sy, dx, dy, w, h);
         if (HleOn) { HleCopy(sx, sy, dx, dy, w, h); return; }
         for (int row = 0; row < h; row++)
             for (int col = 0; col < w; col++)
@@ -130,14 +132,17 @@ public sealed partial class Gpu
         _loadH = (int)((_fifo[2] >> 16) & 0xFFFF); if (_loadH == 0) _loadH = 0x200; else _loadH &= 0x1FF; if (_loadH == 0) _loadH = 0x200;
         _loadPx = 0;
         _loadImage = true;
+        Enhanced.FontFileProvenance.BeginUpload(
+            _loadX, _loadY, _loadW, _loadH);
         Log.Gpu($"image load begin xy={_loadX},{_loadY} size={_loadW}x{_loadH}");
         HleLoadBegin();
         ClearFifo();
     }
 
-    void StoreImageHalfword(ushort value)
+    void StoreImageHalfword(ushort value, uint sourceAddress)
     {
         if (!_loadImage) return;
+        Enhanced.FontFileProvenance.TrackUploadWord(sourceAddress);
         ushort stored = _setMask ? (ushort)(value | 0x8000) : value;
         if (!HleOn)   // gl mode uploads to gl vram via HleLoadPut
         {
@@ -163,6 +168,7 @@ public sealed partial class Gpu
                 }
                 Log.Gpu($"image load end xy={_loadX},{_loadY} size={_loadW}x{_loadH} or=0x{wordOr:X4}");
             }
+            Enhanced.FontFileProvenance.CompleteUpload();
             HleLoadFlush();
         }
     }

@@ -1,0 +1,26 @@
+# Enter the native enemy selector, let the stable-ID automation seam build the
+# requested guest on row zero, accept it, then exercise the ordinary gameplay
+# handoff. The guest identity is supplied externally by the acceptance runner.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+2020+3=CROSS
+
+[choose_player]
+300+3=CROSS
+
+[choose_enemies]
+2000+3=CROSS
+3500+3=CROSS
+4500+3=CROSS
+5500+3=CROSS
+6500+3=CROSS
+7500+3=CROSS
+8500+3=CROSS
+
+[gameplay]
+30+180=CROSS
