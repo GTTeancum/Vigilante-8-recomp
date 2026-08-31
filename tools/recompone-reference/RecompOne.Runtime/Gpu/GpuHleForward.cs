@@ -588,6 +588,9 @@ public sealed partial class Gpu
         if (!_hleLoadActive) return;
         int count = _loadW * _loadH;
         ReadOnlySpan<ushort> upload = _hleLoad.AsSpan(0, count);
+        ushort[]? replacement = Enhanced.VramImageReplacements.Resolve(
+            _loadX, _loadY, _loadW, _loadH, upload);
+        if (replacement != null) upload = replacement;
         if (_checkMask)
         {
             if (_hleLoadDest.Length < count)
