@@ -24,14 +24,16 @@ open work.
    voice, and SFX mix.
 5. **User** - Add four-player local multiplayer after release.
 6. **User** - Add a persistent option to disable transformation powerups.
-7. **User — PARTIAL** - Port the original Vigilante 8 UI as a selectable presentation.
-8. **User** - Move remaining wrapper functionality into the native game UI.
+7. **User — PARTIAL** - Finish the sole original-V8-style UI; review remaining fonts and menu layouts.
+8. **User** - Move player-facing features from the Windows menu bar (Mods, Cheats, Guest Vehicles, etc.) into controller-friendly in-game menus, then remove that external bar.
 9. **User** - Add customizable controls with Modern, Classic, and Southpaw presets.
 10. **User** - Fix shared near-object viewport-edge clipping, including scenery and other vehicles.
 11. **Codex** - Complete physical-controller and arena/split-screen user signoff.
 12. **User** - Fix incorrect audio during character and AI selection.
 13. **User** - Wire original Vigilante 8 quests into the existing quest system and audit every quest-bearing character.
 14. **User** - Fix repeated-match texture loss and severe framerate degradation.
+    Latest UI proof run still fails the performance floor (52.51 median /
+    10.65 minimum FPS); see `notes/v82_pause_style.md`. UI changes do not close this.
 15. **User** - Correct Houston's converted special-weapon enemy tracking.
 16. **User — PENDING REVIEW** - Verify the shared main-menu reset that prevents a prior imported character from remaining stuck on Y.
 
@@ -88,9 +90,16 @@ Test and deployment target: `V8_2_LOOSE` only.
 
 ### V82-OPEN-018 - Port the original Vigilante 8 UI (PARTIAL)
 
-- [ ] Add a selectable original-V8 presentation covering menus, selectors,
+- [ ] Finish the original-V8-style presentation covering menus, selectors,
       loading, HUD, pause/objectives, results, fonts, icons, and transitions.
-- [ ] Retain a clean route back to the native V8:2 presentation.
+- [ ] Ship this as the sole final UI, not an alternate/selectable theme;
+      there is no user-facing switch back to the V8:2 presentation.
+- [ ] Review remaining fonts and shared-GAME.FNT layouts outside the approved
+      pause menu. See `notes/v82_pause_style.md` for the accepted smaller
+      Rockwell Extra Bold font and panel. Keep the cyan
+      font unchanged; cursive source fonts remain in scope but become
+      non-cursive. Use the shared per-file font hook, with original-font fallback
+      where an approved HD replacement is unavailable.
 - [ ] Cover every reachable state without mixed-theme leakage or broken layout,
       including imported/native content and 4:3/widescreen presentation.
 
@@ -315,8 +324,12 @@ fail pending comparison of its hard-edged mist band against PS1 gameplay;
 
 ## Additional V8:2 work
 
-- [ ] Internalize remaining wrapper functionality into the game UI so the
-      external header/menu bar can be removed.
+- [ ] Move player-facing features currently accessed through the Windows menu
+      bar above the game (including Mods, Cheats, and Guest Vehicles) into the
+      game's own controller-friendly menus. Once those features are reachable
+      in-game, remove the external menu bar. This is functional integration,
+      separate from #7's visual redesign; developer-only diagnostics need not
+      become player-facing menu entries.
 - [ ] Add fully customizable keyboard/controller bindings plus Modern, Classic,
       and Southpaw presets in the native Options/Controls UI at stock visual and
       interaction parity.

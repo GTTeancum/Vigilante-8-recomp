@@ -1702,6 +1702,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             if (!rect.Valid)
                 return false;
             ApplyReplacementRect(ref a, ref b, ref c, rect);
+            // A filename-resolved FNT is a font at every screen position and
+            // size, including the upper half of native pause modals.
+            a.Texpage |= 0x3800;
+            b.Texpage |= 0x3800;
+            c.Texpage |= 0x3800;
             return true;
         }
         if (
@@ -3463,8 +3468,34 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         c.ViewY += dy[2] * vz[2] / scale;
     }
 
+    void DrawCleanModalPanel(in HleRect r, in PrimFlags f)
+    {
+        Begin(f, 6);
+        PrimFlags panelFlags = f;
+        float left = r.X - 7, top = r.Y - 9;
+        int width = r.W + 14, height = r.H + 18;
+        GlVertex Corner(int x, int y)
+        {
+            var source = new HleVertex { X = left + x, Y = top + y };
+            var vertex = V(source, panelFlags, false, false, true);
+            vertex.Texpage |= 0x01000000;
+            vertex.U = x; vertex.V = y;
+            vertex.UvMaxX = width; vertex.UvMaxY = height;
+            return vertex;
+        }
+        var a = Corner(0, 0); var b = Corner(width, 0);
+        var c = Corner(0, height); var d = Corner(width, height);
+        _verts[_count++] = a; _verts[_count++] = b; _verts[_count++] = c;
+        _verts[_count++] = b; _verts[_count++] = d; _verts[_count++] = c;
+    }
+
     public void DrawRect(in HleRect r, in PrimFlags f)
     {
+        if (GpuHle.IsNativeModalPanel(f.PacketAddress))
+        {
+            DrawCleanModalPanel(r, f);
+            return;
+        }
         int sourceU1 = r.U + (r.FlipX ? -r.W : r.W);
         int sourceV1 = r.V + (r.FlipY ? -r.H : r.H);
         CheckTextureFeedback(
@@ -3498,6 +3529,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             GpuHle.GameplayActive && GpuHle.DebugGameplayTick == 0;
         bool topGameplayHud =
             GpuHle.GameplayActive &&
+            !GpuHle.NativeModalActive &&
             !loadingScreenUi &&
             _kTarget is { } hudTarget &&
             r.Y - hudTarget.Y < hudTarget.H * 0.42f;
@@ -3774,6 +3806,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         vd.ReplacementX = va.ReplacementX;
         vd.ReplacementY = va.ReplacementY;
         vd.ReplacementW = va.ReplacementW;
+        vd.Texpage = va.Texpage;
         vd.ReplacementH = va.ReplacementH;
         vd.ReplacementScaleR = va.ReplacementScaleR;
         vd.ReplacementScaleG = va.ReplacementScaleG;

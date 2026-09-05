@@ -74,6 +74,7 @@
   <Target Name="EnsureGeneratedVehicleSeams"
           BeforeTargets="CoreCompile"
           Condition="Exists('$(MSBuildProjectDirectory)\main.cs')">
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_modal_style_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_vehicle_engine_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_selector_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot; --main-source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_options_patches.py&quot; --shell-source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot; --main-source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />

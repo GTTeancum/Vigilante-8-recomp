@@ -97,6 +97,7 @@ internal static class GlShaders
         flat out int   vN64RouteColor;
         flat out int   vHudKeyedMagenta;
         flat out int   vEffectContour;
+        flat out int   vModalPanel;
         flat out int   vMaterial;
         flat out vec4  vReplacementRect;
         flat out vec3  vReplacementScale;
@@ -166,6 +167,7 @@ internal static class GlShaders
             vN64RouteColor = (inTexpage >> 21) & 1;
             vHudKeyedMagenta = (inTexpage >> 22) & 1;
             vEffectContour = (inTexpage >> 23) & 1;
+            vModalPanel = (inTexpage >> 24) & 1;
             vMaterial = inMaterial;
             vReplacementRect = inReplacementRect;
             vReplacementScale = inReplacementScale;
@@ -175,12 +177,12 @@ internal static class GlShaders
             vBary = inBary;
             vDepth = inDepth;
 
+            vUVPerspective = inUV;
+            vUVAffine = inUV;
             if ((inTexpage & 0x8000) != 0) {
                 texMode = 4;
             } else {
                 texMode = (inTexpage >> 7) & 3;
-                vUVPerspective = inUV;
-                vUVAffine = inUV;
                 pageBase = ivec2((inTexpage & 0xf) * 64, ((inTexpage >> 4) & 1) * 256);
                 clutBase = ivec2((inClut & 0x3f) * 16, (inClut >> 6) & 0x1ff);
             }
@@ -210,6 +212,7 @@ internal static class GlShaders
         flat in int   vN64RouteColor;
         flat in int   vHudKeyedMagenta;
         flat in int   vEffectContour;
+        flat in int   vModalPanel;
         flat in int   vMaterial;
         flat in vec4  vReplacementRect;
         flat in vec3  vReplacementScale;
@@ -616,6 +619,24 @@ internal static class GlShaders
         }
         void main() {
             if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
+            if (vModalPanel != 0) {
+                // Analytic geometry in native layout units, antialiased at
+                // the actual output resolution. No low-res border texture.
+                vec2 halfSize = vec2(vUvBounds.zw) * 0.5;
+                vec2 q = abs(vUVAffine - halfSize) - halfSize + 7.0;
+                float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - 7.0;
+                float aa = max(fwidth(sd), 0.05);
+                float coverage = 1.0 - smoothstep(-aa, aa, sd);
+                if (coverage <= 0.001) discard;
+                float border = smoothstep(-2.0-aa, -2.0+aa, sd);
+                vec3 gold = mix(vec3(0.66, 0.33, 0.035), vec3(1.0, 0.79, 0.08),
+                    1.0 - vUVAffine.y / max(halfSize.y * 2.0, 1.0));
+                vec3 color = mix(vec3(0.035, 0.045, 0.035), gold, border);
+                float alpha = mix(0.84, 1.0, border) * coverage;
+                FragColor = vec4(color, uSetMask);
+                BlendColor = vec4(vec3(alpha), 1.0-alpha);
+                return;
+            }
             if (vTerrainDebug != 0) {
                 FragColor = vec4(1.0, 0.0, 1.0, uSetMask);
                 BlendColor = uBlendOpaque;

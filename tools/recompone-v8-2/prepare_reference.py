@@ -1213,6 +1213,12 @@ PROVEN_PATCHES = [
     },
     {
         "overlay": "main",
+        "address": "80011BB8",
+        "target": "RecompOne.Runtime.Sdk.V82ModalStyle.DrawPanel",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
         "address": "8001ADF8",
         "target": "RecompOne.Runtime.Sdk.V82Compat.TraceNativeSelectorCall",
         "mode": "pre",

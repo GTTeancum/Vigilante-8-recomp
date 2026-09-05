@@ -23,6 +23,11 @@ public static class GpuHle
     public static int NativeModalHold { get; set; }
     public static bool NativeModalActive => NativeModalHold > 0;
     public static void SignalNativeModal() => NativeModalHold = 4;
+    static readonly HashSet<uint> NativeModalPanels = [];
+    public static void RegisterNativeModalPanel(uint address) =>
+        NativeModalPanels.Add(NormalizePacketAddress(address));
+    public static bool IsNativeModalPanel(uint address) =>
+        NativeModalPanels.Contains(NormalizePacketAddress(address));
     public static float TargetAspect { get; set; } = 4f / 3f;
     public static string? DebugCaptureLabel { get; set; }
     public static int DebugGameplayTick { get; set; }
@@ -202,6 +207,7 @@ public static class GpuHle
         // is emitted. Any later write to that packet address starts new
         // ownership, even when the replacement also belongs to terrain.
         CoarseTerrainPackets.Remove(address);
+        NativeModalPanels.Remove(address);
         TerrainTransitionPackets.Remove(address);
         if (!TriangleNclipHeaderPending.Remove(address))
             TriangleNclipPackets.Remove(address);
@@ -373,6 +379,7 @@ public static class GpuHle
 
     public static void ResetSceneTracking()
     {
+        NativeModalPanels.Clear();
         VehiclePacketRanges.Clear();
         OwnedPacketRanges.Clear();
         VehiclePackets.Clear();
