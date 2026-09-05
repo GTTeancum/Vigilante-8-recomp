@@ -1088,6 +1088,30 @@ PROVEN_PATCHES = [
     },
     {
         "overlay": "main",
+        "address": "80024E40",
+        "target": "RecompOne.Runtime.Sdk.V82MeshClipCompat.SubmitTriangle",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "800259C8",
+        "target": "RecompOne.Runtime.Sdk.V82MeshClipCompat.SubmitTriangle",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "80026694",
+        "target": "RecompOne.Runtime.Sdk.V82MeshClipCompat.SubmitTriangle",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8002737C",
+        "target": "RecompOne.Runtime.Sdk.V82MeshClipCompat.SubmitTriangle",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
         "address": "80022164",
         "target": "RecompOne.Runtime.Sdk.V82Compat.EnterGeometry22164",
         "mode": "pre",

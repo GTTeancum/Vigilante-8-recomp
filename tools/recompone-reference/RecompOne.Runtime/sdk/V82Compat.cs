@@ -780,6 +780,9 @@ public static class V82Compat
     public static int CensusHookCalls;
     public static long ObjectRenderEntries;
     public static long ObjectRenderExits;
+    public static int ObjectRenderScopeDepth => ObjectRenderScopes.Count;
+    public static int ImportedRenderGroupScopeDepth =>
+        ImportedRenderGroupScopes.Count;
     public static int CensusRejected;
 
     // Kept running continuously rather than armed around a capture: the
@@ -1237,6 +1240,22 @@ public static class V82Compat
             ? Math.Max(1, testDefeatFrame)
             : 0;
     static bool _testDefeatInjected;
+    static readonly int _proofHoldPlayerFrame = Math.Max(
+        0, ReadOptionalInt("RECOMPONE_V82_PROOF_HOLD_PLAYER_FRAME") ?? 0);
+    static readonly uint[] ProofHoldTransformOffsets =
+    [
+        0x20u, 0x24u, 0x28u, 0x2Cu, 0x30u,
+        0x34u, 0x38u, 0x3Cu,
+        0x4Cu, 0x50u, 0x54u,
+    ];
+    static readonly uint[] ProofHoldMotionOffsets =
+    [0x80u, 0x84u, 0x88u, 0x8Cu, 0x90u, 0x94u, 0x98u];
+    static readonly Dictionary<uint, uint[]> ProofHeldVehicleTransforms = [];
+    static readonly bool ProofEdgeVehicles =
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_PROOF_EDGE_VEHICLES") == "1";
+    static readonly int ProofEdgeVehicleOffset =
+        ReadOptionalInt("RECOMPONE_V82_PROOF_EDGE_VEHICLE_OFFSET") ?? 140;
+    static readonly Dictionary<uint, int> ProofEdgeVehicleSlots = [];
     static readonly int? _testLoadingTipTableIndex =
         ReadOptionalInt("RECOMPONE_V82_TEST_LOADING_TIP_INDEX");
 
@@ -2035,6 +2054,8 @@ public static class V82Compat
         TraceObjectRenderBegin(c, m);
         m = Dispatcher.UnwrapMemory(m);
         uint objectAddress = c.A0;
+        if (ProofEdgeVehicles && objectAddress != _playerVehicle)
+            UpdateProofVehicleHold(m, objectAddress);
         uint packetStart = m.ReadU32(c.GP + 0x610u);
         if (objectAddress == TraceObjectAddress && _traceObjectCount++ < 256)
         {
@@ -4933,6 +4954,7 @@ public static class V82Compat
                                 $"delta=({dx},{dy},{dz})");
                         }
                     }
+                    UpdateProofVehicleHold(m, objectAddress);
                     uint primitiveAfter = m.ReadU32(c.GP + 0x610u);
                     if (traceObject)
                     {
@@ -5079,6 +5101,67 @@ public static class V82Compat
             $"health={healthBefore}->{healthAfter} result={result}; " +
             $"awaiting retail defeat flow");
         InputManager.SignalScriptStage("defeated", captureDelayPolls: 180);
+    }
+
+    // Generic proof-only scene stabilizer. The release-gate harness opts in
+    // with a frame number, captures every native vehicle at its current
+    // authored transform, and restores only transform/follow-target fields
+    // while clearing motion. It has no arena, vehicle, material, or renderer
+    // identity and is a strict no-op in ordinary builds and user sessions.
+    static void UpdateProofVehicleHold(IMemory m, uint vehicle)
+    {
+        if (_proofHoldPlayerFrame == 0 ||
+            _gameplayFrameCount < _proofHoldPlayerFrame ||
+            vehicle < PcHeapBase || vehicle >= PcHeapEnd - 0xA0u ||
+            m.ReadU8(vehicle + 8u) != 2u)
+            return;
+
+        if (!ProofHeldVehicleTransforms.TryGetValue(
+                vehicle, out uint[]? transform))
+        {
+            transform = new uint[ProofHoldTransformOffsets.Length];
+            for (int i = 0; i < ProofHoldTransformOffsets.Length; i++)
+                transform[i] =
+                    m.ReadU32(vehicle + ProofHoldTransformOffsets[i]);
+            ProofHeldVehicleTransforms.Add(vehicle, transform);
+            Console.Error.WriteLine(
+                $"[V82ProofHold] captured frame={_gameplayFrameCount} " +
+                $"vehicle=0x{vehicle:X8} " +
+                $"pos=({transform[5]},{transform[6]},{transform[7]})");
+        }
+
+        for (int i = 0; i < ProofHoldTransformOffsets.Length; i++)
+            m.WriteU32(
+                vehicle + ProofHoldTransformOffsets[i],
+                transform[i]);
+        // Process-local diagnostic scene only: the first two existing AI
+        // vehicles flank the held player. No synthetic mesh or rendering
+        // override; both still use their normal native model/material paths.
+        if (ProofEdgeVehicles && vehicle != _playerVehicle &&
+            ProofHeldVehicleTransforms.TryGetValue(_playerVehicle, out uint[]? playerTransform))
+        {
+            if (!ProofEdgeVehicleSlots.TryGetValue(vehicle, out int slot))
+            {
+                slot = ProofEdgeVehicleSlots.Count;
+                ProofEdgeVehicleSlots[vehicle] = slot;
+                Console.Error.WriteLine($"[V82ProofEdgeVehicle] vehicle={vehicle:X8} slot={slot} lateral={ProofEdgeVehicleOffset} player={_playerVehicle:X8}");
+            }
+            if (slot < 2)
+            {
+                int lateral = (slot == 0 ? -1 : 1) * ProofEdgeVehicleOffset;
+                Span<int> axis = [(short)playerTransform[0], (short)(playerTransform[1] >> 16), (short)playerTransform[3]];
+                for (int i = 0; i < ProofHoldTransformOffsets.Length; i++)
+                {
+                    uint value = playerTransform[i];
+                    int coordinate = i is >= 5 and <= 7 ? i - 5 : i is >= 8 and <= 10 ? i - 8 : -1;
+                    if (coordinate >= 0)
+                        value = unchecked(value + (uint)(axis[coordinate] * lateral * 16));
+                    m.WriteU32(vehicle + ProofHoldTransformOffsets[i], value);
+                }
+            }
+        }
+        foreach (uint offset in ProofHoldMotionOffsets)
+            m.WriteU32(vehicle + offset, 0u);
     }
 
     static int? ReadOptionalInt(string name)
@@ -6128,6 +6211,8 @@ public static class V82Compat
         _matchVramSuccesses = 0;
         _matchVramFailures = 0;
         _testDefeatInjected = false;
+        ProofHeldVehicleTransforms.Clear();
+        ProofEdgeVehicleSlots.Clear();
         _testWaterInjected = false;
         _testWaterConfigLogged = false;
         _testWaterDestroyed = false;
@@ -6153,6 +6238,8 @@ public static class V82Compat
         _matchVramSuccesses = 0;
         _matchVramFailures = 0;
         _testDefeatInjected = false;
+        ProofHeldVehicleTransforms.Clear();
+        ProofEdgeVehicleSlots.Clear();
         _testWaterInjected = false;
         _testWaterConfigLogged = false;
         _testWaterDestroyed = false;

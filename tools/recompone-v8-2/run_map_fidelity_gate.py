@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import statistics
 import subprocess
 import time
 from pathlib import Path
@@ -35,6 +36,9 @@ MAP_SPECIFIC_RENDERER_TOKENS = (
     "wildwest", "hoovrdam", "vallyfrm", "casnocty", "canynlnd",
     "skiresrt", "dreamlnd", "dreamland", "florida",
 )
+PERFORMANCE_MEDIAN_FLOOR_FPS = 40.0
+PERFORMANCE_HARD_FLOOR_FPS = 30.0
+PERFORMANCE_MAXIMUM_TAIL_DECLINE_FPS = 15.0
 
 MAPS = (
     ("LEVELS_ROUTE66", "levels/route66"),
@@ -97,6 +101,13 @@ TERRAIN_FRAME_RE = re.compile(
     r"\[TerrainFrame\].*?cells=(\d+) emitted=(\d+).*?"
     r"nearReject=(\d+).*?poolDropped=(\d+).*?flagErrors=(\d+)"
 )
+PERFORMANCE_RE = re.compile(
+    r"\[EnhancedPerformance\] frames=(\d+)-(\d+) "
+    r"frame-mean-ms=([0-9.]+) frame-max-ms=([0-9.]+) "
+    r"effective-fps=([0-9.]+).*?"
+    r"generated-terrain-triangles=(\d+).*?"
+    r"flushes=(\d+).*?begin-flushes=(\d+)"
+)
 
 
 def sha256(path: Path) -> str:
@@ -149,6 +160,8 @@ def fixture_text(
     maps: tuple = MAPS,
     capture_gameplay: bool = False,
     capture_poll: int = 601,
+    hold_for_capture: bool = False,
+    proof_camera_cycles: int = 0,
 ) -> str:
     lines = [
         "# Initial boot/FMV/title/one-player Arcade path.",
@@ -177,13 +190,23 @@ def fixture_text(
             "1250+3=CROSS",
             "",
         ])
-    route = active_route_pulses(gameplay_frames)
+    # A visual-diagnostic capture may need the vehicle undamaged and at its
+    # authored spawn point.  This is test orchestration only: it suppresses
+    # the route for that run and deliberately leaves the traversal gate red.
+    route = () if hold_for_capture else active_route_pulses(gameplay_frames)
     for generation in range(1, len(maps) + 1):
         lines.append(f"[after:gameplay@{generation}]")
         for name, start, duration, buttons in route:
             lines.append(
                 f"{start}+{duration}={','.join(buttons)} # {name}"
             )
+        if hold_for_capture and generation == 1:
+            first_camera_poll = max(1, capture_poll - 120)
+            for index in range(proof_camera_cycles):
+                lines.append(
+                    f"{first_camera_poll + index * 20}+2=SELECT "
+                    f"# proof_camera_cycle_{index + 1}"
+                )
         lines.append("")
     if capture_gameplay:
         # The ordinary stage capture fires while some arenas are still running
@@ -386,6 +409,64 @@ def location_token(slot: int) -> str:
     return "n64.super_dreamland_64" if slot == 18 else f"retail.{slot}"
 
 
+def performance_summary(segment: str) -> dict[str, object]:
+    """Summarize sustained gameplay windows, excluding menu-only cadence."""
+    samples = [
+        {
+            "frame_start": int(match.group(1)),
+            "frame_end": int(match.group(2)),
+            "mean_ms": float(match.group(3)),
+            "max_ms": float(match.group(4)),
+            "fps": float(match.group(5)),
+            "terrain_triangles": int(match.group(6)),
+            "flushes": int(match.group(7)),
+            "state_breaks": int(match.group(8)),
+        }
+        for match in PERFORMANCE_RE.finditer(segment)
+        if int(match.group(6)) > 0
+    ]
+    # The first and last windows can straddle a load/defeat transition. The
+    # interior windows are the sustained route the player actually feels.
+    steady = samples[1:-1] if len(samples) >= 5 else samples
+    fps = [float(sample["fps"]) for sample in steady]
+    head = fps[:min(5, len(fps))]
+    tail = fps[-min(5, len(fps)):]
+    median_fps = statistics.median(fps) if fps else 0.0
+    head_median = statistics.median(head) if head else 0.0
+    tail_median = statistics.median(tail) if tail else 0.0
+    frame_count = len(steady) * 60
+    return {
+        "windows": len(steady),
+        "frame_range": (
+            [steady[0]["frame_start"], steady[-1]["frame_end"]]
+            if steady else []
+        ),
+        "median_fps": round(median_fps, 2),
+        "minimum_fps": round(min(fps), 2) if fps else 0.0,
+        "head_median_fps": round(head_median, 2),
+        "tail_median_fps": round(tail_median, 2),
+        "tail_decline_fps": round(max(0.0, head_median - tail_median), 2),
+        "flushes_per_frame": round(
+            sum(int(sample["flushes"]) for sample in steady) /
+            max(1, frame_count),
+            2,
+        ),
+        "state_breaks_per_frame": round(
+            sum(int(sample["state_breaks"]) for sample in steady) /
+            max(1, frame_count),
+            2,
+        ),
+        "passed": (
+            len(steady) >= 3 and
+            median_fps >= PERFORMANCE_MEDIAN_FLOOR_FPS and
+            min(fps, default=0.0) >= PERFORMANCE_HARD_FLOOR_FPS and
+            tail_median >= PERFORMANCE_MEDIAN_FLOOR_FPS and
+            head_median - tail_median <=
+                PERFORMANCE_MAXIMUM_TAIL_DECLINE_FPS
+        ),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, default=DEFAULT_EXE)
@@ -409,6 +490,14 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=7200.0)
     parser.add_argument("--unthrottled", action="store_true")
     parser.add_argument(
+        "--original-renderer-oracle",
+        action="store_true",
+        help=(
+            "diagnostic-only PS1 renderer oracle; never valid as a shipping "
+            "or acceptance run"
+        ),
+    )
+    parser.add_argument(
         "--capture-gameplay",
         action="store_true",
         help="retain exactly one composed gameplay frame for visual review",
@@ -422,6 +511,33 @@ def main() -> int:
             "(default: 601, after the arena title camera on the full "
             "presentation parity)"
         ),
+    )
+    parser.add_argument(
+        "--hold-for-capture",
+        action="store_true",
+        help=(
+            "hold the player at the authored spawn for a visual diagnostic; "
+            "the run is not a traversal acceptance gate"
+        ),
+    )
+    parser.add_argument(
+        "--proof-camera-cycles",
+        type=int,
+        default=0,
+        help=(
+            "process-local camera SELECT pulses before a held visual capture"
+        ),
+    )
+    parser.add_argument(
+        "--presentation-resolution",
+        default="1280x720",
+        help="composed capture resolution (default: 1280x720)",
+    )
+    parser.add_argument(
+        "--player-type",
+        type=int,
+        default=0,
+        help="native V8:2 player type used for every selected map (default: 0)",
     )
     parser.add_argument(
         "--verbose-render-log",
@@ -449,6 +565,13 @@ def main() -> int:
             "capture gameplay poll must be between 1 and twice the "
             "gameplay-frame count"
         )
+    if args.proof_camera_cycles < 0 or args.proof_camera_cycles > 3:
+        parser.error("proof camera cycles must be between 0 and 3")
+    if not re.fullmatch(r"[1-9][0-9]{2,3}x[1-9][0-9]{2,3}",
+                        args.presentation_resolution):
+        parser.error("presentation resolution must use WIDTHxHEIGHT")
+    if args.player_type < 0 or args.player_type > 255:
+        parser.error("player type must be between 0 and 255")
     if args.map_slots:
         try:
             selected_slots = [
@@ -491,6 +614,8 @@ def main() -> int:
             selected_maps,
             capture_gameplay=args.capture_gameplay,
             capture_poll=args.capture_gameplay_poll,
+            hold_for_capture=args.hold_for_capture,
+            proof_camera_cycles=args.proof_camera_cycles,
         ),
         encoding="utf-8",
     )
@@ -508,8 +633,12 @@ def main() -> int:
         "RECOMPONE_INPUT_FILE": str(fixture),
         "RECOMPONE_DISABLE_LIVE_INPUT": "1",
         "RECOMPONE_WINDOW_VISIBLE": "0",
-        "RECOMPONE_GPU_HLE": "1",
-        "RECOMPONE_GRAPHICS_PRESET": "Enhanced",
+        "RECOMPONE_GPU_HLE": (
+            "0" if args.original_renderer_oracle else "1"
+        ),
+        "RECOMPONE_GRAPHICS_PRESET": (
+            "Original" if args.original_renderer_oracle else "Enhanced"
+        ),
         "RECOMPONE_MUTE": "1",
         "SDL_AUDIODRIVER": "dummy",
         "RECOMPONE_SUPPRESS_RUMBLE": "1",
@@ -538,18 +667,21 @@ def main() -> int:
         "RECOMPONE_SOAK_HEARTBEAT_FRAMES": "30",
         "RECOMPONE_SOAK_TEARDOWN_FRAMES": "0",
         "RECOMPONE_V82_TEST_DEFEAT_FRAME": str(args.gameplay_frames),
+        "RECOMPONE_V82_PROOF_HOLD_PLAYER_FRAME": (
+            "30" if args.hold_for_capture else "0"
+        ),
         "RECOMPONE_SCRIPT_EXIT_AFTER_STAGE": "shell_transition",
         "RECOMPONE_SCRIPT_EXIT_AFTER_STAGE_VISITS": str(len(selected_maps) + 1),
         "RECOMPONE_V82_ARENA_SLOT_SEQUENCE": ",".join(
             str(slot) for slot in selected_slots
         ),
         "RECOMPONE_V82_PLAYER_TYPE_SEQUENCE": ",".join(
-            "0" for _ in selected_maps
+            str(args.player_type) for _ in selected_maps
         ),
         "RECOMPONE_PRESENTATION_CAPTURE": (
             "1" if args.capture_gameplay else "0"
         ),
-        "RECOMPONE_PRESENTATION_RESOLUTION": "1280x720",
+        "RECOMPONE_PRESENTATION_RESOLUTION": args.presentation_resolution,
         "RECOMPONE_CAPTURE_NATIVE_GUEST_SELECTOR": "0",
         "RECOMPONE_CAPTURE_V82_SELECTOR_TURNS": "0",
         "RECOMPONE_CAPTURE_SELECTOR_GENERATIONS": "0",
@@ -568,7 +700,10 @@ def main() -> int:
         env["RECOMPONE_CAPTURE_SCRIPTED_STAGE"] = "gameplay"
     else:
         env.pop("RECOMPONE_CAPTURE_SCRIPTED_STAGE", None)
-    env.pop("RECOMPONE_ORIGINAL_RENDERER_ORACLE", None)
+    if args.original_renderer_oracle:
+        env["RECOMPONE_ORIGINAL_RENDERER_ORACLE"] = "1"
+    else:
+        env.pop("RECOMPONE_ORIGINAL_RENDERER_ORACLE", None)
     for key in (
         "RECOMPONE_HEADLESS",
         "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS",
@@ -702,13 +837,19 @@ def main() -> int:
     ]
     renderer_content_hits = renderer_content_branch_hits()
     captured_images = sorted(output.glob("*.ppm"))
-    route = active_route_pulses(args.gameplay_frames)
+    route = () if args.hold_for_capture else active_route_pulses(
+        args.gameplay_frames
+    )
     gameplay_segments = re.split(
         r"\[Input\] stage 'gameplay' at absolute poll \d+",
         runtime_text,
     )[1:]
     route_summaries = [
         route_summary(segment, len(route))
+        for segment in gameplay_segments[:len(selected_maps)]
+    ]
+    performance_summaries = [
+        performance_summary(segment)
         for segment in gameplay_segments[:len(selected_maps)]
     ]
     expected_detail_calls = len(selected_maps) * args.gameplay_frames
@@ -776,6 +917,14 @@ def main() -> int:
         ),
         "no_map_specific_renderer_branches": not renderer_content_hits,
     }
+    performance_enforced = not args.verbose_render_log
+    checks["sustained_performance"] = (
+        not performance_enforced or
+        (
+            len(performance_summaries) == len(selected_maps) and
+            all(summary["passed"] for summary in performance_summaries)
+        )
+    )
     if args.capture_gameplay:
         checks["exactly_one_gameplay_image"] = (
             len(captured_images) == 1 and
@@ -806,12 +955,23 @@ def main() -> int:
                 if generation < len(route_summaries)
                 else {"passed": False}
             ),
+            "performance": (
+                performance_summaries[generation]
+                if generation < len(performance_summaries)
+                else {"passed": False}
+            ),
         }
         entry["passed"] = all(
             value for key, value in entry.items()
-            if key not in {"slot", "arena", "terrain", "route"}
+            if key not in {
+                "slot", "arena", "terrain", "route", "performance"
+            }
         )
         entry["passed"] = entry["passed"] and entry["route"]["passed"]
+        if performance_enforced:
+            entry["passed"] = (
+                entry["passed"] and entry["performance"]["passed"]
+            )
         map_checks.append(entry)
     checks["all_map_contracts"] = all(entry["passed"] for entry in map_checks)
     passed = all(checks.values())
@@ -830,11 +990,21 @@ def main() -> int:
         "detail_sample_high_water": max(detail_samples, default=0),
         "packet_arena_maximum_percent": maximum_usage,
         "maximum_game_processes": maximum_game_processes,
+        "performance_enforced": performance_enforced,
+        "performance_median_floor_fps": PERFORMANCE_MEDIAN_FLOOR_FPS,
+        "performance_hard_floor_fps": PERFORMANCE_HARD_FLOOR_FPS,
+        "performance_maximum_tail_decline_fps":
+            PERFORMANCE_MAXIMUM_TAIL_DECLINE_FPS,
         "renderer_content_branch_hits": renderer_content_hits,
         "capture_gameplay": args.capture_gameplay,
+        "original_renderer_oracle": args.original_renderer_oracle,
         "capture_gameplay_poll": (
             args.capture_gameplay_poll if args.capture_gameplay else None
         ),
+        "hold_for_capture": args.hold_for_capture,
+        "proof_camera_cycles": args.proof_camera_cycles,
+        "presentation_resolution": args.presentation_resolution,
+        "player_type": args.player_type,
         "captured_images": [str(path) for path in captured_images],
         "route_profile": [
             {

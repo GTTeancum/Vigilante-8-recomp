@@ -20,6 +20,8 @@ public sealed partial class Gpu
 
     static readonly bool TraceProjection =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PROJECTION") == "1";
+    static readonly bool TracePacketGeometry =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PACKET_GEOMETRY") == "1";
     static readonly bool TraceSoftwareRectangles =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_SOFTWARE_RECTANGLES") == "1";
@@ -297,8 +299,27 @@ public sealed partial class Gpu
 
         if (HleOn)
         {
+            // Camera-space projection is accepted only when every packet
+            // vertex carries the exact address/value GTE provenance written
+            // by the original emitter. Reconstructing a missing endpoint
+            // from OT depth bends copied/cached mesh passes away from their
+            // opaque base geometry as vehicles deform, exposing the interior
+            // as apparent body transparency. The packet coordinates remain
+            // the authoritative shared fallback for any incomplete set.
             PopulateEnhancedViewSpace(v, n);
             NormalizeEnhancedPrimitiveViewSpace(v, n);
+            if (TracePacketGeometry && GpuHle.GameplayActive &&
+                TraceGameplayTicks is { } packetTicks &&
+                GpuHle.DebugGameplayTick >= packetTicks.Start &&
+                GpuHle.DebugGameplayTick <= packetTicks.End)
+            {
+                string[] endpoints = new string[n];
+                for (int i = 0; i < n; i++)
+                    endpoints[i] = FormattableString.Invariant(
+                        $"{i}:src={v[i].SourceAddress:X8},xy={v[i].X},{v[i].Y},view={v[i].ViewX:F4},{v[i].ViewY:F4},{v[i].ViewZ:F4},projection={v[i].ProjectionCenterX:F4},{v[i].ProjectionCenterY:F4},{v[i].ProjectionScale:F4},exact={v[i].HasPreciseGteZ},modern={v[i].HasViewSpace},uv={v[i].U},{v[i].V}");
+                Console.Error.WriteLine(
+                    $"[PacketGeometry] tick={GpuHle.DebugGameplayTick} packet=0x{_currentOtPacketAddress:X8} command=0x{cmd:X8} ot={_currentOtDepth} owner=\"{GpuHle.DescribePacketOwner(_currentOtPacketAddress)}\" vertices=[{string.Join(';', endpoints)}]");
+            }
             HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
             if (quad) HleTri(v[1], v[2], v[3], tex, gouraud, semi, raw, clut);
         }
