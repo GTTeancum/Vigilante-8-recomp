@@ -340,24 +340,22 @@ def v8_bank_to_v82(source: project.ObjectBank) -> project.ObjectBank:
         #          | (native & 0x10 ? 0x02 : 0)
         #          | (native & 0x40 ? 0x80 : 0)
         #
-        # Native bit 0x20 is ignored by the retail packet-mode rewrite, but V8
-        # uses it on the coplanar environment faces that follow their diffuse
-        # surface. Translate that authored gloss role to V8:2's semitransparent
-        # bit 0x10 instead of dropping it. Retail V8:2 vehicle banks use one
+        # Native bit 0x20 is ignored by the retail packet-mode rewrite. It is
+        # not a second semitransparency selector: converting it to 0x10 makes
+        # the environment fills behind keyed body/window textures translucent
+        # and exposes the vehicle interior. Retail V8:2 vehicle banks use one
         # exact tuple for each of the two environment roles:
         #
         #   opaque arena reflection: type 0x0C, (0x3FFF, 0x8080, 0, 0)
         #   translucent gloss pass:  type 0x1C, (0x7FFE, 0x8080, 0, 0)
         #
-        # V8 stores both global roles under selector 0x3FFF. Its normal gloss
-        # packets carry 0x20, while a small number carry 0x30; both become the
-        # sequel's 0x10 gloss role. Direct local texture selectors are retained
-        # rather than being mistaken for a global vehicle material.
+        # V8 stores both global roles under selector 0x3FFF. Faces carrying
+        # only ignored bit 0x20 remain opaque; the small 0x30 family retains
+        # its real 0x10 semitransparency bit. Direct local texture selectors
+        # are retained rather than being mistaken for a global material.
         source_environment = face.environment_parameters[0]
-        translucent = bool(face.packet_flags & 0x30)
+        translucent = bool(face.packet_flags & 0x10)
         target_flags = face.packet_flags & ~0x20
-        if face.packet_flags & 0x20:
-            target_flags |= 0x10
         target_environment = source_environment
         if (source_environment & 0x3FFF) == 0x3FFF:
             target_environment = 0x7FFE if translucent else 0x3FFF

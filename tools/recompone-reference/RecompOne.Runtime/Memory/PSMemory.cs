@@ -16,8 +16,22 @@ public sealed class PSMemory : IMemory
     private readonly byte[] _scratchpad = new byte[MemoryMap.ScratchpadSize];
     private readonly byte[] _hwregs = new byte[MemoryMap.HwRegsSize];
     private readonly byte[] _bios = new byte[MemoryMap.BiosSize];
-    private readonly Dictionary<uint, PreciseGteVertexData>
-        _preciseGteVertices = [];
+    private const int PrecisePageShift = 10;
+    private const int PreciseWordsPerPage = 1 << (PrecisePageShift - 2);
+
+    private sealed class PreciseGtePage
+    {
+        public readonly PreciseGteVertexData[] Vertices =
+            new PreciseGteVertexData[PreciseWordsPerPage];
+        public readonly bool[] Valid = new bool[PreciseWordsPerPage];
+    }
+
+    // Exact enhanced-renderer vertex provenance is sparse, but it is queried
+    // and invalidated in the hottest memory paths. A direct page table keeps
+    // inactive RAM almost free while avoiding a Dictionary hash/remove for
+    // every emulated write and every submitted GPU vertex.
+    private readonly PreciseGtePage?[] _preciseGteRamPages;
+    private readonly PreciseGtePage?[] _preciseGteScratchpadPages;
 
     private readonly Gpu _gpu = new();
     private readonly Spu _spu = new();
@@ -31,6 +45,10 @@ public sealed class PSMemory : IMemory
 
     public PSMemory()
     {
+        _preciseGteRamPages =
+            new PreciseGtePage?[_ram.Length >> PrecisePageShift];
+        _preciseGteScratchpadPages =
+            new PreciseGtePage?[MemoryMap.ScratchpadSize >> PrecisePageShift];
         _dma = new Dma(this, _gpu, _spu, _mdec, () => Runtime.DispatchIrq(3));
         Runtime.Gpu = _gpu;
         Runtime.Spu = _spu;
@@ -55,18 +73,21 @@ public sealed class PSMemory : IMemory
             : null;
     }
 
-    private static void TraceWatchedWrite(uint phys, uint value)
+    private static void TraceWatchedWrite(uint phys, uint value, int size)
     {
-        if (_watchedWriteAddress != phys)
+        if (_watchedWriteAddress is not uint watched ||
+            watched < phys || watched >= phys + (uint)size)
             return;
-        if (_watchDmaLinksOnly &&
+        if (_watchDmaLinksOnly && size == 4 &&
             ((value & 0xFF000000u) != 0u || (value & 0x00F00000u) != 0x00700000u))
             return;
 
         int count = System.Threading.Interlocked.Increment(ref _watchedWriteCount);
         if (count <= 64)
             Console.Error.WriteLine(
-                $"[MemoryWatch] #{count} write32 phys=0x{phys:X8} value=0x{value:X8}{Environment.NewLine}{Environment.StackTrace}");
+                $"[MemoryWatch] #{count} write{size * 8} " +
+                $"phys=0x{phys:X8} watched=0x{watched:X8} " +
+                $"value=0x{value:X8}{Environment.NewLine}{Environment.StackTrace}");
     }
 
     public void SetCd(CdController cd) { _cd = cd; _dma.SetCd(cd); }
@@ -93,43 +114,60 @@ public sealed class PSMemory : IMemory
         if (phys < MemoryMap.RamWindow)
         {
             uint off = phys % (uint)_ram.Length;
-            Runtime.RamLog.RecordWrite(phys % (uint)_ram.Length, size);
+            if (RamLogger.TrackWrites)
+                Runtime.RamLog.RecordWrite(off, size);
             Dispatcher.NotifyWrite(off);
         }
 
     }
 
-    private bool TryCanonicalPreciseWord(
-        uint phys, out uint key)
+    private bool TryPrecisePageCoordinates(
+        uint phys, out PreciseGtePage?[] pages,
+        out int pageIndex, out int wordIndex)
     {
         if (phys < MemoryMap.RamWindow)
         {
-            key = (phys % (uint)_ram.Length) & ~3u;
+            uint offset = phys % (uint)_ram.Length;
+            pages = _preciseGteRamPages;
+            pageIndex = (int)(offset >> PrecisePageShift);
+            wordIndex = (int)((offset >> 2) &
+                (PreciseWordsPerPage - 1));
             return true;
         }
         if (phys >= MemoryMap.ScratchpadBase &&
             phys < MemoryMap.ScratchpadBase +
                 MemoryMap.ScratchpadSize)
         {
-            // Keep the physical scratchpad range in the key so it cannot
-            // alias the canonical main-RAM offsets above.
-            key = phys & ~3u;
+            uint offset = phys - MemoryMap.ScratchpadBase;
+            pages = _preciseGteScratchpadPages;
+            pageIndex = (int)(offset >> PrecisePageShift);
+            wordIndex = (int)((offset >> 2) &
+                (PreciseWordsPerPage - 1));
             return true;
         }
-        key = 0;
+        pages = _preciseGteRamPages;
+        pageIndex = 0;
+        wordIndex = 0;
         return false;
+    }
+
+    private void InvalidatePreciseGteWord(uint phys)
+    {
+        if (!TryPrecisePageCoordinates(
+                phys, out PreciseGtePage?[] pages,
+                out int pageIndex, out int wordIndex))
+            return;
+        PreciseGtePage? page = pages[pageIndex];
+        if (page != null)
+            page.Valid[wordIndex] = false;
     }
 
     private void InvalidatePreciseGteVertex(uint phys, int size)
     {
-        if (!TryCanonicalPreciseWord(phys, out uint first))
-            return;
-        _preciseGteVertices.Remove(first);
-        if (TryCanonicalPreciseWord(
-                phys + (uint)Math.Max(size - 1, 0),
-                out uint last) &&
-            last != first)
-            _preciseGteVertices.Remove(last);
+        uint lastPhys = phys + (uint)Math.Max(size - 1, 0);
+        InvalidatePreciseGteWord(phys);
+        if ((phys & ~3u) != (lastPhys & ~3u))
+            InvalidatePreciseGteWord(lastPhys);
     }
 
     private void TrackRead(uint phys, int size)
@@ -232,6 +270,8 @@ public sealed class PSMemory : IMemory
     {
         uint phys = MemoryMap.ToPhysical(address);
         InvalidatePreciseGteVertex(phys, 1);
+        if (_watchedWriteAddress.HasValue)
+            TraceWatchedWrite(phys, value, 1);
         TrackWrite(phys, 1);
         if (_cd != null && IsCd(phys)) { _cd.Write(phys, value); return; }
         Resolve(address, 1)[0] = value;
@@ -241,6 +281,8 @@ public sealed class PSMemory : IMemory
     {
         uint phys = MemoryMap.ToPhysical(address);
         InvalidatePreciseGteVertex(phys, 2);
+        if (_watchedWriteAddress.HasValue)
+            TraceWatchedWrite(phys, value, 2);
         TrackWrite(phys, 2);
         if (_cd != null && IsCd(phys)) { _cd.Write(phys, (byte)value); return; }
         if (IsSpu(phys)) { _spu.WriteReg16(phys, value); return; }
@@ -254,7 +296,8 @@ public sealed class PSMemory : IMemory
     {
         uint phys = MemoryMap.ToPhysical(address);
         InvalidatePreciseGteVertex(phys, 4);
-        TraceWatchedWrite(phys, value);
+        if (_watchedWriteAddress.HasValue)
+            TraceWatchedWrite(phys, value, 4);
         RecompOne.Runtime.Hle.GpuHle.ObservePacketWrite(phys);
         TrackWrite(phys, 4);
         if (phys == 0x1F801810u) { _gpu.WriteGp0(value); return; }
@@ -292,9 +335,14 @@ public sealed class PSMemory : IMemory
     {
         WriteU32(address, vertex.PackedScreenPosition);
         uint phys = MemoryMap.ToPhysical(address);
-        if (vertex.Valid &&
-            TryCanonicalPreciseWord(phys, out uint key))
-            _preciseGteVertices[key] = vertex;
+        if (!vertex.Valid ||
+            !TryPrecisePageCoordinates(
+                phys, out PreciseGtePage?[] pages,
+                out int pageIndex, out int wordIndex))
+            return;
+        PreciseGtePage page = pages[pageIndex] ??= new PreciseGtePage();
+        page.Vertices[wordIndex] = vertex;
+        page.Valid[wordIndex] = true;
     }
 
     public bool TryGetPreciseGteVertex(
@@ -302,9 +350,12 @@ public sealed class PSMemory : IMemory
         out PreciseGteVertexData vertex)
     {
         uint phys = MemoryMap.ToPhysical(address);
-        if (TryCanonicalPreciseWord(phys, out uint key) &&
-            _preciseGteVertices.TryGetValue(
-                key, out vertex) &&
+        if (TryPrecisePageCoordinates(
+                phys, out PreciseGtePage?[] pages,
+                out int pageIndex, out int wordIndex) &&
+            pages[pageIndex] is PreciseGtePage page &&
+            page.Valid[wordIndex] &&
+            (vertex = page.Vertices[wordIndex]).Valid &&
             vertex.PackedScreenPosition == packedScreenPosition &&
             vertex.Valid)
             return true;

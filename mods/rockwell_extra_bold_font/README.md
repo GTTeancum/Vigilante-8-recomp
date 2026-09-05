@@ -1,5 +1,8 @@
 # Approved Rockwell Extra Bold font
 
+> Superseded on 2026-09-05 by `mods/rockwell_regular_font`. This package is
+> retained as a reviewed candidate and is not the active preferred font.
+
 Source: locally installed `C:/Windows/Fonts/ROCKEB.TTF`, selected by the user.
 The source TTF is not bundled. `build.json` records its hash and compilation settings.
 

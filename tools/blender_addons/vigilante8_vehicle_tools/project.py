@@ -6,6 +6,7 @@ there is intentionally no raw/blob/passthrough property.
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
@@ -574,6 +575,7 @@ class VehicleProject:
     sounds: tuple[Mapping[str, Any], ...] = ()
     controller_class: str = "ground"
     supports_transformations: bool = True
+    special_behavior_type: int | None = None
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "VehicleProject":
@@ -601,6 +603,7 @@ class VehicleProject:
                 "sounds",
                 "controller_class",
                 "supports_transformations",
+                "special_behavior_type",
             },
             "vehicle project",
         )
@@ -663,6 +666,11 @@ class VehicleProject:
             supports_transformations=bool(
                 value.get("supports_transformations", True)
             ),
+            special_behavior_type=(
+                None
+                if value.get("special_behavior_type") is None
+                else int(value["special_behavior_type"])
+            ),
         )
         project.validate()
         return project
@@ -678,6 +686,14 @@ class VehicleProject:
         if self.controller_class not in VEHICLE_CONTROLLER_CLASSES:
             raise ValueError(
                 "controller_class must be ground or flying"
+            )
+        if (
+            self.special_behavior_type is not None
+            and not 0 <= self.special_behavior_type < 18
+        ):
+            raise ValueError(
+                "special_behavior_type must select a retail V8:2 behavior "
+                "class in the range 0..17"
             )
         if not self.stable_id or any(
             character not in "abcdefghijklmnopqrstuvwxyz0123456789_.-"
@@ -872,10 +888,33 @@ class VehicleProject:
             raise ValueError(
                 "unlock authoring schema is not decoded yet; opaque unlock data is forbidden"
             )
-        if self.sounds:
-            raise ValueError(
-                "sound authoring schema is not decoded yet; opaque SND data is forbidden"
-            )
+        for index, sound in enumerate(self.sounds):
+            _strict(sound, {"pitch", "adpcm_base64"}, f"sound {index}")
+            if set(sound) != {"pitch", "adpcm_base64"}:
+                raise ValueError(
+                    f"sound {index} requires pitch and adpcm_base64"
+                )
+            pitch = int(sound["pitch"])
+            if pitch < 0 or pitch > 0xFFFF:
+                raise ValueError(
+                    f"sound {index} pitch must fit unsigned 16-bit"
+                )
+            encoded = sound["adpcm_base64"]
+            if not isinstance(encoded, str):
+                raise ValueError(
+                    f"sound {index} adpcm_base64 must be text"
+                )
+            try:
+                payload = base64.b64decode(encoded, validate=True)
+            except Exception as error:
+                raise ValueError(
+                    f"sound {index} adpcm_base64 is invalid"
+                ) from error
+            if not payload or len(payload) % 16:
+                raise ValueError(
+                    f"sound {index} ADPCM payload must be a nonempty "
+                    "multiple of the native 16-byte block"
+                )
 
     def _validate_bank(
         self,
@@ -1412,6 +1451,7 @@ def to_dict(vehicle: VehicleProject) -> dict[str, Any]:
         "sounds": [dict(sound) for sound in vehicle.sounds],
         "controller_class": vehicle.controller_class,
         "supports_transformations": vehicle.supports_transformations,
+        "special_behavior_type": vehicle.special_behavior_type,
     }
     result["transformation_bank"] = (
         None

@@ -20,6 +20,11 @@ internal static class HostWindow
     static ImGuiController? _imgui;
     static bool _headless;
     static Gpu? _gpu;
+    static string _baseWindowTitle = string.Empty;
+    static long _fpsWindowStartedTicks;
+    static int _fpsWindowFrames;
+    static readonly bool _traceWindowFps =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_WINDOW_FPS") == "1";
 
     static uint _displayTex;
     static uint _vramTex;
@@ -94,7 +99,7 @@ internal static class HostWindow
     static int _activeComposedBurstRemaining;
     static readonly bool _lowerProcessPriority =
         Environment.GetEnvironmentVariable(
-            "RECOMPONE_LOWER_PROCESS_PRIORITY") != "0";
+            "RECOMPONE_LOWER_PROCESS_PRIORITY") == "1";
     static readonly string? _processPriorityOverride =
         Environment.GetEnvironmentVariable("RECOMPONE_PROCESS_PRIORITY");
     static readonly bool _windowVisible =
@@ -133,6 +138,9 @@ internal static class HostWindow
 
     public static void Initialize(string title)
     {
+        _baseWindowTitle = title;
+        _fpsWindowStartedTicks = 0;
+        _fpsWindowFrames = 0;
         ConfigManager.Load();
         ApplyProcessPriority();
         if (_forceHeadless)
@@ -202,7 +210,10 @@ internal static class HostWindow
     static void ApplyProcessPriority()
     {
         if (!_lowerProcessPriority)
+        {
+            Console.WriteLine("[Host] process priority=default");
             return;
+        }
 
         ProcessPriorityClass priority = ProcessPriorityClass.BelowNormal;
         if (!string.IsNullOrWhiteSpace(_processPriorityOverride) &&
@@ -255,6 +266,7 @@ internal static class HostWindow
             }
             return;
         }
+        UpdateFpsTitle();
         try { _window.DoEvents(); }
         catch (Exception e) {
             Console.WriteLine(e.Message);
@@ -282,6 +294,36 @@ internal static class HostWindow
             Runtime.Shutdown();
             Environment.Exit(0);
         }
+    }
+
+    static void UpdateFpsTitle()
+    {
+        if (_window == null)
+            return;
+
+        long now = Stopwatch.GetTimestamp();
+        if (_fpsWindowStartedTicks == 0)
+        {
+            _fpsWindowStartedTicks = now;
+            return;
+        }
+
+        _fpsWindowFrames++;
+        long elapsedTicks = now - _fpsWindowStartedTicks;
+        if (elapsedTicks < Stopwatch.Frequency)
+            return;
+
+        double framesPerSecond =
+            _fpsWindowFrames * (double)Stopwatch.Frequency / elapsedTicks;
+        _window.Title = FormattableString.Invariant(
+            $"{_baseWindowTitle} - {framesPerSecond:F1} FPS");
+        if (_traceWindowFps)
+            Console.Error.WriteLine(
+                $"[HostFpsTitle] fps={framesPerSecond:F3} " +
+                $"frames={_fpsWindowFrames} elapsed-ms=" +
+                $"{elapsedTicks * 1000.0 / Stopwatch.Frequency:F3}");
+        _fpsWindowStartedTicks = now;
+        _fpsWindowFrames = 0;
     }
 
     internal static void Pump()
@@ -564,9 +606,11 @@ internal static class HostWindow
         gl.Clear(ClearBufferMask.ColorBufferBit);
 
         Runtime.RamLog.Tick();
-        Memory.RamLogger.TrackReads =
+        bool trackRamAccess =
             PanelManager.Get<RamMapPanel>()?.IsOpen == true ||
             PanelManager.Get<MemoryEditorPanel>()?.IsOpen == true;
+        Memory.RamLogger.TrackReads = trackRamAccess;
+        Memory.RamLogger.TrackWrites = trackRamAccess;
 
         var gpu = _gpu;
         if (gpu != null)

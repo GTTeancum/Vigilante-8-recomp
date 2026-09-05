@@ -87,8 +87,6 @@ def validate_environment_translation(
         before_type = before.packet_kind | before.packet_flags
         after_type = after.packet_kind | after.packet_flags
         expected_mode = render_mode(before_type)
-        if before.packet_flags & 0x20:
-            expected_mode |= 0x02
         require(
             expected_mode == render_mode(after_type),
             f"{stable_id} {label} face {index} did not map the V8 "
@@ -101,10 +99,8 @@ def validate_environment_translation(
 
         source_selector = before.environment_parameters[0]
         if (source_selector & 0x3FFF) == 0x3FFF:
-            translucent = bool(before.packet_flags & 0x30)
+            translucent = bool(before.packet_flags & 0x10)
             expected_flags = before.packet_flags & ~0x20
-            if before.packet_flags & 0x20:
-                expected_flags |= 0x10
             expected = (
                 expected_flags,
                 (
@@ -403,8 +399,8 @@ def main() -> None:
         beezwax["body_environment"]
         == {
             "faces": 26,
-            "opaque_arena_reflection": 2,
-            "translucent_gloss": 24,
+            "opaque_arena_reflection": 18,
+            "translucent_gloss": 8,
         },
         "Beezwax body glass/reflection structure changed",
     )

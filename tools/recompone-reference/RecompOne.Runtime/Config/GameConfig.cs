@@ -186,6 +186,7 @@ public static class InputBindingResolver
 
 public class GameConfig
 {
+    public V82TransformationMode V82Transformations { get; set; } = V82TransformationMode.All;
     // V8: 2nd Offense native cheat bits. DRIVE_ONLY (bit 6) and the
     // PlayStation original-arena flag (bit 20) are the PC defaults.
     public uint V82CheatFlags { get; set; } = (1u << 6) | (1u << 20);

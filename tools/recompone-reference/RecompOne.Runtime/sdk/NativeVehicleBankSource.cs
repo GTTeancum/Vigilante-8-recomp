@@ -13,15 +13,17 @@ readonly record struct NativeVramAllocation(
 
 /// <summary>
 /// File-backed slice of one strict native XOBF bank. Package discovery keeps
-/// only offsets resident; BIN/ANM payloads are read when the selected vehicle
-/// is validated or built.
+/// only offsets resident; BIN/ANM/SND payloads are read when the selected
+/// vehicle is validated or built.
 /// </summary>
 sealed class NativeVehicleBankSource(
     string path,
     long binOffset,
     int binLength,
     long animationOffset,
-    int animationLength)
+    int animationLength,
+    long soundOffset,
+    int soundLength)
 {
     public const int MaximumSourceBytes = 256 * 1024;
 
@@ -31,6 +33,11 @@ sealed class NativeVehicleBankSource(
         animationOffset < 0
             ? null
             : ReadSlice(path, animationOffset, animationLength);
+
+    public byte[]? ReadSound() =>
+        soundOffset < 0
+            ? null
+            : ReadSlice(path, soundOffset, soundLength);
 
     /// <summary>
     /// Returns the native PS1 allocator requests made by the retail XOBF
@@ -110,8 +117,9 @@ sealed class NativeVehicleBankSource(
         return result;
     }
 
-    public int SourceBytes => checked(binLength + animationLength);
+    public int SourceBytes => checked(binLength + animationLength + soundLength);
     public int BinLength => binLength;
+    public int SoundLength => soundOffset < 0 ? 0 : soundLength;
 
     public static List<NativeVehicleBankSource> Open(string archivePath)
     {
@@ -144,6 +152,8 @@ sealed class NativeVehicleBankSource(
             int binLength = 0;
             long animationOffset = -1;
             int animationLength = 0;
+            long soundOffset = -1;
+            int soundLength = 0;
             while (stream.Position < formEnd)
             {
                 ReadExact(stream, childHeader, "XOBF child header");
@@ -169,6 +179,14 @@ sealed class NativeVehicleBankSource(
                     animationOffset = payloadOffset;
                     animationLength = (int)childSize;
                 }
+                else if (childHeader[..4].SequenceEqual("SND "u8))
+                {
+                    if (soundOffset >= 0)
+                        throw new InvalidDataException(
+                            "XOBF contains duplicate SND chunks");
+                    soundOffset = payloadOffset;
+                    soundLength = (int)childSize;
+                }
                 else
                 {
                     throw new InvalidDataException(
@@ -181,7 +199,8 @@ sealed class NativeVehicleBankSource(
             if (stream.Position != formEnd || binOffset < 0)
                 throw new InvalidDataException(
                     "XOBF has invalid padding or no BIN chunk");
-            int sourceBytes = checked(binLength + animationLength);
+            int sourceBytes = checked(
+                binLength + animationLength + soundLength);
             if (sourceBytes > MaximumSourceBytes)
                 throw new InvalidDataException(
                     $"native vehicle bank uses {sourceBytes} source bytes; " +
@@ -191,7 +210,15 @@ sealed class NativeVehicleBankSource(
                 binOffset,
                 binLength,
                 animationOffset,
-                animationLength));
+                animationLength,
+                soundOffset,
+                soundLength));
+            if (soundOffset >= 0)
+            {
+                Console.Error.WriteLine(
+                    $"[V82BankSource] form={banks.Count - 1} " +
+                    $"bin={binLength} anm={animationLength} snd={soundLength}");
+            }
             stream.Position = checked(formEnd + (formSize & 1u));
         }
         if (stream.Position != stream.Length || banks.Count == 0)

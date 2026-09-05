@@ -182,6 +182,14 @@ def parse_args() -> argparse.Namespace:
             "menu navigation for the selected map and character"
         ),
     )
+    parser.add_argument(
+        "--native-selector-only",
+        action="store_true",
+        help=(
+            "leave player selection entirely to the supplied native input "
+            "script instead of forcing a diagnostic player type"
+        ),
+    )
     parser.add_argument("--cycles", type=int, default=1)
     parser.add_argument(
         "--unthrottled",
@@ -485,6 +493,7 @@ def run_one(
     location_settle_frames: int,
     loading_prompt_hold_frames: int,
     input_script: Path | None,
+    native_selector_only: bool,
 ) -> RunResult:
     expected = EXPECTED_OVERLAYS[slot]
     stem = (
@@ -549,7 +558,10 @@ def run_one(
     )
     if mods_directory is not None:
         env["RECOMPONE_MOD_DIR"] = str(mods_directory)
-    if guest_vehicle is None:
+    if native_selector_only:
+        env.pop("RECOMPONE_V82_PLAYER_TYPE", None)
+        env.pop("RECOMPONE_V82_PLAYER_TYPE_SEQUENCE", None)
+    elif guest_vehicle is None:
         env["RECOMPONE_V82_PLAYER_TYPE"] = str(character_slot)
     else:
         env.pop("RECOMPONE_V82_PLAYER_TYPE", None)
@@ -913,6 +925,17 @@ def run_one(
         reason = f"incomplete weapon attachment coverage: {weapon_armed}"
     if (
         passed
+        and coverage_profile != "powerups"
+        and weapon_armed
+        and weapon_fired != weapon_armed
+    ):
+        passed = False
+        reason = (
+            "attached weapons did not fire: "
+            f"armed={weapon_armed} fired={weapon_fired}"
+        )
+    if (
+        passed
         and frames >= 2700
         and coverage_profile != "weapons"
         and powerups != EXPECTED_POWERUPS
@@ -1137,6 +1160,7 @@ def main() -> int:
                 args.location_settle_frames,
                 args.loading_prompt_hold_frames,
                 input_script,
+                args.native_selector_only,
             )
             results.append(result)
             write_summary(output, args, results, started)

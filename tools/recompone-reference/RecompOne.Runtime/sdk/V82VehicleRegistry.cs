@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Context;
@@ -21,6 +22,7 @@ public static class V82VehicleRegistry
     public const int FirstCustomType = 64;
     public const uint CustomDispatchAddress = 0x807FF000u;
     const uint BuildNativeBankAddress = 0x8001E914u;
+    const uint SpuMallocAddress = 0x80052F9Cu;
     const uint CreateObjectAddress = 0x80031DDCu;
     const uint GenericVehicleDispatchAddress = 0x800367A4u;
     const uint TerrainHeightAddress = 0x8001B750u;
@@ -42,8 +44,13 @@ public static class V82VehicleRegistry
     const uint FlagNonTransformable = 1u << 0;
     const int ControllerClassShift = 8;
     const uint ControllerClassMask = 0xFu << ControllerClassShift;
+    const uint FlagSpecialBehavior = 1u << 16;
+    const int SpecialBehaviorShift = 17;
+    const uint SpecialBehaviorMask = 0x1Fu << SpecialBehaviorShift;
     const uint SupportedCapabilityFlags =
-        FlagNonTransformable | ControllerClassMask;
+        FlagNonTransformable | ControllerClassMask |
+        FlagSpecialBehavior | SpecialBehaviorMask;
+    const uint SpecialBehaviorTableAddress = 0x800C6130u;
     const uint SelectorInputAddress = 0x8006B508u;
     // Gameplay and SHELL share six participant bytes at 0x8006B8F4. The
     // first two are players; the four enemy-row vehicle types start at +2.
@@ -89,6 +96,7 @@ public static class V82VehicleRegistry
     static readonly HashSet<(uint Pickup, uint Vehicle, ushort Mode)>
         RejectedTransformationPickups = [];
     static readonly HashSet<uint> WheelLessConstructionLogged = [];
+    static readonly HashSet<uint> SpecialBehaviorLogged = [];
     static readonly Dictionary<uint, ulong> ControllerPhysicsTicks = [];
     static bool _initialized;
     static bool _dispatchRegistered;
@@ -494,6 +502,13 @@ public static class V82VehicleRegistry
             c.V0 = checked((uint)entry.Type);
             SelectTypeForPlayer(_selectorPlayer, entry.Type);
         }
+        else if (!_selectorEnemyPhase)
+        {
+            // A retail result is just as authoritative as an imported one.
+            // Without this assignment, the last imported type survived in
+            // SelectedTypes and overrode every later native selection.
+            SelectTypeForPlayer(_selectorPlayer, -1);
+        }
         _selectorGuestIndex = -1;
         _selectorEnemyPhase = false;
         _selectorAcceptedGuest = -1;
@@ -505,6 +520,28 @@ public static class V82VehicleRegistry
         ReleaseAllSelectorRuntimes(c, Dispatcher.UnwrapMemory(m), "selector-end");
         _selectorPreviewObject = 0u;
         _selectorContext = uint.MaxValue;
+    }
+
+    /// <summary>
+    /// The native main menu is the boundary between match setup sessions.
+    /// Discard every imported player/NPC override there so a completed or
+    /// abandoned setup cannot leak into the next character selection.
+    /// </summary>
+    public static void ResetSelectionsAtMainMenu()
+    {
+        ClearSelections();
+        // Command-line diagnostic selection is an explicit per-process test
+        // contract, not state leaked by a completed setup. Reapply it after
+        // the same reset so existing hidden roster gates remain deterministic.
+        if (_requestedStableId != null && Entries.Count != 0)
+            ApplyRequestedSelection();
+        _selectorGuestIndex = -1;
+        _selectorAcceptedGuest = -1;
+        _selectorAcceptedProxySlot = -1;
+        _selectorPreviousSlot = -1;
+        _selectorPreviewObject = 0u;
+        Console.Error.WriteLine(
+            "[V82Vehicles] reset imported selections at native main menu");
     }
 
     /// <summary>
@@ -1580,6 +1617,7 @@ public static class V82VehicleRegistry
         LoadAndValidate(registryPath, archivePath);
         ValidateSelectorPortraits(root);
         return $"vehicles={Entries.Count} banks={Banks.Count} " +
+            $"sound-banks={Banks.Count(bank => bank.SoundLength != 0)} " +
             $"portraits={Entries.Count}";
     }
 
@@ -1609,10 +1647,18 @@ public static class V82VehicleRegistry
         ObjectUpgradeStatus.Clear();
         RejectedTransformationPickups.Clear();
         WheelLessConstructionLogged.Clear();
+        SpecialBehaviorLogged.Clear();
         ControllerPhysicsTicks.Clear();
         SelectorPortraitPixels.Clear();
         _defaultReplacementEntry = null;
         ClearSelections();
+        string archiveHash = Convert.ToHexString(
+            SHA256.HashData(File.ReadAllBytes(archivePath)));
+        Console.Error.WriteLine(
+            $"[V82Vehicles] package registry={Path.GetFullPath(registryPath)} " +
+            $"archive={Path.GetFullPath(archivePath)} " +
+            $"archive_bytes={new FileInfo(archivePath).Length} " +
+            $"archive_sha256={archiveHash}");
         byte[] registry = File.ReadAllBytes(registryPath);
         ParseArchive(archivePath);
         ParseRegistry(registry);
@@ -1991,6 +2037,7 @@ public static class V82VehicleRegistry
         ObjectUpgradeStatus.Clear();
         RejectedTransformationPickups.Clear();
         WheelLessConstructionLogged.Clear();
+        SpecialBehaviorLogged.Clear();
         ControllerPhysicsTicks.Clear();
         _constructingEntry = null;
         _constructingSelectorPreview = false;
@@ -2229,9 +2276,12 @@ public static class V82VehicleRegistry
     }
 
     /// <summary>
-    /// Capture the native action-step vehicle before the generated function
-    /// restores its caller's saved registers. Controller selection remains
-    /// entirely registry-driven and ground vehicles retain the retail path.
+    /// Apply capability-selected movement at the start of V8:2's native
+    /// vehicle action handler. The handler itself must always continue: it
+    /// owns weapon firing, weapon selection, transformations, sound and other
+    /// input actions independently of the vehicle's movement controller.
+    /// Controller selection remains registry-driven and ground vehicles keep
+    /// the unchanged retail movement path.
     /// </summary>
     public static bool BeginControllerPhysics(CpuContext c, IMemory m)
     {
@@ -2242,10 +2292,6 @@ public static class V82VehicleRegistry
             entry?.ControllerClass == VehicleControllerClass.Flying)
         {
             ApplyOriginalV8FlyingPhysics(c, m, vehicle, entry);
-            // The V8:2 function being hooked is the ground suspension
-            // integrator. A wheel-less controller must not execute it after
-            // its own source-authored movement step.
-            return false;
         }
         return true;
     }
@@ -2262,6 +2308,10 @@ public static class V82VehicleRegistry
             TryEntryForObject(m, vehicle, out VehicleEntry? entry) &&
             entry?.ControllerClass == VehicleControllerClass.Flying;
     }
+
+    public static bool CanTransform(IMemory m, uint vehicle) =>
+        !TryEntryForObject(Dispatcher.UnwrapMemory(m), vehicle, out var entry) ||
+        entry?.SupportsTransformations == true;
 
     static void ApplyOriginalV8FlyingPhysics(
         CpuContext c, IMemory m, uint vehicle, VehicleEntry entry)
@@ -2529,6 +2579,13 @@ public static class V82VehicleRegistry
 
         m = Dispatcher.UnwrapMemory(m);
         uint vehicle = m.ReadU32(c.A2);
+        ushort pickupKind = m.ReadU16(c.A0 + 0x1Au);
+        if (vehicle != 0u && pickupKind is >= 7 and <= 9 &&
+            !V82TransformationSettings.AllowsPowerups(ConfigManager.Game.V82Transformations))
+        {
+            c.V0 = 0u;
+            return false;
+        }
         if (vehicle == 0u ||
             !TryEntryForObject(m, vehicle, out VehicleEntry? entry) ||
             entry == null || entry.SupportsTransformations)
@@ -2555,6 +2612,11 @@ public static class V82VehicleRegistry
     public static bool RejectUnsupportedTransformationActivation(
         CpuContext c, IMemory m)
     {
+        if (!V82TransformationPolicy.AllowsActivation(c.A0, c.A1))
+        {
+            c.V0 = 0u;
+            return false;
+        }
         if (c.A1 == 0u ||
             !TryEntryForObject(
                 Dispatcher.UnwrapMemory(m), c.A0, out VehicleEntry? entry) ||
@@ -2588,6 +2650,37 @@ public static class V82VehicleRegistry
         {
             c.Restore(state);
         }
+    }
+
+    /// <summary>
+    /// Selects a retail V8:2 special-weapon behavior through package metadata.
+    /// The imported model remains independently owned; only a proven native
+    /// behavior class is reused. Custom vehicles without one use the retail
+    /// generic fallback instead of indexing beyond the fixed 18-entry table.
+    /// </summary>
+    public static uint SpecialBehaviorForObject(
+        IMemory m, uint vehicle, uint retailPointer)
+    {
+        if (!TryEntryForObject(m, vehicle, out VehicleEntry? entry) ||
+            entry == null)
+            return retailPointer;
+        if (entry.SpecialBehaviorType < 0)
+        {
+            if (SpecialBehaviorLogged.Add(vehicle))
+                Console.Error.WriteLine(
+                    $"[V82VehicleSpecial] stable={entry.StableId} " +
+                    "behavior=generic-fallback");
+            return 0u;
+        }
+        uint pointer = m.ReadU32(
+            SpecialBehaviorTableAddress +
+            checked((uint)entry.SpecialBehaviorType * 4u));
+        if (SpecialBehaviorLogged.Add(vehicle))
+            Console.Error.WriteLine(
+                $"[V82VehicleSpecial] stable={entry.StableId} " +
+                $"native-type={entry.SpecialBehaviorType} " +
+                $"descriptor=0x{pointer:X8}");
+        return pointer;
     }
 
     static void DispatchCustomVehicle(CpuContext c, IMemory m)
@@ -3177,9 +3270,11 @@ public static class V82VehicleRegistry
         uint animation = animationSource == null
             ? 0u
             : AllocateBytes(c, m, animationSource);
+        byte[]? soundSource = bank.ReadSound();
         Console.Error.WriteLine(
             $"[V82Bank] build bin=0x{bin:X8}+0x{binSource.Length:X} " +
-            $"anm=0x{animation:X8}+0x{animationSource?.Length ?? 0:X}");
+            $"anm=0x{animation:X8}+0x{animationSource?.Length ?? 0:X} " +
+            $"snd=0x{soundSource?.Length ?? 0:X}");
         c.A0 = bin;
         c.A1 = animation;
         c.RA = CustomDispatchAddress;
@@ -3199,9 +3294,108 @@ public static class V82VehicleRegistry
         }
         if (c.V0 == 0u)
             throw new OutOfMemoryException("native V8:2 object-bank build failed");
+        uint runtime = c.V0;
+        if (soundSource != null)
+        {
+            var state = c.Snapshot();
+            try
+            {
+                AttachSoundBank(c, m, runtime, soundSource);
+            }
+            finally
+            {
+                c.Restore(state);
+            }
+        }
         Console.Error.WriteLine(
-            $"[V82Bank] built runtime=0x{c.V0:X8}");
-        return new NativeBankAllocation(c.V0, bin, animation);
+            $"[V82Bank] built runtime=0x{runtime:X8}");
+        return new NativeBankAllocation(runtime, bin, animation);
+    }
+
+    static void AttachSoundBank(
+        CpuContext c, IMemory m, uint runtime, byte[] source)
+    {
+        if (source.Length < 4)
+            throw new InvalidDataException("native SND header is truncated");
+        ushort count = BinaryPrimitives.ReadUInt16LittleEndian(source);
+        ushort sizeIn8b = BinaryPrimitives.ReadUInt16LittleEndian(
+            source.AsSpan(2));
+        if (count == 0 || sizeIn8b == 0)
+            throw new InvalidDataException("native SND bank is empty");
+        int tableEnd = checked(4 + count * 4);
+        int sampleBytes = checked(sizeIn8b * 8);
+        if (source.Length != checked(tableEnd + sampleBytes))
+            throw new InvalidDataException(
+                "native SND payload does not match its header");
+
+        ushort previousOffset = 0;
+        for (int index = 0; index < count; index++)
+        {
+            int entry = 4 + index * 4;
+            ushort offset = BinaryPrimitives.ReadUInt16LittleEndian(
+                source.AsSpan(entry));
+            ushort nextOffset = index + 1 < count
+                ? BinaryPrimitives.ReadUInt16LittleEndian(
+                    source.AsSpan(entry + 4))
+                : sizeIn8b;
+            if ((index == 0 && offset != 0) ||
+                (index != 0 && offset <= previousOffset) ||
+                nextOffset <= offset || nextOffset > sizeIn8b ||
+                (nextOffset - offset) * 8 % 16 != 0)
+                throw new InvalidDataException(
+                    "native SND sample table is invalid");
+            previousOffset = offset;
+        }
+
+        uint allocationBytes = checked((uint)(sampleBytes + 0x3F) & ~0x3Fu);
+        c.A0 = allocationBytes;
+        c.RA = CustomDispatchAddress;
+        Dispatcher.Call(c, m, SpuMallocAddress);
+        uint spuAddress = c.V0;
+        if (spuAddress == 0u || spuAddress == 0xFFFFFFFFu)
+            throw new OutOfMemoryException(
+                $"V8:2 custom vehicle SND allocation failed for " +
+                $"{allocationBytes} bytes");
+        if (spuAddress > Spu.RamSize ||
+            sampleBytes > Spu.RamSize - checked((int)spuAddress))
+            throw new InvalidDataException(
+                "native SND allocation is outside SPU RAM");
+
+        uint baseIn8b = spuAddress >> 3;
+        var handle = new byte[checked(4 + count * 4)];
+        BinaryPrimitives.WriteUInt16LittleEndian(handle, count);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            handle.AsSpan(2), checked((ushort)baseIn8b));
+        for (int index = 0; index < count; index++)
+        {
+            int sourceEntry = 4 + index * 4;
+            int handleEntry = 4 + index * 4;
+            ushort relative = BinaryPrimitives.ReadUInt16LittleEndian(
+                source.AsSpan(sourceEntry));
+            ushort pitch = BinaryPrimitives.ReadUInt16LittleEndian(
+                source.AsSpan(sourceEntry + 2));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                handle.AsSpan(handleEntry),
+                checked((ushort)(baseIn8b + relative)));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                handle.AsSpan(handleEntry + 2), pitch);
+        }
+        uint handleAddress = AllocateBytes(c, m, handle);
+        Spu? spu = Runtime.Spu;
+        if (spu == null)
+            throw new InvalidOperationException(
+                "SPU is unavailable while loading a custom vehicle SND bank");
+        spu.LoadRam(
+            spuAddress, source.AsSpan(tableEnd, sampleBytes));
+        // Native XOBF runtime layout is BIN at +4, ANM at +8, and SND at
+        // +0xC (the same assignment made by func_80032F4C after parsing a
+        // retail FORM). Never replace +8: that turns the sound table into an
+        // animation stream and sends the native event interpreter off-map.
+        m.WriteU32(runtime + 0xCu, handleAddress);
+        Console.Error.WriteLine(
+            $"[V82Bank] attached SND runtime=0x{runtime:X8} " +
+            $"handle=0x{handleAddress:X8} spu=0x{spuAddress:X5} " +
+            $"samples={count} bytes={sampleBytes}");
     }
 
     static void ReleaseAllSelectorRuntimes(
@@ -3339,15 +3533,29 @@ public static class V82VehicleRegistry
 
     static bool TryFindPackage(out string registryPath, out string archivePath)
     {
-        var roots = new List<string>();
+        var explicitRoots = new List<string>();
         string? package =
             Environment.GetEnvironmentVariable("RECOMPONE_V82_VEHICLE_PACKAGE");
         if (!string.IsNullOrWhiteSpace(package))
-            roots.Add(Path.GetFullPath(package));
+            explicitRoots.Add(Path.GetFullPath(package));
         if (!string.IsNullOrWhiteSpace(
                 ConfigManager.Game.V82VehiclePackagePath))
-            roots.Add(Path.GetFullPath(
+            explicitRoots.Add(Path.GetFullPath(
                 ConfigManager.Game.V82VehiclePackagePath));
+
+        // Explicit configuration always wins. Otherwise, installed mod
+        // packages take precedence over legacy runnable-root copies, matching
+        // loose disc-file override semantics. This lets a package be updated
+        // atomically as a mod without overwriting source assets in the game
+        // root or silently loading a stale earlier conversion.
+        foreach (string root in explicitRoots.Distinct(
+                     StringComparer.OrdinalIgnoreCase))
+        {
+            if (TryPackageAt(root, out registryPath, out archivePath))
+                return true;
+        }
+
+        var roots = new List<string>();
         string? loose = Runtime.ResolveLoosePath();
         if (!string.IsNullOrWhiteSpace(loose))
             roots.Add(Path.GetFullPath(loose));
@@ -3357,34 +3565,47 @@ public static class V82VehicleRegistry
         var candidates = new List<string>();
         foreach (string root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            candidates.Add(root);
             string mods = Path.Combine(root, "mods");
-            if (!Directory.Exists(mods))
-                continue;
-            candidates.AddRange(
-                Directory.EnumerateDirectories(mods)
-                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
+            if (Directory.Exists(mods))
+                candidates.AddRange(
+                    Directory.EnumerateDirectories(mods)
+                        .OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
         }
+        candidates.AddRange(roots);
 
         foreach (string root in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            string candidateRegistry = Path.Combine(root, "VEHICLES.V8R");
-            string candidateArchive = Path.Combine(root, "CUSTOM.EXP");
-            bool hasRegistry = File.Exists(candidateRegistry);
-            bool hasArchive = File.Exists(candidateArchive);
-            if (hasRegistry != hasArchive)
-                throw new FileNotFoundException(
-                    "A custom vehicle package requires both VEHICLES.V8R and " +
-                    $"CUSTOM.EXP in {root}");
-            if (!hasRegistry) continue;
-            registryPath = candidateRegistry;
-            archivePath = candidateArchive;
-            return true;
+            if (TryPackageAt(root, out registryPath, out archivePath))
+                return true;
         }
 
         registryPath = "";
         archivePath = "";
         return false;
+    }
+
+    static bool TryPackageAt(
+        string root,
+        out string registryPath,
+        out string archivePath)
+    {
+        string candidateRegistry = Path.Combine(root, "VEHICLES.V8R");
+        string candidateArchive = Path.Combine(root, "CUSTOM.EXP");
+        bool hasRegistry = File.Exists(candidateRegistry);
+        bool hasArchive = File.Exists(candidateArchive);
+        if (hasRegistry != hasArchive)
+            throw new FileNotFoundException(
+                "A custom vehicle package requires both VEHICLES.V8R and " +
+                $"CUSTOM.EXP in {root}");
+        if (!hasRegistry)
+        {
+            registryPath = "";
+            archivePath = "";
+            return false;
+        }
+        registryPath = candidateRegistry;
+        archivePath = candidateArchive;
+        return true;
     }
 
     static void ParseRegistry(byte[] data)
@@ -3446,10 +3667,15 @@ public static class V82VehicleRegistry
                 : (ushort)0;
             uint controllerId =
                 (flags & ControllerClassMask) >> ControllerClassShift;
+            int specialBehaviorType = (flags & FlagSpecialBehavior) != 0u
+                ? checked((int)(
+                    (flags & SpecialBehaviorMask) >> SpecialBehaviorShift))
+                : -1;
             bool supportsTransformations =
                 (flags & FlagNonTransformable) == 0u;
             if ((flags & ~SupportedCapabilityFlags) != 0u ||
                 controllerId > (uint)VehicleControllerClass.Flying ||
+                specialBehaviorType >= RetailVehicleCount ||
                 statSize != StatsSize ||
                 entryReserved != 0 || extensionReserved != 0)
                 throw new InvalidDataException(
@@ -3522,6 +3748,7 @@ public static class V82VehicleRegistry
                 flags,
                 (VehicleControllerClass)controllerId,
                 supportsTransformations,
+                specialBehaviorType,
                 rearSuspensionDamping,
                 stats,
                 transformModes,
@@ -3731,6 +3958,7 @@ public static class V82VehicleRegistry
         uint flags,
         VehicleControllerClass controllerClass,
         bool supportsTransformations,
+        int specialBehaviorType,
         ushort rearSuspensionDamping,
         byte[] stats,
         ushort[,] transformModes,
@@ -3752,6 +3980,7 @@ public static class V82VehicleRegistry
             controllerClass;
         public bool SupportsTransformations { get; } =
             supportsTransformations;
+        public int SpecialBehaviorType { get; } = specialBehaviorType;
         public ushort RearSuspensionDamping { get; } = rearSuspensionDamping;
         public byte[] Stats { get; } = stats;
         public ushort[,] TransformModes { get; } = transformModes;

@@ -51,6 +51,12 @@ public static class GpuHle
         TriangleNclipPackets = [];
     static readonly HashSet<uint> TriangleNclipHeaderPending = [];
     static readonly Dictionary<uint, string> PacketOwners = [];
+    static long _vehiclePacketLookups;
+    static long _vehiclePacketExplicitHits;
+    static long _vehiclePacketRangeHits;
+    static long _vehiclePacketRangeTests;
+    static long _vehiclePacketRangeRegistrations;
+    static long _vehiclePacketRangeDuplicates;
     static readonly bool TracePacketArenas =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_PACKET_ARENAS") == "1";
@@ -73,14 +79,49 @@ public static class GpuHle
         byte AverageG,
         byte AverageB);
 
+    public readonly record struct TerrainDistanceColor(
+        byte BaseR,
+        byte BaseG,
+        byte BaseB,
+        byte FarR,
+        byte FarG,
+        byte FarB);
+
+    public readonly record struct TerrainQuadDistanceColors(
+        TerrainDistanceColor TopLeft,
+        TerrainDistanceColor TopRight,
+        TerrainDistanceColor BottomLeft,
+        TerrainDistanceColor BottomRight,
+        bool Alternate,
+        bool Valid,
+        TerrainPatchGeometry? Patch = null)
+    {
+        public TerrainDistanceColor Get(bool secondHalf, int vertex) =>
+            (secondHalf, vertex) switch
+            {
+                (false, 0) => TopLeft,
+                (false, 1) => TopRight,
+                (false, 2) => BottomLeft,
+                (true, 0) => TopRight,
+                (true, 1) => BottomLeft,
+                _ => BottomRight,
+            };
+    }
+
     public readonly record struct TerrainCellTextures(
         TerrainTextureDescriptor[]? Tiles,
         int GridSize,
-        bool Valid)
+        bool Valid,
+        TerrainQuadDistanceColors DistanceColors)
     {
         public TerrainTextureDescriptor Get(int x, int z) =>
             Tiles![x * GridSize + z];
     }
+
+    public sealed record TerrainPatchGeometry(
+        DreamcastTerrainGeometry.Sample[] Samples,
+        System.Numerics.Vector3 HeightAxis,
+        float ProjectionCenterX, float ProjectionCenterY, float ProjectionScale);
 
     public readonly record struct CoarseTerrainPacket(
         TerrainCellTextures Textures,
@@ -117,6 +158,20 @@ public static class GpuHle
         int X2,
         int Y2);
 
+    public readonly record struct VehiclePacketOwnershipMetrics(
+        int RangeCount,
+        int ExplicitPacketCount,
+        int ReflectionPacketCount,
+        int OwnedRangeCount,
+        long TotalRangeBytes,
+        uint MaximumRangeBytes,
+        long Lookups,
+        long ExplicitHits,
+        long RangeHits,
+        long RangeTests,
+        long Registrations,
+        long DuplicateRegistrations);
+
     static uint NormalizePacketAddress(uint address)
     {
         uint ramSize = Runtime.Mode == RunMode.Devkit
@@ -131,20 +186,122 @@ public static class GpuHle
         end = NormalizePacketAddress(end);
         if (end <= start)
             return;
-        var range = new PacketRange(start, end);
-        if (!VehiclePacketRanges.Contains(range))
-            VehiclePacketRanges.Add(range);
+        _vehiclePacketRangeRegistrations++;
+
+        // Ownership is a union of packet intervals. Object and imported-group
+        // scopes can be nested, so retaining every raw scope forces the hot OT
+        // lookup through redundant ranges thousands of times per frame. Merge
+        // overlapping/adjacent intervals at registration and keep the result
+        // sorted; this preserves the exact address set while making lookup
+        // logarithmic and independent of renderer nesting.
+        uint mergedStart = start;
+        uint mergedEnd = end;
+        bool merged = false;
+        for (int index = VehiclePacketRanges.Count - 1; index >= 0; index--)
+        {
+            PacketRange existing = VehiclePacketRanges[index];
+            if (existing.End < mergedStart || existing.Start > mergedEnd)
+                continue;
+            mergedStart = Math.Min(mergedStart, existing.Start);
+            mergedEnd = Math.Max(mergedEnd, existing.End);
+            VehiclePacketRanges.RemoveAt(index);
+            merged = true;
+        }
+        if (merged && mergedStart == start && mergedEnd == end)
+            _vehiclePacketRangeDuplicates++;
+
+        int insert = VehiclePacketRanges.BinarySearch(
+            new PacketRange(mergedStart, mergedEnd),
+            PacketRangeStartComparer.Instance);
+        if (insert < 0)
+            insert = ~insert;
+        VehiclePacketRanges.Insert(
+            insert,
+            new PacketRange(mergedStart, mergedEnd));
     }
 
     public static bool IsVehiclePacket(uint address)
     {
+        _vehiclePacketLookups++;
         address = NormalizePacketAddress(address);
         if (VehiclePackets.Contains(address))
+        {
+            _vehiclePacketExplicitHits++;
             return true;
-        foreach (PacketRange range in VehiclePacketRanges)
+        }
+        int low = 0;
+        int high = VehiclePacketRanges.Count - 1;
+        int tests = 0;
+        while (low <= high)
+        {
+            tests++;
+            int middle = low + ((high - low) >> 1);
+            PacketRange range = VehiclePacketRanges[middle];
+            if (address < range.Start)
+            {
+                high = middle - 1;
+                continue;
+            }
+            if (address >= range.End)
+            {
+                low = middle + 1;
+                continue;
+            }
+
+            _vehiclePacketRangeTests += tests;
             if (address >= range.Start && address < range.End)
+            {
+                _vehiclePacketRangeHits++;
                 return true;
+            }
+        }
+        _vehiclePacketRangeTests += tests;
         return false;
+    }
+
+    sealed class PacketRangeStartComparer : IComparer<PacketRange>
+    {
+        public static readonly PacketRangeStartComparer Instance = new();
+
+        public int Compare(PacketRange x, PacketRange y)
+        {
+            int start = x.Start.CompareTo(y.Start);
+            return start != 0 ? start : x.End.CompareTo(y.End);
+        }
+    }
+
+    public static VehiclePacketOwnershipMetrics
+        ConsumeVehiclePacketOwnershipMetrics()
+    {
+        long totalRangeBytes = 0;
+        uint maximumRangeBytes = 0;
+        foreach (PacketRange range in VehiclePacketRanges)
+        {
+            uint width = range.End - range.Start;
+            totalRangeBytes += width;
+            maximumRangeBytes = Math.Max(maximumRangeBytes, width);
+        }
+
+        var metrics = new VehiclePacketOwnershipMetrics(
+            VehiclePacketRanges.Count,
+            VehiclePackets.Count,
+            VehicleReflectionPackets.Count,
+            OwnedPacketRanges.Count,
+            totalRangeBytes,
+            maximumRangeBytes,
+            _vehiclePacketLookups,
+            _vehiclePacketExplicitHits,
+            _vehiclePacketRangeHits,
+            _vehiclePacketRangeTests,
+            _vehiclePacketRangeRegistrations,
+            _vehiclePacketRangeDuplicates);
+        _vehiclePacketLookups = 0;
+        _vehiclePacketExplicitHits = 0;
+        _vehiclePacketRangeHits = 0;
+        _vehiclePacketRangeTests = 0;
+        _vehiclePacketRangeRegistrations = 0;
+        _vehiclePacketRangeDuplicates = 0;
+        return metrics;
     }
 
     public static void ClearVehiclePacketRanges()
@@ -477,6 +634,8 @@ public static class GpuHle
     }
 
     public static int RectCount => _rects.Length;
+
+    public static long DisplayStamp => _stamp;
 
     public static DispRect GetRect(int i) => _rects[i];
 

@@ -5,10 +5,10 @@ using RecompOne.Runtime.Memory;
 namespace Recompiled;
 
 /// <summary>
-/// A VIDEO row added to the retail Options list (TO-DO item 4), sitting under
-/// Audio so the two audio/video pages are together and the informational rows
+/// Video and Gameplay rows added to the retail Options list, sitting under
+/// Audio so the settings pages are together and the informational rows
 /// stay last: Game Status, Memory Card, Difficulty, Controllers, Audio,
-/// <b>Video</b>, Back Story, Credits.
+/// <b>Video</b>, <b>Gameplay</b>, Back Story, Credits.
 ///
 /// The list is drawn by func_80108B48: seven string pointers at 0x80115E60,
 /// walked with a stride of four by S2, a row count compiled in as
@@ -20,14 +20,13 @@ namespace Recompiled;
 /// screen renders as a mesh of small textured quads; moving the loop's layout
 /// leaves them exactly where they were, and no table of their positions and no
 /// seven-iteration draw loop exists anywhere in SHELL.DLL. So there are seven
-/// plates, an eighth cannot be produced from code, and eight rows cannot all
+/// plates, another is not added by this hook, and nine rows cannot all
 /// be on screen at once.
 ///
 /// They do not need to be. The loop draws seven rows wherever S2 points, so
-/// this hook points it into an eight-entry table of its own and slides the
-/// window by one when the cursor reaches the last row. Rows zero through six
-/// render exactly as retail; on Credits the list scrolls a single step, Game
-/// Status leaves the top and Credits occupies the last plate. Every row sits
+/// this hook points it into a nine-entry table and slides the seven-row
+/// window as the cursor reaches Back Story and Credits. The selected row
+/// remains on the last plate while the first rows scroll out. Every row sits
 /// on a plate at its retail position and the panel art is untouched.
 /// </summary>
 public static partial class Vigilante82PC
@@ -36,20 +35,22 @@ public static partial class Vigilante82PC
     {
         /// <summary>Index the appended row occupies in the list.</summary>
         public const int VideoRowIndex = 5;
+        public const int GameplayRowIndex = 6;
 
         /// <summary>Highest index the cursor may reach (Credits).</summary>
-        public const int LastRowIndex = 7;
+        public const int LastRowIndex = 8;
 
         const int RetailRows = 7;
-        const int TotalRows = RetailRows + 1;
+        const int TotalRows = RetailRows + 2;
         const uint RetailRowStrings = 0x80115E60u;
 
         // Past the shell overlay image, which ends at 0x8011AED8, and clear of
         // V82NativeControlOptions (0x8011AF00, reaching 0x8011B040 with five
         // footer prompts) and V82NativeVideoPage (0x8011B100, under 0x100).
         const uint ScratchTable = 0x8011B200u;
-        const uint ScratchString = ScratchTable + 0x20u;
-        const uint ScratchRect = ScratchTable + 0x40u;
+        const uint ScratchString = ScratchTable + 0x30u;
+        const uint ScratchGameplayString = ScratchTable + 0x40u;
+        const uint ScratchRect = ScratchTable + 0x60u;
 
         const uint ReturnAddress = 0x8010A8ECu;
 
@@ -67,7 +68,7 @@ public static partial class Vigilante82PC
 
         // The retail layout: X=40, Y=172, row height 34. Kept tunable because
         // the surrounding art is still open, but the defaults are now retail
-        // and the window below is what makes eight rows fit.
+        // and the window below is what makes nine rows fit.
         static readonly int StartY = EnvInt("RECOMPONE_V82_OPTIONS_START_Y", 172);
         static readonly int RowStride = EnvInt("RECOMPONE_V82_OPTIONS_ROW_STRIDE", 34);
 
@@ -92,10 +93,9 @@ public static partial class Vigilante82PC
             raw.WriteU16(c.SP + 0x12u, (ushort)StartY);
             raw.WriteU16(c.SP + 0x16u, (ushort)RowStride);
 
-            // One step of scroll is all eight entries need: only the last row
-            // falls outside the seven plates.
+            // Scroll only enough to keep the selected row on the seven plates.
             int selected = (int)c.S4;
-            int top = selected >= LastRowIndex ? 1 : 0;
+            int top = Math.Max(0, selected - (RetailRows - 1));
             c.S2 = ScratchTable + (uint)top * 4u;
             // The loop compares its 0..6 counter against S4, so the highlight
             // has to be the row's position in the window, not in the list.
@@ -150,7 +150,13 @@ public static partial class Vigilante82PC
 
         static void EnsureTable(IMemory m)
         {
-            if (_tableWritten) return;
+            // Shell reloads can reuse this memory. Verify the owned table,
+            // rather than retaining a process-lifetime initialization flag.
+            if (_tableWritten &&
+                m.ReadU32(ScratchTable + VideoRowIndex * 4u) == ScratchString &&
+                m.ReadU32(ScratchTable + GameplayRowIndex * 4u) == ScratchGameplayString &&
+                m.ReadU8(ScratchString) == (byte)'V' &&
+                m.ReadU8(ScratchGameplayString) == (byte)'G') return;
             _tableWritten = true;
 
             // The retail rows are mixed case ("Game Status", "Controllers").
@@ -158,16 +164,21 @@ public static partial class Vigilante82PC
             for (int i = 0; i < label.Length; i++)
                 m.WriteU8(ScratchString + (uint)i, (byte)label[i]);
             m.WriteU8(ScratchString + (uint)label.Length, 0);
+            const string gameplay = "Gameplay";
+            for (int i = 0; i < gameplay.Length; i++)
+                m.WriteU8(ScratchGameplayString + (uint)i, (byte)gameplay[i]);
+            m.WriteU8(ScratchGameplayString + (uint)gameplay.Length, 0);
 
             // Copy rather than hard-code, so a localised or modded string table
-            // still supplies the retail seven. Video is spliced in after Audio,
-            // pushing Back Story and Credits down a slot.
+            // still supplies the retail seven. Video and Gameplay follow Audio,
+            // pushing Back Story and Credits down two slots.
             for (uint i = 0; i < VideoRowIndex; i++)
                 m.WriteU32(ScratchTable + i * 4u,
                     m.ReadU32(RetailRowStrings + i * 4u));
             m.WriteU32(ScratchTable + VideoRowIndex * 4u, ScratchString);
+            m.WriteU32(ScratchTable + GameplayRowIndex * 4u, ScratchGameplayString);
             for (uint i = VideoRowIndex; i < RetailRows; i++)
-                m.WriteU32(ScratchTable + (i + 1) * 4u,
+                m.WriteU32(ScratchTable + (i + 2) * 4u,
                     m.ReadU32(RetailRowStrings + i * 4u));
         }
 
@@ -184,36 +195,33 @@ public static partial class Vigilante82PC
         /// </summary>
         public static void ExtendCursorRange(CpuContext c, IMemory m)
         {
-            if (c.V0 != 0u && (int)c.S1 == LastRowIndex - 1)
-                c.S1 = (uint)LastRowIndex;
+            if (c.V0 != 0u && c.S1 >= RetailRows - 1 && c.S1 < LastRowIndex)
+                c.S1++;
         }
 
         /// <summary>
         /// Runs after the <c>sltiu v0, s1, 7</c> at 0x8010EC58, the bound on
         /// the page jump table, and before S3 is added to the scaled index.
         ///
-        /// Two things have to change there. The bound has to admit the eighth
-        /// index, or Credits never dispatches. And because Video is spliced in
-        /// at five, indices six and seven have to reach Back Story and Credits,
-        /// which are the retail table's entries five and six -- so S3 points at
-        /// a remapped copy. Entry five of that copy is never read:
-        /// V82NativeVideoPage.Dispatch claims the row before the table is
-        /// touched.
+        /// Admit all nine indices and bias the native jump-table base for
+        /// Back Story and Credits (new indices seven/eight, retail five/six).
+        /// V82NativeVideoPage.Dispatch handles Video and Gameplay before
+        /// the native table is touched; its existing entries stay unchanged.
         /// </summary>
         public static void WidenDispatch(CpuContext c, IMemory m)
         {
-            // The dispatch is `v0 = [s3 + s1*4]`, so biasing the base by one
+            // The dispatch is `v0 = [s3 + s1*4]`, so biasing the base by two
             // entry remaps the tail of the table without copying it anywhere:
-            // indices six and seven then read the retail entries five and six,
-            // which are Back Story and Credits. Index five never gets here --
-            // V82NativeVideoPage.Dispatch claims the row first -- and indices
+            // indices seven and eight then read the retail entries five and six,
+            // which are Back Story and Credits. Indices five/six never get here --
+            // V82NativeVideoPage.Dispatch claims those rows first -- and indices
             // below it are unshifted. Nothing is written to guest memory and
             // the entries stay whatever the loader relocated them to.
             uint s3 = c.S3;
-            if (s3 != _jumpTableBase && s3 != _jumpTableBase - 4u)
+            if (s3 != _jumpTableBase && s3 != _jumpTableBase - 8u)
                 _jumpTableBase = s3;
-            c.S3 = (int)c.S1 > VideoRowIndex
-                ? _jumpTableBase - 4u
+            c.S3 = (int)c.S1 > GameplayRowIndex
+                ? _jumpTableBase - 8u
                 : _jumpTableBase;
             c.V0 = c.S1 < (uint)TotalRows ? 1u : 0u;
         }

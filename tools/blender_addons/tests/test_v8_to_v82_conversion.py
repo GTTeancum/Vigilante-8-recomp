@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 import sys
 import unittest
@@ -19,6 +20,7 @@ from build_v8_to_v82_guest_roster import (  # noqa: E402
     V8_SELECTOR_VEHICLES,
     build_projects,
     decode_bank,
+    decode_sounds,
 )
 from vigilante8_vehicle_tools import (  # noqa: E402
     conversion,
@@ -110,11 +112,70 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
         }
         referenced.discard(None)
         self.assertEqual(set(range(len(forms))), referenced)
+        behavior_types = {
+            entry.stable_id: entry.special_behavior_type
+            for entry in entries
+        }
+        self.assertEqual(3, behavior_types["guest.v8.houston_3"])
+        self.assertTrue(
+            all(
+                value is None
+                for stable_id, value in behavior_types.items()
+                if stable_id != "guest.v8.houston_3"
+            )
+        )
 
         decoded = registry.decompile_package(package.archive, package.registry)
         rebuilt = registry.compile_package(decoded)
         self.assertEqual(package.archive, rebuilt.archive)
         self.assertEqual(package.registry, rebuilt.registry)
+
+    def test_original_vehicle_sound_banks_are_converted_semantically(self) -> None:
+        package = registry.compile_package(self.vehicles)
+        _game, entries = registry.parse_registry(package.registry)
+        forms = tuple(iff.parse(package.archive).forms(b"XOBF"))
+        source_forms = tuple(iff.parse(V8_COMMON.read_bytes()).forms(b"XOBF"))
+        for source_index, vehicle in enumerate(self.vehicles):
+            expected = decode_sounds(V8_COMMON, source_index)
+            self.assertEqual(expected, vehicle.sounds, vehicle.stable_id)
+            body = forms[entries[source_index].archive_index]
+            self.assertEqual(expected, registry._decode_sounds(body))
+            self.assertEqual(
+                next(
+                    child.payload
+                    for child in source_forms[source_index].children
+                    if child.tag == b"SND "
+                ),
+                next(
+                    child.payload
+                    for child in body.children
+                    if child.tag == b"SND "
+                ),
+                vehicle.stable_id,
+            )
+            for support_index in (
+                entries[source_index].transformation_archive_index,
+                entries[source_index].selector_preview_archive_index,
+            ):
+                if support_index is not None:
+                    self.assertEqual(
+                        (), registry._decode_sounds(forms[support_index])
+                    )
+
+        y = self.vehicles[12]
+        self.assertEqual(
+            (743, 743, 1024),
+            tuple(int(sound["pitch"]) for sound in y.sounds),
+        )
+        y_sound_chunk = next(
+            child.payload
+            for child in forms[entries[12].archive_index].children
+            if child.tag == b"SND "
+        )
+        self.assertEqual(
+            "0BD82A7D7D7684BB23DC39CF8636B2AFDDB4CBF8491B3FDE5F6A59DB84B79CF8",
+            hashlib.sha256(y_sound_chunk).hexdigest().upper(),
+        )
 
     def test_v8_minus_two_arena_sentinel_preserves_native_class_f(self) -> None:
         source = project.ObjectBank(
@@ -307,7 +368,7 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
             | (0x80 if native_packet_type & 0x40 else 0)
         )
 
-    def test_v8_environment_materials_translate_authored_gloss_role(
+    def test_v8_environment_materials_preserve_authored_blend_role(
         self,
     ) -> None:
         for vehicle in self.vehicles:
@@ -344,16 +405,12 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
                         source_type = 12 | source_face.packet_flags
                         converted_type = 12 | converted_face.packet_flags
                         expected_mode = self._retail_render_mode(source_type)
-                        if source_face.packet_flags & 0x20:
-                            expected_mode |= 0x02
                         self.assertEqual(
                             expected_mode,
                             self._retail_render_mode(converted_type),
                             f"{vehicle.stable_id}: {label}",
                         )
                         expected_flags = source_face.packet_flags & ~0x20
-                        if source_face.packet_flags & 0x20:
-                            expected_flags |= 0x10
                         self.assertEqual(
                             converted_face.packet_flags,
                             expected_flags,
@@ -366,7 +423,7 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
                         if (source_environment & 0x3FFF) == 0x3FFF:
                             expected_environment = (
                                 0x7FFE
-                                if source_face.packet_flags & 0x30
+                                if source_face.packet_flags & 0x10
                                 else 0x3FFF
                             )
                         self.assertEqual(

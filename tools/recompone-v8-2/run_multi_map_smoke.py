@@ -229,6 +229,7 @@ def run_case(
         "RECOMPONE_DISABLE_SCRIPT_STAGE_CAPTURES": "1",
         "RECOMPONE_TRACE_LOADING_UI_TEXTURES": "1",
         "RECOMPONE_TRACE_MDEC": "1",
+        "RECOMPONE_TRACE_NATIVE_OPTIONS": "1",
         "RECOMPONE_TRACE_V82_ARENA_SELECTOR": "1",
         "RECOMPONE_V82_ARENA_SLOT_SEQUENCE":
             f"{case.map_a},{case.map_b}",
@@ -239,7 +240,11 @@ def run_case(
         "RECOMPONE_V82_SOAK_WEAPONS": "0",
         "RECOMPONE_SOAK_TEARDOWN_FRAMES": "0",
         "RECOMPONE_V82_TEST_DEFEAT_FRAME": str(gameplay_frames),
-        "RECOMPONE_SCRIPT_EXIT_AFTER_STAGE": "shell_transition",
+        # Do not stop at the second return's overlay notification: a resident
+        # SHELL can enter its native title dispatcher before that notification.
+        # Wait until OPTIONS is submitted on the second returned menu so both
+        # post-match screens are actually covered by the contract below.
+        "RECOMPONE_SCRIPT_EXIT_AFTER_STAGE": "v82_options",
         "RECOMPONE_SCRIPT_EXIT_AFTER_STAGE_VISITS": "3",
         "RECOMPONE_PRESENTATION_CAPTURE": "0",
         "RECOMPONE_CAPTURE_NATIVE_GUEST_SELECTOR": "0",
@@ -299,16 +304,22 @@ def run_case(
     while marker_at >= 0:
         shell_positions.append(marker_at)
         marker_at = runtime_text.find(shell_marker, marker_at + 1)
-    first_return_audio = ""
-    if len(shell_positions) >= 2:
-        first_return_end = runtime_text.find(
-            "[Input] stage 'choose_location_2'", shell_positions[1]
-        )
-        if first_return_end < 0:
-            first_return_end = len(runtime_text)
-        first_return_audio = runtime_text[
-            shell_positions[1]:first_return_end
-        ]
+    title_marker = "[V82NativeTitleEntry]"
+    title_positions: list[int] = []
+    marker_at = runtime_text.find(title_marker)
+    while marker_at >= 0:
+        title_positions.append(marker_at)
+        marker_at = runtime_text.find(title_marker, marker_at + 1)
+    title_shells = [
+        runtime_text[start:(
+            title_positions[index + 1]
+            if index + 1 < len(title_positions)
+            else len(runtime_text)
+        )]
+        for index, start in enumerate(title_positions)
+    ]
+    returned_shells = title_shells[1:3]
+    first_return_audio = returned_shells[0] if returned_shells else ""
     arena_a, terrain_a = MAPS[case.map_a]
     arena_b, terrain_b = MAPS[case.map_b]
     checks = {
@@ -322,7 +333,7 @@ def run_case(
             runtime_text.count(
                 "[V82DefeatRegression] native lethal damage completed") >= 2,
         "deterministic_completion":
-            "deterministic replay completed after stage 'shell_transition' visit 3"
+            "deterministic replay completed after stage 'v82_options' visit 3"
             in runtime_text,
         "first_location": f"[V82Arena] location={location_token(case.map_a)}" in text,
         "second_location": f"[V82Arena] location={location_token(case.map_b)}" in text,
@@ -353,6 +364,24 @@ def run_case(
         "menu_audio_recovered":
             "[CDDA] play LBA=147300" in first_return_audio
             or "[CDDA] loose track=2 " in first_return_audio,
+        "every_post_match_skips_press_start":
+            len(returned_shells) == 2
+            and all(
+                f"entry={entry} mode=5" in segment
+                and "[V82NativeTitlePromptRoutine]" not in segment
+                and "text='PRESS START'" not in segment
+                for entry, segment in enumerate(returned_shells, start=2)
+            ),
+        "every_post_match_has_main_menu_labels":
+            len(returned_shells) == 2
+            and all(
+                all(
+                    f"[V82NativeOptions] text='{label}' caller=0x80104284"
+                    in segment
+                    for label in ("1 PLAYER", "2 PLAYER", "OPTIONS")
+                ) and "[Input] stage 'v82_options'" in segment
+                for segment in returned_shells
+            ),
         "no_fatal":
             "[Fatal]" not in text
             and "Unhandled exception" not in text
@@ -386,7 +415,7 @@ def run_case(
         str(runtime_path),
     )
     report = {
-        "schema": 1,
+        "schema": 2,
         "executable_sha256": exe_hash,
         "gameplay_frames": gameplay_frames,
         "case_definition": asdict(case),
@@ -410,7 +439,7 @@ def load_pass(
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return None
     if (
-        report.get("schema") != 1
+        report.get("schema") != 2
         or report.get("executable_sha256") != exe_hash
         or report.get("gameplay_frames") != gameplay_frames
         or report.get("case_definition") != asdict(case)
@@ -429,7 +458,7 @@ def write_summary(
 ) -> None:
     ordered = [results[case.name] for case in selected if case.name in results]
     report = {
-        "schema": 1,
+        "schema": 2,
         "executable_sha256": exe_hash,
         "gameplay_frames_per_match": gameplay_frames,
         "matches_requested": len(selected) * 2,

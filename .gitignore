@@ -61,7 +61,9 @@ ghidra/
 
 # Smoke-test artifacts
 /artifacts/
+/*Dreamcast.zip
 *.png
+!mods/v8_classic_menu/source/options_left.png
 *.ppm
 *.wav
 *.log
@@ -73,6 +75,7 @@ __pycache__/
 /tools/n64_reference/state/
 /tools/n64_reference/vendor/
 /tools/recompone-v8-2/reference-host/bin/
+/tools/recompone-v8-2/tests/*/bin/
 
 # Compiled objects
 **/obj/

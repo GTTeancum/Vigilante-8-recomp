@@ -160,6 +160,15 @@ public sealed class Spu
         for (int i = 0; i < 24; i++) _v[i] = new Voice();
     }
 
+    public void LoadRam(uint address, ReadOnlySpan<byte> data)
+    {
+        if (address > RamSize || data.Length > RamSize - (int)address)
+            throw new ArgumentOutOfRangeException(
+                nameof(address), "SPU upload is outside the 512 KiB RAM");
+        lock (_sync)
+            data.CopyTo(Ram.AsSpan((int)address, data.Length));
+    }
+
     public ushort ReadReg16(uint phys)
     {
         lock (_sync) return ReadReg(phys);

@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- Release is a Windows GUI application: diagnostics remain mirrored to
+         v8_latest.log, but launching the shipped game does not allocate a
+         console window. Keep Debug as a console host for developer probes. -->
+    <OutputType Condition="'$(Configuration)' == 'Release'">WinExe</OutputType>
+    <OutputType Condition="'$(Configuration)' != 'Release'">Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

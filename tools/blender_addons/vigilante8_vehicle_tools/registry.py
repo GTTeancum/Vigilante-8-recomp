@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 import struct
 from typing import Iterable
@@ -26,8 +27,16 @@ NO_ARCHIVE_INDEX = 0xFFFF
 FLAG_NON_TRANSFORMABLE = 1 << 0
 CONTROLLER_CLASS_SHIFT = 8
 CONTROLLER_CLASS_MASK = 0xF << CONTROLLER_CLASS_SHIFT
+FLAG_SPECIAL_BEHAVIOR = 1 << 16
+SPECIAL_BEHAVIOR_SHIFT = 17
+SPECIAL_BEHAVIOR_MASK = 0x1F << SPECIAL_BEHAVIOR_SHIFT
 CONTROLLER_CLASS_IDS = {"ground": 0, "flying": 1}
-SUPPORTED_FLAGS = FLAG_NON_TRANSFORMABLE | CONTROLLER_CLASS_MASK
+SUPPORTED_FLAGS = (
+    FLAG_NON_TRANSFORMABLE
+    | CONTROLLER_CLASS_MASK
+    | FLAG_SPECIAL_BEHAVIOR
+    | SPECIAL_BEHAVIOR_MASK
+)
 
 
 def vehicle_flags(vehicle: project.VehicleProject) -> int:
@@ -36,6 +45,9 @@ def vehicle_flags(vehicle: project.VehicleProject) -> int:
     flags = CONTROLLER_CLASS_IDS[vehicle.controller_class] << CONTROLLER_CLASS_SHIFT
     if not vehicle.supports_transformations:
         flags |= FLAG_NON_TRANSFORMABLE
+    if vehicle.special_behavior_type is not None:
+        flags |= FLAG_SPECIAL_BEHAVIOR
+        flags |= vehicle.special_behavior_type << SPECIAL_BEHAVIOR_SHIFT
     return flags
 
 
@@ -66,6 +78,7 @@ class RegistryEntry:
     powerups: dict[str, int]
     controller_class: str
     supports_transformations: bool
+    special_behavior_type: int | None
 
 
 @dataclass(frozen=True)
@@ -308,6 +321,15 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
             raise ValueError("vehicle registry entry is invalid")
         game = games[game_id]
         controller_class, supports_transformations = decode_vehicle_flags(flags)
+        special_behavior_type = (
+            (flags & SPECIAL_BEHAVIOR_MASK) >> SPECIAL_BEHAVIOR_SHIFT
+            if flags & FLAG_SPECIAL_BEHAVIOR
+            else None
+        )
+        if special_behavior_type is not None and special_behavior_type >= 18:
+            raise ValueError(
+                "vehicle registry special behavior type is outside 0..17"
+            )
         transform_modes: tuple[tuple[int, ...], ...] = ()
         powerups: dict[str, int] = {}
         if game == "V8_2":
@@ -383,6 +405,7 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
                 powerups=powerups,
                 controller_class=controller_class,
                 supports_transformations=supports_transformations,
+                special_behavior_type=special_behavior_type,
             )
         )
     return games[game_id], tuple(entries)
@@ -571,7 +594,7 @@ def _decode_bank(form: iff.IffChunk, game: str) -> project.ObjectBank:
         raise ValueError("vehicle archive contains a non-XOBF form")
     chunks: dict[bytes, bytes] = {}
     for child in form.children:
-        if child.tag not in {b"BIN ", b"ANM "}:
+        if child.tag not in {b"BIN ", b"ANM ", b"SND "}:
             raise ValueError(
                 f"XOBF contains unsupported chunk {child.tag!r}")
         if child.tag in chunks:
@@ -725,6 +748,48 @@ def _decode_bank(form: iff.IffChunk, game: str) -> project.ObjectBank:
     )
 
 
+def _decode_sounds(form: iff.IffChunk) -> tuple[dict[str, object], ...]:
+    chunks = [child.payload for child in form.children if child.tag == b"SND "]
+    if not chunks:
+        return ()
+    if len(chunks) != 1:
+        raise ValueError("XOBF contains duplicate SND chunks")
+    data = chunks[0]
+    if len(data) < 4:
+        raise ValueError("SND header is truncated")
+    count, size_in_8b = struct.unpack_from("<HH", data, 0)
+    table_end = 4 + count * 4
+    payload_size = size_in_8b * 8
+    if len(data) != table_end + payload_size:
+        raise ValueError("SND payload size does not match its header")
+    entries = [
+        struct.unpack_from("<HH", data, 4 + index * 4)
+        for index in range(count)
+    ]
+    if entries and entries[0][0] != 0:
+        raise ValueError("SND first sample does not begin at payload zero")
+    sounds = []
+    payload = data[table_end:]
+    for index, (offset_in_8b, pitch) in enumerate(entries):
+        next_offset = (
+            entries[index + 1][0]
+            if index + 1 < len(entries)
+            else size_in_8b
+        )
+        if next_offset <= offset_in_8b or next_offset > size_in_8b:
+            raise ValueError("SND sample offsets are not strictly increasing")
+        sample = payload[offset_in_8b * 8:next_offset * 8]
+        if len(sample) % 16:
+            raise ValueError("SND sample is not native ADPCM block aligned")
+        sounds.append(
+            {
+                "pitch": pitch,
+                "adpcm_base64": base64.b64encode(sample).decode("ascii"),
+            }
+        )
+    return tuple(sounds)
+
+
 def decompile_package(
     archive_data: bytes, registry_data: bytes
 ) -> tuple[project.VehicleProject, ...]:
@@ -796,8 +861,10 @@ def decompile_package(
             selector_preview_body_kind=entry.selector_preview_body_kind,
             transform_modes=entry.transform_modes,
             powerups=entry.powerups,
+            sounds=_decode_sounds(forms[entry.archive_index]),
             controller_class=entry.controller_class,
             supports_transformations=entry.supports_transformations,
+            special_behavior_type=entry.special_behavior_type,
         )
         vehicle.validate()
         vehicles.append(vehicle)
@@ -819,7 +886,7 @@ def compile_package(
         source_bytes = sum(
             len(child.payload)
             for child in form.children
-            if child.tag in {b"BIN ", b"ANM "}
+            if child.tag in {b"BIN ", b"ANM ", b"SND "}
         )
         if source_bytes > project.MAX_NATIVE_BANK_SOURCE_BYTES:
             raise ValueError(

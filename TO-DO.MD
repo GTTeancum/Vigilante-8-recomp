@@ -23,7 +23,7 @@ open work.
 4. **User** - Install and prefer original V8 music; balance the default music,
    voice, and SFX mix.
 5. **User** - Add four-player local multiplayer after release.
-6. **User** - Add a persistent option to disable transformation powerups.
+6. **User — IN PROGRESS** - Fix detached water attachments and verify all 30 vehicles except Y; retain the three transformation settings.
 7. **User — PARTIAL** - Finish the sole original-V8-style UI; review remaining fonts and menu layouts.
 8. **User** - Move player-facing features from the Windows menu bar (Mods, Cheats, Guest Vehicles, etc.) into controller-friendly in-game menus, then remove that external bar.
 9. **User** - Add customizable controls with Modern, Classic, and Southpaw presets.
@@ -80,13 +80,47 @@ Test and deployment target: `V8_2_LOOSE` only.
       correct camera/HUD ownership, pause, results, scoring, and teardown.
 - [ ] Pass representative-arena soak testing and sequential visual review.
 
-### V82-OPEN-017 - UI option to disable transformation powerups
+### V82-OPEN-017 - Three-mode transformation setting
 
-- [ ] Add a normal in-game option and persist it in user settings.
+- **ACTIVE FOLLOW-UP:** water attachments look detached. Diagnose and fix the
+  shared native attachment path, then verify all 18 stock and 12 imported
+  vehicles (types 0–17 and 64–75); exclude Y/type 76 only. No per-vehicle
+  authored offset fixes. Require per-vehicle native visual fit evidence plus
+  water/land/re-activation checks; previous buoyancy tests do not pass fit.
+  See `notes/v82_water_attachment_fit.md`. All 30 currently pending.
+
+- **IMPLEMENTED — PENDING USER REVIEW:** available under **OPTIONS → Gameplay → Transformations**;
+  native menu replay selected/saved all three policies and a full-size menu
+  proof is retained in `artifacts/transformation-modes-20260904/options`.
+  237 focused assertions pass. First native Florida test shows Sheila afloat
+  with automatic water attachments and wheels restored on land; both full-size
+  proofs inspected (`artifacts/transformation-modes-20260904/auto-native-01`).
+  Three native matches (Florida/Louisiana/Florida) exited cleanly with player
+    and AI water/land transitions; All/None/Auto native action checks pass
+    (20 player/AI requests per policy, not physical pickup collection).
+    Imported Chassey floats/retracts in Florida; Y retains native flight;
+    Sheila's equipped native recovery returns to normal wheels (frame 210).
+    Final OPTIONS proof inspected on `E3F11E82...A744163`, 60.07 FPS, mode 2
+    saved and original settings restored. User visual approval and guest
+    texture integrity remain outstanding; loader allocation failures are
+    recorded under #14. Not a release or visual acceptance claim.
+- [x] Add a normal in-game option, persist it in user settings, and show the
+      selected mode: **All transformations**, **No transformations**, or
+      **Auto Waterski**.
+- [x] **All transformations:** retain the original powerup-driven behavior.
+- [x] **No transformations:** disable transformation powerups and their effects.
+- [ ] **Auto Waterski:** disable powerup-driven transformations, automatically
+      equip waterskis when a vehicle enters dangerous water, and remove them
+      once it returns to land. No pickup, inventory item, or powerup is required.
 - [ ] Apply it through the authoritative gameplay path for human and AI
       vehicles in every mode while leaving unrelated pickups/rules unchanged.
-- [ ] Report the active setting in the UI and verify that re-enabling it fully
-      restores native behavior.
+- [ ] Use shared water-hazard and vehicle-capability logic, not map/vehicle
+      exceptions. Preserve inherently water-safe hover/flying behavior rather
+      than forcing waterskis onto vehicles that do not need them.
+- [ ] Verify activation before drowning/teleport, stable shoreline transitions
+      without rapid equip/unequip flicker, removal on land, and no stale ski
+      state after respawn or match exit. Switching back to All transformations
+      must fully restore original behavior.
 
 ### V82-OPEN-018 - Port the original Vigilante 8 UI (PARTIAL)
 
@@ -94,9 +128,10 @@ Test and deployment target: `V8_2_LOOSE` only.
       loading, HUD, pause/objectives, results, fonts, icons, and transitions.
 - [ ] Ship this as the sole final UI, not an alternate/selectable theme;
       there is no user-facing switch back to the V8:2 presentation.
-- [ ] Review remaining fonts and shared-GAME.FNT layouts outside the approved
-      pause menu. See `notes/v82_pause_style.md` for the accepted smaller
-      Rockwell Extra Bold font and panel. Keep the cyan
+- [ ] Review remaining fonts and shared-GAME.FNT layouts outside the pause
+      menu. The pause menu now uses the preferred earlier Rockwell Regular
+      replacement through the corrected all-position file-font hook; see
+      `notes/v82_pause_style.md`. Keep the cyan
       font unchanged; cursive source fonts remain in scope but become
       non-cursive. Use the shared per-file font hook, with original-font fallback
       where an approved HD replacement is unavailable.
@@ -265,6 +300,21 @@ fail pending comparison of its hard-edged mist band against PS1 gameplay;
       These failures remain open; the candidate is not release-ready. See
       `notes/v82_dreamcast_terrain_distance_re.md` and the binary-anchored
       decision reference `tools/dreamcast_terrain_contract.py`.
+- [ ] Investigate original-game texture-allocation failures during guest
+      loading: `artifacts/transformation-modes-20260904/guest-recovery/runtime.log`
+      reports `Out of VRAM` while explicitly running Enhanced. The existing
+      recovery can omit affected textures; this is not PC GPU exhaustion or an
+      old-renderer run. Keep separate from the previously verified dispatch
+      lifecycle fix below; guest visual texture integrity is not passed.
+      Reproduced during water-attachment verification on 2026-09-05:
+      `artifacts/water-attachment-fit-20260905/fit-chassey-visual/` shows
+      corrupted body/attachment textures. Allocation errors occur before
+      gameplay and the attachment-fit hook; imported attachment visual
+      confirmation remains blocked by this issue, not passed by buoyancy logs.
+      Subsequent source inspection found that the test's forced type bypassed
+      carousel registry selection and therefore guest reservations. Correct
+      that fixture before treating this run as evidence of a normal-launch
+      failure; #14 remains open pending valid reproduction.
 - [x] Fix the repeated-match lifecycle regression reported on 2026-08-29:
       during the third match setup, vehicle textures dropped out and framerate
       became atrocious; textures recovered when the third match entered

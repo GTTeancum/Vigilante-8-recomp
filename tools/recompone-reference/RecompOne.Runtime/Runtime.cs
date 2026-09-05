@@ -13,6 +13,10 @@ public static class Runtime
     static int _presentTraceCount;
     static readonly bool TraceVSync =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VSYNC") == "1";
+    static readonly bool TraceFramePacing =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_FRAME_PACING") == "1";
+    static int _framePacingFrames;
     public static CpuContext? Cpu { get; private set; }
     public static IMemory? Mem { get; private set; }
     public static Gpu? Gpu;
@@ -126,6 +130,24 @@ public static class Runtime
         if (TraceVSync && traceFrame < 10) Console.Error.WriteLine($"[VSync] present {traceFrame}: audio");
         Audio.Attach(Spu);
         FrameClock.Throttle();
+        if (++_framePacingFrames % 60 == 0 &&
+            (TraceFramePacing ||
+             GameTitle.Contains("2nd Offense", StringComparison.Ordinal)))
+        {
+            var pacing = FrameClock.ConsumeMetrics();
+            Console.Error.WriteLine(
+                $"[FramePacing] frames={_framePacingFrames - 59}-" +
+                $"{_framePacingFrames} " +
+                $"requested-sleep-ms={pacing.RequestedSleepMs:F3} " +
+                $"actual-sleep-ms={pacing.ActualSleepMs:F3} " +
+                $"spin-ms={pacing.SpinMs:F3} " +
+                $"max-sleep-overshoot-ms=" +
+                    $"{pacing.MaximumSleepOvershootMs:F3} " +
+                $"max-deadline-miss-ms=" +
+                    $"{pacing.MaximumDeadlineMissMs:F3} " +
+                $"deadline-misses={pacing.DeadlineMisses} " +
+                $"resyncs={pacing.Resyncs}");
+        }
         if (TraceVSync && traceFrame < 10) Console.Error.WriteLine($"[VSync] present {traceFrame}: devices");
         Sdk.LibCd.Tick();
         if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); } //is this correct?

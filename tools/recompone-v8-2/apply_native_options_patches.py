@@ -37,6 +37,52 @@ MAIN_NEW = """    public static void func_8001A3B0(CpuContext c, IMemory m)
         if (!RecompOne.Runtime.Context.PreHook.Run(RecompOne.Runtime.Sdk.V82Compat.TraceNativeOptionsText, c, m)) return;
 """
 
+SHELL_TITLE_OLD = """    public static void func_8010EDB0(CpuContext c, IMemory m)
+    {
+        c.SP = c.SP - 0x78u;
+"""
+SHELL_TITLE_NEW = """    public static void func_8010EDB0(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Sdk.V82Compat.TraceNativeTitleEntry(c, m);
+        c.SP = c.SP - 0x78u;
+"""
+
+SHELL_PROMPT_OLD = """    public static void func_80103C4C(CpuContext c, IMemory m)
+    {
+        c.SP = c.SP - 0x20u;
+"""
+SHELL_PROMPT_NEW = """    public static void func_80103C4C(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Sdk.V82Compat.TraceNativeTitlePromptRoutine(c, m);
+        c.SP = c.SP - 0x20u;
+"""
+
+SHELL_MAIN_MENU_OLD = """    public static void func_80103FA0(CpuContext c, IMemory m)
+    {
+        c.SP = c.SP - 0x68u;
+"""
+SHELL_MAIN_MENU_NEW = """    public static void func_80103FA0(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Sdk.V82Compat.TraceNativeMainMenuEntry(c, m);
+        c.SP = c.SP - 0x68u;
+"""
+
+SHELL_MAIN_MENU_EXIT_OLD = """        c.LoadWord(16, m, (c.SP + 0x50u));
+        c.SP = c.SP + 0x68u;
+        return;
+    }
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static void func_8010458C(CpuContext c, IMemory m)
+"""
+SHELL_MAIN_MENU_EXIT_NEW = """        c.LoadWord(16, m, (c.SP + 0x50u));
+        c.SP = c.SP + 0x68u;
+        RecompOne.Runtime.Sdk.V82Compat.TraceNativeMainMenuExit(c, m);
+        return;
+    }
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static void func_8010458C(CpuContext c, IMemory m)
+"""
+
 
 def patch_once(path: Path, old: str, new: str, label: str) -> int:
     text = path.read_text(encoding="utf-8")
@@ -60,6 +106,24 @@ def main() -> int:
     changed = patch_once(
         args.main_source.resolve(), MAIN_OLD, MAIN_NEW,
         "native options text trace",
+    )
+    changed += patch_once(
+        args.shell_source.resolve(), SHELL_TITLE_OLD, SHELL_TITLE_NEW,
+        "native title entry trace",
+    )
+    changed += patch_once(
+        args.shell_source.resolve(), SHELL_PROMPT_OLD, SHELL_PROMPT_NEW,
+        "native title prompt trace",
+    )
+    changed += patch_once(
+        args.shell_source.resolve(), SHELL_MAIN_MENU_OLD, SHELL_MAIN_MENU_NEW,
+        "native main-menu entry trace",
+    )
+    changed += patch_once(
+        args.shell_source.resolve(),
+        SHELL_MAIN_MENU_EXIT_OLD,
+        SHELL_MAIN_MENU_EXIT_NEW,
+        "native main-menu exit trace",
     )
     print(f"V8:2 native options seams ready ({changed} applied)")
     return 0

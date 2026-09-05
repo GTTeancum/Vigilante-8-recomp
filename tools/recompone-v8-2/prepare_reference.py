@@ -227,6 +227,24 @@ EXTRA_OVERLAY_FUNCTIONS = {
 }
 
 PROVEN_PATCHES = [
+    # Both retail XTIN layouts populate the same 256-entry runtime material
+    # table. Arena scripts are allowed to reuse those descriptors as mutable
+    # animation state (Hoover Dam does this for materials 50-53), so preserve
+    # the authored average colors immediately after either loader completes.
+    # Enhanced terrain-distance shading consumes this immutable snapshot,
+    # matching the Dreamcast loader rather than later overlay scratch writes.
+    {
+        "overlay": "SHELL_LOAD",
+        "address": "80108338",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.CaptureAuthoredTerrainMaterialAverages",
+        "mode": "post",
+    },
+    {
+        "overlay": "SHELL_LOAD",
+        "address": "801085F4",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.CaptureAuthoredTerrainMaterialAverages",
+        "mode": "post",
+    },
     # A VIDEO row added to the retail Options list. The row count in
     # func_80108B48 is a compiled constant and the seven row plates behind the
     # text are panel geometry, so an eighth row cannot simply be drawn on the
@@ -1064,8 +1082,8 @@ PROVEN_PATCHES = [
     },
     {
         # Preserve V8:2-native input, AI, weapons, damage and action handling.
-        # At the ground-suspension integrator, registry metadata either keeps
-        # the retail path or substitutes the source-authored controller.
+        # This is the shared action handler, so a capability-selected flying
+        # movement step runs before it and never replaces the handler itself.
         "overlay": "main",
         "address": "8003AC84",
         "target": (

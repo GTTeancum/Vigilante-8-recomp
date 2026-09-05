@@ -1,0 +1,39 @@
+# In one process, play a match as appended guest Y, return to the native main
+# menu, then accept the initial retail character without touching the carousel.
+# The second gameplay visit must not inherit Y's registry selection.
+540+3=START
+900+3=START
+1020+2=SELECT
+1080+3=CROSS
+1200+2=SELECT
+1260+3=CROSS
+1380+2=SELECT
+
+[after:v82_options@2]
+60+3=START
+120+2=SELECT
+180+3=CROSS
+
+[choose_location_1]
+800+3=CROSS
+
+[choose_location_2]
+800+3=CROSS
+
+[after:choose_player@1]
+350+2=LEFT
+650+3=CROSS
+
+[after:choose_player@2]
+650+3=CROSS
+
+[choose_enemies]
+220+3=CROSS
+470+3=CROSS
+
+[after:gameplay@1]
+120+3=START
+180+3=LEFT
+240+3=CROSS
+300+3=LEFT
+360+3=CROSS

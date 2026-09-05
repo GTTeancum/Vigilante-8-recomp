@@ -99,6 +99,8 @@ public static partial class Vigilante82PC
         static int _row;
         static int _top;
         static uint _previousInput;
+        static int _pageIndex;
+        static bool IsGameplay => _pageIndex == V82NativeVideoOption.GameplayRowIndex;
 
         /// <summary>
         /// Inline hook on the jump-table bound check at 0x8010EC58. Returns
@@ -106,9 +108,11 @@ public static partial class Vigilante82PC
         /// </summary>
         public static bool Dispatch(CpuContext c, IMemory m)
         {
-            if ((int)c.S1 != V82NativeVideoOption.VideoRowIndex)
+            if ((int)c.S1 != V82NativeVideoOption.VideoRowIndex &&
+                (int)c.S1 != V82NativeVideoOption.GameplayRowIndex)
                 return false;
 
+            _pageIndex = (int)c.S1;
             var snapshot = c.Snapshot();
             try { RunPage(c, m); }
             finally { c.Restore(snapshot); }
@@ -204,7 +208,7 @@ public static partial class Vigilante82PC
             try
             {
                 c.A0 = 0u;
-                c.A1 = (uint)V82NativeVideoOption.VideoRowIndex;
+                c.A1 = (uint)_pageIndex;
                 c.RA = ReturnAddress;
                 func_80108B48(c, m);
             }
@@ -277,13 +281,24 @@ public static partial class Vigilante82PC
                         FirstRowY + (index - _top) * RowSpacing);
                     string prefix = selected ? Cursor : "  ";
                     SetObjectColor(m, textObject, normalColor, selected);
-                    DrawText(c, m, textObject,
-                        prefix + row.Label + ": " + row.Value(),
-                        y, 0x00000008u);
+                    if (IsGameplay)
+                    {
+                        // Keep the full mode names readable, without squeezing
+                        // the label and value onto a single narrow line.
+                        DrawText(c, m, textObject, prefix + row.Label,
+                            y, 0x00000008u);
+                        DrawText(c, m, textObject, row.Value(),
+                            (ushort)(y + RowSpacing), 0x0000000Au);
+                    }
+                    else
+                        DrawText(c, m, textObject,
+                            prefix + row.Label + ": " + row.Value(),
+                            y, 0x00000008u);
                 }
 
                 SetObjectColor(m, textObject, normalColor, selected: false);
-                DrawText(c, m, textObject, Hint(), HintY, 0x0000000Au);
+                DrawText(c, m, textObject, Hint(),
+                    IsGameplay ? (ushort)(HintY - 0x20) : HintY, 0x0000000Au);
 
                 c.A0 = textObject;
                 c.RA = ReturnAddress;
@@ -299,6 +314,8 @@ public static partial class Vigilante82PC
         {
             if (!_editing)
                 return "Press X to configure";
+            if (IsGameplay)
+                return "Left / Right to change";
             int below = Rows.Length - (_top + VisibleRows);
             return below > 0 ? $"{below} more below" : "";
         }
@@ -371,7 +388,23 @@ public static partial class Vigilante82PC
 
         static ViewConfig View => ConfigManager.View;
 
-        static readonly Row[] Rows =
+        static Row[] Rows => IsGameplay ? GameplayRows : VideoRows;
+
+        static readonly Row[] GameplayRows =
+        [
+            new("Transformations",
+                () => V82TransformationSettings.Label(ConfigManager.Game.V82Transformations),
+                direction =>
+                {
+                    ConfigManager.Game.V82Transformations = V82TransformationSettings.Cycle(
+                        ConfigManager.Game.V82Transformations, direction);
+                    ConfigManager.SaveGame();
+                    Console.Error.WriteLine(
+                        $"[V82Transformations] saved mode={ConfigManager.Game.V82Transformations}");
+                }),
+        ];
+
+        static readonly Row[] VideoRows =
         [
             // No graphics preset row. The Original preset exists to put the
             // PS1 software renderer back, and this port is not going back to

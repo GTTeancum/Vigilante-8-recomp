@@ -1,0 +1,11 @@
+{
+  "font": "C:\\Windows\\Fonts\\ROCK.TTF",
+  "pointSize": 14,
+  "scale": 4,
+  "baseline": 14,
+  "alphaThreshold": 128,
+  "fontSha256": "0c61e5ce8296a55761cdb9d350d4c990be4cda8890cc70f2abdedfc357f96d00",
+  "glyphs": 137,
+  "routing": "SHARED/GAME.FNT whole-file provenance",
+  "cyanFontUnchanged": true
+}

@@ -29,7 +29,15 @@ public static class Dispatcher
 
     public static string[] ActiveNames
     {
-        get { lock (_active) return _active.ToArray(); }
+        get
+        {
+            lock (_active)
+                return _active
+                    .Concat(_relocatedImages.Select(
+                        image => image.Overlay.Name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+        }
     }
 
     public static string? LatestLevelName => _latestLevelName;
@@ -441,13 +449,46 @@ public static class Dispatcher
     static void RegisterRelocatedOverlay(IOverlay overlay, uint actualBase)
     {
         uint delta = actualBase - overlay.Base;
-        _relocatedImages.RemoveAll(image =>
-            ReferenceEquals(image.Overlay, overlay));
+        uint imageSize = overlay.Size != 0u
+            ? overlay.Size
+            : overlay.ImageSize;
+        ulong actualEnd = (ulong)actualBase + imageSize;
+        var retired = _relocatedImages
+            .Where(image =>
+            {
+                uint existingSize = image.Overlay.Size != 0u
+                    ? image.Overlay.Size
+                    : image.Overlay.ImageSize;
+                uint existingBase = image.Overlay.Base + image.Delta;
+                ulong existingEnd = (ulong)existingBase + existingSize;
+                return ReferenceEquals(image.Overlay, overlay) ||
+                       actualBase < existingEnd &&
+                       existingBase < actualEnd;
+            })
+            .ToArray();
+        _relocatedImages.RemoveAll(image => retired.Contains(image));
         _relocatedImages.Add((overlay, delta));
 
-        lock (_active)
-            if (!_active.Contains(overlay.Name)) _active.Add(overlay.Name);
+        // A relocated image is executable only at its actual RAM address.
+        // Treating it as a linked-base active overlay also registered every
+        // original 0x8010xxxx function. After several matches that let a
+        // retired arena function win a shell call at the same linked address,
+        // execute against unrelated LOAD data, and jump through a corrupt
+        // callback. Relocated images have their own dispatch index below and
+        // therefore must not pollute the linked active set.
         Rebuild();
+        foreach (var image in retired)
+        {
+            uint retiredBase = image.Overlay.Base + image.Delta;
+            Runtime.OverlayLog.Record(
+                image.Overlay.Name,
+                OverlayEventKind.Overwritten,
+                $"relocated RAM 0x{retiredBase:X8} reused by {overlay.Name}");
+            Console.WriteLine(
+                $"[Dispatcher] relocated overlay {image.Overlay.Name} " +
+                $"at 0x{retiredBase:X8} retired by {overlay.Name} " +
+                $"at 0x{actualBase:X8}");
+        }
         Runtime.OverlayLog.Record(overlay.Name, OverlayEventKind.Loaded,
             $"relocated by 0x{delta:X8}");
         if (overlay.Name.StartsWith(
@@ -518,12 +559,11 @@ public static class Dispatcher
             // functions have already been registered. Rebuild used to retain
             // only linked addresses, leaving object-owner metadata and aliases
             // pointing at actual addresses absent from the dispatch table.
-            // Reconstruct all three indexes from the same active image set so
-            // an indirect callback cannot fall through to an older LOAD image.
+            // Reconstruct all three indexes from the linked active set plus the
+            // live relocated images so an indirect callback cannot fall through
+            // to an older LOAD image.
             foreach (var (overlay, delta) in _relocatedImages)
             {
-                if (!_active.Contains(overlay.Name))
-                    continue;
                 foreach (var (original, function) in overlay.Functions)
                 {
                     uint actual = original + delta;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import struct
 from typing import Iterable, Sequence
 
@@ -585,6 +586,29 @@ def compile_animation(
     return bytes(output)
 
 
+def compile_sounds(vehicle: project.VehicleProject) -> bytes | None:
+    if not vehicle.sounds:
+        return None
+    entries = bytearray()
+    payload = bytearray()
+    for index, sound in enumerate(vehicle.sounds):
+        if len(payload) % 8:
+            raise AssertionError("validated ADPCM payload lost 8-byte alignment")
+        offset = len(payload) // 8
+        entries += struct.pack(
+            "<HH",
+            _u16(offset, f"sound {index} offset"),
+            _u16(int(sound["pitch"]), f"sound {index} pitch"),
+        )
+        payload += base64.b64decode(sound["adpcm_base64"], validate=True)
+    size_in_8b = _u16(len(payload) // 8, "sound payload size")
+    return (
+        struct.pack("<HH", _u16(len(vehicle.sounds), "sound count"), size_in_8b)
+        + entries
+        + payload
+    )
+
+
 def compile_xobf(
     vehicle: project.VehicleProject, bank: project.ObjectBank | None = None
 ) -> iff.IffChunk:
@@ -594,6 +618,10 @@ def compile_xobf(
     animation = compile_animation(vehicle, bank)
     if animation is not None:
         children.append(iff.IffChunk(tag=b"ANM ", payload=animation))
+    if bank is None:
+        sounds = compile_sounds(vehicle)
+        if sounds is not None:
+            children.append(iff.IffChunk(tag=b"SND ", payload=sounds))
     return iff.IffChunk(tag=b"FORM", form_type=b"XOBF", children=children)
 
 

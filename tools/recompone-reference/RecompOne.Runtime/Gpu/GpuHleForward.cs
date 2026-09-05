@@ -17,6 +17,10 @@ public sealed partial class Gpu
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PACKET_OWNERS") == "1";
     static readonly bool TraceMeshes =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1";
+    static readonly bool TraceWaterNearGeometry =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_WATER_NEAR_GEOMETRY") == "1";
+    int _traceWaterNearTick = -1;
+    int _traceWaterNearCount;
     static readonly bool TraceN64RouteColors =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_N64_ROUTE_COLORS") == "1";
@@ -232,7 +236,10 @@ public sealed partial class Gpu
         bool gouraud = false)
     {
         HleMaterialKind material;
-        bool nativeVehicleGlass = tex && IsNativeVehicleGlassClut(clut);
+        // Only authored semitransparent packets qualify as vehicle glass.
+        // Opaque packets can share the same CLUT row, but must retain the
+        // ordinary PS1 keyed/STP material contract used by every vehicle.
+        bool nativeVehicleGlass = semi && tex && IsNativeVehicleGlassClut(clut);
         if (_currentOtPacketTerrainRoute)
             material = HleMaterialKind.TerrainRoute;
         else if (_currentOtPacketVehicle)
@@ -299,6 +306,25 @@ public sealed partial class Gpu
         if (!modernGeometry && (spanX > 1023 || spanY > 511)) return;
 
         int gameplayTick = GpuHle.DebugGameplayTick;
+        // Diagnostic only: the generic far-to-near trace can exhaust its
+        // budget before reaching a water vehicle. Keep a separate bounded
+        // frame150 record of vehicle/near-camera world triangles.
+        if (TraceWaterNearGeometry && gameplayTick == 150 &&
+            (_currentOtPacketVehicle || (modernGeometry && _currentOtDepth <= 200)))
+        {
+            if (_traceWaterNearTick != gameplayTick)
+            { _traceWaterNearTick = gameplayTick; _traceWaterNearCount = 0; }
+            if (_traceWaterNearCount++ < 8192)
+                Console.Error.WriteLine(
+                    $"[WaterNearTriangle] tick={gameplayTick} packet=0x{_currentOtPacketAddress:X8} " +
+                    $"ot={_currentOtDepth} owner={GpuHle.DescribePacketOwner(_currentOtPacketAddress)} " +
+                    $"reflection={_currentOtPacketVehicleReflection} tex={tex} semi={semi} clut=0x{clut:X4} " +
+                    $"xy=({a.X},{a.Y}),({b.X},{b.Y}),({c.X},{c.Y}) " +
+                    $"source=({a.SourceAddress:X8},{b.SourceAddress:X8},{c.SourceAddress:X8}) " +
+                    $"view=({a.ViewX:R},{a.ViewY:R},{a.ViewZ:R}),({b.ViewX:R},{b.ViewY:R},{b.ViewZ:R}),({c.ViewX:R},{c.ViewY:R},{c.ViewZ:R}) " +
+                    $"valid=({a.HasViewSpace},{b.HasViewSpace},{c.HasViewSpace}) " +
+                    $"projection=({a.ProjectionCenterX:R},{a.ProjectionCenterY:R},{a.ProjectionScale:R}),({b.ProjectionCenterX:R},{b.ProjectionCenterY:R},{b.ProjectionScale:R}),({c.ProjectionCenterX:R},{c.ProjectionCenterY:R},{c.ProjectionScale:R})");
+        }
         if (_traceGameplayTick != gameplayTick)
         {
             _traceGameplayTick = gameplayTick;
@@ -328,8 +354,7 @@ public sealed partial class Gpu
                 $"{(c.HasProjectiveW ? 1 : 0)}) " +
                 $"owner={GpuHle.DescribePacketOwner(_currentOtPacketAddress)}");
 
-        if (_currentOtPacketVehicle &&
-            Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1" &&
+        if (_currentOtPacketVehicle && TraceMeshes &&
             _traceVehicleTriangles++ < 128)
             Console.Error.WriteLine(
                 $"[V8VehicleTriangle] xy=({a.X},{a.Y}),({b.X},{b.Y}),({c.X},{c.Y}) " +
@@ -408,17 +433,14 @@ public sealed partial class Gpu
             tex &&
             minY >= 110 &&
             minY <= 230;
-        if (screenSpaceOverlay || misownedGameplayCaption)
-            flags.Material = HleMaterialKind.Ui;
-        else if (nativeScreenEffect)
+        // The full-display weather/lighting scanlines are the more specific
+        // case. They also satisfy the generic high-OT/no-projection UI test,
+        // so classify them first or the renderer cannot keep the native
+        // screen-effect layer together as one ordered pass.
+        if (nativeScreenEffect)
             flags.Material = HleMaterialKind.ScreenEffect;
-        else if (GpuHle.GameplayActive &&
-                 flags.Vehicle &&
-                 hasWorldProjection &&
-                 maxX - minX <= 260 &&
-                 maxY - minY <= 180 &&
-                flags.Material == HleMaterialKind.Glass)
-            flags.Material = HleMaterialKind.OpaqueVehicleGlass;
+        else if (screenSpaceOverlay || misownedGameplayCaption)
+            flags.Material = HleMaterialKind.Ui;
         be.DrawTri(HV(a, flags), HV(b, flags), HV(c, flags), flags);
     }
 

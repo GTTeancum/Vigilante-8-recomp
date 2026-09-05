@@ -75,6 +75,8 @@ internal static class GlShaders
         layout(location = 14) in vec4 inReplacementRect;
         layout(location = 15) in vec3 inReplacementScale;
         layout(location = 16) in vec3 inReplacementBias;
+        layout(location = 17) in int inBlendCode;
+        layout(location = 18) in uint inTerrainOffset;
 
         out vec4 vColorPerspective;
         noperspective out vec4 vColorAffine;
@@ -99,6 +101,10 @@ internal static class GlShaders
         flat out int   vEffectContour;
         flat out int   vModalPanel;
         flat out int   vMaterial;
+        flat out int   vBlendCode;
+        flat out int   vDreamcastTerrainColor;
+        out vec3 vTerrainOffsetPerspective;
+        noperspective out vec3 vTerrainOffsetAffine;
         flat out vec4  vReplacementRect;
         flat out vec3  vReplacementScale;
         flat out vec3  vReplacementBias;
@@ -169,6 +175,14 @@ internal static class GlShaders
             vEffectContour = (inTexpage >> 23) & 1;
             vModalPanel = (inTexpage >> 24) & 1;
             vMaterial = inMaterial;
+            vBlendCode = inBlendCode;
+            vec3 unpackedTerrainOffset = vec3(
+                float(inTerrainOffset & 0xFFu),
+                float((inTerrainOffset >> 8) & 0xFFu),
+                float((inTerrainOffset >> 16) & 0xFFu)) / 255.0;
+            vTerrainOffsetPerspective = unpackedTerrainOffset;
+            vTerrainOffsetAffine = unpackedTerrainOffset;
+            vDreamcastTerrainColor = int((inTerrainOffset >> 24) & 1u);
             vReplacementRect = inReplacementRect;
             vReplacementScale = inReplacementScale;
             vReplacementBias = inReplacementBias;
@@ -214,6 +228,10 @@ internal static class GlShaders
         flat in int   vEffectContour;
         flat in int   vModalPanel;
         flat in int   vMaterial;
+        flat in int   vBlendCode;
+        flat in int   vDreamcastTerrainColor;
+        in vec3 vTerrainOffsetPerspective;
+        noperspective in vec3 vTerrainOffsetAffine;
         flat in vec4  vReplacementRect;
         flat in vec3  vReplacementScale;
         flat in vec3  vReplacementBias;
@@ -256,7 +274,6 @@ internal static class GlShaders
         const int MaterialSubtractive = 6;
         const int MaterialTerrainRoute = 9;
         const int MaterialVehicleReflection = 10;
-        const int MaterialOpaqueVehicleGlass = 11;
 
         const int ditherTbl[16] = int[16](
             -4,  0, -3,  1,
@@ -400,66 +417,61 @@ internal static class GlShaders
                 // The replacement atlas deliberately has no hardware mip
                 // chain: conventional atlas mip levels blend unrelated
                 // packed images. Reconstruct one screen-pixel footprint
-                // inside this primitive's clamped rectangle instead. Eight
-                // bounded taps keep adjacent terrain cells on the same
-                // minification curve without leaking into neighbouring atlas
-                // entries.
+                // inside this primitive's clamped rectangle instead.
                 vec2 major = atlasDxLength >= atlasDyLength
                     ? atlasDx : atlasDy;
                 vec2 minor = atlasDxLength >= atlasDyLength
                     ? atlasDy : atlasDx;
                 vec4 filtered = vec4(0.0);
-                filtered += replacementSample(
-                    atlasPixel + major * -0.375 + minor * -0.25,
-                    minPixel, maxPixel, atlasSize);
-                filtered += replacementSample(
-                    atlasPixel + major * -0.375 + minor * 0.25,
-                    minPixel, maxPixel, atlasSize);
-                filtered += replacementSample(
-                    atlasPixel + major * -0.125 + minor * -0.25,
-                    minPixel, maxPixel, atlasSize);
-                filtered += replacementSample(
-                    atlasPixel + major * -0.125 + minor * 0.25,
-                    minPixel, maxPixel, atlasSize);
-                filtered += replacementSample(
-                    atlasPixel + major * 0.125 + minor * -0.25,
-                    minPixel, maxPixel, atlasSize);
-                filtered += replacementSample(
-                    atlasPixel + major * 0.125 + minor * 0.25,
-                    minPixel, maxPixel, atlasSize);
-                filtered += replacementSample(
-                    atlasPixel + major * 0.375 + minor * -0.25,
-                    minPixel, maxPixel, atlasSize);
-                filtered += replacementSample(
-                    atlasPixel + major * 0.375 + minor * 0.25,
-                    minPixel, maxPixel, atlasSize);
+                float filteredSamples = 0.0;
+                if (vMaterial == MaterialTerrainRoute) {
+                    // The recovered Dreamcast terrain material is static
+                    // across distance; its separate base/offset vertex-color
+                    // transition is applied after this bounded footprint.
+                    // Keep minification inside this atlas rectangle so neither
+                    // the transition nor ordinary viewing can bleed into a
+                    // neighboring packed replacement.
+                    for (int iy = 0; iy < 4; ++iy) {
+                        for (int ix = 0; ix < 4; ++ix) {
+                            vec2 offset =
+                                atlasDx * ((float(ix) + 0.5) * 0.25 - 0.5) +
+                                atlasDy * ((float(iy) + 0.5) * 0.25 - 0.5);
+                            filtered += replacementSample(
+                                atlasPixel + offset,
+                                minPixel, maxPixel, atlasSize);
+                            filteredSamples += 1.0;
+                        }
+                    }
+                } else {
+                    // Four bounded taps are sufficient for ordinary world
+                    // replacements and keep their established cost/profile.
+                    filtered += replacementSample(
+                        atlasPixel + major * -0.25 + minor * -0.25,
+                        minPixel, maxPixel, atlasSize);
+                    filtered += replacementSample(
+                        atlasPixel + major * -0.25 + minor * 0.25,
+                        minPixel, maxPixel, atlasSize);
+                    filtered += replacementSample(
+                        atlasPixel + major * 0.25 + minor * -0.25,
+                        minPixel, maxPixel, atlasSize);
+                    filtered += replacementSample(
+                        atlasPixel + major * 0.25 + minor * 0.25,
+                        minPixel, maxPixel, atlasSize);
+                    filteredSamples = 4.0;
+                }
                 float filterAmount = uTextureMipmaps != 0
-                    ? smoothstep(1.0, 2.25, replacementFootprint)
+                    ? smoothstep(
+                        1.0,
+                        vMaterial == MaterialTerrainRoute ? 4.0 : 2.25,
+                        replacementFootprint)
                     : smoothstep(
                         1.0, 2.25,
                         replacementFootprint /
                             max(min(atlasDxLength, atlasDyLength), 1.0));
-                texel = mix(texel, filtered * 0.125, filterAmount);
-            }
-            if (vMaterial == MaterialTerrainRoute) {
-                vec3 neighbours = (
-                    replacementSample(
-                        atlasPixel + vec2(1.0, 0.0),
-                        minPixel, maxPixel, atlasSize).rgb +
-                    replacementSample(
-                        atlasPixel + vec2(-1.0, 0.0),
-                        minPixel, maxPixel, atlasSize).rgb +
-                    replacementSample(
-                        atlasPixel + vec2(0.0, 1.0),
-                        minPixel, maxPixel, atlasSize).rgb +
-                    replacementSample(
-                        atlasPixel + vec2(0.0, -1.0),
-                        minPixel, maxPixel, atlasSize).rgb) * 0.25;
-                float sharpen = 1.0 - smoothstep(
-                    0.75, 2.0, replacementFootprint);
-                texel.rgb = clamp(
-                    texel.rgb + (texel.rgb - neighbours) * sharpen,
-                    vec3(0.0), vec3(1.0));
+                texel = mix(
+                    texel,
+                    filtered / max(filteredSamples, 1.0),
+                    filterAmount);
             }
             texel.rgb = clamp(
                 texel.rgb * vReplacementScale + vReplacementBias,
@@ -617,6 +629,17 @@ internal static class GlShaders
             }
             return vec3(min(c8 >> 3, 31)) / 31.0;
         }
+        vec4 primitiveBlend() {
+            if (vBlendCode == 0)
+                return uBlendOpaque;
+            if (vBlendCode == 1)
+                return vec4(0.5, 0.5, 0.5, 0.5);
+            if (vBlendCode == 2)
+                return vec4(1.0);
+            if (vBlendCode == 3)
+                return uBlend;
+            return vec4(0.25, 0.25, 0.25, 1.0);
+        }
         void main() {
             if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
             if (vModalPanel != 0) {
@@ -667,7 +690,10 @@ internal static class GlShaders
                                                      min(vBary.x, vBary.y);
                     coverage = smoothstep(0.0, max(fwidth(edge) * 2.5, 0.001), edge) * 0.72;
                 }
-                BlendColor = vec4(uBlend.rgb * coverage, uBlend.a);
+                vec4 authoredBlend = primitiveBlend();
+                BlendColor = vec4(
+                    authoredBlend.rgb * coverage,
+                    authoredBlend.a);
                 return;
             }
 
@@ -697,9 +723,6 @@ internal static class GlShaders
                 : (uTextureSmoothing != 0 && vSmooth != 0
                     ? filteredTexture(sampleUV, nearestTexel)
                     : nearestTexel);
-            bool vehicleGlass = vMaterial == MaterialGlass;
-            bool opaqueVehicleGlass =
-                vMaterial == MaterialOpaqueVehicleGlass;
             bool vehicleReflection =
                 vMaterial == MaterialVehicleReflection;
             bool fontPrimitive =
@@ -769,9 +792,7 @@ internal static class GlShaders
                 }
             }
 
-            if (transparentBlack(nearestTexel) &&
-                !vehicleGlass &&
-                !opaqueVehicleGlass) {
+            if (transparentBlack(nearestTexel)) {
                 // PS1 color 0x0000 is transparent for every textured
                 // polygon, including authored vehicle-reflection faces.
                 // Kind-12 can cover an ordinary keyed wheel triangle; letting
@@ -806,32 +827,27 @@ internal static class GlShaders
                 // authored STP/blend mode as the coplanar gloss pass.
                 FragColor = vec4(distanceFog(texel.rgb), 1.0);
                 BlendColor = nearestTexel.a >= 0.5
-                    ? uBlend
+                    ? primitiveBlend()
                     : uBlendOpaque;
                 return;
             }
-            if (opaqueVehicleGlass) {
-                // The depth-writing classification prevents background holes;
-                // it must not change the native reflection texture itself.
-                FragColor = vec4(distanceFog(texel.rgb), 1.0);
-                BlendColor = vec4(1.0);
-                return;
-            }
-            if (vehicleGlass) {
-                // Screen-space vehicle icons may use the same CLUT/textures
-                // as panes. Keep their native translucent path unless the
-                // primitive was promoted to OpaqueVehicleGlass by world
-                // projection provenance.
-                float authored = max(
-                    texel.r,
-                    max(texel.g, texel.b));
-                vec3 glassTint = authored > 0.02
-                    ? texel.rgb
-                    : vec3(0.18, 0.25, 0.29);
+            if (vDreamcastTerrainColor != 0) {
+                // Dreamcast 0x8C101E20 submits PVR base and offset colors.
+                // PVR combines them as texture*base+offset; these colors are
+                // already in the native /255 domain and must not pass through
+                // the PS1 packet modulation equation below.
+                vec3 terrainOffset = uPerspectiveCorrectColors != 0
+                    ? vTerrainOffsetPerspective
+                    : vTerrainOffsetAffine;
+                vec3 terrainColor = clamp(
+                    texel.rgb * vertexColor.rgb + terrainOffset,
+                    vec3(0.0), vec3(1.0));
                 FragColor = vec4(
-                    distanceFog(glassTint),
-                    authored > 0.02 ? 0.46 : 0.34);
-                BlendColor = vec4(1.0);
+                    quant5(ivec3(terrainColor * 255.0 + 0.5)),
+                    max(texel.a, uSetMask));
+                BlendColor = nearestTexel.a >= 0.5
+                    ? primitiveBlend()
+                    : uBlendOpaque;
                 return;
             }
             ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
@@ -886,20 +902,20 @@ internal static class GlShaders
                 max(texel.a, uSetMask));
             if (svgHud) {
                 vec4 analyticBlend =
-                    texel.a >= 0.5 ? uBlend : uBlendOpaque;
+                    texel.a >= 0.5 ? primitiveBlend() : uBlendOpaque;
                 BlendColor = vec4(
                     analyticBlend.rgb * hudCoverage,
                     mix(1.0, analyticBlend.a, hudCoverage));
             } else if ((replacementFont || vectorFont) &&
                        contourCoverage < 0.999) {
                 BlendColor = vec4(
-                    uBlend.rgb * contourCoverage,
-                    mix(1.0, uBlend.a, contourCoverage));
+                    primitiveBlend().rgb * contourCoverage,
+                    mix(1.0, primitiveBlend().a, contourCoverage));
             } else if (enhancedParticle && contourCoverage < 0.999) {
                 if (contourStp >= 0.5) {
                     BlendColor = vec4(
-                        uBlend.rgb * contourCoverage,
-                        mix(1.0, uBlend.a, contourCoverage));
+                        primitiveBlend().rgb * contourCoverage,
+                        mix(1.0, primitiveBlend().a, contourCoverage));
                 } else {
                     BlendColor = vec4(
                         vec3(contourCoverage),
@@ -907,10 +923,12 @@ internal static class GlShaders
                 }
             } else if (enhancedEffectContour) {
                 BlendColor = vec4(
-                    uBlend.rgb * contourCoverage,
-                    mix(1.0, uBlend.a, contourCoverage));
+                    primitiveBlend().rgb * contourCoverage,
+                    mix(1.0, primitiveBlend().a, contourCoverage));
             } else {
-                BlendColor = nearestTexel.a >= 0.5 ? uBlend : uBlendOpaque;
+                BlendColor = nearestTexel.a >= 0.5
+                    ? primitiveBlend()
+                    : uBlendOpaque;
             }
         }
         """;

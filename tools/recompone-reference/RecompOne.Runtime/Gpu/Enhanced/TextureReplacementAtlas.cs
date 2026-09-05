@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
+using System.Diagnostics;
 using RecompOne.Runtime.Hle;
 using Silk.NET.OpenGL;
 
@@ -15,6 +16,18 @@ namespace RecompOne.Runtime.Enhanced;
 /// </summary>
 internal sealed class TextureReplacementAtlas : IDisposable
 {
+    internal readonly record struct PerformanceMetrics(
+        long ResolveCalls,
+        long CacheHits,
+        long CacheMisses,
+        long ResolveTicks,
+        long RevisionTicks,
+        long DecodeTicks,
+        long HashTicks,
+        long TerrainLookupTicks,
+        long Marks,
+        long MarkedPixels);
+
     internal readonly record struct Rect(float X, float Y, float W, float H)
     {
         public bool Valid => W > 0f && H > 0f;
@@ -100,6 +113,17 @@ internal sealed class TextureReplacementAtlas : IDisposable
     long _terrainResolves, _terrainAtlasHits;
     long _terrainAtlasCatalogHits, _terrainAtlasAnchorHits;
     long _terrainAtlasMisses;
+    readonly bool _tracePerformance;
+    long _performanceResolveCalls;
+    long _performanceCacheHits;
+    long _performanceCacheMisses;
+    long _performanceResolveTicks;
+    long _performanceRevisionTicks;
+    long _performanceDecodeTicks;
+    long _performanceHashTicks;
+    long _performanceTerrainLookupTicks;
+    long _performanceMarks;
+    long _performanceMarkedPixels;
     ulong _revision = 1;
     uint _texture;
     int _width = 1, _height = 1;
@@ -112,6 +136,9 @@ internal sealed class TextureReplacementAtlas : IDisposable
     public TextureReplacementAtlas(GL gl)
     {
         _gl = gl;
+        _tracePerformance =
+            Environment.GetEnvironmentVariable(
+                "RECOMPONE_TRACE_ENHANCED_PERFORMANCE") == "1";
         _dumpDirectory = Environment.GetEnvironmentVariable(
             "RECOMPONE_TEXTURE_DUMP_DIR");
         _dumpTerrainOnly = Environment.GetEnvironmentVariable(
@@ -651,23 +678,46 @@ internal sealed class TextureReplacementAtlas : IDisposable
         HleMaterialKind material,
         out ulong textureKey)
     {
+        long resolveStarted = _tracePerformance
+            ? Stopwatch.GetTimestamp()
+            : 0;
+        Rect Finish(Rect result)
+        {
+            if (_tracePerformance)
+            {
+                _performanceResolveCalls++;
+                _performanceResolveTicks +=
+                    Stopwatch.GetTimestamp() - resolveStarted;
+            }
+            return result;
+        }
         textureKey = 0;
         if ((tpage & 0x180) == 0x180 ||
             minU < 0 || minV < 0 || maxU > 255 || maxV > 255 ||
             minU > maxU || minV > maxV)
-            return default;
+            return Finish(default);
         var signature = new Signature(
             tpage & 0x1FF, clut & 0x7FFF,
             minU, minV, maxU, maxV,
             twAndX, twAndY, twOrX, twOrY,
             material);
+        long revisionStarted = _tracePerformance
+            ? Stopwatch.GetTimestamp()
+            : 0;
         ulong regionRevision = RevisionOf(signature);
+        if (_tracePerformance)
+            _performanceRevisionTicks +=
+                Stopwatch.GetTimestamp() - revisionStarted;
         if (_cache.TryGetValue(signature, out Cached cached) &&
             cached.Revision == regionRevision)
         {
+            if (_tracePerformance)
+                _performanceCacheHits++;
             textureKey = cached.Key;
-            return cached.Rect;
+            return Finish(cached.Rect);
         }
+        if (_tracePerformance)
+            _performanceCacheMisses++;
 
         bool terrain = material == HleMaterialKind.TerrainRoute;
         if (terrain) _terrainResolves++;
@@ -677,8 +727,20 @@ internal sealed class TextureReplacementAtlas : IDisposable
         int height = maxV - minV + 1;
         if (terrain && _routeEntries.Count != 0)
         {
+            long decodeStarted = _tracePerformance
+                ? Stopwatch.GetTimestamp()
+                : 0;
             decoded = Decode(signature);
+            if (_tracePerformance)
+                _performanceDecodeTicks +=
+                    Stopwatch.GetTimestamp() - decodeStarted;
+            long hashStarted = _tracePerformance
+                ? Stopwatch.GetTimestamp()
+                : 0;
             hash = Hash(decoded, width, height);
+            if (_tracePerformance)
+                _performanceHashTicks +=
+                    Stopwatch.GetTimestamp() - hashStarted;
             if (_routeEntries.Contains(hash) &&
                 _entries.TryGetValue(hash, out Rect routeRect))
             {
@@ -692,11 +754,20 @@ internal sealed class TextureReplacementAtlas : IDisposable
                         $"[TexturePack] route DDS hit key={hash:x16} " +
                         $"size={width}x{height} " +
                         $"window={twAndX:x2},{twAndY:x2},{twOrX:x2},{twOrY:x2}");
-                return routeRect;
+                return Finish(routeRect);
             }
         }
-        if (terrain && TryResolveTerrain(
-                signature, out Rect terrainRect, out ulong terrainKey))
+        long terrainStarted = _tracePerformance && terrain
+            ? Stopwatch.GetTimestamp()
+            : 0;
+        Rect terrainRect = default;
+        ulong terrainKey = 0;
+        bool terrainHit = terrain && TryResolveTerrain(
+            signature, out terrainRect, out terrainKey);
+        if (_tracePerformance && terrain)
+            _performanceTerrainLookupTicks +=
+                Stopwatch.GetTimestamp() - terrainStarted;
+        if (terrainHit)
         {
             textureKey = terrainKey;
             _resolves++;
@@ -711,12 +782,34 @@ internal sealed class TextureReplacementAtlas : IDisposable
                     $"[TexturePack] terrain atlas hit key={terrainKey:x16} " +
                     $"size={maxU - minU + 1}x{maxV - minV + 1} " +
                     $"window={twAndX:x2},{twAndY:x2},{twOrX:x2},{twOrY:x2}");
-            return terrainRect;
+            return Finish(terrainRect);
         }
 
-        byte[] rgba = decoded ?? Decode(signature);
+        byte[] rgba;
+        if (decoded != null)
+        {
+            rgba = decoded;
+        }
+        else
+        {
+            long decodeStarted = _tracePerformance
+                ? Stopwatch.GetTimestamp()
+                : 0;
+            rgba = Decode(signature);
+            if (_tracePerformance)
+                _performanceDecodeTicks +=
+                    Stopwatch.GetTimestamp() - decodeStarted;
+        }
         if (hash == 0)
+        {
+            long hashStarted = _tracePerformance
+                ? Stopwatch.GetTimestamp()
+                : 0;
             hash = Hash(rgba, width, height);
+            if (_tracePerformance)
+                _performanceHashTicks +=
+                    Stopwatch.GetTimestamp() - hashStarted;
+        }
         textureKey = hash;
         _resolves++;
         Rect rect = _entries.TryGetValue(hash, out Rect found)
@@ -745,7 +838,33 @@ internal sealed class TextureReplacementAtlas : IDisposable
             (!_dumpTerrainOnly || material == HleMaterialKind.TerrainRoute) &&
             _dumped.Add(hash))
             Dump(hash, width, height, rgba);
-        return rect;
+        return Finish(rect);
+    }
+
+    public PerformanceMetrics ConsumePerformanceMetrics()
+    {
+        var result = new PerformanceMetrics(
+            _performanceResolveCalls,
+            _performanceCacheHits,
+            _performanceCacheMisses,
+            _performanceResolveTicks,
+            _performanceRevisionTicks,
+            _performanceDecodeTicks,
+            _performanceHashTicks,
+            _performanceTerrainLookupTicks,
+            _performanceMarks,
+            _performanceMarkedPixels);
+        _performanceResolveCalls = 0;
+        _performanceCacheHits = 0;
+        _performanceCacheMisses = 0;
+        _performanceResolveTicks = 0;
+        _performanceRevisionTicks = 0;
+        _performanceDecodeTicks = 0;
+        _performanceHashTicks = 0;
+        _performanceTerrainLookupTicks = 0;
+        _performanceMarks = 0;
+        _performanceMarkedPixels = 0;
+        return result;
     }
 
     bool TryResolveTerrain(Signature s, out Rect rect, out ulong key)
@@ -1142,6 +1261,11 @@ internal sealed class TextureReplacementAtlas : IDisposable
 
     void Mark(int x, int y, int width, int height)
     {
+        if (_tracePerformance)
+        {
+            _performanceMarks++;
+            _performanceMarkedPixels += (long)width * height;
+        }
         ulong revision = ++_revision;
         for (int row = 0; row < height; row += 64)
         for (int column = 0; column < width; column += 64)

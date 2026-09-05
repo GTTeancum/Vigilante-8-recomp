@@ -10,6 +10,7 @@ public struct HleVertex
     public float ProjectionCenterX, ProjectionCenterY, ProjectionScale;
     public float AuthoredMinU, AuthoredMinV, AuthoredMaxU, AuthoredMaxV;
     public byte R, G, B;
+    public byte TerrainOffsetR, TerrainOffsetG, TerrainOffsetB;
     public short U, V;
     public bool HasGteZ;
     public bool HasCoherentGteZ;
@@ -17,6 +18,7 @@ public struct HleVertex
     public bool HasViewSpace;
     public bool ReconstructedViewSpace;
     public bool HasAuthoredUvBounds;
+    public bool DreamcastTerrainColor;
 }
 
 public enum HleMaterialKind : byte
@@ -32,7 +34,6 @@ public enum HleMaterialKind : byte
     ScreenEffect,
     TerrainRoute,
     VehicleReflection,
-    OpaqueVehicleGlass,
 }
 
 public struct PrimFlags

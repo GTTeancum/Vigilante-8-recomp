@@ -1,0 +1,22 @@
+# Exercise both assets that share the Classic UI mod's shell contract in one
+# native process. Enter Options, return to the actual main menu, choose Arcade,
+# and leave the USA location selector resident long enough for model loading.
+540+3=START
+900+3=START
+960+3=DOWN
+1020+3=DOWN
+1080+3=CROSS
+
+[v82_options_game_status]
+60+3=TRIANGLE
+
+[after:v82_options_game_status@1]
+200+3=UP
+260+3=UP
+320+3=CROSS
+440+2=SELECT
+500+3=CROSS
+620+2=SELECT
+
+[choose_location_1]
+300+2=SELECT

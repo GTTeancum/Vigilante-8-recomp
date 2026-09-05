@@ -85,6 +85,12 @@ public static class ConfigManager
             Game.InputBindingsVersion = 2;
             saveGame = true;
         }
+        var transformations = V82TransformationSettings.Normalize(Game.V82Transformations);
+        if (transformations != Game.V82Transformations)
+        {
+            Game.V82Transformations = transformations;
+            saveGame = true;
+        }
         if (saveGame) SaveGame();
         Console.Error.WriteLine(
             $"[Config] settings={GameConfigPath} " +

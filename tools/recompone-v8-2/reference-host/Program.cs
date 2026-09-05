@@ -341,24 +341,39 @@ if (args.Length == 2 &&
             FP = 0u,
         };
 
+        const uint probeVehicle = 0x80110000u;
+        const uint houstonBehavior = 0x80123458u;
+        memory.WriteU32(0x800C6130u + 3u * 4u, houstonBehavior);
+        memory.WriteU8(probeVehicle + 0xDCu, (byte)71);
+        if (V82VehicleRegistry.SpecialBehaviorForObject(
+                memory, probeVehicle, 0x80BAD000u) != houstonBehavior)
+            throw new InvalidDataException(
+                "Houston registry behavior did not resolve V8:2 type 3");
+        memory.WriteU8(probeVehicle + 0xDCu, (byte)76);
+        if (V82VehicleRegistry.SpecialBehaviorForObject(
+                memory, probeVehicle, 0x80BAD000u) != 0u)
+            throw new InvalidDataException(
+                "unmapped guest special did not select the generic fallback");
+
         V82VehicleRegistry.BeginNativeSelector(context, memory);
         uint initial = V82VehicleRegistry.ResolveNativeSelectorSlot(
             context, memory);
         memory.WriteU32(0x8006B508u, 0x80000000u);
         context.FP = 17u;
+        V82VehicleRegistry.ApplyNativeSelectorNavigation(context, memory);
         uint wrapped = V82VehicleRegistry.ResolveNativeSelectorSlot(
             context, memory);
         int guest = V82VehicleRegistry.NativeSelectorGuestIndex;
-        if (initial != 0u || wrapped != 0u || guest != 11)
+        if (initial != 0u || wrapped != 0u || guest != 12)
             throw new InvalidDataException(
-                $"left wrap did not select Sid: initial={initial} " +
+                $"left wrap did not select Y: initial={initial} " +
                 $"wrapped={wrapped} guest={guest}");
 
         context.V0 = wrapped;
         V82VehicleRegistry.EndNativeSelector(context, memory);
-        if (V82VehicleRegistry.SelectedType != 75)
+        if (V82VehicleRegistry.SelectedType != 76)
             throw new InvalidDataException(
-                $"Sid selection did not persist: " +
+                $"Y selection did not persist: " +
                 $"type={V82VehicleRegistry.SelectedType}");
 
         context.A1 = 0u;
@@ -371,9 +386,9 @@ if (args.Length == 2 &&
             throw new InvalidDataException(
                 "enemy selector context replaced the native portrait");
         V82VehicleRegistry.EndNativeSelector(context, memory);
-        if (V82VehicleRegistry.SelectedType != 75)
+        if (V82VehicleRegistry.SelectedType != 76)
             throw new InvalidDataException(
-                "enemy selector context displaced player-one Sid selection");
+                "enemy selector context displaced player-one Y selection");
 
         // The enemy editor keeps retail proxy bytes in its four fixed rows.
         // Crossing left from retail slot zero must enter the final registered
@@ -386,7 +401,7 @@ if (args.Length == 2 &&
         V82VehicleRegistry.ObserveNativeSelectorCall(context, memory);
         context.S3 = 0u;
         memory.WriteU8(0x8006B8F6u, (byte)0);
-        // Reserve Sid's ordinary wrap proxy in row one. The guest row must
+        // Reserve the ordinary left-wrap proxy in row one. The guest row must
         // move to a distinct retail identity so participant expansion cannot
         // silently convert row one's stock enemy as well.
         memory.WriteU8(0x8006B8F7u, (byte)17);
@@ -396,10 +411,10 @@ if (args.Length == 2 &&
         memory.WriteU32(0x8006B508u, 0x80000000u);
         V82VehicleRegistry.ApplyNativeEnemySelectorSlot(context, memory);
         int npcProxy = memory.ReadU8(0x8006B8F6u);
-        if (V82VehicleRegistry.SelectedNpcTypeForSlot(0) != 75 ||
+        if (V82VehicleRegistry.SelectedNpcTypeForSlot(0) != 76 ||
             npcProxy == 17)
             throw new InvalidDataException(
-                "enemy selector did not isolate Sid's retail proxy");
+                "enemy selector did not isolate Y's retail proxy");
         const uint participantBase = 0x80061104u;
         memory.WriteU8(participantBase, (byte)0);
         memory.WriteU8(participantBase + 1u, (byte)0xFF);
@@ -407,16 +422,17 @@ if (args.Length == 2 &&
         memory.WriteU8(participantBase + 3u, (byte)17);
         V82VehicleRegistry.ApplySelectedNpcTypes(memory, participantBase);
         if (memory.ReadU8(participantBase) != 0u ||
-            memory.ReadU8(participantBase + 2u) != 75u ||
+            memory.ReadU8(participantBase + 2u) != 76u ||
             memory.ReadU8(participantBase + 3u) != 17u)
             throw new InvalidDataException(
                 "isolated enemy proxy changed an unrelated stock participant");
         V82VehicleRegistry.EndNativeSelector(context, memory);
 
         Console.WriteLine(
-            $"[SelectorLifecycle] {validation} left_wrap=Sid " +
-            $"type=75 enemy_portrait=native player_selection=preserved " +
-            $"npc_type=75 npc_proxy={npcProxy} stock_proxy=17_preserved");
+            $"[SelectorLifecycle] {validation} left_wrap=Y " +
+            $"type=76 enemy_portrait=native player_selection=preserved " +
+            $"npc_type=76 npc_proxy={npcProxy} stock_proxy=17_preserved " +
+            $"houston_special=native_type_3");
         return 0;
     }
     catch (Exception exception)

@@ -22,7 +22,7 @@ MIGRATIONS = (
         RecompOne.Runtime.Sdk.V82VehicleRegistry.ApplyControllerPhysics(c, m);
 """,
         """        func_8003AC84_Impl(c, m);
-        // The generic controller pre-hook owns any substituted movement.
+        // The capability pre-hook applies movement before native actions.
 """,
     ),
     (
@@ -36,6 +36,15 @@ MIGRATIONS = (
 )
 
 REPLACEMENTS = (
+    (
+        """    public static void func_80041B0C(CpuContext c, IMemory m)
+    {
+""",
+        """    public static void func_80041B0C(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Sdk.V82AutoWaterski.BeforeVehiclePhysics(c, m);
+""",
+    ),
     (
         """    public static void func_80049D54(CpuContext c, IMemory m)
     {
@@ -68,7 +77,7 @@ REPLACEMENTS = (
     {
         if (!RecompOne.Runtime.Context.PreHook.Run(RecompOne.Runtime.Sdk.V82VehicleRegistry.BeginControllerPhysics, c, m)) return;
         func_8003AC84_Impl(c, m);
-        // The generic controller pre-hook owns any substituted movement.
+        // The capability pre-hook applies movement before native actions.
     }
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     public static void func_8003AC84_Impl(CpuContext c, IMemory m)
@@ -190,6 +199,17 @@ REPLACEMENTS = (
         c.V1 = c.S6 << 1;
         c.LoadWord(19, m, (c.V0 + 0x61C0u));
         c.S3 = RecompOne.Runtime.Sdk.V82VehicleRegistry.TransformBankForObject(m, c.S5, c.S3);
+""",
+    ),
+    (
+        """        c.V1 = c.V1 + c.A0;
+        c.LoadWord(3, m, c.V1);
+        if (c.V1 == 0u) {
+""",
+        """        c.V1 = c.V1 + c.A0;
+        c.LoadWord(3, m, c.V1);
+        c.V1 = RecompOne.Runtime.Sdk.V82VehicleRegistry.SpecialBehaviorForObject(m, c.S2, c.V1);
+        if (c.V1 == 0u) {
 """,
     ),
     (

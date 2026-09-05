@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
@@ -201,6 +202,14 @@ def main() -> None:
         bpy.ops.wm.open_mainfile(filepath=str(blend))
         reopened = authored_collection()
         rebuilt = authored_scene.scene_to_project(reopened)
+        # SND payloads are package data, not Blender-authored scene data.
+        # Carry the source bank through the visual round trip just as the
+        # compiler carries the other non-scene registry metadata.
+        rebuilt = replace(
+            rebuilt,
+            sounds=original.sounds,
+            special_behavior_type=original.special_behavior_type,
+        )
         original_dict = project.to_dict(original)
         rebuilt_dict = project.to_dict(rebuilt)
         if rebuilt_dict != original_dict:

@@ -1,0 +1,105 @@
+{
+  "purpose": "Review-only 4x whole-file FNT replacement candidates",
+  "deployed": false,
+  "scale": 4,
+  "fonts": [
+    {
+      "id": "hud",
+      "source": "SHARED/HUD.FNT",
+      "role": "compact in-match digits and HUD symbols",
+      "sourceWidth": 92,
+      "sourceHeight": 12,
+      "original": "mods/v82_hd_font_candidates/hud/original_atlas.png",
+      "candidates": [
+        {
+          "id": "agency_fb_bold",
+          "label": "Agency FB Bold",
+          "font": "C:/Windows/Fonts/AGENCYB.TTF",
+          "pointSize": 18,
+          "widthFactor": 0.94,
+          "shadowAlpha": 0,
+          "png": "mods/v82_hd_font_candidates/hud/agency_fb_bold/atlas_4x.png",
+          "dds": "mods/v82_hd_font_candidates/hud/agency_fb_bold/atlas_4x.dds",
+          "proof": "mods/v82_hd_font_candidates/hud/agency_fb_bold/proof.png",
+          "pngSha256": "E828E8C2CC5E4181F22AA0262E9BC467001C3F85FA1ECCE9BD045CBC707C3837",
+          "ddsSha256": "445F7461A5546B934AFF0526BA708FE905B741938A55F7D48B118AC380EE595F"
+        },
+        {
+          "id": "arial_narrow_bold",
+          "label": "Arial Narrow Bold",
+          "font": "C:/Windows/Fonts/ARIALNB.TTF",
+          "pointSize": 18,
+          "widthFactor": 0.94,
+          "shadowAlpha": 0,
+          "png": "mods/v82_hd_font_candidates/hud/arial_narrow_bold/atlas_4x.png",
+          "dds": "mods/v82_hd_font_candidates/hud/arial_narrow_bold/atlas_4x.dds",
+          "proof": "mods/v82_hd_font_candidates/hud/arial_narrow_bold/proof.png",
+          "pngSha256": "637274D5A60A659CFDBBECB6E59C86AB9C0B287DD68D5CD146C7231BDBB32A74",
+          "ddsSha256": "5CD70042702F292BC731248E1019B8A5BA4B7E0D1792078015F96073C1F693C4"
+        },
+        {
+          "id": "ocr_a_extended",
+          "label": "OCR A Extended",
+          "font": "C:/Windows/Fonts/OCRAEXT.TTF",
+          "pointSize": 18,
+          "widthFactor": 0.9,
+          "shadowAlpha": 0,
+          "png": "mods/v82_hd_font_candidates/hud/ocr_a_extended/atlas_4x.png",
+          "dds": "mods/v82_hd_font_candidates/hud/ocr_a_extended/atlas_4x.dds",
+          "proof": "mods/v82_hd_font_candidates/hud/ocr_a_extended/proof.png",
+          "pngSha256": "A953F43D700B856F1235D416E0688A9114512D5944047C57F91A8256838F2C5D",
+          "ddsSha256": "71067CF74611E3E4C77D5895A19A1F0AF4F2C8545940A9D768CE973B36B3BEE0"
+        }
+      ]
+    },
+    {
+      "id": "kong",
+      "source": "SHARED/KONG.FNT",
+      "role": "heavy block diagnostic and exception-screen text",
+      "sourceWidth": 220,
+      "sourceHeight": 24,
+      "original": "mods/v82_hd_font_candidates/kong/original_atlas.png",
+      "candidates": [
+        {
+          "id": "rockwell_extra_bold",
+          "label": "Rockwell Extra Bold",
+          "font": "C:/Windows/Fonts/ROCKEB.TTF",
+          "pointSize": 20,
+          "widthFactor": 0.96,
+          "shadowAlpha": 150,
+          "png": "mods/v82_hd_font_candidates/kong/rockwell_extra_bold/atlas_4x.png",
+          "dds": "mods/v82_hd_font_candidates/kong/rockwell_extra_bold/atlas_4x.dds",
+          "proof": "mods/v82_hd_font_candidates/kong/rockwell_extra_bold/proof.png",
+          "pngSha256": "836060EECF3D620E0535745DAFA510691DC61EA3F7AAC5171137DC5EDB79697D",
+          "ddsSha256": "879944DEDB91CF568493FB160C90A205F6CC95086C8B137D7EC0FE398E520C39"
+        },
+        {
+          "id": "rockwell_condensed_bold",
+          "label": "Rockwell Condensed Bold",
+          "font": "C:/Windows/Fonts/ROCCB___.TTF",
+          "pointSize": 20,
+          "widthFactor": 0.98,
+          "shadowAlpha": 150,
+          "png": "mods/v82_hd_font_candidates/kong/rockwell_condensed_bold/atlas_4x.png",
+          "dds": "mods/v82_hd_font_candidates/kong/rockwell_condensed_bold/atlas_4x.dds",
+          "proof": "mods/v82_hd_font_candidates/kong/rockwell_condensed_bold/proof.png",
+          "pngSha256": "4239EF18A70588908869B56D828331FB2D7356FD9203B00ECB5A7F433CAF8446",
+          "ddsSha256": "ADA8219C5442703304FC7434406F31356DF5DCDF104B81AAA15E755B92228766"
+        },
+        {
+          "id": "cooper_black",
+          "label": "Cooper Black",
+          "font": "C:/Windows/Fonts/COOPBL.TTF",
+          "pointSize": 20,
+          "widthFactor": 0.94,
+          "shadowAlpha": 150,
+          "png": "mods/v82_hd_font_candidates/kong/cooper_black/atlas_4x.png",
+          "dds": "mods/v82_hd_font_candidates/kong/cooper_black/atlas_4x.dds",
+          "proof": "mods/v82_hd_font_candidates/kong/cooper_black/proof.png",
+          "pngSha256": "884706F723046279D879B3334345581E02524B686A72E79656FF557EA472927C",
+          "ddsSha256": "96B8793656DF767C1BD078314321676CF6DEA330CDDCDF1EFF6DD78FD0E2CCEA"
+        }
+      ]
+    }
+  ]
+}

@@ -96,35 +96,37 @@ def main() -> None:
     if not target.slots:
         raise ValueError("the V8:2 cursor must contain at least one shell slot")
 
-    # The V8 shell cursor contains one tire object, while V8:2's shared shell
-    # code indexes two root selector objects.  Copying the one-root V8 bank
-    # directly therefore makes the shell follow an invalid second slot.  Keep
-    # the target file's complete slot layout and transforms, but make every
-    # selector slot reference its own native copy of the converted tire.  This
-    # is still a pure shared-asset overwrite: no menu-specific runtime route is
-    # needed, and both selector roles receive the same canonical V8 model.
-    converted = project.ObjectBank(
-        groups=tuple(
-            replace(converted.groups[0], name=f"group_{index:03d}")
-            for index in range(len(target.slots))
-        ),
-        slots=tuple(
+    if len(converted.slots) != 1 or len(target.slots) != 2:
+        raise ValueError(
+            "the V8 cursor must have one root slot and the V8:2 cursor must "
+            "have its two native shell roots"
+        )
+
+    # V8:2's shared cursor bank serves two unrelated roles: root 0 is the
+    # raised marker on the USA map, while root 1 is the front-end smiley
+    # selector. Replace only root 1 with the converted V8 tire and retain root
+    # 0's full native dependency closure. The selector keeps V8:2's authored root
+    # transform/flags so this remains a direct model overwrite rather than a
+    # menu-specific runtime route.
+    tire, _ = conversion.extract_roots(converted, {0})
+    tire = replace(
+        tire,
+        slots=(
             replace(
-                slot,
-                name=f"slot_{index:03d}",
-                render_group=index,
-                collision=index,
+                target.slots[1],
+                name="slot_000",
+                render_group=0,
+                collision=0,
+                parent=None,
                 key=None,
-            )
-            for index, slot in enumerate(target.slots)
+            ),
         ),
-        collisions=tuple(
-            replace(converted.collisions[0], name=f"collision_{index:03d}")
-            for index in range(len(target.slots))
-        ),
-        textures=converted.textures,
         animations=(),
     )
+    map_marker, _ = conversion.extract_roots(target, {0})
+    converted, slot_bases = conversion.merge_banks((map_marker, tire))
+    if slot_bases != (0, 1):
+        raise AssertionError(f"unexpected merged cursor roots {slot_bases}")
 
     templates = registry.decompile_package(
         args.template_archive.read_bytes(),
@@ -139,6 +141,9 @@ def main() -> None:
     reparsed = decode_model(output, "V8_2")
     if project._bank_to_dict(reparsed) != project._bank_to_dict(converted):
         raise AssertionError("converted cursor changed during V8:2 round trip")
+    reparsed_marker, _ = conversion.extract_roots(reparsed, {0})
+    if project._bank_to_dict(reparsed_marker) != project._bank_to_dict(map_marker):
+        raise AssertionError("native V8:2 USA-map marker changed")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(output)
@@ -155,6 +160,8 @@ def main() -> None:
         "collisions": len(reparsed.collisions),
         "textures": len(reparsed.textures),
         "faces": sum(len(group.faces) for group in reparsed.groups),
+        "selector_root": "converted original V8 tire",
+        "usa_map_root": "preserved native V8:2 marker",
     }
     print(json.dumps(report, indent=2))
 

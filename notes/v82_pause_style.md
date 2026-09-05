@@ -1,13 +1,15 @@
-# Pause-menu cleanup — Rockwell Extra Bold
+# Pause-menu cleanup — preferred Rockwell replacement
 
-User-selected family: Rockwell Extra Bold (`ROCKEB.TTF`). Cyan is unchanged.
+Current preferred family: Rockwell Regular (`ROCK.TTF`) at 14 logical pixels.
+Cyan is unchanged. The prior Rockwell Extra Bold experiment is superseded.
 
 ## Font path
 
-`build_rockwell_extra_bold_font.py` builds a complete indexed GAME.FNT plus an
-HD atlas matched by `SHARED/GAME.FNT` provenance. It does not call the older
-compiler's glyph-hash manifest writer. It checks that all originally present
-glyphs still exist. Native metrics drive text placement and truncation.
+`build_rockwell_regular_font.py` builds the previously used complete indexed
+GAME.FNT plus its crisp 4x atlas, matched by `SHARED/GAME.FNT` provenance. It
+does not call the older compiler's glyph-hash manifest writer. It checks that
+all originally present glyphs still exist. Native metrics drive text placement
+and truncation.
 
 The inconsistent pause lettering was not caused by missing font files:
 the baseline log resolves GAME.FNT at 4x. `DrawRect` classified anything above
@@ -15,11 +17,16 @@ the baseline log resolves GAME.FNT at 4x. `DrawRect` classified anything above
 font coverage/smoothing flags while Quit and Resume (y=114) retained them.
 The fix excludes active native modals from that HUD rule and marks every
 successful filename-resolved FNT as a font, independent of dimensions/position.
-All four rectangle vertices retain the same shader flags. The DDS keeps TTF
-coverage alpha; the shader uses that alpha rather than the native glyph edge.
-The approved family is compiled at 11 logical pixels (reduced from 12 after
-the user requested a smaller size) to suit its heavier/wider
-metrics, retaining the original line height. Both native choice-value calls
+All four rectangle vertices retain the same shader flags. The shader consumes
+the replacement DDS alpha rather than reconstructing the native glyph edge.
+The restored Rockwell Regular DDS deliberately retains its earlier crisp
+binary-alpha raster; output-resolution filtering supplies final edge smoothing.
+The file-provenance fix is independent of the selected typeface. On 2026-09-05
+the user restored the earlier Rockwell Regular 14-pixel FNT/DDS after clarifying
+that its incomplete pause presentation had been a routing bug, not a different
+font. The exact earlier assets were restored while retaining the newer coverage
+logic, so PAUSED, Track, its value, Quit, and Resume all use the same replacement
+path. Both native choice-value calls
 temporarily inset the text box by 12 pixels on each side while measuring and
 drawing, then restore it for the arrow calls. Long values still use the native
 fitting behavior; track selection and audio logic are unchanged.
@@ -73,11 +80,21 @@ That run's median/minimum was 52.51/10.65 FPS, so it fails the performance
 gate and is NOT a renderer/map release approval. No attempt was made to hide
 or fix that separate performance failure within this UI task.
 
-The user visually approved the smaller-font pause menu on 2026-09-04 and
-requested commit/push. This accepts that font size, panel and pause layout,
-not the separately failing performance gate or other renderer work.
+The user visually approved the smaller Extra Bold pause menu on 2026-09-04 and
+requested commit/push, then superseded that font selection on 2026-09-05 in
+favor of the earlier Rockwell Regular asset with the same corrected coverage.
+The panel and pause layout remain unchanged. This does not approve the separate
+performance gate or other renderer work.
 The exact staged runtime was exported independently of older uncommitted
 renderer/audio/vehicle changes; all 42 modal and 159 mesh packet assertions pass.
 Full menus and 4:3,
 confirmation/objective pages remain review work; unit tests are not visual
 acceptance of those pages.
+
+The 2026-09-05 Rockwell Regular proof is under
+`artifacts/pause-style-20260905/rockwell-regular-all-lines`. It was captured
+natively at 1920x1080 from executable SHA256
+`E64E81B41235B4CF9EFA67C2B0D7BD34F8A8F136DB10439A05B972FB2E83226D`.
+The full-size frame visibly covers every pause line with the restored face.
+That extended diagnostic timed out after capture before its unrelated route
+completion gate, so it is font evidence only and not a map/gameplay pass.

@@ -112,7 +112,11 @@ public static class V82Compat
     static readonly bool TraceImportedOverlayAbi =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_IMPORTED_OVERLAY_ABI") == "1";
+    static int _nativeTitleEntryCount;
+    static int _nativeTitlePromptRoutineCount;
+    static int _nativeMainMenuEntryCount;
     static int _nativeModelLifecycleTraceCount;
+    static bool _postGameplayShellMenuPending;
     static readonly HashSet<string> SeenNativeOptionText = [];
     static bool _nativeOptionsActive;
     public static int? GetFirstPressedNativeControlPadButton(int player) =>
@@ -150,11 +154,105 @@ public static class V82Compat
     public static void ApplyGraphicsConfiguration() =>
         HostWindow.ApplyGraphicsConfiguration();
 
+    public static void TraceNativeTitleEntry(CpuContext c, IMemory m)
+    {
+        // A resident SHELL overlay can re-enter its title dispatcher before
+        // the CD overlay notification fires on the second and later matches.
+        // Normalize at this native dispatcher entry as well as at overlay load
+        // so the route is stable across an unlimited number of cycles.
+        NormalizePostGameplayShellMode(m);
+        if (!TraceNativeOptions)
+            return;
+
+        int entry = Interlocked.Increment(ref _nativeTitleEntryCount);
+        sbyte mode = unchecked((sbyte)m.ReadU8(0x8006A820u));
+        uint shellFlags = m.ReadU32(0x8006B4ECu);
+        SeenNativeOptionText.Clear();
+        _nativeOptionsActive = false;
+        Console.Error.WriteLine(
+            $"[V82NativeTitleEntry] entry={entry} mode={mode} " +
+            $"shellFlags=0x{shellFlags:X8} caller=0x{c.RA:X8}");
+    }
+
+    public static void TraceNativeTitlePromptRoutine(CpuContext c, IMemory m)
+    {
+        if (!TraceNativeOptions)
+            return;
+
+        int entry = Interlocked.Increment(ref _nativeTitlePromptRoutineCount);
+        sbyte mode = unchecked((sbyte)m.ReadU8(0x8006A820u));
+        Console.Error.WriteLine(
+            $"[V82NativeTitlePromptRoutine] entry={entry} mode={mode} " +
+            $"caller=0x{c.RA:X8}");
+    }
+
+    public static void TraceNativeMainMenuEntry(CpuContext c, IMemory m)
+    {
+        V82VehicleRegistry.ResetSelectionsAtMainMenu();
+        if (!TraceNativeOptions)
+            return;
+
+        int entry = Interlocked.Increment(ref _nativeMainMenuEntryCount);
+        sbyte mode = unchecked((sbyte)m.ReadU8(0x8006A820u));
+        Console.Error.WriteLine(
+            $"[V82NativeMainMenu] phase=entry entry={entry} mode={mode} " +
+            $"caller=0x{c.RA:X8} input=0x{m.ReadU32(0x8006B4ECu):X8} " +
+            $"s0=0x{c.S0:X8} s1=0x{c.S1:X8} " +
+            $"s2=0x{c.S2:X8} s3=0x{c.S3:X8} " +
+            $"s4=0x{c.S4:X8} s5=0x{c.S5:X8} " +
+            $"s6=0x{c.S6:X8} s7=0x{c.S7:X8} " +
+            $"ui0=0x{m.ReadU32(0x80116730u):X8} " +
+            $"ui1=0x{m.ReadU32(0x80116734u):X8} " +
+            $"ui2=0x{m.ReadU32(0x80116738u):X8}");
+    }
+
+    public static void TraceNativeMainMenuExit(CpuContext c, IMemory m)
+    {
+        if (!TraceNativeOptions)
+            return;
+
+        sbyte mode = unchecked((sbyte)m.ReadU8(0x8006A820u));
+        Console.Error.WriteLine(
+            $"[V82NativeMainMenu] phase=exit entry={_nativeMainMenuEntryCount} " +
+            $"mode={mode} result={(int)c.V0} " +
+            $"input=0x{m.ReadU32(0x8006B4ECu):X8}");
+    }
+
     public static void TraceNativeOptionsText(CpuContext c, IMemory m)
     {
         string text = ReadNativeAscii(m, c.A1, 64);
+        if (TraceNativeOptions && c.RA == 0x80104284u)
+        {
+            Span<byte> sample = stackalloc byte[16];
+            for (int index = 0; index < sample.Length; index++)
+                sample[index] = m.ReadU8(c.A1 + (uint)index);
+            string relocation = m is RelocatedMemory relocated
+                ? $" linked=0x{relocated.LinkedBase:X8}+0x{relocated.Size:X} " +
+                  $"delta=0x{relocated.Delta:X8}"
+                : " linked=none";
+            Console.Error.WriteLine(
+                $"[V82NativeMainMenuText] pointer=0x{c.A1:X8} " +
+                $"bytes={Convert.ToHexString(sample)}{relocation}");
+        }
         if (text.Length == 0)
             return;
+
+        // PRESS START is ordinary native SHELL text, not part of the decoded
+        // title backplate. Give deterministic re-entry tests a stage at the
+        // exact native submit call so a missing post-match prompt can be
+        // separated from any content-addressed backplate replacement.
+        if (text == "PRESS START")
+        {
+            InputManager.SignalScriptStage(
+                "v82_press_start", captureDelayPolls: 12);
+            if (TraceNativeOptions)
+            {
+                Console.Error.WriteLine(
+                    $"[V82NativeTitle] text='PRESS START' " +
+                    $"caller=0x{c.RA:X8} object=0x{c.A0:X8} " +
+                    $"layout=0x{c.A2:X8} flags=0x{c.A3:X8}");
+            }
+        }
 
         if (GpuHle.GameplayActive &&
             text is "PAUSED" or "QUEST OBJECTIVES" or "ARE YOU SURE?")
@@ -201,7 +299,12 @@ public static class V82Compat
 
     static string ReadNativeAscii(IMemory m, uint address, int maxLength)
     {
-        if (address < 0x80010000u || address >= 0x80200000u)
+        // Relocatable SHELL images are allocated from the PC-only devkit
+        // arena above retail's 2 MiB RAM window.  Their string pointers are
+        // already runtime addresses, so diagnostic text discovery must accept
+        // the complete 8 MiB devkit window instead of silently treating every
+        // post-match menu label as absent.
+        if (address < 0x80010000u || address >= 0x80800000u)
             return string.Empty;
         Span<char> chars = stackalloc char[maxLength];
         int length = 0;
@@ -283,6 +386,7 @@ public static class V82Compat
     static readonly List<GuestVramReservation> SelectorVramReservations = [];
     static readonly HashSet<int> ClaimedGuestVramReservations = [];
     static readonly HashSet<uint> SyntheticVramDescriptors = [];
+    static readonly HashSet<uint> SyntheticVramBackingLive = [];
     static List<GuestVramReservation>? _activeGuestVramReservations;
     static bool _guestVramClaimReusable;
     static bool _guestVramClaimActive;
@@ -307,7 +411,8 @@ public static class V82Compat
         uint ObjectAddress,
         uint PacketStart,
         uint Caller,
-        bool IsVehicle);
+        bool IsVehicle,
+        V82WaterAttachmentFit.Scope? WaterFit);
     readonly record struct ImportedRenderGroupScope(
         uint PacketStart,
         uint Descriptor,
@@ -1206,6 +1311,58 @@ public static class V82Compat
     static int _terrainCellsSubmitted;
     static int _terrainCellsEmitted;
     static uint _terrainCellPacketCursor;
+    const uint TerrainTextureTable = 0x800B7270u;
+    static readonly byte[] AuthoredTerrainMaterialAverages = new byte[256 * 3];
+    static bool _authoredTerrainMaterialAveragesValid;
+
+    /// <summary>
+    /// Preserves the immutable XTIN average colors at the exact common loader
+    /// boundary. Retail arena overlays may subsequently reuse descriptors as
+    /// animation state, but Dreamcast distance shading continues to use the
+    /// authored XTIN values rather than those mutable PS1-side bytes.
+    /// </summary>
+    public static void CaptureAuthoredTerrainMaterialAverages(
+        CpuContext c,
+        IMemory m)
+    {
+        m = Dispatcher.UnwrapMemory(m);
+        for (int material = 0; material < 256; material++)
+        {
+            uint descriptor =
+                TerrainTextureTable + (uint)material * 0x20u;
+            int output = material * 3;
+            AuthoredTerrainMaterialAverages[output] =
+                m.ReadU8(descriptor + 0x1Cu);
+            AuthoredTerrainMaterialAverages[output + 1] =
+                m.ReadU8(descriptor + 0x1Du);
+            AuthoredTerrainMaterialAverages[output + 2] =
+                m.ReadU8(descriptor + 0x1Eu);
+        }
+        _authoredTerrainMaterialAveragesValid = true;
+    }
+
+    static void ReadTerrainMaterialAverage(
+        IMemory m,
+        byte textureId,
+        out byte r,
+        out byte g,
+        out byte b)
+    {
+        if (_authoredTerrainMaterialAveragesValid)
+        {
+            int source = textureId * 3;
+            r = AuthoredTerrainMaterialAverages[source];
+            g = AuthoredTerrainMaterialAverages[source + 1];
+            b = AuthoredTerrainMaterialAverages[source + 2];
+            return;
+        }
+
+        uint descriptor =
+            TerrainTextureTable + (uint)textureId * 0x20u;
+        r = m.ReadU8(descriptor + 0x1Cu);
+        g = m.ReadU8(descriptor + 0x1Du);
+        b = m.ReadU8(descriptor + 0x1Eu);
+    }
 
     public static (int Submitted, int Emitted) ConsumeTerrainCellCounts()
     {
@@ -2029,6 +2186,7 @@ public static class V82Compat
             c.V0 != 0u)
         {
             VehicleObjects.Add(c.V0);
+            V82AutoWaterski.Forget(c.V0);
             if (TraceRendererOwnership)
                 Console.Error.WriteLine(
                     $"[EnhancedOwner] vehicle source=0x{source:X8} " +
@@ -2086,7 +2244,8 @@ public static class V82Compat
                 objectAddress,
                 packetStart,
                 c.RA,
-                isVehicle));
+                isVehicle,
+                isVehicle ? V82WaterAttachmentFit.Begin(c,m,objectAddress) : null));
     }
 
     public static void EndObjectRender(CpuContext c, IMemory m)
@@ -2098,6 +2257,7 @@ public static class V82Compat
 
         m = Dispatcher.UnwrapMemory(m);
         ObjectRenderScope scope = ObjectRenderScopes.Pop();
+        scope.WaterFit?.Dispose();
         uint packetEnd = m.ReadU32(c.GP + 0x610u);
         if (TraceRendererOwnership &&
             scope.ObjectAddress != 0u &&
@@ -3515,16 +3675,18 @@ public static class V82Compat
     }
 
     /// <summary>
-    /// Keeps the native inner terrain subdivision active until the outer cell
-    /// LOD boundary while modern maximum detail is active.
+    /// Maps the PS1 terrain emitter onto the recovered Dreamcast terrain
+    /// distance contract while modern maximum detail is active.
     ///
-    /// The retail emitter has two nested camera-depth limits.  Scratchpad
-    /// <c>+0x98</c> is the whole-cell boundary and <c>+0x9A</c> is the inner
-    /// subcell boundary.  Extending the inner boundary to the outer boundary
-    /// removes the intermediate transition without increasing the amount of
-    /// native geometry emitted for far cells.  The Enhanced backend owns
-    /// texturing the already-visible coarse cells; moving the outer boundary
-    /// itself can overflow the native edge arena and is therefore forbidden.
+    /// Dreamcast 1ST_READ.BIN renders one uniformly coarse terrain path in
+    /// four-unit steps across an 80-unit clipped view polygon. Each quad uses
+    /// the material ID in its top-left terrain record; it does not reproduce
+    /// the sixteen one-unit PS1 texture cells inside that quad. PS1 V8:2
+    /// already traverses the same 80-unit extent, but scratchpad
+    /// <c>+0x98</c> and <c>+0x9A</c> select its detail and transition paths.
+    /// Zeroing both depth thresholds makes the native emitter use its existing
+    /// four-unit coarse geometry for the complete visible polygon. The
+    /// Enhanced backend then applies the recovered single-material quad rule.
     /// </summary>
     public static void ExtendTerrainTextureDetail(CpuContext c, IMemory m)
     {
@@ -3537,19 +3699,31 @@ public static class V82Compat
         const uint scratchpad = 0x1F800000u;
         ushort outerDetailPlane = m.ReadU16(scratchpad + 0x98u);
         ushort innerDetailPlane = m.ReadU16(scratchpad + 0x9Au);
-        if (outerDetailPlane == 0 || innerDetailPlane == 0)
+        if (outerDetailPlane == 0 && innerDetailPlane == 0)
             return;
 
-        ushort extendedInnerPlane = Math.Max(
-            innerDetailPlane, outerDetailPlane);
-        m.WriteU16(scratchpad + 0x9Au, extendedInnerPlane);
+        m.WriteU16(scratchpad + 0x98u, 0);
+        m.WriteU16(scratchpad + 0x9Au, 0);
         long sample = ++_terrainDetailRangeSamples;
         if (sample == 1 || sample % 600 == 0)
         {
+            ushort nativeViewExtent = m.ReadU16(c.GP + 0xDB4u);
             Console.Error.WriteLine(
                 $"[V82TerrainDetailRange] " +
-                $"inner={innerDetailPlane}->{extendedInnerPlane} " +
-                $"outer={outerDetailPlane} " +
+                $"inner={innerDetailPlane}->0 " +
+                $"outer={outerDetailPlane}->0 " +
+                $"view={nativeViewExtent} dreamcast-view=80 " +
+                "dreamcast-step=4 dreamcast-material=top-left " +
+                $"cols-far={m.ReadU8(c.GP + 0xE04u)}," +
+                $"{m.ReadU8(c.GP + 0xE05u)}," +
+                $"{m.ReadU8(c.GP + 0xE06u)} " +
+                $"cols-high={m.ReadU8(c.GP + 0xDACu)}," +
+                $"{m.ReadU8(c.GP + 0xDADu)}," +
+                $"{m.ReadU8(c.GP + 0xDAEu)} " +
+                $"cols-back={m.ReadU8(c.GP + 0xDA4u)}," +
+                $"{m.ReadU8(c.GP + 0xDA5u)}," +
+                $"{m.ReadU8(c.GP + 0xDA6u)} " +
+                $"cols-source=0x{m.ReadU32(c.GP + 0xDDCu):X8} " +
                 $"samples={sample} " +
                 $"tick={GpuHle.DebugGameplayTick}");
         }
@@ -3938,7 +4112,10 @@ public static class V82Compat
         uint local = ((x & 0x3Fu) << 6) + (z & 0x3Fu);
         uint textureGrid = page + 0x2000u + local;
         ushort clut = m.ReadU16(c.GP + 0xDA8u);
-        return ReadTerrainTextureGrid(m, textureGrid, clut, 4);
+        GpuHle.TerrainQuadDistanceColors distanceColors =
+            ReadDreamcastTerrainDistanceColors(c, m, x, z);
+        return ReadTerrainTextureGrid(
+            m, textureGrid, clut, 4, distanceColors);
     }
 
     public static void BeginTerrainDetailPacketWrites(
@@ -4113,9 +4290,9 @@ public static class V82Compat
         IMemory m,
         uint textureGrid,
         ushort clut,
-        int gridSize)
+        int gridSize,
+        GpuHle.TerrainQuadDistanceColors distanceColors = default)
     {
-        const uint terrainTextureTable = 0x800B7270u;
         var tiles = new GpuHle.TerrainTextureDescriptor[gridSize * gridSize];
         for (int x = 0; x < gridSize; x++)
         {
@@ -4124,7 +4301,12 @@ public static class V82Compat
                 byte textureId = m.ReadU8(
                     textureGrid + (uint)(x * 0x40 + z));
                 uint descriptor =
-                    terrainTextureTable + (uint)textureId * 0x20u;
+                    TerrainTextureTable + (uint)textureId * 0x20u;
+                ReadTerrainMaterialAverage(
+                    m, textureId,
+                    out byte averageR,
+                    out byte averageG,
+                    out byte averageB);
                 tiles[x * gridSize + z] =
                     new GpuHle.TerrainTextureDescriptor(
                         textureId,
@@ -4135,12 +4317,183 @@ public static class V82Compat
                         m.ReadU16(descriptor + 6u),
                         clut,
                         m.ReadU8(descriptor + 0x1Fu),
-                        m.ReadU8(descriptor + 0x1Cu),
-                        m.ReadU8(descriptor + 0x1Du),
-                        m.ReadU8(descriptor + 0x1Eu));
+                        averageR,
+                        averageG,
+                        averageB);
             }
         }
-        return new GpuHle.TerrainCellTextures(tiles, gridSize, true);
+        return new GpuHle.TerrainCellTextures(
+            tiles, gridSize, true, distanceColors);
+    }
+
+    static GpuHle.TerrainQuadDistanceColors
+        ReadDreamcastTerrainDistanceColors(
+            CpuContext c,
+            IMemory m,
+            uint x,
+            uint z)
+    {
+        if (!ConfigManager.View.HighResolution3D ||
+            !IsMaximumLevelOfDetail())
+            return default;
+
+        // SHELL/LOAD's COLS handler keeps words three and four at gp+E04 and
+        // gp+DAC. Dreamcast 0x8C084700 builds its 32-entry terrain ramp from
+        // those exact RGB endpoints, inclusive. Use the loaded globals so
+        // every retail, converted, and modded level follows its own data.
+        byte lowR = m.ReadU8(c.GP + 0xE04u);
+        byte lowG = m.ReadU8(c.GP + 0xE05u);
+        byte lowB = m.ReadU8(c.GP + 0xE06u);
+        byte highR = m.ReadU8(c.GP + 0xDACu);
+        byte highG = m.ReadU8(c.GP + 0xDADu);
+        byte highB = m.ReadU8(c.GP + 0xDAEu);
+        // PS1 func_8001C158 selects its 80/40/20 or 48/24/12 view tuple from
+        // this signed mode byte. It is the direct platform-equivalent state
+        // to Dreamcast 0x8C1133F0 selecting the normal or alternate distance
+        // tuple; do not infer the mode later from a derived projection value.
+        bool alternate = unchecked((sbyte)m.ReadU8(c.GP + 0x31u)) >= 6;
+
+        GpuHle.TerrainDistanceColor ReadCorner(int cornerX, int cornerZ)
+        {
+            ushort height = ReadTerrainHeight(
+                m, checked((int)x + cornerX), checked((int)z + cornerZ));
+            int shade = (height >> 11) & 31;
+            int rampR = InterpolateTerrainRamp(lowR, highR, shade);
+            int rampG = InterpolateTerrainRamp(lowG, highG, shade);
+            int rampB = InterpolateTerrainRamp(lowB, highB, shade);
+            int worldX = checked((int)x + cornerX);
+            int worldZ = checked((int)z + cornerZ);
+            int averageR = 0;
+            int averageG = 0;
+            int averageB = 0;
+            AddTerrainMaterialAverage(
+                m, worldX - 1, worldZ - 1,
+                ref averageR, ref averageG, ref averageB);
+            AddTerrainMaterialAverage(
+                m, worldX - 1, worldZ,
+                ref averageR, ref averageG, ref averageB);
+            AddTerrainMaterialAverage(
+                m, worldX, worldZ - 1,
+                ref averageR, ref averageG, ref averageB);
+            AddTerrainMaterialAverage(
+                m, worldX, worldZ,
+                ref averageR, ref averageG, ref averageB);
+
+            // Dreamcast 0x8C084540 multiplies the ramp component by the sum
+            // of the four XTIN averages meeting this vertex, then scales by
+            // the literal 1/1024 before 0x8C0844E0 truncates and packs it.
+            static byte Far(int ramp, int average) =>
+                (byte)Math.Clamp((int)(ramp * average / 1024.0f), 0, 255);
+            return new GpuHle.TerrainDistanceColor(
+                (byte)rampR,
+                (byte)rampG,
+                (byte)rampB,
+                Far(rampR, averageR),
+                Far(rampG, averageG),
+                Far(rampB, averageB));
+        }
+
+        // Snapshot the complete authored 5x5 patch while the native terrain
+        // camera is installed. Later OT playback must not read mutable GTE
+        // state or replace authored intermediate heights with bilinear ones.
+        var samples = new RecompOne.Runtime.Hle.DreamcastTerrainGeometry.Sample[25];
+        Span<float> rotation = stackalloc float[9];
+        for (int rowIndex = 0; rowIndex < 9; rowIndex++)
+        {
+            uint pair = Gte.ReadControl(rowIndex / 2);
+            rotation[rowIndex] = unchecked((short)(pair >> ((rowIndex & 1) * 16))) / 4096f;
+        }
+        var heightAxis = new System.Numerics.Vector3(rotation[1], rotation[4], rotation[7]);
+        int originX = unchecked((int)m.ReadU32(0x1F800084u));
+        int originY = unchecked((int)m.ReadU32(0x1F800088u));
+        int originZ = unchecked((int)m.ReadU32(0x1F80008Cu));
+        for (int sx = 0; sx <= 4; sx++)
+        for (int sz = 0; sz <= 4; sz++)
+        {
+            float height = (ReadTerrainHeight(m, (int)x + sx, (int)z + sz) & 0x7FF) * 8;
+            float vx = unchecked((short)(((int)x + sx) * 256 + originX));
+            float vy = unchecked((short)((int)height + originY));
+            float vz = unchecked((short)(((int)z + sz) * 256 + originZ));
+            var view = new System.Numerics.Vector3(
+                unchecked((int)Gte.ReadControl(5)) + rotation[0]*vx + rotation[1]*vy + rotation[2]*vz,
+                unchecked((int)Gte.ReadControl(6)) + rotation[3]*vx + rotation[4]*vy + rotation[5]*vz,
+                unchecked((int)Gte.ReadControl(7)) + rotation[6]*vx + rotation[7]*vy + rotation[8]*vz);
+            GpuHle.TerrainDistanceColor color = ReadCorner(sx, sz);
+            samples[sx * 5 + sz] = new RecompOne.Runtime.Hle.DreamcastTerrainGeometry.Sample(
+                view, height,
+                new System.Numerics.Vector3(color.BaseR, color.BaseG, color.BaseB),
+                new System.Numerics.Vector3(color.FarR, color.FarG, color.FarB));
+        }
+        var patch = new GpuHle.TerrainPatchGeometry(samples, heightAxis,
+            unchecked((int)Gte.ReadControl(24)) / 65536f,
+            unchecked((int)Gte.ReadControl(25)) / 65536f,
+            Gte.ReadControl(26) & 0xFFFFu);
+        return new GpuHle.TerrainQuadDistanceColors(
+            ReadCorner(0, 0),
+            ReadCorner(4, 0),
+            ReadCorner(0, 4),
+            ReadCorner(4, 4),
+            alternate,
+            true,
+            patch);
+    }
+
+    static int InterpolateTerrainRamp(int low, int high, int shade) =>
+        low + (high - low) * shade / 31;
+
+    static ushort ReadTerrainHeight(IMemory m, int x, int z)
+    {
+        if (!TryResolveTerrainRecord(m, x, z, out uint record))
+            return 0;
+        return m.ReadU16(record);
+    }
+
+    static void AddTerrainMaterialAverage(
+        IMemory m,
+        int x,
+        int z,
+        ref int r,
+        ref int g,
+        ref int b)
+    {
+        byte textureId = 0;
+        if (TryResolveTerrainRecord(m, x, z, out uint record))
+            textureId = m.ReadU8(record + 0x2000u);
+        ReadTerrainMaterialAverage(
+            m, textureId,
+            out byte averageR,
+            out byte averageG,
+            out byte averageB);
+        r += averageR;
+        g += averageG;
+        b += averageB;
+    }
+
+    static bool TryResolveTerrainRecord(
+        IMemory m,
+        int x,
+        int z,
+        out uint record)
+    {
+        const uint terrainPageTable = 0x800B93F0u;
+        if ((uint)x >= 2048u || (uint)z >= 2048u)
+        {
+            record = 0;
+            return false;
+        }
+        uint ux = (uint)x;
+        uint uz = (uint)z;
+        uint block = terrainPageTable +
+            ((((ux >> 6) << 5) + (uz >> 6)) << 2);
+        uint page = m.ReadU32(block + 0x80u);
+        if (!IsShapeAddress(page, 0x4042u))
+        {
+            record = 0;
+            return false;
+        }
+        uint local = ((ux & 0x3Fu) << 6) + (uz & 0x3Fu);
+        record = page + local * 2u;
+        return true;
     }
 
     static int CountGpuTriangles(IMemory m, uint start, uint end)
@@ -4411,13 +4764,27 @@ public static class V82Compat
         }
     }
 
+    static readonly string? LevelOfDetailEnvironmentMode =
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_LOD") ??
+        Environment.GetEnvironmentVariable("RECOMPONE_LOD_MODE");
+    static int _levelOfDetailCacheTick = int.MinValue;
+    static string? _levelOfDetailCacheMode;
+    static bool _levelOfDetailCacheMaximum;
+
     static bool IsMaximumLevelOfDetail()
     {
-        bool maximum = ConfigManager.View.LevelOfDetail.Equals(
+        string configuredMode = ConfigManager.View.LevelOfDetail;
+        int gameplayTick = GpuHle.DebugGameplayTick;
+        if (_levelOfDetailCacheTick == gameplayTick &&
+            string.Equals(
+                _levelOfDetailCacheMode,
+                configuredMode,
+                StringComparison.Ordinal))
+            return _levelOfDetailCacheMaximum;
+
+        bool maximum = configuredMode.Equals(
             "Maximum", StringComparison.OrdinalIgnoreCase);
-        string? environmentMode =
-            Environment.GetEnvironmentVariable("RECOMPONE_V82_LOD") ??
-            Environment.GetEnvironmentVariable("RECOMPONE_LOD_MODE");
+        string? environmentMode = LevelOfDetailEnvironmentMode;
         if (!string.IsNullOrWhiteSpace(environmentMode))
         {
             maximum = environmentMode.Equals("maximum", StringComparison.OrdinalIgnoreCase) ||
@@ -4425,6 +4792,9 @@ public static class V82Compat
                       environmentMode.Equals("1", StringComparison.OrdinalIgnoreCase) ||
                       environmentMode.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
+        _levelOfDetailCacheTick = gameplayTick;
+        _levelOfDetailCacheMode = configuredMode;
+        _levelOfDetailCacheMaximum = maximum;
         return maximum;
     }
 
@@ -4575,6 +4945,13 @@ public static class V82Compat
         int requestedPlayerType = _soakPlayerTypeSequence.Length > 0
             ? _soakPlayerTypeSequence[sequenceIndex]
             : _soakPlayerType;
+        // Process-local roster fixtures must establish the same registry
+        // selection as the real carousel, BEFORE the match reserves guest
+        // texture rectangles. Writing only the participant byte bypasses
+        // those reservations and produces invalid imported-vehicle proofs.
+        if (requestedPlayerType >= 0)
+            V82VehicleRegistry.SelectTypeForPlayer(0,
+                V82VehicleRegistry.IsCustomType((uint)requestedPlayerType) ? requestedPlayerType : -1);
         for (int player = 0; player < 2; player++)
         {
             int selectedPlayerType = player == 0 && requestedPlayerType >= 0
@@ -4712,6 +5089,8 @@ public static class V82Compat
     {
         VehicleFactorySources.Clear();
         VehicleObjects.Clear();
+        V82AutoWaterski.Reset();
+        V82TransformationProbe.Reset();
         ObjectRenderScopes.Clear();
         TracedRenderObjects.Clear();
         _rendererOwnershipTraceCount = 0;
@@ -5024,6 +5403,7 @@ public static class V82Compat
             if (frame == 1)
                 InputManager.SignalScriptStage("gameplay", captureDelayPolls: 300);
             UpdateDefeatRegression(c, m, frame);
+            V82TransformationProbe.Tick(c, m, frame, VehicleObjects, _playerVehicle);
             UpdateImportedWaterDrowning(c, m, frame);
             UpdateWaterLifecycle(c, m, frame);
             UpdateSoak(c, m, frame);
@@ -5220,7 +5600,7 @@ public static class V82Compat
             // Drowning volumes model ground-vehicle water contact. Flight is
             // an independent registry capability, so a hovering vehicle does
             // not enter the ground-water dwell/destruction lifecycle.
-            if (V82VehicleRegistry.UsesFlyingController(m, vehicle))
+            if (V82AutoWaterski.HasWaterMovement(m, vehicle))
             {
                 ImportedWaterDwell.Remove(vehicle);
                 continue;
@@ -5435,6 +5815,7 @@ public static class V82Compat
         // dynamics. The isolated power-up profile remains parked so its three
         // transformation captures are visually comparable and cannot overlap
         // incidental weapon/pickup events.
+        if (V82TransformationProbe.Enabled) return;
         MaintainSoakVehicle(m, player, frame);
         if (_soakPowerUpsEnabled)
             UpdateSoakPowerUps(c, m, player, frame);
@@ -6203,6 +6584,7 @@ public static class V82Compat
         // not inherit the prior match's terminal tick.
         GpuHle.DebugGameplayTick = 0;
         GpuHle.GameplayActive = true;
+        _postGameplayShellMenuPending = true;
         var snapshot = c.Snapshot();
         c.A0 = 1u;
         Dispatcher.Call(c, Dispatcher.UnwrapMemory(m), 0x8002091Cu);
@@ -6235,6 +6617,7 @@ public static class V82Compat
         _matchVramActive = true;
         GpuHle.DebugGameplayTick = 0;
         GpuHle.GameplayActive = true;
+        _postGameplayShellMenuPending = true;
         _matchVramSuccesses = 0;
         _matchVramFailures = 0;
         _testDefeatInjected = false;
@@ -6303,6 +6686,7 @@ public static class V82Compat
                 m.WriteU32(descriptor + 0x10u, 0u);
                 m.WriteU32(descriptor + 0x14u, 0u);
                 SyntheticVramDescriptors.Add(descriptor);
+                SyntheticVramBackingLive.Add(descriptor);
                 GuestVramReservations.Add(new GuestVramReservation(
                     request, x, y, descriptor));
             }
@@ -6350,23 +6734,33 @@ public static class V82Compat
             {
                 GuestVramReservation reservation =
                     SelectorVramReservations[index];
-                if (SyntheticVramDescriptors.Remove(reservation.Descriptor))
+                bool descriptorLive =
+                    SyntheticVramDescriptors.Remove(reservation.Descriptor);
+                if (descriptorLive)
                 {
                     c.A0 = reservation.Descriptor;
                     PcFree(c, m);
                     retiredDescriptors++;
                 }
-                // The allocator can restructure/coalesce native nodes while a
-                // preview is alive, so a saved descriptor pointer is not
-                // stable. Use retail's coordinate-release wrapper; it searches
-                // the current tree and dispatches descriptor teardown itself.
-                c.A0 = reservation.X;
-                c.A1 = reservation.Y;
-                Dispatcher.Call(c, m, 0x80020F5Cu);
-                if (c.V0 == 0u)
-                    alreadyReleasedBacking++;
-                else
-                    releasedBacking++;
+                // The native destructor normally reaches
+                // IgnoreSyntheticVramFree first, which releases the backing
+                // rectangle and marks it dead. Do not submit the same
+                // coordinates to the native tree a second time: after several
+                // guest previews that duplicate traversal can coalesce a node
+                // already reused by the stock enemy selector. Only descriptors
+                // whose backing is still explicitly owned here need the
+                // coordinate lookup because allocator nodes themselves are not
+                // pointer-stable.
+                if (SyntheticVramBackingLive.Remove(reservation.Descriptor))
+                {
+                    c.A0 = reservation.X;
+                    c.A1 = reservation.Y;
+                    Dispatcher.Call(c, m, 0x80020F5Cu);
+                    if (c.V0 == 0u)
+                        alreadyReleasedBacking++;
+                    else
+                        releasedBacking++;
+                }
             }
             Console.Error.WriteLine(
                 $"[V82Vehicles] selector teardown retired " +
@@ -6396,6 +6790,8 @@ public static class V82Compat
                 $"[V82Vehicles] native teardown released " +
                 $"{SelectorVramReservations.Count} selector VRAM backing " +
                 "rectangles");
+        foreach (GuestVramReservation reservation in SelectorVramReservations)
+            SyntheticVramBackingLive.Remove(reservation.Descriptor);
         SelectorVramReservations.Clear();
         ClaimedGuestVramReservations.Clear();
         _activeGuestVramReservations = null;
@@ -6778,13 +7174,16 @@ public static class V82Compat
         {
             c.A0 = descriptor;
             PcFree(c, m);
-            c.A0 = x;
-            c.A1 = y;
-            Dispatcher.Call(c, m, 0x80020F5Cu);
-            if (c.V0 == 0u)
-                Console.Error.WriteLine(
-                    $"[V82Vehicles] selector backing VRAM rectangle at " +
-                    $"({x},{y}) was already released");
+            if (SyntheticVramBackingLive.Remove(descriptor))
+            {
+                c.A0 = x;
+                c.A1 = y;
+                Dispatcher.Call(c, m, 0x80020F5Cu);
+                if (c.V0 == 0u)
+                    Console.Error.WriteLine(
+                        $"[V82Vehicles] selector backing VRAM rectangle at " +
+                        $"({x},{y}) was already released");
+            }
         }
         finally
         {
@@ -6832,6 +7231,7 @@ public static class V82Compat
             m.WriteU32(descriptor + 0x10u, 0u);
             m.WriteU32(descriptor + 0x14u, 0u);
             SyntheticVramDescriptors.Add(descriptor);
+            SyntheticVramBackingLive.Add(descriptor);
             SelectorVramReservations.Add(new GuestVramReservation(
                 new NativeVramAllocation(
                     request.Width,
@@ -6976,12 +7376,34 @@ public static class V82Compat
     // above its frame, then makes several hand-written helper calls. Separate
     // recompilation of those continuations can reuse that slot. Preserve it
     // across the two heap allocations that precede the second read.
+    public static void NormalizePostGameplayShellMode(IMemory m)
+    {
+        if (!_postGameplayShellMenuPending)
+            return;
+
+        // Retail uses two different SHELL return modes: a completed match
+        // reaches mode 5 (the populated 1/2 Player + Options menu), while
+        // Pause -> Quit reaches mode 4 (the PRESS START title gate).  The PC
+        // shell has one stable post-game contract regardless of how or how
+        // many times gameplay exits. Normalize the shared mode byte before
+        // native SHELL reads it; SHELL still constructs and runs its own menu.
+        const uint shellModeAddress = 0x8006A820u;
+        byte sourceMode = m.ReadU8(shellModeAddress);
+        if (sourceMode != 5)
+            m.WriteU8(shellModeAddress, 5);
+        _postGameplayShellMenuPending = false;
+        Console.Error.WriteLine(
+            $"[V82ShellReturn] source-mode={sourceMode} " +
+            "target-mode=5 route=native-main-menu");
+    }
+
     public static void PreserveShellImageDecodePre(CpuContext c, IMemory m)
     {
         bool returningFromGameplay = GpuHle.GameplayActive;
         GpuHle.GameplayActive = false;
         if (returningFromGameplay)
         {
+            NormalizePostGameplayShellMode(m);
             GpuHle.WidescreenMenuReturnPending = true;
             // A relocated shell image can remain registered across several
             // matches, so later returns may execute it without another

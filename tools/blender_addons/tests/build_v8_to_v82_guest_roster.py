@@ -53,6 +53,14 @@ VEHICLES = (
     (12, "guest.v8.y_the_alien", '"Y" the Alien', "'64 Luxo Saucer"),
 )
 
+# Imported specials select a sequel-native behavior class through registry
+# metadata. Houston's Samson Tow Hook is behavior-compatible with V8:2's
+# Houston implementation; vehicles without a proven equivalent retain the
+# engine's generic special callback until their conversion is audited.
+V82_SPECIAL_BEHAVIOR_TYPES = {
+    7: 3,
+}
+
 SELECTOR_ASSETS = (
     *(
         ROOT / "V8_2_LOOSE" / "SHELL" / f"SELECTOR_{index:02}.PPM"
@@ -91,6 +99,11 @@ def decode_bank(path: Path, game: str, index: int) -> project.ObjectBank:
         ],
     )
     return registry._decode_bank(model_form, game)
+
+
+def decode_sounds(path: Path, index: int) -> tuple[dict[str, object], ...]:
+    form = tuple(iff.parse(path.read_bytes()).forms(b"XOBF"))[index]
+    return registry._decode_sounds(form)
 
 
 def build_projects() -> tuple[project.VehicleProject, ...]:
@@ -188,8 +201,10 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
             selector_preview_body_kind=0,
             transform_modes=mapped_modes,
             powerups=v82_stats.powerup_values(),
+            sounds=decode_sounds(V8_COMMON, source_index),
             controller_class="flying" if flying else "ground",
             supports_transformations=not flying,
+            special_behavior_type=V82_SPECIAL_BEHAVIOR_TYPES.get(source_index),
         )
         vehicle.validate()
         result.append(vehicle)

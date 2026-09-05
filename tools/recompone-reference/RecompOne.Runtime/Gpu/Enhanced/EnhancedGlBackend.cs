@@ -33,6 +33,27 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         public float ReplacementX, ReplacementY, ReplacementW, ReplacementH;
         public float ReplacementScaleR, ReplacementScaleG, ReplacementScaleB;
         public float ReplacementBiasR, ReplacementBiasG, ReplacementBiasB;
+        public int BlendCode;
+        public uint TerrainOffset;
+    }
+
+    readonly struct DrawTriTimingScope : IDisposable
+    {
+        readonly EnhancedGlBackend? _owner;
+        readonly long _started;
+
+        public DrawTriTimingScope(EnhancedGlBackend owner)
+        {
+            _owner = owner;
+            _started = Stopwatch.GetTimestamp();
+        }
+
+        public void Dispose()
+        {
+            if (_owner != null)
+                _owner._traceDrawTriTicks +=
+                    Stopwatch.GetTimestamp() - _started;
+        }
     }
 
     const int MaxVerts = 0x40000;
@@ -102,9 +123,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             StringSplitOptions.TrimEntries)
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-    static bool IsOpaqueVehicleGlassMaterial(in PrimFlags f) =>
-        f.Material == HleMaterialKind.OpaqueVehicleGlass;
-
     static int _modalRectLines;
     static int _modalTriLines;
     static readonly bool TraceModalRects =
@@ -120,6 +138,12 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_ENHANCED_FALLBACKS") == "1";
     static readonly bool TracePerformance =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_ENHANCED_PERFORMANCE") is string performanceTrace
+                ? performanceTrace == "1"
+                : Runtime.GameTitle.Contains(
+                    "2nd Offense", StringComparison.Ordinal);
+    static readonly bool TracePerformanceDetail =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_ENHANCED_PERFORMANCE") == "1";
     static readonly bool TracePresentationFrames =
@@ -185,6 +209,22 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     readonly GlDisplayRt?[] _rts = new GlDisplayRt?[2];
     long _rtStamp;
     long _frame;
+    GlDisplayRt? _classifiedTarget;
+    long _classifiedDisplayStamp = -1;
+    int _classifiedClipX0 = int.MinValue;
+    int _classifiedClipY0 = int.MinValue;
+    int _classifiedClipX1 = int.MinValue;
+    int _classifiedClipY1 = int.MinValue;
+    bool _viewHighResolutionTextures;
+    bool _viewTextureSmoothing;
+    bool _viewPs1Dithering;
+    bool _viewEnhancedDepthBuffer;
+    bool _viewHighResolution3D;
+    bool _viewPerspectiveCorrectTextures;
+    bool _viewVectorIcons;
+    bool _viewVectorFonts;
+    bool _viewHudAnchoring;
+    int _viewMsaaSamples;
     int _backdropTriangles;
     float _backdropMinX = float.PositiveInfinity;
     float _backdropMaxX = float.NegativeInfinity;
@@ -193,6 +233,18 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     int _backdropMovedWrongSide;
     readonly HashSet<uint> _backdropPackets = [];
     readonly List<(int A, int B, int C, uint Packet)> _backdropPending = [];
+    readonly record struct PendingCoarseTerrainHalf(
+        HleVertex A,
+        HleVertex B,
+        HleVertex C,
+        PrimFlags Flags,
+        GpuHle.CoarseTerrainPacket Coarse);
+    PendingCoarseTerrainHalf? _pendingCoarseTerrainHalf;
+    readonly HashSet<GpuHle.TerrainPatchGeometry> _renderedDreamcastPatches =
+        new(ReferenceEqualityComparer.Instance);
+    long _traceDreamcastOneUnitLeaves, _traceDreamcastTwoUnitLeaves, _traceDreamcastFourUnitLeaves;
+    long _traceCoarseTerrainPairedQuads;
+    long _traceCoarseTerrainUnpairedHalves;
     long _terrainVramTraceFrame = long.MinValue / 2;
     long _traceOpaqueTriangles;
     long _traceTransparentTriangles;
@@ -308,6 +360,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_PACKET_NCLIP_CULL") == "1";
     long _packetNclipFrontFaces;
+    long _packetNclipNativePreservedFaces;
     long _packetNclipBackFaces;
     long _packetNclipRescuedFaces;
     long _packetNclipVehicleFrontFaces;
@@ -562,6 +615,32 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     int _traceRectangleProbeHits;
     long _tracePresentTicks;
     long _tracePresentMaxTicks;
+    long _traceBatchVertices;
+    long _traceDrawTriCalls;
+    long _traceDrawTriTicks;
+    long _traceGeneratedTerrainTriangles;
+    long _traceVehiclePacketTriangles;
+    long _traceFlushTicks;
+    long _traceDeferredTriangles;
+    long _traceScreenEffectTriangles;
+    long _traceDepthTestedScreenEffectTriangles;
+    long _traceLastAllocatedBytes = GC.GetAllocatedBytesForCurrentThread();
+    int _traceLastGc0 = GC.CollectionCount(0);
+    int _traceLastGc1 = GC.CollectionCount(1);
+    int _traceLastGc2 = GC.CollectionCount(2);
+    long _traceLastObjectRenderEntries = Sdk.V82Compat.ObjectRenderEntries;
+    long _traceLastObjectRenderExits = Sdk.V82Compat.ObjectRenderExits;
+    long _traceBeginFlushes;
+    long _traceTargetBreaks;
+    long _traceBlendBreaks;
+    long _traceDepthBreaks;
+    long _traceMaterialBreaks;
+    long _traceMaskBreaks;
+    long _traceTextureWindowBreaks;
+    long _traceClipBreaks;
+    long _traceSmoothingBreaks;
+    long _traceCapacityBreaks;
+    readonly Dictionary<string, long> _traceStateTransitions = [];
     long _traceFrameIntervalTicks;
     long _traceFrameIntervalMaxTicks;
     long _traceLastPresentStarted;
@@ -717,6 +796,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         int ClipY1,
         int TextureSmoothing);
     readonly List<DeferredBatch> _deferredLoadingPrompt = [];
+    readonly List<DeferredBatch> _deferredScreenEffects = [];
     int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv;
     int _uTextureSmoothing, _uTextureMipmaps, _uAnisotropy;
     int _uEnhancedShadows, _uEnhancedParticles, _uEnhancedFog;
@@ -739,7 +819,38 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
     public bool Ready { get; private set; }
 
-    public EnhancedGlBackend(GL gl) { _gl = gl; _vram = new GlVram(gl); }
+    public EnhancedGlBackend(GL gl)
+    {
+        _gl = gl;
+        _vram = new GlVram(gl);
+        RefreshViewSettings();
+    }
+
+    void RefreshViewSettings()
+    {
+        // ViewConfig is backed by a string dictionary. Parsing those strings
+        // for every one of the thousands of terrain triangles in a frame was
+        // measurable CPU work. Settings are frame-scoped, so read them once
+        // here and let the next presented frame observe any menu change.
+        _viewHighResolutionTextures =
+            ConfigManager.View.HighResolutionTextures;
+        _viewTextureSmoothing = ConfigManager.View.TextureSmoothing;
+        _viewPs1Dithering = ConfigManager.View.Ps1Dithering;
+        _viewEnhancedDepthBuffer = ConfigManager.View.EnhancedDepthBuffer;
+        _viewHighResolution3D = ConfigManager.View.HighResolution3D;
+        _viewPerspectiveCorrectTextures =
+            ConfigManager.View.PerspectiveCorrectTextures;
+        _viewVectorIcons = ConfigManager.View.VectorIcons;
+        _viewVectorFonts = ConfigManager.View.VectorFonts;
+        _viewHudAnchoring = ConfigManager.View.HudAnchoring;
+        int samples = Math.Clamp(ConfigManager.View.MsaaSamples, 0, 8);
+        if (samples == 1) samples = 0;
+        if (_viewMsaaSamples != samples)
+        {
+            _viewMsaaSamples = samples;
+            _classifiedDisplayStamp = -1;
+        }
+    }
 
     public void ResetTransientState()
     {
@@ -747,7 +858,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _kTarget = null;
         _backdropPending.Clear();
         _backdropPackets.Clear();
+        _pendingCoarseTerrainHalf = null;
+        _renderedDreamcastPatches.Clear();
         _deferredLoadingPrompt.Clear();
+        _deferredScreenEffects.Clear();
         ResetAtmosphereState();
     }
 
@@ -866,6 +980,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _rts[index] = null;
         }
         _kTarget = null;
+        _classifiedDisplayStamp = -1;
+        _classifiedTarget = null;
         _vram.ReinitializeScale(scale, nativeVram);
         _textureReplacements?.Reset(nativeVram);
         _readCacheValid = false;
@@ -970,6 +1086,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.EnableVertexAttribArray(14); _gl.VertexAttribPointer(14, 4, VertexAttribPointerType.Float, false, stride, (void*)100);
         _gl.EnableVertexAttribArray(15); _gl.VertexAttribPointer(15, 3, VertexAttribPointerType.Float, false, stride, (void*)116);
         _gl.EnableVertexAttribArray(16); _gl.VertexAttribPointer(16, 3, VertexAttribPointerType.Float, false, stride, (void*)128);
+        _gl.EnableVertexAttribArray(17); _gl.VertexAttribIPointer(17, 1, VertexAttribIType.Int, stride, (void*)140);
+        _gl.EnableVertexAttribArray(18); _gl.VertexAttribIPointer(18, 1, VertexAttribIType.UnsignedInt, stride, (void*)144);
 
         // fullscreen quad for present, real vbo since gl_VertexID without arrays does not draw on mesa for some reason?? or i did it wrong?
         _presentVao = _gl.GenVertexArray();
@@ -1007,6 +1125,14 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         int clipW = _env.ClipX1 - _env.ClipX0 + 1, clipH = _env.ClipY1 - _env.ClipY0 + 1;
         if (clipW <= 0 || clipH <= 0) return null;
 
+        long displayStamp = GpuHle.DisplayStamp;
+        if (_classifiedDisplayStamp == displayStamp &&
+            _classifiedClipX0 == _env.ClipX0 &&
+            _classifiedClipY0 == _env.ClipY0 &&
+            _classifiedClipX1 == _env.ClipX1 &&
+            _classifiedClipY1 == _env.ClipY1)
+            return _classifiedTarget;
+
         long bestStamp = -1;
         int fbX = 0, fbY = 0, fbW = 0, fbH = 0;
         for (int i = 0; i < GpuHle.RectCount; i++)
@@ -1022,7 +1148,15 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             if (clipInside) { bestStamp = r.Stamp; fbX = r.X; fbY = r.Y; fbW = r.W; fbH = r.H; }
             else if (clipIsFb) { bestStamp = r.Stamp; fbX = clipX; fbY = clipY; fbW = clipW; fbH = clipH; }
         }
-        return bestStamp < 0 ? null : GetOrCreateRt(fbX, fbY, fbW, fbH);
+        _classifiedTarget = bestStamp < 0
+            ? null
+            : GetOrCreateRt(fbX, fbY, fbW, fbH);
+        _classifiedDisplayStamp = displayStamp;
+        _classifiedClipX0 = _env.ClipX0;
+        _classifiedClipY0 = _env.ClipY0;
+        _classifiedClipX1 = _env.ClipX1;
+        _classifiedClipY1 = _env.ClipY1;
+        return _classifiedTarget;
     }
 
     GlDisplayRt GetOrCreateRt(int fbX, int fbY, int fbW, int fbH)
@@ -1033,8 +1167,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             {
                 bool sameW = rt.W == fbW;
                 bool fitsH = rt.H >= fbH && rt.H - fbH <= FbSlackH;
-                int samples = Math.Clamp(ConfigManager.View.MsaaSamples, 0, 8);
-                if (samples == 1) samples = 0;
+                int samples = _viewMsaaSamples;
                 if (sameW && fitsH && rt.Margin == GpuHle.WideMargin(rt.W) && rt.Samples == samples)
                 {
                     rt.Stamp = ++_rtStamp;
@@ -1256,15 +1389,32 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     {
         int twAndX = ~(_env.TwMaskX * 8) & 0xFF, twAndY = ~(_env.TwMaskY * 8) & 0xFF;
         int twOrX = (_env.TwOffX & _env.TwMaskX) * 8, twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
-        return _kTransparent == transparent && _kBlend == blend &&
+        // PS1 blend coefficients are carried per primitive in BlendCode. All
+        // ordinary opaque, alpha-test, additive and reflection polygons can
+        // therefore share one dual-source GL blend state. Only subtractive
+        // blending and conventional vehicle glass require a state break.
+        int blendState = BlendStateOf(transparent, blend, material);
+        int currentBlendState =
+            BlendStateOf(_kTransparent, _kBlend, _kMaterial);
+        return currentBlendState == blendState &&
             _kDepthTest == depthTest &&
             _kDepthWrite == depthWrite &&
             _kSourceDepthCompareWrite == sourceDepthCompareWrite
-            && _kMaterial == material
             && _kSetMask == (_env.SetMask ? 1 : 0) && _kCheckMask == (_env.CheckMask ? 1 : 0)
             && _kTwAndX == twAndX && _kTwAndY == twAndY && _kTwOrX == twOrX && _kTwOrY == twOrY
             && _kClipX0 == _env.ClipX0 && _kClipY0 == _env.ClipY0 && _kClipX1 == _env.ClipX1 && _kClipY1 == _env.ClipY1
-            && _kTextureSmoothing == (ConfigManager.View.TextureSmoothing ? 1 : 0);
+            && _kTextureSmoothing == (_viewTextureSmoothing ? 1 : 0);
+    }
+
+    static int BlendStateOf(
+        bool transparent,
+        int blend,
+        HleMaterialKind material)
+    {
+        if (transparent &&
+            (blend == 2 || material == HleMaterialKind.Subtractive))
+            return 1;
+        return 0;
     }
 
     void Begin(
@@ -1275,10 +1425,21 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         bool sourceDepthCompareWrite = false)
     {
         _readCacheValid = false;
-        bool opaqueVehicleGlass = IsOpaqueVehicleGlassMaterial(f);
-        bool transparent = f.SemiTrans && !opaqueVehicleGlass;
+        bool transparent = f.SemiTrans;
         int blend = f.BlendMode;
         HleMaterialKind material = f.Material;
+        // V8:2's native weather/lighting pass is a stack of full-display
+        // semitransparent scanlines inserted among world OT packets. Keep the
+        // scanlines ordered within their pass, but finish the world and screen
+        // layers before the first UI primitive. Without this layer boundary,
+        // terrain and screen-effect depth states alternate thousands of times
+        // per frame on maps that use the pass.
+        if (material == HleMaterialKind.Ui &&
+            _deferredScreenEffects.Count != 0)
+        {
+            Flush();
+            ReplayDeferredBatches(_deferredScreenEffects);
+        }
         var target = Classify();
         if (_count > 0 &&
             (target != _kTarget ||
@@ -1288,8 +1449,55 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                  depthTest,
                  depthWrite,
                  sourceDepthCompareWrite,
-                 material))) Flush();
-        if (_count + vertsNeeded > MaxVerts) Flush();
+                 material)))
+        {
+            if (TracePerformance)
+            {
+                int twAndX = ~(_env.TwMaskX * 8) & 0xFF;
+                int twAndY = ~(_env.TwMaskY * 8) & 0xFF;
+                int twOrX = (_env.TwOffX & _env.TwMaskX) * 8;
+                int twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
+                _traceBeginFlushes++;
+                string transition =
+                    $"{(_kTransparent ? 'T' : 'O')}:{_kMaterial}:" +
+                    $"{(_kDepthTest ? 1 : 0)}{(_kDepthWrite ? 1 : 0)}" +
+                    $"->{(transparent ? 'T' : 'O')}:{material}:" +
+                    $"{(depthTest ? 1 : 0)}{(depthWrite ? 1 : 0)}";
+                _traceStateTransitions[transition] =
+                    _traceStateTransitions.GetValueOrDefault(transition) + 1;
+                if (target != _kTarget) _traceTargetBreaks++;
+                if (BlendStateOf(_kTransparent, _kBlend, _kMaterial) !=
+                    BlendStateOf(transparent, blend, material))
+                    _traceBlendBreaks++;
+                if (_kDepthTest != depthTest ||
+                    _kDepthWrite != depthWrite ||
+                    _kSourceDepthCompareWrite != sourceDepthCompareWrite)
+                    _traceDepthBreaks++;
+                if (BlendStateOf(_kTransparent, _kBlend, _kMaterial) !=
+                    BlendStateOf(transparent, blend, material) &&
+                    (material == HleMaterialKind.Glass ||
+                     _kMaterial == HleMaterialKind.Glass))
+                    _traceMaterialBreaks++;
+                if (_kSetMask != (_env.SetMask ? 1 : 0) ||
+                    _kCheckMask != (_env.CheckMask ? 1 : 0))
+                    _traceMaskBreaks++;
+                if (_kTwAndX != twAndX || _kTwAndY != twAndY ||
+                    _kTwOrX != twOrX || _kTwOrY != twOrY)
+                    _traceTextureWindowBreaks++;
+                if (_kClipX0 != _env.ClipX0 || _kClipY0 != _env.ClipY0 ||
+                    _kClipX1 != _env.ClipX1 || _kClipY1 != _env.ClipY1)
+                    _traceClipBreaks++;
+                if (_kTextureSmoothing !=
+                    (_viewTextureSmoothing ? 1 : 0))
+                    _traceSmoothingBreaks++;
+            }
+            Flush();
+        }
+        if (_count + vertsNeeded > MaxVerts)
+        {
+            if (TracePerformance) _traceCapacityBreaks++;
+            Flush();
+        }
         _kTarget = target;
         _kTransparent = transparent; _kBlend = blend;
         _kDepthTest = depthTest;
@@ -1300,11 +1508,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _kTwAndX = ~(_env.TwMaskX * 8) & 0xFF; _kTwAndY = ~(_env.TwMaskY * 8) & 0xFF;
         _kTwOrX = (_env.TwOffX & _env.TwMaskX) * 8; _kTwOrY = (_env.TwOffY & _env.TwMaskY) * 8;
         _kClipX0 = _env.ClipX0; _kClipY0 = _env.ClipY0; _kClipX1 = _env.ClipX1; _kClipY1 = _env.ClipY1;
-        _kTextureSmoothing = ConfigManager.View.TextureSmoothing ? 1 : 0;
+        _kTextureSmoothing = _viewTextureSmoothing ? 1 : 0;
     }
 
     bool DitherOf(in PrimFlags f) =>
-        ConfigManager.View.Ps1Dithering &&
+        _viewPs1Dithering &&
         _env.Dither &&
         (f.Gouraud || (f.Textured && !f.RawTexture));
 
@@ -1314,7 +1522,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         bool dither,
         bool perspectiveCorrect,
         bool uiTexture = false,
-        float rasterDepth = 0f)
+        float rasterDepth = 0f,
+        GlDisplayRt? targetOverride = null)
     {
         uint color = (f.Textured && f.RawTexture) ? 0x808080u : (uint)(v.R | (v.G << 8) | (v.B << 16));
         int tpage = f.Textured ? (f.TPage & 0x1FF) : 0x8000;
@@ -1326,7 +1535,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         bool exactSemitransEffect = f.Material is
             HleMaterialKind.Additive or
             HleMaterialKind.Subtractive;
-        if (ConfigManager.View.TextureSmoothing && f.Textured &&
+        if (_viewTextureSmoothing && f.Textured &&
             !exactSemitransEffect &&
             (!f.RawTexture || !uiTexture))
             tpage |= 0x800;
@@ -1335,6 +1544,12 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             tpage |= 0x800000;
         if (f.Vehicle) tpage |= 0x80000;
         if (f.N64RouteColor) tpage |= 0x200000;
+        uint terrainOffset = (uint)(
+            v.TerrainOffsetR |
+            (v.TerrainOffsetG << 8) |
+            (v.TerrainOffsetB << 16));
+        if (v.DreamcastTerrainColor)
+            terrainOffset |= 0x01000000u;
         float perspectiveW =
             perspectiveCorrect ? MathF.Max(1f, v.PerspectiveW) : 1f;
         float fogDepth = v.HasProjectiveW
@@ -1347,9 +1562,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         float projectionCenterX = v.ProjectionCenterX;
         float projectionCenterY = v.ProjectionCenterY;
         float projectionScale = v.ProjectionScale;
+        GlDisplayRt? projectionTarget = targetOverride ?? _kTarget;
         if (!uiTexture &&
             GpuHle.GameplayActive &&
-            _kTarget is { Margin: > 0 } wideTarget)
+            projectionTarget is { Margin: > 0 } wideTarget)
         {
             // Preserve the native vertical FOV and projection scale. The
             // enhanced target owns real pixels on both sides of the authored
@@ -1384,6 +1600,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 ? (v.ReconstructedViewSpace ? 1f : 2f)
                 : 0f,
             Material = (int)f.Material,
+            BlendCode = f.SemiTrans
+                ? Math.Clamp(f.BlendMode, 0, 3) + 1
+                : 0,
+            TerrainOffset = terrainOffset,
         };
     }
 
@@ -1586,6 +1806,20 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             (int)MathF.Round(from.G + (to.G - from.G) * t), 0, 255);
         result.B = (byte)Math.Clamp(
             (int)MathF.Round(from.B + (to.B - from.B) * t), 0, 255);
+        result.TerrainOffsetR = (byte)Math.Clamp(
+            (int)MathF.Round(
+                from.TerrainOffsetR +
+                (to.TerrainOffsetR - from.TerrainOffsetR) * t), 0, 255);
+        result.TerrainOffsetG = (byte)Math.Clamp(
+            (int)MathF.Round(
+                from.TerrainOffsetG +
+                (to.TerrainOffsetG - from.TerrainOffsetG) * t), 0, 255);
+        result.TerrainOffsetB = (byte)Math.Clamp(
+            (int)MathF.Round(
+                from.TerrainOffsetB +
+                (to.TerrainOffsetB - from.TerrainOffsetB) * t), 0, 255);
+        result.DreamcastTerrainColor =
+            from.DreamcastTerrainColor && to.DreamcastTerrainColor;
         return result;
     }
 
@@ -1671,34 +1905,42 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         float minU, float minV, float maxU, float maxV,
         out ulong textureKey,
         out string resolution,
-        bool allowUiReplacement = false)
+        bool allowUiReplacement = false,
+        bool includeResolution = false)
     {
         textureKey = 0;
-        resolution = "kind=disabled source-label=\"none\" shadow=\"none\"";
+        resolution = string.Empty;
         bool uiMaterial = f.Material is
             HleMaterialKind.Ui or HleMaterialKind.ScreenEffect;
-        if (!ConfigManager.View.HighResolutionTextures ||
+        if (!_viewHighResolutionTextures ||
             !f.Textured || _textureReplacements == null)
             return false;
         int sourceMinU = (int)MathF.Floor(minU);
         int sourceMinV = (int)MathF.Floor(minV);
         int sourceMaxU = (int)MathF.Ceiling(maxU);
         int sourceMaxV = (int)MathF.Ceiling(maxV);
-        TextureReplacementAtlas.Rect rect =
-            _textureReplacements.ResolveFontFile(
+        TextureReplacementAtlas.Rect rect = default;
+        string fontPath = string.Empty;
+        bool fileFont = false;
+        // File-font provenance applies only to UI/screen primitives. Running
+        // the resolver for every terrain triangle dominated CPU time and
+        // allocated lookup strings even though no world primitive can match.
+        if (uiMaterial)
+            rect = _textureReplacements.ResolveFontFile(
                 f.TPage,
                 sourceMinU, sourceMinV, sourceMaxU, sourceMaxV,
                 _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY,
-                out string fontPath, out bool fileFont);
+                out fontPath, out fileFont);
         if (fileFont)
         {
-            resolution = rect.Valid
-                ? $"kind=file-font path=\"{fontPath}\" " +
-                  $"replacement-scale={rect.W / Math.Max(1f, sourceMaxU - sourceMinU + 1f):F3}x" +
-                  $"{rect.H / Math.Max(1f, sourceMaxV - sourceMinV + 1f):F3} " +
-                  "shadow=\"none\""
-                : $"kind=file-font-fallback path=\"{fontPath}\" " +
-                  "source-label=\"original FNT\" shadow=\"none\"";
+            if (includeResolution)
+                resolution = rect.Valid
+                    ? $"kind=file-font path=\"{fontPath}\" " +
+                      $"replacement-scale={rect.W / Math.Max(1f, sourceMaxU - sourceMinU + 1f):F3}x" +
+                      $"{rect.H / Math.Max(1f, sourceMaxV - sourceMinV + 1f):F3} " +
+                      "shadow=\"none\""
+                    : $"kind=file-font-fallback path=\"{fontPath}\" " +
+                      "source-label=\"original FNT\" shadow=\"none\"";
             if (!rect.Valid)
                 return false;
             ApplyReplacementRect(ref a, ref b, ref c, rect);
@@ -1713,8 +1955,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             f.Material is HleMaterialKind.Particle or
                 HleMaterialKind.Additive or
                 HleMaterialKind.Subtractive or
-                HleMaterialKind.VehicleReflection or
-                HleMaterialKind.OpaqueVehicleGlass ||
+                HleMaterialKind.VehicleReflection ||
             (uiMaterial && !allowUiReplacement))
             return false;
         rect = _textureReplacements.Resolve(
@@ -1726,8 +1967,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             (int)MathF.Ceiling(maxU) - (int)MathF.Floor(minU) + 1;
         int sourceHeight =
             (int)MathF.Ceiling(maxV) - (int)MathF.Floor(minV) + 1;
-        resolution = _textureReplacements.DescribeResolution(
-            textureKey, sourceWidth, sourceHeight);
+        if (includeResolution)
+            resolution = _textureReplacements.DescribeResolution(
+                textureKey, sourceWidth, sourceHeight);
         if (f.Vehicle && TraceVehicleTextureReplacements)
         {
             HashSet<ulong> keys = rect.Valid
@@ -1818,6 +2060,15 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     // paused frame only ~38 carry neither view space nor a GTE Z.
     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
+        if (TracePerformance)
+        {
+            _traceDrawTriCalls++;
+            if (f.Vehicle)
+                _traceVehiclePacketTriangles++;
+        }
+        using var timing = TracePerformanceDetail
+            ? new DrawTriTimingScope(this)
+            : default;
         GpuHle.CoarseTerrainPacket coarseTerrain = default;
         bool hasCoarseTerrain =
             !f.Textured &&
@@ -1878,9 +2129,34 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     $"textured={(f.Textured ? 1 : 0)} raw={(f.RawTexture ? 1 : 0)} " +
                     $"tpage=0x{f.TPage:X3} clut=0x{f.Clut:X4}");
         }
+        // Ordering-table playback can interleave unrelated world primitives
+        // between the two triangles of one coarse terrain square. Keep the
+        // second half through those packets; only retire it when another
+        // coarse half proves that its matching first half was clipped.
+        if (_pendingCoarseTerrainHalf is { } pending &&
+            hasCoarseTerrain &&
+            !(!coarseTerrain.SecondHalf &&
+              coarseTerrain.X == pending.Coarse.X &&
+              coarseTerrain.Z == pending.Coarse.Z))
+        {
+            _pendingCoarseTerrainHalf = null;
+            _traceCoarseTerrainUnpairedHalves++;
+            DrawTexturedCoarseTerrainHalfImmediate(
+                pending.A,
+                pending.B,
+                pending.C,
+                pending.Flags,
+                pending.Coarse);
+        }
         if (hasCoarseTerrain &&
             f.Material == HleMaterialKind.TerrainRoute)
         {
+            if (coarseTerrain.Textures.DistanceColors.Patch is { } patch)
+            {
+                if (_renderedDreamcastPatches.Add(patch))
+                    DrawDreamcastTerrainPatch(a, f, coarseTerrain.Textures, patch);
+                return;
+            }
             DrawTexturedCoarseTerrainHalf(a, b, c, f, coarseTerrain);
             return;
         }
@@ -1922,7 +2198,145 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         DrawTriCore(authoredA, authoredB, authoredC, f);
     }
 
+    void DrawDreamcastTerrainPatch(
+        in HleVertex template, in PrimFlags flags,
+        in GpuHle.TerrainCellTextures textures, GpuHle.TerrainPatchGeometry patch)
+    {
+        Span<DreamcastTerrainGeometry.Vertex> vertices =
+            stackalloc DreamcastTerrainGeometry.Vertex[25];
+        Span<DreamcastTerrainGeometry.Leaf> leaves =
+            stackalloc DreamcastTerrainGeometry.Leaf[16];
+        int count = DreamcastTerrainGeometry.Build(patch.Samples, patch.HeightAxis,
+            textures.DistanceColors.Alternate, vertices, leaves);
+        for (int index = 0; index < count; index++)
+        {
+            DreamcastTerrainGeometry.Leaf leaf = leaves[index];
+            int tl = leaf.X * 5 + leaf.Z;
+            int tr = (leaf.X + leaf.Size) * 5 + leaf.Z;
+            int bl = leaf.X * 5 + leaf.Z + leaf.Size;
+            int br = (leaf.X + leaf.Size) * 5 + leaf.Z + leaf.Size;
+            HleVertex a = MakeDreamcastTerrainVertex(template, vertices[tl], patch, leaf.Textured);
+            HleVertex b = MakeDreamcastTerrainVertex(template, vertices[tr], patch, leaf.Textured);
+            HleVertex c = MakeDreamcastTerrainVertex(template, vertices[bl], patch, leaf.Textured);
+            HleVertex d = MakeDreamcastTerrainVertex(template, vertices[br], patch, leaf.Textured);
+            if (leaf.Textured)
+            {
+                _traceDreamcastOneUnitLeaves++;
+                GpuHle.TerrainTextureDescriptor texture = textures.Get(leaf.X, leaf.Z);
+                if ((texture.Flags & 1) == 0)
+                    DrawTerrainTextureSquare(a, b, c, d, flags, texture);
+            }
+            else
+            {
+                if (leaf.Size == 2) _traceDreamcastTwoUnitLeaves++;
+                else _traceDreamcastFourUnitLeaves++;
+                PrimFlags flat = flags;
+                flat.Textured = false;
+                flat.RawTexture = false;
+                flat.Gouraud = true;
+                // Native untextured strip is TL,TR,BL,BR irrespective of XTIN flags.
+                DrawGeneratedTerrainTriangle(a, b, c, flat);
+                DrawGeneratedTerrainTriangle(d, b, c, flat);
+            }
+        }
+    }
+
+    static HleVertex MakeDreamcastTerrainVertex(
+        in HleVertex template, in DreamcastTerrainGeometry.Vertex source,
+        GpuHle.TerrainPatchGeometry patch, bool textured)
+    {
+        HleVertex result = template;
+        result.SourceAddress = 0;
+        result.ViewX = source.View.X;
+        result.ViewY = source.View.Y;
+        result.ViewZ = source.View.Z;
+        result.HasViewSpace = result.HasProjectiveW = result.HasGteZ = true;
+        result.HasCoherentGteZ = true;
+        result.PerspectiveW = source.View.Z;
+        result.Z = source.View.Z;
+        result.ProjectionCenterX = patch.ProjectionCenterX;
+        result.ProjectionCenterY = patch.ProjectionCenterY;
+        result.ProjectionScale = patch.ProjectionScale;
+        float denominator = MathF.Max(source.View.Z, 0.01f * 256f);
+        result.X = patch.ProjectionCenterX + source.View.X * patch.ProjectionScale / denominator;
+        result.Y = patch.ProjectionCenterY + source.View.Y * patch.ProjectionScale / denominator;
+        float offset = Math.Clamp(source.TextureFade / 0.75f, 0f, 1f);
+        static byte Pack(float value) => (byte)Math.Clamp((int)value, 0, 255);
+        result.R = Pack(textured ? source.Ramp.X * (1f - offset) : source.Flat.X);
+        result.G = Pack(textured ? source.Ramp.Y * (1f - offset) : source.Flat.Y);
+        result.B = Pack(textured ? source.Ramp.Z * (1f - offset) : source.Flat.Z);
+        result.DreamcastTerrainColor = textured;
+        result.TerrainOffsetR = textured ? Pack(source.Flat.X * offset) : (byte)0;
+        result.TerrainOffsetG = textured ? Pack(source.Flat.Y * offset) : (byte)0;
+        result.TerrainOffsetB = textured ? Pack(source.Flat.Z * offset) : (byte)0;
+        result.HasAuthoredUvBounds = false;
+        return result;
+    }
+
     void DrawTexturedCoarseTerrainHalf(
+        in HleVertex a,
+        in HleVertex b,
+        in HleVertex c,
+        in PrimFlags flags,
+        in GpuHle.CoarseTerrainPacket coarse)
+    {
+        if (coarse.SecondHalf)
+        {
+            _pendingCoarseTerrainHalf = new PendingCoarseTerrainHalf(
+                a, b, c, flags, coarse);
+            return;
+        }
+
+        if (_pendingCoarseTerrainHalf is { } pending &&
+            pending.Coarse.X == coarse.X &&
+            pending.Coarse.Z == coarse.Z)
+        {
+            _pendingCoarseTerrainHalf = null;
+            _traceCoarseTerrainPairedQuads++;
+            DrawTexturedCoarseTerrainSquare(
+                a, b, c, flags, coarse, pending);
+            return;
+        }
+
+        _traceCoarseTerrainUnpairedHalves++;
+        DrawTexturedCoarseTerrainHalfImmediate(a, b, c, flags, coarse);
+    }
+
+    void DrawTexturedCoarseTerrainSquare(
+        in HleVertex topLeft,
+        in HleVertex topRight,
+        in HleVertex bottomLeft,
+        in PrimFlags flags,
+        in GpuHle.CoarseTerrainPacket coarse,
+        in PendingCoarseTerrainHalf second)
+    {
+        GpuHle.TerrainCellTextures textures = coarse.Textures;
+        GpuHle.TerrainTextureDescriptor texture = textures.Get(0, 0);
+        if ((texture.Flags & 1) != 0)
+            return;
+
+        GpuHle.TerrainQuadDistanceColors colors = textures.DistanceColors;
+        HleVertex Color(
+            in HleVertex source,
+            in GpuHle.TerrainDistanceColor color) =>
+            colors.Valid
+                ? ApplyDreamcastTerrainDistanceColor(
+                    source, color, colors.Alternate)
+                : source;
+
+        // The PS1 emits a four-unit quad as two fixed triangles, second half
+        // then first half in OT order. Rejoin that pair so the authored XTIN
+        // diagonal flag can select the same split as Dreamcast 0x8C1020E2.
+        DrawTerrainTextureSquare(
+            Color(topLeft, colors.TopLeft),
+            Color(topRight, colors.TopRight),
+            Color(bottomLeft, colors.BottomLeft),
+            Color(second.C, colors.BottomRight),
+            flags,
+            texture);
+    }
+
+    void DrawTexturedCoarseTerrainHalfImmediate(
         in HleVertex a,
         in HleVertex b,
         in HleVertex c,
@@ -1931,6 +2345,17 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     {
         GpuHle.TerrainCellTextures textures = coarse.Textures;
         int size = textures.GridSize;
+        GpuHle.TerrainTextureDescriptor texture = textures.Get(0, 0);
+        GpuHle.TerrainQuadDistanceColors distanceColors =
+            textures.DistanceColors;
+
+        HleVertex DistanceColor(in HleVertex source, bool secondHalf, int vertex) =>
+            distanceColors.Valid
+                ? ApplyDreamcastTerrainDistanceColor(
+                    source,
+                    distanceColors.Get(secondHalf, vertex),
+                    distanceColors.Alternate)
+                : source;
         if (TraceTerrainShade && _traceTerrainShadePackets++ < 4096)
         {
             int minimumR = 255, minimumG = 255, minimumB = 255;
@@ -1967,59 +2392,26 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 $"{maximumR},{maximumG},{maximumB} " +
                 $"textures={textureIds}");
         }
-        for (int x = 0; x < size; x++)
-        {
-            for (int z = 0; z < size; z++)
-            {
-                GpuHle.TerrainTextureDescriptor texture =
-                    textures.Get(x, z);
-                if ((texture.Flags & 1) != 0)
-                    continue;
+        if ((texture.Flags & 1) != 0)
+            return;
 
-                if (!coarse.SecondHalf)
-                {
-                    int diagonal = x + z;
-                    if (diagonal == size - 1)
-                        DrawTerrainTextureTriangle(
-                            FirstTerrainGridPoint(a, b, c, size, x, z),
-                            texture.Uv00,
-                            FirstTerrainGridPoint(a, b, c, size, x + 1, z),
-                            texture.Uv01,
-                            FirstTerrainGridPoint(a, b, c, size, x, z + 1),
-                            texture.Uv10,
-                            flags, texture);
-                    else if (diagonal < size - 1)
-                        DrawTerrainTextureSquare(
-                            FirstTerrainGridPoint(a, b, c, size, x, z),
-                            FirstTerrainGridPoint(a, b, c, size, x + 1, z),
-                            FirstTerrainGridPoint(a, b, c, size, x, z + 1),
-                            FirstTerrainGridPoint(
-                                a, b, c, size, x + 1, z + 1),
-                            flags, texture);
-                    continue;
-                }
-
-                int secondDiagonal = x + z;
-                if (secondDiagonal == size - 1)
-                    DrawTerrainTextureTriangle(
-                        SecondTerrainGridPoint(
-                            a, b, c, size, x + 1, z + 1),
-                        texture.Uv11,
-                        SecondTerrainGridPoint(a, b, c, size, x + 1, z),
-                        texture.Uv01,
-                        SecondTerrainGridPoint(a, b, c, size, x, z + 1),
-                        texture.Uv10,
-                        flags, texture);
-                else if (secondDiagonal >= size)
-                    DrawTerrainTextureSquare(
-                        SecondTerrainGridPoint(a, b, c, size, x, z),
-                        SecondTerrainGridPoint(a, b, c, size, x + 1, z),
-                        SecondTerrainGridPoint(a, b, c, size, x, z + 1),
-                        SecondTerrainGridPoint(
-                            a, b, c, size, x + 1, z + 1),
-                        flags, texture);
-            }
-        }
+        // Dreamcast 0x8C1020E2 reads byte +6 from the first terrain record
+        // of each four-unit quad and submits one textured quad with that
+        // material. Do not reconstruct the PS1's sixteen one-unit XTIN cells:
+        // doing so recreates the jagged detail band that the Dreamcast path
+        // deliberately avoids.
+        if (!coarse.SecondHalf)
+            DrawTerrainTextureTriangle(
+                DistanceColor(a, false, 0), texture.Uv00,
+                DistanceColor(b, false, 1), texture.Uv01,
+                DistanceColor(c, false, 2), texture.Uv10,
+                flags, texture);
+        else
+            DrawTerrainTextureTriangle(
+                DistanceColor(a, true, 0), texture.Uv01,
+                DistanceColor(b, true, 1), texture.Uv10,
+                DistanceColor(c, true, 2), texture.Uv11,
+                flags, texture);
     }
 
     void DrawTerrainTextureSquare(
@@ -2070,12 +2462,17 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         in GpuHle.TerrainTransitionPacket transition)
     {
         GpuHle.TerrainCellTextures textures = transition.Textures;
-        List<TerrainClipVertex> source =
-        [
+        Span<TerrainClipVertex> source = stackalloc TerrainClipVertex[3]
+        {
             new TerrainClipVertex(a, transition.Ax, transition.Az),
             new TerrainClipVertex(b, transition.Bx, transition.Bz),
             new TerrainClipVertex(c, transition.Cx, transition.Cz),
-        ];
+        };
+        // Clipping a triangle against an axis-aligned tile can produce at most
+        // seven vertices. Reuse two stack buffers instead of allocating the
+        // former source list plus four output lists for every terrain tile.
+        Span<TerrainClipVertex> clipA = stackalloc TerrainClipVertex[8];
+        Span<TerrainClipVertex> clipB = stackalloc TerrainClipVertex[8];
         for (int x = 0; x < textures.GridSize; x++)
         {
             for (int z = 0; z < textures.GridSize; z++)
@@ -2085,22 +2482,25 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 if ((texture.Flags & 1) != 0)
                     continue;
 
-                List<TerrainClipVertex> clipped =
-                    ClipTerrainTransition(source, xAxis: true, x, keepHigh: true);
-                clipped = ClipTerrainTransition(
-                    clipped, xAxis: true, x + 1, keepHigh: false);
-                clipped = ClipTerrainTransition(
-                    clipped, xAxis: false, z, keepHigh: true);
-                clipped = ClipTerrainTransition(
-                    clipped, xAxis: false, z + 1, keepHigh: false);
-                if (clipped.Count < 3)
+                int clippedCount = ClipTerrainTransition(
+                    source, clipA, xAxis: true, x, keepHigh: true);
+                clippedCount = ClipTerrainTransition(
+                    clipA[..clippedCount], clipB,
+                    xAxis: true, x + 1, keepHigh: false);
+                clippedCount = ClipTerrainTransition(
+                    clipB[..clippedCount], clipA,
+                    xAxis: false, z, keepHigh: true);
+                clippedCount = ClipTerrainTransition(
+                    clipA[..clippedCount], clipB,
+                    xAxis: false, z + 1, keepHigh: false);
+                if (clippedCount < 3)
                     continue;
 
-                for (int index = 1; index + 1 < clipped.Count; index++)
+                for (int index = 1; index + 1 < clippedCount; index++)
                     DrawTerrainTextureTriangle(
-                        clipped[0],
-                        clipped[index],
-                        clipped[index + 1],
+                        clipB[0],
+                        clipB[index],
+                        clipB[index + 1],
                         x, z,
                         flags,
                         texture);
@@ -2108,17 +2508,18 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         }
     }
 
-    static List<TerrainClipVertex> ClipTerrainTransition(
-        List<TerrainClipVertex> source,
+    static int ClipTerrainTransition(
+        ReadOnlySpan<TerrainClipVertex> source,
+        Span<TerrainClipVertex> output,
         bool xAxis,
         float boundary,
         bool keepHigh)
     {
-        if (source.Count == 0)
-            return source;
+        if (source.IsEmpty)
+            return 0;
 
-        var output = new List<TerrainClipVertex>(source.Count + 1);
         TerrainClipVertex previous = source[^1];
+        int outputCount = 0;
         float previousCoordinate = xAxis ? previous.X : previous.Z;
         bool previousInside = keepHigh
             ? previousCoordinate >= boundary
@@ -2135,21 +2536,21 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 float amount = MathF.Abs(span) < 0.0001f
                     ? 0f
                     : (boundary - previousCoordinate) / span;
-                output.Add(new TerrainClipVertex(
+                output[outputCount++] = new TerrainClipVertex(
                     LerpVertex(
                         previous.Vertex,
                         current.Vertex,
                         Math.Clamp(amount, 0f, 1f)),
                     previous.X + (current.X - previous.X) * amount,
-                    previous.Z + (current.Z - previous.Z) * amount));
+                    previous.Z + (current.Z - previous.Z) * amount);
             }
             if (currentInside)
-                output.Add(current);
+                output[outputCount++] = current;
             previous = current;
             previousCoordinate = currentCoordinate;
             previousInside = currentInside;
         }
-        return output;
+        return outputCount;
     }
 
     void DrawTerrainTextureTriangle(
@@ -2162,13 +2563,13 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         in GpuHle.TerrainTextureDescriptor texture)
     {
         HleVertex texturedA = WithTerrainUv(
-            PreserveCoarseTerrainDetail(a.Vertex, texture),
+            a.Vertex,
             texture, a.X - tileX, a.Z - tileZ);
         HleVertex texturedB = WithTerrainUv(
-            PreserveCoarseTerrainDetail(b.Vertex, texture),
+            b.Vertex,
             texture, b.X - tileX, b.Z - tileZ);
         HleVertex texturedC = WithTerrainUv(
-            PreserveCoarseTerrainDetail(c.Vertex, texture),
+            c.Vertex,
             texture, c.X - tileX, c.Z - tileZ);
         PrimFlags texturedFlags = flags;
         texturedFlags.Textured = true;
@@ -2176,7 +2577,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         texturedFlags.Gouraud = true;
         texturedFlags.TPage = texture.TPage;
         texturedFlags.Clut = texture.Clut;
-        DrawTri(texturedA, texturedB, texturedC, texturedFlags);
+        DrawGeneratedTerrainTriangle(
+            texturedA, texturedB, texturedC, texturedFlags);
     }
 
     static HleVertex FirstTerrainGridPoint(
@@ -2225,46 +2627,108 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         in GpuHle.TerrainTextureDescriptor texture)
     {
         HleVertex texturedA = WithTerrainUv(
-            PreserveCoarseTerrainDetail(a, texture), uvA);
+            a, uvA);
         HleVertex texturedB = WithTerrainUv(
-            PreserveCoarseTerrainDetail(b, texture), uvB);
+            b, uvB);
         HleVertex texturedC = WithTerrainUv(
-            PreserveCoarseTerrainDetail(c, texture), uvC);
+            c, uvC);
         PrimFlags texturedFlags = flags;
         texturedFlags.Textured = true;
         texturedFlags.RawTexture = false;
         texturedFlags.Gouraud = true;
         texturedFlags.TPage = texture.TPage;
         texturedFlags.Clut = texture.Clut;
-        DrawTri(texturedA, texturedB, texturedC, texturedFlags);
+        DrawGeneratedTerrainTriangle(
+            texturedA, texturedB, texturedC, texturedFlags);
     }
 
-    static HleVertex PreserveCoarseTerrainDetail(
+    void DrawGeneratedTerrainTriangle(
+        in HleVertex a,
+        in HleVertex b,
+        in HleVertex c,
+        in PrimFlags flags)
+    {
+        // Generated detail triangles are already past the coarse/transition
+        // dispatcher and can never be native modal geometry. Sending every
+        // one back through public DrawTri repeated that dispatch and nested a
+        // per-call performance timer inside the parent terrain packet timer.
+        // Preserve the authored UV footprint required by the replacement
+        // atlas, then enter the common raster path directly.
+        float minU = MathF.Min(a.U, MathF.Min(b.U, c.U));
+        float minV = MathF.Min(a.V, MathF.Min(b.V, c.V));
+        float maxU = MathF.Max(a.U, MathF.Max(b.U, c.U));
+        float maxV = MathF.Max(a.V, MathF.Max(b.V, c.V));
+        HleVertex authoredA = a;
+        HleVertex authoredB = b;
+        HleVertex authoredC = c;
+        authoredA.HasAuthoredUvBounds =
+            authoredB.HasAuthoredUvBounds =
+            authoredC.HasAuthoredUvBounds = true;
+        authoredA.AuthoredMinU = authoredB.AuthoredMinU =
+            authoredC.AuthoredMinU = minU;
+        authoredA.AuthoredMinV = authoredB.AuthoredMinV =
+            authoredC.AuthoredMinV = minV;
+        authoredA.AuthoredMaxU = authoredB.AuthoredMaxU =
+            authoredC.AuthoredMaxU = maxU;
+        authoredA.AuthoredMaxV = authoredB.AuthoredMaxV =
+            authoredC.AuthoredMaxV = maxV;
+        if (TracePerformance)
+            _traceGeneratedTerrainTriangles++;
+        DrawTriCore(authoredA, authoredB, authoredC, flags);
+    }
+
+    static HleVertex ApplyDreamcastTerrainDistanceColor(
         in HleVertex source,
-        in GpuHle.TerrainTextureDescriptor texture)
+        in GpuHle.TerrainDistanceColor color,
+        bool alternate)
     {
-        // Native coarse terrain stores the intended final surface colour in
-        // an untextured Gouraud packet. Reusing that byte directly as textured
-        // modulation is wrong: 128 is neutral in the PS1 texture equation, so
-        // the old clamp forced every bright distant tile to the texture's raw
-        // average and produced a hard white LOD ring. Convert the authored
-        // final colour to the modulation needed for this tile's measured
-        // average instead. This retains the original distance lighting while
-        // restoring local texture detail, and remains continuous when the
-        // native emitter changes between detail, transition and coarse paths.
-        HleVertex result = source;
-        result.R = TerrainTargetToModulation(source.R, texture.AverageR);
-        result.G = TerrainTargetToModulation(source.G, texture.AverageG);
-        result.B = TerrainTargetToModulation(source.B, texture.AverageB);
-        return result;
-    }
+        // 0x8C102780 starts a five-unit distance factor at 20.2 (normal) or
+        // 14.6 (multi-view) Dreamcast terrain units. 0x8C101E20 finishes the
+        // texture-to-local-flat-color transition at factor 0.75, so the
+        // visible blend spans exactly 3.75 units. One Dreamcast terrain unit
+        // is 256 PS1 world/view units in this conversion.
+        float depth = source.HasViewSpace
+            ? source.ViewZ / 256.0f
+            : source.HasProjectiveW
+                ? source.PerspectiveW / 256.0f
+                : source.Z / 256.0f;
+        float farEnd = alternate ? 19.6f : 25.2f;
+        const float span = 5.0f;
+        float remaining = farEnd - depth;
+        float factor = remaining >= span
+            ? 0.0f
+            : remaining > 0.0f
+                ? 1.0f - remaining / span
+                : 1.0f;
+        float baseWeight;
+        float offsetWeight;
+        if (factor <= 0.0f)
+        {
+            baseWeight = 1.0f;
+            offsetWeight = 0.0f;
+        }
+        else if (factor < 0.75f)
+        {
+            baseWeight = (0.75f - factor) / 0.75f;
+            offsetWeight = factor / 0.75f;
+        }
+        else
+        {
+            baseWeight = 0.0f;
+            offsetWeight = 1.0f;
+        }
 
-    static byte TerrainTargetToModulation(byte target, byte textureAverage)
-    {
-        if (textureAverage == 0)
-            return Math.Min(target, (byte)128);
-        int modulation = (target * 128 + textureAverage / 2) / textureAverage;
-        return (byte)Math.Clamp(modulation, 0, 255);
+        static byte Scale(byte value, float weight) =>
+            (byte)Math.Clamp((int)(value * weight), 0, 255);
+        HleVertex result = source;
+        result.R = Scale(color.BaseR, baseWeight);
+        result.G = Scale(color.BaseG, baseWeight);
+        result.B = Scale(color.BaseB, baseWeight);
+        result.TerrainOffsetR = Scale(color.FarR, offsetWeight);
+        result.TerrainOffsetG = Scale(color.FarG, offsetWeight);
+        result.TerrainOffsetB = Scale(color.FarB, offsetWeight);
+        result.DreamcastTerrainColor = true;
+        return result;
     }
 
     static HleVertex WithTerrainUv(in HleVertex source, ushort packedUv)
@@ -2415,17 +2879,20 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         if (f.Vehicle &&
             DisabledVehicleMaterials.Contains(f.Material.ToString()))
             return;
-        string triangleSignature =
-            $"{f.Material}:{f.TPage & 0x1FF:X3}:{f.Clut & 0x7FFF:X4}";
-        if (DisabledTriangleSignatures.Contains(triangleSignature))
+        if (DisabledTriangleSignatures.Count != 0)
         {
-            if (TriangleProbe is not null && GpuHle.GameplayActive)
-                Console.Error.WriteLine(
-                    "[V8TriangleSignatureSuppressed] " +
-                    $"frame={_frame} packet=0x{f.PacketAddress:X8} " +
-                    $"signature={triangleSignature} " +
-                    $"owner=\"{GpuHle.DescribePacketOwner(f.PacketAddress)}\"");
-            return;
+            string triangleSignature =
+                $"{f.Material}:{f.TPage & 0x1FF:X3}:{f.Clut & 0x7FFF:X4}";
+            if (DisabledTriangleSignatures.Contains(triangleSignature))
+            {
+                if (TriangleProbe is not null && GpuHle.GameplayActive)
+                    Console.Error.WriteLine(
+                        "[V8TriangleSignatureSuppressed] " +
+                        $"frame={_frame} packet=0x{f.PacketAddress:X8} " +
+                        $"signature={triangleSignature} " +
+                        $"owner=\"{GpuHle.DescribePacketOwner(f.PacketAddress)}\"");
+                return;
+            }
         }
 
         // Use per-vertex GTE depth only when all three packet vertices were
@@ -2438,31 +2905,53 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             a.HasCoherentGteZ &&
             b.HasCoherentGteZ &&
             c.HasCoherentGteZ;
+        // Native V8:2 weather and distance-lighting scanlines are inserted at
+        // specific OT depths. They are screen-space geometry, but they are not
+        // depthless UI: the OT position decides which world pixels the strip
+        // shades. Deferred replay must therefore test their recovered OT depth
+        // against the completed world depth buffer. Omitting this test flattened
+        // the whole stack over the final image as hard-edged translucent bars.
         bool depthEligible =
             !DisableRasterDepth &&
-            ConfigManager.View.EnhancedDepthBuffer &&
+            _viewEnhancedDepthBuffer &&
             GpuHle.GameplayActive &&
-            f.Material is not
-                (HleMaterialKind.Ui or HleMaterialKind.ScreenEffect) &&
-            (ConfigManager.View.HighResolution3D ||
-             ConfigManager.View.PerspectiveCorrectTextures) &&
+            f.Material != HleMaterialKind.Ui &&
+            (_viewHighResolution3D ||
+             _viewPerspectiveCorrectTextures) &&
             (modernGeometry || f.OtIndex > 0);
-        // Preserve the PS1 ordering table for opaque world geometry. Source
-        // route surfaces that explicitly carry an RDP compare/update contract
-        // populate the shared depth image; semitransparent world primitives
-        // test it without writing it.
+        // Preserve the PS1 ordering table for ordinary world and vehicle
+        // materials. In particular, vehicle reflection/gloss polygons are
+        // coplanar and interleaved with opaque body polygons; depth-testing
+        // those packets against a partially reconstructed depth image rejects
+        // valid body coverage and makes the vehicle look hollow. Only source
+        // route surfaces with an explicit compare/update contract and deferred
+        // screen effects use the enhanced depth image. The latter are replayed
+        // after the world is complete so their authored OT depth can mask the
+        // weather/fog strip without changing native vehicle painter ordering.
+        bool deferScreenEffect =
+            GpuHle.GameplayActive &&
+            f.Material == HleMaterialKind.ScreenEffect &&
+            f.SemiTrans;
         bool depthWrite =
             depthEligible &&
-            (!f.SemiTrans || IsOpaqueVehicleGlassMaterial(f));
+            !f.SemiTrans;
         bool sourceOpaqueDepthTest =
             f.N64RouteDepthCompare &&
             !f.SemiTrans &&
             coherentRasterDepth;
         bool depthTest =
             depthEligible &&
-            (sourceOpaqueDepthTest || f.SemiTrans);
+            (sourceOpaqueDepthTest || deferScreenEffect);
         bool sourceDepthCompareWrite =
             sourceOpaqueDepthTest && depthTest && depthWrite;
+        if (TracePerformance && f.Material == HleMaterialKind.ScreenEffect)
+        {
+            _traceScreenEffectTriangles++;
+            if (depthTest)
+                _traceDepthTestedScreenEffectTriangles++;
+        }
+        GlDisplayRt? deferredTarget =
+            deferScreenEffect ? Classify() : null;
         GlDisplayRt? backdropTarget =
             _kTarget is { Margin: > 0 } candidateBackdrop
                 ? candidateBackdrop
@@ -2483,12 +2972,13 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             Math.Min(a.V, Math.Min(b.V, c.V)),
             Math.Max(a.U, Math.Max(b.U, c.U)),
             Math.Max(a.V, Math.Max(b.V, c.V)));
-        Begin(
-            f,
-            3,
-            depthTest,
-            depthWrite,
-            sourceDepthCompareWrite);
+        if (!deferScreenEffect)
+            Begin(
+                f,
+                3,
+                depthTest,
+                depthWrite,
+                sourceDepthCompareWrite);
         bool dith = DitherOf(f);
         bool hasDepth = f.Textured && a.HasGteZ && b.HasGteZ && c.HasGteZ;
         bool hasProjectiveW =
@@ -2542,7 +3032,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 HleMaterialKind.AlphaTest or
                 HleMaterialKind.Glass or
                 HleMaterialKind.VehicleReflection or
-                HleMaterialKind.OpaqueVehicleGlass or
                 HleMaterialKind.TerrainRoute;
             float minX = Math.Min(a.X, Math.Min(b.X, c.X));
             float maxX = Math.Max(a.X, Math.Max(b.X, c.X));
@@ -2600,7 +3089,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                         _traceGlassFallbackTriangles++;
                         break;
                     case HleMaterialKind.VehicleReflection:
-                    case HleMaterialKind.OpaqueVehicleGlass:
                         _traceOpaqueFallbackTriangles++;
                         break;
                 }
@@ -2760,11 +3248,14 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             ExpandBackdropEdge(ref drawC, backdropTarget!);
         }
         var va = V(drawA, f, dith, perspectiveCorrect, screenSpacePrimitive,
-            DepthOf(a, f.OtIndex, coherentRasterDepth)); va.BaryX = 1f;
+            DepthOf(a, f.OtIndex, coherentRasterDepth), deferredTarget);
+        va.BaryX = 1f;
         var vb = V(drawB, f, dith, perspectiveCorrect, screenSpacePrimitive,
-            DepthOf(b, f.OtIndex, coherentRasterDepth)); vb.BaryY = 1f;
+            DepthOf(b, f.OtIndex, coherentRasterDepth), deferredTarget);
+        vb.BaryY = 1f;
         var vc = V(drawC, f, dith, perspectiveCorrect, screenSpacePrimitive,
-            DepthOf(c, f.OtIndex, coherentRasterDepth)); vc.BaryZ = 1f;
+            DepthOf(c, f.OtIndex, coherentRasterDepth), deferredTarget);
+        vc.BaryZ = 1f;
         // The panorama is two big textured quads at a constant far depth,
         // written to a small static packet buffer. They are positioned for the
         // authored 320-wide window, so in widescreen the strip can start
@@ -3165,7 +3656,24 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             va.Texpage |= 0x4000; vb.Texpage |= 0x4000; vc.Texpage |= 0x4000;
             va.Clut = vb.Clut = vc.Clut = longest;
         }
-        _verts[_count++] = va; _verts[_count++] = vb; _verts[_count++] = vc;
+        if (deferScreenEffect)
+        {
+            if (TracePerformance)
+                _traceDeferredTriangles++;
+            _deferredScreenEffects.Add(CaptureDeferredBatch(
+                [va, vb, vc],
+                deferredTarget,
+                f,
+                depthTest,
+                depthWrite,
+                sourceDepthCompareWrite));
+        }
+        else
+        {
+            _verts[_count++] = va;
+            _verts[_count++] = vb;
+            _verts[_count++] = vc;
+        }
     }
 
     bool CullByPacketNclip(
@@ -3217,16 +3725,27 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             return false;
         }
 
-        if (preciseArea > 0d)
+        // The retail packet made it through the native emitter when packed
+        // NCLIP was positive. That decision is authoritative and must never be
+        // overturned by the reconstructed test: the two coordinate domains can
+        // disagree around projection saturation and shared packet positions.
+        // Enhanced is monotonic here--it may rescue a packed false negative
+        // with precise camera-space area, but it may not delete a native front
+        // face. A face is rejected only when both tests call it back-facing.
+        bool nativeFrontFace = packet.PackedArea > 0;
+        bool preciseFrontFace = preciseArea > 0d;
+        if (nativeFrontFace || preciseFrontFace)
         {
             if (TracePacketNclipCull)
             {
                 _packetNclipFrontFaces++;
+                if (nativeFrontFace && !preciseFrontFace)
+                    _packetNclipNativePreservedFaces++;
                 if (flags.Vehicle)
                     _packetNclipVehicleFrontFaces++;
                 else
                     _packetNclipObjectFrontFaces++;
-                if (packet.PackedArea <= 0)
+                if (!nativeFrontFace && preciseFrontFace)
                 {
                     _packetNclipRescuedFaces++;
                     if (flags.Vehicle)
@@ -3579,7 +4098,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             ? r.Y - statusTarget.Y
             : float.NaN;
         bool statusHudBacking =
-            ConfigManager.View.VectorIcons &&
+            _viewVectorIcons &&
             topGameplayHud &&
             f.Textured && f.RawTexture && f.SemiTrans &&
             r.X == 80 && statusLocalY == 20f &&
@@ -3610,7 +4129,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             anchor = 0f;
         else if (fullDisplayGameplayRect)
             anchor = 0f;
-        else if (ConfigManager.View.HudAnchoring && GpuHle.GameplayActive &&
+        else if (_viewHudAnchoring && GpuHle.GameplayActive &&
             _kTarget is { Margin: > 0 } target)
         {
             float localCenter = drawX + drawW * 0.5f - target.X;
@@ -3694,10 +4213,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             (!topGameplayHud || hudBackgroundPlate);
         bool highResolutionUiFonts =
             fontLike &&
-            (ConfigManager.View.VectorFonts ||
-             ConfigManager.View.HighResolutionTextures);
+            (_viewVectorFonts ||
+             _viewHighResolutionTextures);
         int uiFlags = highResolutionUiFonts ? 0x2800 :
-            iconLike && ConfigManager.View.VectorIcons ? 0x4800 : 0;
+            iconLike && _viewVectorIcons ? 0x4800 : 0;
         bool topHudKeyedMagenta =
             topGameplayHud &&
             f.Textured && f.RawTexture && f.SemiTrans &&
@@ -3705,7 +4224,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             r.X >= 70 && r.X <= 130;
         if (topHudKeyedMagenta)
             uiFlags |= 0x400000;
-        if (ConfigManager.View.VectorIcons)
+        if (_viewVectorIcons)
         {
             if (radarPlate) uiFlags |= 0x10000;
             if (hudBackgroundPlate) uiFlags |= 0x20000;
@@ -3738,7 +4257,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         // retain their dedicated contour paths and never bleed across atlas
         // cells.
         bool largeUiArtwork =
-            ConfigManager.View.TextureSmoothing &&
+            _viewTextureSmoothing &&
             f.Textured &&
             !topGameplayHud &&
             !fontLike &&
@@ -3783,8 +4302,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             out string loadingTextureResolution,
             allowUiReplacement:
                 (f.Material is HleMaterialKind.Ui or
-                    HleMaterialKind.ScreenEffect) &&
-                !topGameplayHud);
+                     HleMaterialKind.ScreenEffect) &&
+                !topGameplayHud,
+            includeResolution: TraceLoadingUiTextures);
         if (TraceLoadingUiTextures &&
             GpuHle.GameplayActive &&
             GpuHle.DebugGameplayTick == 0 &&
@@ -3837,7 +4357,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     public void DrawLine(in HleVertex a, in HleVertex b, in PrimFlags f)
     {
         Begin(f, 6);
-        bool dith = ConfigManager.View.Ps1Dithering && _env.Dither;
+        bool dith = _viewPs1Dithering && _env.Dither;
         float x1 = a.X, y1 = a.Y;
         float x2 = b.X, y2 = b.Y;
         float dx = x2 - x1, dy = y2 - y1;
@@ -3995,10 +4515,14 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     public unsafe void Flush()
     {
         if (_count == 0) return;
+        long flushStarted = TracePerformance
+            ? Stopwatch.GetTimestamp()
+            : 0;
         ApplyBackdropBatchOuterEdges();
         if (TracePerformance)
         {
             _traceFlushes++;
+            _traceBatchVertices += _count;
             if (_kCheckMask != 0) _traceCheckMaskFlushes++;
             if (_kSetMask != 0) _traceSetMaskFlushes++;
         }
@@ -4139,28 +4663,39 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
         }
 
-        if (!_kTransparent)
+        int blendState = BlendStateOf(_kTransparent, _kBlend, _kMaterial);
+        if (blendState == 0)
         {
-            _gl.Disable(EnableCap.Blend);
-            DrawBatch();
+            // Opaque and the common PS1 semitransparency modes use one
+            // dual-source state. BlendCode selects (1,0), (.5,.5), (1,1), or
+            // (.25,1) per primitive, so interleaved vehicle reflections no
+            // longer force thousands of tiny buffer uploads and draw calls.
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
+            _gl.BlendFuncSeparate(
+                BlendingFactor.Src1Color,
+                BlendingFactor.Src1Alpha,
+                BlendingFactor.One,
+                BlendingFactor.Zero);
             if (_kDepthWrite && !_kSourceDepthCompareWrite)
             {
                 // The PS1 has no Z buffer: its opaque colour contract is the
-                // ordering-table painter order above. Build a separate
-                // nearest-surface depth image only for later transparent
-                // tests, without allowing it to reject opaque colour.
-                _gl.ColorMask(false, false, false, false);
+                // ordering-table painter order above.  DepthFunction.Always
+                // preserves that colour order while writing the same final
+                // nearest-surface depth image for later transparent tests in
+                // this single pass.  The former colour pass plus duplicate
+                // depth-only pass submitted every opaque batch twice.
                 _gl.Enable(EnableCap.DepthTest);
-                _gl.DepthFunc(DepthFunction.Lequal);
+                _gl.DepthFunc(DepthFunction.Always);
                 _gl.DepthMask(true);
                 DrawBatch();
-                _gl.ColorMask(true, true, true, true);
             }
+            else DrawBatch();
         }
         else
         {
             _gl.Enable(EnableCap.Blend);
-            if (_kMaterial == HleMaterialKind.Glass)
+            if (blendState == 2)
             {
                 _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
                 _gl.BlendFunc(
@@ -4199,6 +4734,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             rt.Dirty = true;
             rt.LastDrawFrame = _frame;
         }
+        if (TracePerformance)
+            _traceFlushTicks += Stopwatch.GetTimestamp() - flushStarted;
         _count = 0;
     }
 
@@ -4223,16 +4760,63 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _kClipY1,
         _kTextureSmoothing);
 
+    DeferredBatch CaptureDeferredBatch(
+        GlVertex[] vertices,
+        GlDisplayRt? target,
+        in PrimFlags f,
+        bool depthTest,
+        bool depthWrite,
+        bool sourceDepthCompareWrite)
+    {
+        bool transparent = f.SemiTrans;
+        return new DeferredBatch(
+            vertices,
+            target,
+            transparent,
+            depthTest,
+            depthWrite,
+            sourceDepthCompareWrite,
+            f.Material,
+            f.BlendMode,
+            _env.SetMask ? 1 : 0,
+            _env.CheckMask ? 1 : 0,
+            ~(_env.TwMaskX * 8) & 0xFF,
+            ~(_env.TwMaskY * 8) & 0xFF,
+            (_env.TwOffX & _env.TwMaskX) * 8,
+            (_env.TwOffY & _env.TwMaskY) * 8,
+            _env.ClipX0,
+            _env.ClipY0,
+            _env.ClipX1,
+            _env.ClipY1,
+            ConfigManager.View.TextureSmoothing ? 1 : 0);
+    }
+
     void ReplayDeferredBatches(List<DeferredBatch> batches)
     {
         if (batches.Count == 0)
             return;
 
-        foreach (var batch in batches)
+        bool MatchesCurrent(in DeferredBatch batch) =>
+            batch.Target == _kTarget &&
+            BlendStateOf(batch.Transparent, batch.Blend, batch.Material) ==
+                BlendStateOf(_kTransparent, _kBlend, _kMaterial) &&
+            batch.DepthTest == _kDepthTest &&
+            batch.DepthWrite == _kDepthWrite &&
+            batch.SourceDepthCompareWrite == _kSourceDepthCompareWrite &&
+            batch.SetMask == _kSetMask &&
+            batch.CheckMask == _kCheckMask &&
+            batch.TwAndX == _kTwAndX &&
+            batch.TwAndY == _kTwAndY &&
+            batch.TwOrX == _kTwOrX &&
+            batch.TwOrY == _kTwOrY &&
+            batch.ClipX0 == _kClipX0 &&
+            batch.ClipY0 == _kClipY0 &&
+            batch.ClipX1 == _kClipX1 &&
+            batch.ClipY1 == _kClipY1 &&
+            batch.TextureSmoothing == _kTextureSmoothing;
+
+        void Adopt(in DeferredBatch batch)
         {
-            Debug.Assert(batch.Vertices.Length <= MaxVerts);
-            batch.Vertices.CopyTo(_verts, 0);
-            _count = batch.Vertices.Length;
             _kTarget = batch.Target;
             _kTransparent = batch.Transparent;
             _kDepthTest = batch.DepthTest;
@@ -4251,8 +4835,21 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _kClipX1 = batch.ClipX1;
             _kClipY1 = batch.ClipY1;
             _kTextureSmoothing = batch.TextureSmoothing;
-            Flush();
         }
+
+        foreach (var batch in batches)
+        {
+            Debug.Assert(batch.Vertices.Length <= MaxVerts);
+            if (_count > 0 &&
+                (!MatchesCurrent(batch) ||
+                 _count + batch.Vertices.Length > MaxVerts))
+                Flush();
+            if (_count == 0)
+                Adopt(batch);
+            batch.Vertices.CopyTo(_verts, _count);
+            _count += batch.Vertices.Length;
+        }
+        Flush();
         batches.Clear();
     }
 
@@ -4263,6 +4860,17 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     public unsafe (uint tex, int w, int h, float aspect) PresentDisplay(int dispX, int dispY, int w, int h, bool rgb24 = false, int outW = 0, int outH = 0)
     {
         if (!Ready || w <= 0 || h <= 0) return (0, 0, 0, GpuHle.OutputAspect);
+        if (_pendingCoarseTerrainHalf is { } pending)
+        {
+            _pendingCoarseTerrainHalf = null;
+            _traceCoarseTerrainUnpairedHalves++;
+            DrawTexturedCoarseTerrainHalfImmediate(
+                pending.A,
+                pending.B,
+                pending.C,
+                pending.Flags,
+                pending.Coarse);
+        }
         long presentStarted = Stopwatch.GetTimestamp();
         if (TracePerformance && _traceLastPresentStarted != 0)
         {
@@ -4466,6 +5074,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             Console.Error.WriteLine(
                 $"[PacketNclipCull] frames={_frame - 59}-{_frame} " +
                 $"front={_packetNclipFrontFaces} " +
+                $"native-preserved={_packetNclipNativePreservedFaces} " +
                 $"rescued={_packetNclipRescuedFaces} " +
                 $"back={_packetNclipBackFaces} " +
                 $"vehicle={_packetNclipVehicleFrontFaces}/" +
@@ -4476,6 +5085,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     $"{_packetNclipObjectBackFaces} " +
                 $"missing={_packetNclipMissing}");
             _packetNclipFrontFaces = 0;
+            _packetNclipNativePreservedFaces = 0;
             _packetNclipRescuedFaces = 0;
             _packetNclipBackFaces = 0;
             _packetNclipVehicleFrontFaces = 0;
@@ -4488,6 +5098,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         }
         FlushSelectorRenderTrace();
         _frame++;
+        RefreshViewSettings();
         // Re-armed each frame the modal is drawn, so it follows the overlay
         // rather than lingering after it closes.
         if (GpuHle.NativeModalHold > 0) GpuHle.NativeModalHold--;
@@ -4517,6 +5128,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     $"[V8TriangleProbeContinuous] frame={_frame} {triangle}");
         _pendingProbeTriangles.Clear();
         Flush();
+        ReplayDeferredBatches(_deferredScreenEffects);
         ReplayDeferredBatches(_deferredLoadingPrompt);
         if (TraceTerrainVram && GpuHle.GameplayActive &&
             _frame - _terrainVramTraceFrame >= 120)
@@ -4627,6 +5239,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 $"route-source-coarse={_traceTerrainRouteSourceCoarse} " +
                 $"route-source-transition={_traceTerrainRouteSourceTransition} " +
                 $"route-source-unresolved={_traceTerrainRouteSourceUnresolved} " +
+                $"coarse-paired-quads={_traceCoarseTerrainPairedQuads} " +
+                $"dc-leaves-1={_traceDreamcastOneUnitLeaves} dc-leaves-2={_traceDreamcastTwoUnitLeaves} dc-leaves-4={_traceDreamcastFourUnitLeaves} " +
+                $"coarse-unpaired-halves={_traceCoarseTerrainUnpairedHalves} " +
                 $"modern-overspan={_traceModernOverspanTriangles} " +
                 $"native-overspan-rejected=" +
                     $"{_traceNativeOverspanRejectedTriangles}");
@@ -4645,6 +5260,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _traceTerrainRouteSourceCoarse = 0;
             _traceTerrainRouteSourceTransition = 0;
             _traceTerrainRouteSourceUnresolved = 0;
+            _traceCoarseTerrainPairedQuads = 0;
+            _traceDreamcastOneUnitLeaves = _traceDreamcastTwoUnitLeaves = _traceDreamcastFourUnitLeaves = 0;
+            _traceCoarseTerrainUnpairedHalves = 0;
             _traceWorldTriangles = 0;
             _traceWorldFallbackTriangles = 0;
             _traceEffectFallbackTriangles = 0;
@@ -4795,6 +5413,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             if ((_frame % 60) == 0)
             {
                 var wide = Gte.ConsumeWidescreenProjectionMetrics();
+                var texturePerformance =
+                    _textureReplacements?.ConsumePerformanceMetrics() ??
+                    default;
                 double tickMs = 1000.0 / Stopwatch.Frequency;
                 double frameMeanMs = _traceFrameIntervals == 0
                     ? 0.0
@@ -4803,6 +5424,24 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 double effectiveFps = frameMeanMs <= 0.0
                     ? 0.0
                     : 1000.0 / frameMeanMs;
+                string topTransitions = string.Join(
+                    '|',
+                    _traceStateTransitions
+                        .OrderByDescending(pair => pair.Value)
+                        .ThenBy(pair => pair.Key, StringComparer.Ordinal)
+                        .Take(6)
+                        .Select(pair => $"{pair.Key}={pair.Value}"));
+                long allocatedBytes = GC.GetAllocatedBytesForCurrentThread();
+                long allocatedDelta = Math.Max(
+                    0,
+                    allocatedBytes - _traceLastAllocatedBytes);
+                int gc0 = GC.CollectionCount(0);
+                int gc1 = GC.CollectionCount(1);
+                int gc2 = GC.CollectionCount(2);
+                var vehicleOwnership =
+                    GpuHle.ConsumeVehiclePacketOwnershipMetrics();
+                long objectRenderEntries = Sdk.V82Compat.ObjectRenderEntries;
+                long objectRenderExits = Sdk.V82Compat.ObjectRenderExits;
                 Console.Error.WriteLine(
                     $"[EnhancedPerformance] frames={_frame - 59}-{_frame} " +
                     $"frame-mean-ms={frameMeanMs:F3} " +
@@ -4810,7 +5449,65 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     $"effective-fps={effectiveFps:F2} " +
                     $"present-mean-ms={_tracePresentTicks * tickMs / 60.0:F3} " +
                     $"present-max-ms={_tracePresentMaxTicks * tickMs:F3} " +
+                    $"draw-tri-calls={_traceDrawTriCalls} " +
+                    $"draw-tri-ms={_traceDrawTriTicks * tickMs:F3} " +
+                    $"generated-terrain-triangles=" +
+                        $"{_traceGeneratedTerrainTriangles} " +
+                    $"vehicle-packet-triangles=" +
+                        $"{_traceVehiclePacketTriangles} " +
+                    $"vehicle-ownership=" +
+                        $"ranges:{vehicleOwnership.RangeCount}," +
+                        $"explicit:{vehicleOwnership.ExplicitPacketCount}," +
+                        $"reflections:{vehicleOwnership.ReflectionPacketCount}," +
+                        $"owned:{vehicleOwnership.OwnedRangeCount}," +
+                        $"bytes:{vehicleOwnership.TotalRangeBytes}," +
+                        $"max:{vehicleOwnership.MaximumRangeBytes}," +
+                        $"lookups:{vehicleOwnership.Lookups}," +
+                        $"hits:{vehicleOwnership.ExplicitHits}/" +
+                            $"{vehicleOwnership.RangeHits}," +
+                        $"tests:{vehicleOwnership.RangeTests}," +
+                        $"registrations:{vehicleOwnership.Registrations}," +
+                        $"duplicates:{vehicleOwnership.DuplicateRegistrations} " +
+                    $"object-render=" +
+                        $"entries:{objectRenderEntries - _traceLastObjectRenderEntries}," +
+                        $"exits:{objectRenderExits - _traceLastObjectRenderExits}," +
+                        $"scope:{Sdk.V82Compat.ObjectRenderScopeDepth}," +
+                        $"imported-scope:{Sdk.V82Compat.ImportedRenderGroupScopeDepth} " +
+                    $"texture-resolves={texturePerformance.ResolveCalls} " +
+                    $"texture-cache={texturePerformance.CacheHits}/" +
+                        $"{texturePerformance.CacheMisses} " +
+                    $"texture-resolve-ms=" +
+                        $"{texturePerformance.ResolveTicks * tickMs:F3} " +
+                    $"texture-revision-ms=" +
+                        $"{texturePerformance.RevisionTicks * tickMs:F3} " +
+                    $"texture-decode-ms=" +
+                        $"{texturePerformance.DecodeTicks * tickMs:F3} " +
+                    $"texture-hash-ms=" +
+                        $"{texturePerformance.HashTicks * tickMs:F3} " +
+                    $"terrain-lookup-ms=" +
+                        $"{texturePerformance.TerrainLookupTicks * tickMs:F3} " +
+                    $"texture-marks={texturePerformance.Marks} " +
+                    $"texture-marked-pixels=" +
+                        $"{texturePerformance.MarkedPixels} " +
+                    $"flush-cpu-ms={_traceFlushTicks * tickMs:F3} " +
+                    $"deferred-triangles={_traceDeferredTriangles} " +
+                    $"screen-effects={_traceScreenEffectTriangles}," +
+                        $"depth-tested:{_traceDepthTestedScreenEffectTriangles} " +
+                    $"allocated-mib={allocatedDelta / 1048576.0:F3} " +
+                    $"gc={gc0 - _traceLastGc0}/" +
+                        $"{gc1 - _traceLastGc1}/{gc2 - _traceLastGc2} " +
                     $"flushes={_traceFlushes} " +
+                    $"batch-vertices={_traceBatchVertices} " +
+                    $"vertices-per-flush=" +
+                        $"{(_traceFlushes == 0 ? 0.0 : (double)_traceBatchVertices / _traceFlushes):F2} " +
+                    $"begin-flushes={_traceBeginFlushes} " +
+                    $"breaks[target={_traceTargetBreaks}," +
+                        $"blend={_traceBlendBreaks},depth={_traceDepthBreaks}," +
+                        $"material={_traceMaterialBreaks},mask={_traceMaskBreaks}," +
+                        $"window={_traceTextureWindowBreaks},clip={_traceClipBreaks}," +
+                        $"smooth={_traceSmoothingBreaks}," +
+                        $"capacity={_traceCapacityBreaks}] " +
+                    $"top-transitions={topTransitions} " +
                     $"msaa-resolves={_traceMsaaResolves} " +
                     $"check-mask-flushes={_traceCheckMaskFlushes} " +
                     $"set-mask-flushes={_traceSetMaskFlushes} " +
@@ -4834,6 +5531,32 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 _tracePresentationExtentSwitches = 0;
                 _tracePresentTicks = 0;
                 _tracePresentMaxTicks = 0;
+                _traceDrawTriCalls = 0;
+                _traceDrawTriTicks = 0;
+                _traceGeneratedTerrainTriangles = 0;
+                _traceVehiclePacketTriangles = 0;
+                _traceFlushTicks = 0;
+                _traceDeferredTriangles = 0;
+                _traceScreenEffectTriangles = 0;
+                _traceDepthTestedScreenEffectTriangles = 0;
+                _traceLastAllocatedBytes = allocatedBytes;
+                _traceLastGc0 = gc0;
+                _traceLastGc1 = gc1;
+                _traceLastGc2 = gc2;
+                _traceLastObjectRenderEntries = objectRenderEntries;
+                _traceLastObjectRenderExits = objectRenderExits;
+                _traceBatchVertices = 0;
+                _traceBeginFlushes = 0;
+                _traceTargetBreaks = 0;
+                _traceBlendBreaks = 0;
+                _traceDepthBreaks = 0;
+                _traceMaterialBreaks = 0;
+                _traceMaskBreaks = 0;
+                _traceTextureWindowBreaks = 0;
+                _traceClipBreaks = 0;
+                _traceSmoothingBreaks = 0;
+                _traceCapacityBreaks = 0;
+                _traceStateTransitions.Clear();
                 _traceFrameIntervalTicks = 0;
                 _traceFrameIntervalMaxTicks = 0;
                 _traceFrameIntervals = 0;
