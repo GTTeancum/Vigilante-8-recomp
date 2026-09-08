@@ -17,11 +17,21 @@ internal static class V82TransformationProbe
         Environment.GetEnvironmentVariable("RECOMPONE_V82_TRANSFORMATION_PROBE_PROFILE") == "powerups";
     static readonly bool AttachmentProfile =
         Environment.GetEnvironmentVariable("RECOMPONE_V82_TRANSFORMATION_PROBE_PROFILE") == "attachment";
+    static readonly bool ExitAfterAttachmentLifecycle =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_TRANSFORMATION_PROBE_EXIT_AFTER_COMPLETE") == "1";
     static readonly bool InspectionCamera =
         Environment.GetEnvironmentVariable("RECOMPONE_V82_WATER_INSPECTION_CAMERA") == "1";
     static readonly int InspectionYaw = InspectionAngle("YAW",0,-180,180);
     static readonly int InspectionPitch = InspectionAngle("PITCH",-45,-80,-5);
+    static readonly uint InspectionDistance = InspectionDistanceOverride();
     static readonly int WaterSiteSeparation = InspectionWaterSeparation();
+    static uint InspectionDistanceOverride()
+    {
+        return uint.TryParse(Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_WATER_INSPECTION_DISTANCE_UNITS"),out uint units)
+            && units>=1 && units<=16 ? units<<16 : 0;
+    }
     static int InspectionWaterSeparation()
     {
         return int.TryParse(Environment.GetEnvironmentVariable(
@@ -103,7 +113,9 @@ internal static class V82TransformationProbe
                 uint camera=m.ReadU32(0x8006B8D8);
                 if (camera>=0x80010000 && camera<0x80800000-0xDC && m.ReadU32(camera+0x80)==player)
                 {
-                    uint distance=Math.Max(m.ReadU32(camera+0x9C),0x30000u);
+                    uint distance=InspectionDistance!=0
+                        ? InspectionDistance
+                        : Math.Max(m.ReadU32(camera+0x9C),0x30000u);
                     m.WriteU32(camera+0x9C,distance);
                     // Native 8004B1B0 adds +92 to the target vehicle yaw;
                     // +90 is elevation. The fixture owns only this camera.
@@ -251,6 +263,17 @@ internal static class V82TransformationProbe
                 V82WaterAttachmentProbe.Dump(c,m,other,frame);
         if (frame is 90 or 150 or 270 or 540)
             V82WaterAttachmentProbe.Dump(c, m, player, frame);
+        if (AttachmentProfile && ExitAfterAttachmentLifecycle && frame == 1050)
+        {
+            // The attachment contract ends with the final repeated-land
+            // sample above. Exit the opt-in fixture here instead of forcing
+            // unrelated defeat/menu code merely to stop the process.
+            Console.Error.WriteLine(
+                "[TransformationProbe] lifecycle-complete frame=1050; " +
+                "clean fixture exit");
+            Runtime.Shutdown();
+            Environment.Exit(0);
+        }
     }
 
     static bool Valid(IMemory m, uint p) => p >= 0x80010000 && p < 0x80800000 - 0x200 &&

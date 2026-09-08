@@ -215,7 +215,10 @@ def fixture_text(
         # a burst or changing shipping/runtime behavior.
         lines.extend([
             "[gameplay]",
-            f"{capture_poll}+1=CROSS # representative_visual_capture",
+            # InputManager requests the capture at this deterministic pulse.
+            # Put the marker on unused player two so the evidence frame cannot
+            # contain a player-one weapon flash or perturb the proof camera.
+            f"{capture_poll}+1=P2:CROSS # representative_visual_capture",
             "",
         ])
     lines.extend([
@@ -265,6 +268,34 @@ def game_process_ids() -> list[int]:
         except ValueError:
             pass
     return result
+
+
+def game_process_details(pids: list[int]) -> list[dict]:
+    """Describe specific game processes for an interrupted isolation run."""
+    if os.name != "nt" or not pids:
+        return []
+    safe_pids = sorted({int(pid) for pid in pids if int(pid) > 0})
+    script = (
+        "$ids=@(" + ",".join(str(pid) for pid in safe_pids) + ");"
+        "Get-CimInstance Win32_Process | Where-Object {"
+        "$ids -contains [int]$_.ProcessId} | Select-Object "
+        "ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine | "
+        "ConvertTo-Json -Compress"
+    )
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if completed.returncode != 0 or not completed.stdout.strip():
+        return []
+    try:
+        details = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return []
+    return details if isinstance(details, list) else [details]
 
 
 def route_summary(segment: str, expected_pulses: int) -> dict:
@@ -534,6 +565,12 @@ def main() -> int:
         help="composed capture resolution (default: 1280x720)",
     )
     parser.add_argument(
+        "--presentation-burst-frames",
+        type=int,
+        default=0,
+        help="retain consecutive composed frames around the visual capture",
+    )
+    parser.add_argument(
         "--player-type",
         type=int,
         default=0,
@@ -567,6 +604,8 @@ def main() -> int:
         )
     if args.proof_camera_cycles < 0 or args.proof_camera_cycles > 3:
         parser.error("proof camera cycles must be between 0 and 3")
+    if args.presentation_burst_frames < 0 or args.presentation_burst_frames > 600:
+        parser.error("presentation burst frames must be between 0 and 600")
     if not re.fullmatch(r"[1-9][0-9]{2,3}x[1-9][0-9]{2,3}",
                         args.presentation_resolution):
         parser.error("presentation resolution must use WIDTHxHEIGHT")
@@ -682,6 +721,9 @@ def main() -> int:
             "1" if args.capture_gameplay else "0"
         ),
         "RECOMPONE_PRESENTATION_RESOLUTION": args.presentation_resolution,
+        "RECOMPONE_PRESENTATION_CAPTURE_BURST_FRAMES": str(
+            args.presentation_burst_frames
+        ),
         "RECOMPONE_CAPTURE_NATIVE_GUEST_SELECTOR": "0",
         "RECOMPONE_CAPTURE_V82_SELECTOR_TURNS": "0",
         "RECOMPONE_CAPTURE_SELECTOR_GENERATIONS": "0",
@@ -708,7 +750,6 @@ def main() -> int:
         "RECOMPONE_HEADLESS",
         "RECOMPONE_SCRIPT_EXIT_AFTER_POLLS",
         "RECOMPONE_PRESENTATION_CAPTURE_FRAMES",
-        "RECOMPONE_PRESENTATION_CAPTURE_BURST_FRAMES",
         "RECOMPONE_V82_PLAYER_TYPE",
     ):
         env.pop(key, None)

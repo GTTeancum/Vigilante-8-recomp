@@ -35,6 +35,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         public float ReplacementBiasR, ReplacementBiasG, ReplacementBiasB;
         public int BlendCode;
         public uint TerrainOffset;
+        public float TerrainMipX, TerrainMipY, TerrainMipW, TerrainMipH;
     }
 
     readonly struct DrawTriTimingScope : IDisposable
@@ -73,6 +74,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     static readonly bool TraceVehicleTextureReplacements =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_VEHICLE_TEXTURE_REPLACEMENTS") == "1";
+    static readonly bool TraceWorldTextureReplacements =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_V82_WORLD_TEXTURES") == "1";
     static readonly bool DisableRasterDepth =
         Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_RASTER_DEPTH") == "1";
     static readonly bool DisableProjectiveTextures =
@@ -163,6 +167,22 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         ParseTriangleProbe(
             Environment.GetEnvironmentVariable(
                 "RECOMPONE_TRACE_TRIANGLE_PROBE"));
+    static readonly (float X, float Y)[] FinalOwnerPoints =
+        (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_FINAL_OWNER_POINT") ?? "")
+        .Split(';', StringSplitOptions.RemoveEmptyEntries)
+        .Select(ParseTriangleProbe).Where(p => p.HasValue)
+        .Select(p => p!.Value).ToArray();
+    string _finalOwnerLeaf = "none";
+    int _finalOwnerOrder;
+    readonly Dictionary<(int X, int Y, int Px, int Py), (float Depth, uint Rgba)>
+        _finalOwnerPixelHistory = [];
+    readonly Dictionary<GlVertex, uint> _finalOwnerPackets = [];
+    static bool FinalOwnerActive => FinalOwnerPoints.Length != 0 &&
+        GpuHle.GameplayActive && TraceTerrainCellTicks is { } ticks &&
+        GpuHle.DebugGameplayTick >= ticks.Start && GpuHle.DebugGameplayTick <= ticks.End;
+    static readonly bool TraceWaterDepthProbe =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_WATER_DEPTH_PROBE") == "1";
     static readonly HashSet<string> TriangleProbeLabels =
         (Environment.GetEnvironmentVariable("RECOMPONE_TRACE_TRIANGLE_LABELS") ?? "")
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -205,6 +225,30 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     TextureReplacementAtlas? _textureReplacements;
     readonly HashSet<ulong> _vehicleReplacementHits = [];
     readonly HashSet<ulong> _vehicleReplacementMisses = [];
+    readonly record struct WorldTextureSource(
+        int TPage, int Clut,
+        int MinU, int MinV, int MaxU, int MaxV,
+        HleMaterialKind Material);
+    readonly record struct WorldTextureOutcome(
+        ulong TextureKey, bool Hit, string Resolution);
+    sealed class WorldTextureFrameOwner
+    {
+        public readonly Dictionary<WorldTextureSource, WorldTextureOutcome>
+            Surfaces = [];
+        public int Triangles;
+        public float MinX = float.PositiveInfinity;
+        public float MinY = float.PositiveInfinity;
+        public float MaxX = float.NegativeInfinity;
+        public float MaxY = float.NegativeInfinity;
+        public float MinViewZ = float.PositiveInfinity;
+        public float MaxViewZ = float.NegativeInfinity;
+    }
+    readonly Dictionary<string, WorldTextureFrameOwner>
+        _worldTextureFrameOwners = [];
+    readonly Dictionary<string,
+        Dictionary<WorldTextureSource, WorldTextureOutcome>>
+        _worldTexturePreviousOwners = [];
+    long _worldTextureTraceDrawnFrames;
     HudSvgAtlas? _hudSvg;
     readonly GlDisplayRt?[] _rts = new GlDisplayRt?[2];
     long _rtStamp;
@@ -242,6 +286,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     PendingCoarseTerrainHalf? _pendingCoarseTerrainHalf;
     readonly HashSet<GpuHle.TerrainPatchGeometry> _renderedDreamcastPatches =
         new(ReferenceEqualityComparer.Instance);
+    long _renderedDreamcastPatchFrame = long.MinValue;
     long _traceDreamcastOneUnitLeaves, _traceDreamcastTwoUnitLeaves, _traceDreamcastFourUnitLeaves;
     long _traceCoarseTerrainPairedQuads;
     long _traceCoarseTerrainUnpairedHalves;
@@ -356,6 +401,15 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     static readonly bool PacketNclipCull =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_V82_PACKET_NCLIP_CULL") != "0";
+    // The retail Dreamcast ordinary-object context compiles ISP culling mode
+    // 3 (PVR_CULLING_CW).  V8:2's PS1 emitter can submit coincident,
+    // oppositely-wound faces carrying different texture state; a packet-level
+    // GTE association is not fine-grained enough to choose between them.
+    // Apply the recovered PVR rule from each submitted triangle's own exact
+    // projection after near-plane clipping.
+    static readonly bool DreamcastWorldObjectCull =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_V82_DREAMCAST_WORLD_OBJECT_CULL") != "0";
     static readonly bool TracePacketNclipCull =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_PACKET_NCLIP_CULL") == "1";
@@ -500,6 +554,86 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _backdropPending.Clear();
     }
 
+    /// <summary>
+    /// Replays the complete function-owned panorama after extending only its
+    /// global outer edges.  Unlike an ordinary GL material batch, this spans
+    /// every texture/state break inside the panorama, so an internal quad join
+    /// can never be mistaken for the edge of the widescreen image.
+    /// </summary>
+    void ReplayDeferredSky()
+    {
+        if (_deferredSky.Count == 0)
+            return;
+
+        GlDisplayRt? target = _deferredSky[0].State.Target;
+        if (target is not { Margin: > 0 })
+        {
+            ReplayBufferedBatches(_deferredSky);
+            return;
+        }
+
+        float left = -target.Margin;
+        float right = target.Wide1x - target.Margin;
+        float stripLeft = float.PositiveInfinity;
+        float stripRight = float.NegativeInfinity;
+        foreach (BufferedDeferredBatch batch in _deferredSky)
+        {
+            foreach (GlVertex vertex in batch.Vertices)
+            {
+                float x = ReconstructedX(vertex);
+                stripLeft = MathF.Min(stripLeft, x);
+                stripRight = MathF.Max(stripRight, x);
+            }
+        }
+
+        if (float.IsFinite(stripLeft) && float.IsFinite(stripRight) &&
+            stripRight > stripLeft)
+        {
+            foreach (BufferedDeferredBatch batch in _deferredSky)
+            {
+                for (int index = 0; index + 2 < batch.Vertices.Count;
+                     index += 3)
+                {
+                    GlVertex a = batch.Vertices[index];
+                    GlVertex b = batch.Vertices[index + 1];
+                    GlVertex c = batch.Vertices[index + 2];
+                    uint probePacket = FinalOwnerActive
+                        ? _finalOwnerPackets.GetValueOrDefault(a) : 0u;
+                    if (FinalOwnerActive)
+                        Console.Error.WriteLine($"[SkyExtensionSource] frame={_frame} tick={GpuHle.DebugGameplayTick} packet=0x{probePacket:X8} owner={GpuHle.DescribePacketOwner(probePacket)} material={a.Material} xy={ReconstructedX(a)},{ReconstructedY(a)};{ReconstructedX(b)},{ReconstructedY(b)};{ReconstructedX(c)},{ReconstructedY(c)} view-z={a.ViewZ},{b.ViewZ},{c.ViewZ} uv={a.U},{a.V};{b.U},{b.V};{c.U},{c.V}");
+                    float beforeMin = MathF.Min(ReconstructedX(a),
+                        MathF.Min(ReconstructedX(b), ReconstructedX(c)));
+                    float beforeMax = MathF.Max(ReconstructedX(a),
+                        MathF.Max(ReconstructedX(b), ReconstructedX(c)));
+                    ExtendBackdropTriangleOuterEdge(
+                        ref a, ref b, ref c,
+                        stripLeft, stripRight, left, right);
+                    float afterMin = MathF.Min(ReconstructedX(a),
+                        MathF.Min(ReconstructedX(b), ReconstructedX(c)));
+                    float afterMax = MathF.Max(ReconstructedX(a),
+                        MathF.Max(ReconstructedX(b), ReconstructedX(c)));
+                    if (afterMin < beforeMin - 0.25f)
+                        _backdropMovedLeft++;
+                    if (afterMax > beforeMax + 0.25f)
+                        _backdropMovedRight++;
+                    _backdropMinX = MathF.Min(_backdropMinX, afterMin);
+                    _backdropMaxX = MathF.Max(_backdropMaxX, afterMax);
+                    batch.Vertices[index] = a;
+                    if (FinalOwnerActive)
+                    {
+                        _finalOwnerPackets[a] = probePacket;
+                        _finalOwnerPackets[b] = probePacket;
+                        _finalOwnerPackets[c] = probePacket;
+                    }
+                    batch.Vertices[index + 1] = b;
+                    batch.Vertices[index + 2] = c;
+                }
+            }
+        }
+
+        ReplayBufferedBatches(_deferredSky);
+    }
+
     static readonly bool TraceNearDepths =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_V82_TRACE_NEAR_DEPTHS") == "1";
@@ -552,6 +686,28 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     static readonly bool TrueVertexDepth =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_V82_TRUE_DEPTH") == "1";
+    static readonly bool TraceDreamcastWaterBase =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_V82_NATIVE_WATER") == "1";
+    static readonly bool DiagnosticSkipDreamcastWaterBase =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_DIAGNOSTIC_SKIP_DC_WATER_BASE") == "1";
+    static readonly bool DiagnosticSkipDreamcastWaterAll =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_DIAGNOSTIC_SKIP_DC_WATER_ALL") == "1";
+    static readonly bool DiagnosticDisableDreamcastFog =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_DIAGNOSTIC_DISABLE_DC_FOG") == "1";
+    static readonly bool DiagnosticDisableTerrainMipmaps =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_DIAGNOSTIC_DISABLE_TERRAIN_MIPMAPS") == "1";
+    static readonly bool DiagnosticMaterialOwnership =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_DIAGNOSTIC_MATERIAL_OWNERSHIP") == "1";
+    int _dreamcastWaterBaseTraceCount;
+    int _dreamcastWaterSurfaceTraceCount;
+    long _traceDreamcastWaterBaseReplacements;
+    long _traceDreamcastWaterSurfaceReplacements;
     static readonly float? WorldGapScanline =
         float.TryParse(
             Environment.GetEnvironmentVariable(
@@ -755,7 +911,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     }
 
     uint _vao, _vbo, _presentVao, _presentVbo, _progPrim, _progPresent, _progPresent24;
-    uint _presentFbo, _presentTex;
+    uint _presentFbo, _presentTex, _dreamcastWaterTexture;
+    ulong _dreamcastWaterTextureRevision;
     int _presentW, _presentH;
     bool _presentNearest;
 
@@ -771,6 +928,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     bool _kDepthTest;
     bool _kDepthWrite;
     bool _kSourceDepthCompareWrite;
+    bool _kDreamcastTerrainDepth;
     HleMaterialKind _kMaterial;
     int _kBlend, _kSetMask, _kCheckMask;
     int _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY;
@@ -782,7 +940,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         bool DepthTest,
         bool DepthWrite,
         bool SourceDepthCompareWrite,
+        bool DreamcastTerrainDepth,
         HleMaterialKind Material,
+        uint PrimitiveGroup,
+        GpuHle.DreamcastWaterBaseQuad? WaterBaseQuad,
+        GpuHle.DreamcastWaterSurfaceMesh? WaterSurfaceMesh,
         int Blend,
         int SetMask,
         int CheckMask,
@@ -797,16 +959,36 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         int TextureSmoothing);
     readonly List<DeferredBatch> _deferredLoadingPrompt = [];
     readonly List<DeferredBatch> _deferredScreenEffects = [];
+    sealed class BufferedDeferredBatch(DeferredBatch state)
+    {
+        public DeferredBatch State { get; } = state;
+        public List<GlVertex> Vertices { get; } = [];
+    }
+    // Water packets are interleaved through the PS1 ordering table. The
+    // Dreamcast submits the same native mesh as two contiguous translucent
+    // contexts after the opaque scene, so gather only those function-owned
+    // packets and replay them as that pair. This is a material/state staging
+    // rule, not a map or texture exception.
+    readonly List<BufferedDeferredBatch> _deferredWater = [];
+    readonly HashSet<uint> _emittedWaterBaseGroups = [];
+    readonly HashSet<uint> _emittedWaterSurfaceGroups = [];
+    long _emittedWaterBaseGroupFrame = -1;
+    // The panorama can change texture/material state between its component
+    // quads.  Buffer the function-owned sky packets until the complete strip
+    // is available so widescreen continuation moves only the strip's real
+    // outer edges, never an internal join exposed by an ordinary state flush.
+    readonly List<BufferedDeferredBatch> _deferredSky = [];
     int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv;
     int _uTextureSmoothing, _uTextureMipmaps, _uAnisotropy;
     int _uEnhancedShadows, _uEnhancedParticles, _uEnhancedFog;
-    int _uFogColor, _uFogColorValid;
+    int _uFogColor, _uFogColorValid, _uDreamcastFogActive;
     // The arena's own horizon colour, harvested from the full-display backdrop
     // quad the engine draws behind every gameplay frame. Distance fog has to
     // converge on this, not on a synthetic haze, or far geometry never joins
     // the sky it is standing against.
     float _fogColorR, _fogColorG, _fogColorB;
     bool _hasFogColor;
+    bool _dreamcastFogActive;
     long _fogResetFrame = long.MinValue;
     long _fogColorFrame = long.MinValue;
     int _fogColorOt = int.MinValue;
@@ -860,14 +1042,18 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _backdropPackets.Clear();
         _pendingCoarseTerrainHalf = null;
         _renderedDreamcastPatches.Clear();
+        _renderedDreamcastPatchFrame = long.MinValue;
         _deferredLoadingPrompt.Clear();
         _deferredScreenEffects.Clear();
+        _deferredWater.Clear();
+        _deferredSky.Clear();
         ResetAtmosphereState();
     }
 
     public void ResetAtmosphereState()
     {
         _hasFogColor = false;
+        _dreamcastFogActive = false;
         _fogColorR = 0f;
         _fogColorG = 0f;
         _fogColorB = 0f;
@@ -880,6 +1066,41 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         if (TraceFog)
             Console.Error.WriteLine(
                 $"[EnhancedFogReset] frame={_fogResetFrame}");
+    }
+
+    public void SetDreamcastFogColor(byte red, byte green, byte blue)
+    {
+        float r = red / 255f;
+        float g = green / 255f;
+        float b = blue / 255f;
+        if (_dreamcastFogActive && _hasFogColor &&
+            _fogColorR == r && _fogColorG == g && _fogColorB == b)
+            return;
+
+        // Uniforms are batch-scoped. Preserve any geometry submitted under
+        // the previous arena before changing its authored atmosphere.
+        Flush();
+        _fogColorR = r;
+        _fogColorG = g;
+        _fogColorB = b;
+        _hasFogColor = true;
+        _dreamcastFogActive = true;
+        // The legacy trace fields described a guessed full-screen backdrop
+        // candidate. Under the recovered Dreamcast path the COLS word is the
+        // authoritative level value, so timestamp that selection directly;
+        // otherwise the multi-map gate falsely reports the valid new level
+        // colour as predating its reset.
+        _fogColorFrame = _frame;
+        _fogColorOt = int.MaxValue;
+        _fogColorSpan = 129f;
+        float minimum = MathF.Min(r, MathF.Min(g, b));
+        float maximum = MathF.Max(r, MathF.Max(g, b));
+        _fogColorNearWhite =
+            minimum > 0.94f && maximum - minimum < 0.04f;
+        if (TraceFog)
+            Console.Error.WriteLine(
+                $"[EnhancedDreamcastFog] rgb={red},{green},{blue} " +
+                "density=0.275390625 table=retail-8C094680");
     }
 
     void TraceSelectorTriangle(
@@ -1022,6 +1243,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _uEnhancedFog = _gl.GetUniformLocation(_progPrim, "uEnhancedFog");
         _uFogColor = _gl.GetUniformLocation(_progPrim, "uFogColor");
         _uFogColorValid = _gl.GetUniformLocation(_progPrim, "uFogColorValid");
+        _uDreamcastFogActive =
+            _gl.GetUniformLocation(_progPrim, "uDreamcastFogActive");
         _uPerspectiveCorrectTextures =
             _gl.GetUniformLocation(_progPrim, "uPerspectiveCorrectTextures");
         _uPerspectiveCorrectColors =
@@ -1038,10 +1261,22 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uHudSvg"), 2);
         _gl.Uniform1(
             _gl.GetUniformLocation(_progPrim, "uReplacementAtlas"), 3);
+        _gl.Uniform1(
+            _gl.GetUniformLocation(_progPrim, "uTerrainMipAtlas"), 4);
+        _gl.Uniform1(
+            _gl.GetUniformLocation(_progPrim, "uDreamcastWater"), 5);
+        _gl.Uniform1(
+            _gl.GetUniformLocation(
+                _progPrim, "uDiagnosticMaterialOwnership"),
+            DiagnosticMaterialOwnership ? 1 : 0);
         _gl.Uniform2(
             _gl.GetUniformLocation(_progPrim, "uReplacementAtlasSize"),
             (float)(_textureReplacements?.Width ?? 1),
             (float)(_textureReplacements?.Height ?? 1));
+        _gl.Uniform2(
+            _gl.GetUniformLocation(_progPrim, "uTerrainMipAtlasSize"),
+            (float)(_textureReplacements?.TerrainMipWidth ?? 1),
+            (float)(_textureReplacements?.TerrainMipHeight ?? 1));
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uScale"), GlVram.Scale);
         bool stockPaintCorrection =
             !DisableStockPaintCorrection &&
@@ -1088,6 +1323,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.EnableVertexAttribArray(16); _gl.VertexAttribPointer(16, 3, VertexAttribPointerType.Float, false, stride, (void*)128);
         _gl.EnableVertexAttribArray(17); _gl.VertexAttribIPointer(17, 1, VertexAttribIType.Int, stride, (void*)140);
         _gl.EnableVertexAttribArray(18); _gl.VertexAttribIPointer(18, 1, VertexAttribIType.UnsignedInt, stride, (void*)144);
+        _gl.EnableVertexAttribArray(19); _gl.VertexAttribPointer(19, 4, VertexAttribPointerType.Float, false, stride, (void*)148);
 
         // fullscreen quad for present, real vbo since gl_VertexID without arrays does not draw on mesa for some reason?? or i did it wrong?
         _presentVao = _gl.GenVertexArray();
@@ -1385,6 +1621,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         bool depthTest,
         bool depthWrite,
         bool sourceDepthCompareWrite,
+        bool dreamcastTerrainDepth,
         HleMaterialKind material)
     {
         int twAndX = ~(_env.TwMaskX * 8) & 0xFF, twAndY = ~(_env.TwMaskY * 8) & 0xFF;
@@ -1400,6 +1637,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _kDepthTest == depthTest &&
             _kDepthWrite == depthWrite &&
             _kSourceDepthCompareWrite == sourceDepthCompareWrite
+            && _kDreamcastTerrainDepth == dreamcastTerrainDepth
             && _kSetMask == (_env.SetMask ? 1 : 0) && _kCheckMask == (_env.CheckMask ? 1 : 0)
             && _kTwAndX == twAndX && _kTwAndY == twAndY && _kTwOrX == twOrX && _kTwOrY == twOrY
             && _kClipX0 == _env.ClipX0 && _kClipY0 == _env.ClipY0 && _kClipX1 == _env.ClipX1 && _kClipY1 == _env.ClipY1
@@ -1411,6 +1649,13 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         int blend,
         HleMaterialKind material)
     {
+        // The Dreamcast water contexts use ordinary source-alpha blending,
+        // rather than any of the PS1 GPU's four semitransparency equations.
+        // Exact function-owned packet provenance selects this state; no
+        // texture, CLUT, map, or object identity participates.
+        if (material is HleMaterialKind.WaterBase or
+            HleMaterialKind.WaterSurface)
+            return 2;
         if (transparent &&
             (blend == 2 || material == HleMaterialKind.Subtractive))
             return 1;
@@ -1422,7 +1667,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         int vertsNeeded,
         bool depthTest = false,
         bool depthWrite = false,
-        bool sourceDepthCompareWrite = false)
+        bool sourceDepthCompareWrite = false,
+        bool dreamcastTerrainDepth = false)
     {
         _readCacheValid = false;
         bool transparent = f.SemiTrans;
@@ -1434,10 +1680,15 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         // layers before the first UI primitive. Without this layer boundary,
         // terrain and screen-effect depth states alternate thousands of times
         // per frame on maps that use the pass.
+        // The static panorama backdrop also has UI material, but belongs to
+        // the far OT background; it must not finish the world layer early.
         if (material == HleMaterialKind.Ui &&
-            _deferredScreenEffects.Count != 0)
+            !GpuHle.IsSkyPacket(f.PacketAddress) &&
+            (_deferredWater.Count != 0 ||
+             _deferredScreenEffects.Count != 0))
         {
             Flush();
+            ReplayBufferedBatches(_deferredWater);
             ReplayDeferredBatches(_deferredScreenEffects);
         }
         var target = Classify();
@@ -1449,6 +1700,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                  depthTest,
                  depthWrite,
                  sourceDepthCompareWrite,
+                 dreamcastTerrainDepth,
                  material)))
         {
             if (TracePerformance)
@@ -1471,7 +1723,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     _traceBlendBreaks++;
                 if (_kDepthTest != depthTest ||
                     _kDepthWrite != depthWrite ||
-                    _kSourceDepthCompareWrite != sourceDepthCompareWrite)
+                    _kSourceDepthCompareWrite != sourceDepthCompareWrite ||
+                    _kDreamcastTerrainDepth != dreamcastTerrainDepth)
                     _traceDepthBreaks++;
                 if (BlendStateOf(_kTransparent, _kBlend, _kMaterial) !=
                     BlendStateOf(transparent, blend, material) &&
@@ -1503,6 +1756,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _kDepthTest = depthTest;
         _kDepthWrite = depthWrite;
         _kSourceDepthCompareWrite = sourceDepthCompareWrite;
+        _kDreamcastTerrainDepth = dreamcastTerrainDepth;
         _kMaterial = material;
         _kSetMask = _env.SetMask ? 1 : 0; _kCheckMask = _env.CheckMask ? 1 : 0;
         _kTwAndX = ~(_env.TwMaskX * 8) & 0xFF; _kTwAndY = ~(_env.TwMaskY * 8) & 0xFF;
@@ -1983,6 +2237,49 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     $"unique={_vehicleReplacementHits.Count}/" +
                     $"{_vehicleReplacementHits.Count + _vehicleReplacementMisses.Count}");
         }
+        if (TraceWorldTextureReplacements &&
+            GpuHle.GameplayActive &&
+            GpuHle.DebugGameplayTick > 0 &&
+            !f.Vehicle &&
+            f.Material is not HleMaterialKind.Ui and
+                not HleMaterialKind.ScreenEffect)
+        {
+            string owner = GpuHle.DescribePacketOwner(f.PacketAddress);
+            if (owner.StartsWith("v82-object=", StringComparison.Ordinal))
+            {
+                string worldResolution = includeResolution
+                    ? resolution
+                    : _textureReplacements.DescribeResolution(
+                        textureKey, sourceWidth, sourceHeight);
+                if (!_worldTextureFrameOwners.TryGetValue(
+                        owner, out WorldTextureFrameOwner? frameOwner))
+                {
+                    frameOwner = new WorldTextureFrameOwner();
+                    _worldTextureFrameOwners.Add(owner, frameOwner);
+                }
+                var source = new WorldTextureSource(
+                    f.TPage, f.Clut,
+                    sourceMinU, sourceMinV, sourceMaxU, sourceMaxV,
+                    f.Material);
+                frameOwner.Surfaces[source] = new WorldTextureOutcome(
+                    textureKey, rect.Valid, worldResolution);
+                frameOwner.Triangles++;
+                frameOwner.MinX = Math.Min(
+                    frameOwner.MinX, Math.Min(a.X, Math.Min(b.X, c.X)));
+                frameOwner.MinY = Math.Min(
+                    frameOwner.MinY, Math.Min(a.Y, Math.Min(b.Y, c.Y)));
+                frameOwner.MaxX = Math.Max(
+                    frameOwner.MaxX, Math.Max(a.X, Math.Max(b.X, c.X)));
+                frameOwner.MaxY = Math.Max(
+                    frameOwner.MaxY, Math.Max(a.Y, Math.Max(b.Y, c.Y)));
+                frameOwner.MinViewZ = Math.Min(
+                    frameOwner.MinViewZ,
+                    Math.Min(a.ViewZ, Math.Min(b.ViewZ, c.ViewZ)));
+                frameOwner.MaxViewZ = Math.Max(
+                    frameOwner.MaxViewZ,
+                    Math.Max(a.ViewZ, Math.Max(b.ViewZ, c.ViewZ)));
+            }
+        }
         if (TraceLoadingUiTextures &&
             GpuHle.GameplayActive &&
             GpuHle.DebugGameplayTick == 0 &&
@@ -2026,6 +2323,73 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         return true;
     }
 
+    void FlushWorldTextureTrace()
+    {
+        if (!TraceWorldTextureReplacements ||
+            _worldTextureFrameOwners.Count == 0)
+            return;
+
+        _worldTextureTraceDrawnFrames++;
+        int surfaces = 0;
+        int triangles = 0;
+        int changes = 0;
+        bool initialFrame = _worldTexturePreviousOwners.Count == 0;
+        foreach ((string owner, WorldTextureFrameOwner frameOwner) in
+                 _worldTextureFrameOwners.OrderBy(pair => pair.Key))
+        {
+            surfaces += frameOwner.Surfaces.Count;
+            triangles += frameOwner.Triangles;
+            if (!_worldTexturePreviousOwners.TryGetValue(
+                    owner,
+                    out Dictionary<WorldTextureSource,
+                        WorldTextureOutcome>? previous))
+            {
+                previous = [];
+                _worldTexturePreviousOwners.Add(owner, previous);
+            }
+
+            foreach ((WorldTextureSource source,
+                      WorldTextureOutcome outcome) in frameOwner.Surfaces)
+            {
+                if (previous.TryGetValue(source, out var before) &&
+                    before != outcome && changes < 64)
+                {
+                    Console.Error.WriteLine(
+                        "[V82WorldMaterialChange] " +
+                        $"frame={_frame} tick={GpuHle.DebugGameplayTick} " +
+                        $"owner=\"{owner}\" " +
+                        $"tpage=0x{source.TPage:X3} " +
+                        $"clut=0x{source.Clut:X4} " +
+                        $"uv={source.MinU},{source.MinV}-" +
+                            $"{source.MaxU},{source.MaxV} " +
+                        $"material={source.Material} " +
+                        $"before={before.TextureKey:x16}/" +
+                            $"{(before.Hit ? 1 : 0)} " +
+                        $"after={outcome.TextureKey:x16}/" +
+                            $"{(outcome.Hit ? 1 : 0)} " +
+                        $"screen={frameOwner.MinX:F1},{frameOwner.MinY:F1}-" +
+                            $"{frameOwner.MaxX:F1},{frameOwner.MaxY:F1} " +
+                        $"view-z={frameOwner.MinViewZ:F3}.." +
+                            $"{frameOwner.MaxViewZ:F3} " +
+                        outcome.Resolution);
+                    changes++;
+                }
+                previous[source] = outcome;
+            }
+        }
+
+        if (initialFrame || changes > 0 ||
+            (_worldTextureTraceDrawnFrames % 120) == 0)
+            Console.Error.WriteLine(
+                "[V82WorldMaterialFrame] " +
+                $"frame={_frame} tick={GpuHle.DebugGameplayTick} " +
+                $"owners={_worldTextureFrameOwners.Count} " +
+                $"surfaces={surfaces} triangles={triangles} " +
+                $"changes={changes} " +
+                $"observed-owners={_worldTexturePreviousOwners.Count}");
+        _worldTextureFrameOwners.Clear();
+    }
+
     static void ApplyReplacementRect(
         ref GlVertex a, ref GlVertex b, ref GlVertex c,
         TextureReplacementAtlas.Rect rect)
@@ -2040,6 +2404,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         a.ReplacementBiasR = b.ReplacementBiasR = c.ReplacementBiasR = rect.ColorBias.X;
         a.ReplacementBiasG = b.ReplacementBiasG = c.ReplacementBiasG = rect.ColorBias.Y;
         a.ReplacementBiasB = b.ReplacementBiasB = c.ReplacementBiasB = rect.ColorBias.Z;
+        a.TerrainMipX = b.TerrainMipX = c.TerrainMipX = rect.TerrainMipRect.X;
+        a.TerrainMipY = b.TerrainMipY = c.TerrainMipY = rect.TerrainMipRect.Y;
+        a.TerrainMipW = b.TerrainMipW = c.TerrainMipW = rect.TerrainMipRect.Z;
+        a.TerrainMipH = b.TerrainMipH = c.TerrainMipH = rect.TerrainMipRect.W;
     }
 
     bool ShouldTraceNearClip(in PrimFlags flags)
@@ -2153,8 +2521,20 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         {
             if (coarseTerrain.Textures.DistanceColors.Patch is { } patch)
             {
+                // TerrainPatchGeometry objects are retained by the gameplay
+                // bridge for all native packets describing one patch.  This
+                // set is a within-frame deduplicator, not a lifetime cache;
+                // retaining every generated patch indefinitely also grows the
+                // set throughout a match.
+                if (_renderedDreamcastPatchFrame != _frame)
+                {
+                    _renderedDreamcastPatches.Clear();
+                    _renderedDreamcastPatchFrame = _frame;
+                }
                 if (_renderedDreamcastPatches.Add(patch))
-                    DrawDreamcastTerrainPatch(a, f, coarseTerrain.Textures, patch);
+                    DrawDreamcastTerrainPatch(
+                        a, f, coarseTerrain.Textures, patch,
+                        coarseTerrain.X, coarseTerrain.Z);
                 return;
             }
             DrawTexturedCoarseTerrainHalf(a, b, c, f, coarseTerrain);
@@ -2200,37 +2580,80 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
     void DrawDreamcastTerrainPatch(
         in HleVertex template, in PrimFlags flags,
-        in GpuHle.TerrainCellTextures textures, GpuHle.TerrainPatchGeometry patch)
+        in GpuHle.TerrainCellTextures textures, GpuHle.TerrainPatchGeometry patch,
+        uint cellX, uint cellZ)
     {
         Span<DreamcastTerrainGeometry.Vertex> vertices =
             stackalloc DreamcastTerrainGeometry.Vertex[25];
         Span<DreamcastTerrainGeometry.Leaf> leaves =
             stackalloc DreamcastTerrainGeometry.Leaf[16];
+        PrimFlags dreamcastFlags = flags;
+        dreamcastFlags.DreamcastTerrainDepth = true;
         int count = DreamcastTerrainGeometry.Build(patch.Samples, patch.HeightAxis,
             textures.DistanceColors.Alternate, vertices, leaves);
         for (int index = 0; index < count; index++)
         {
             DreamcastTerrainGeometry.Leaf leaf = leaves[index];
-            int tl = leaf.X * 5 + leaf.Z;
-            int tr = (leaf.X + leaf.Size) * 5 + leaf.Z;
-            int bl = leaf.X * 5 + leaf.Z + leaf.Size;
-            int br = (leaf.X + leaf.Size) * 5 + leaf.Z + leaf.Size;
-            HleVertex a = MakeDreamcastTerrainVertex(template, vertices[tl], patch, leaf.Textured);
-            HleVertex b = MakeDreamcastTerrainVertex(template, vertices[tr], patch, leaf.Textured);
-            HleVertex c = MakeDreamcastTerrainVertex(template, vertices[bl], patch, leaf.Textured);
-            HleVertex d = MakeDreamcastTerrainVertex(template, vertices[br], patch, leaf.Textured);
+            if (FinalOwnerActive)
+                _finalOwnerLeaf = $"cell={cellX},{cellZ} leaf={leaf.X},{leaf.Z}/{leaf.Size} descriptor={textures.Get(leaf.X, leaf.Z)}";
+            HleVertex a = MakeDreamcastTerrainVertex(
+                template, leaf.TopLeft, patch, leaf.Textured, _kTarget);
+            HleVertex b = MakeDreamcastTerrainVertex(
+                template, leaf.TopRight, patch, leaf.Textured, _kTarget);
+            HleVertex c = MakeDreamcastTerrainVertex(
+                template, leaf.BottomLeft, patch, leaf.Textured, _kTarget);
+            HleVertex d = MakeDreamcastTerrainVertex(
+                template, leaf.BottomRight, patch, leaf.Textured, _kTarget);
+            if (TraceTerrainScanlines.Length != 0 &&
+                (TraceTerrainCellTicks is not { } leafTicks ||
+                 (GpuHle.DebugGameplayTick >= leafTicks.Start &&
+                  GpuHle.DebugGameplayTick <= leafTicks.End)))
+            {
+                float targetY = _kTarget?.Y ?? 0f;
+                float minY = MathF.Min(
+                    MathF.Min(a.Y, b.Y), MathF.Min(c.Y, d.Y)) - targetY;
+                float maxY = MathF.Max(
+                    MathF.Max(a.Y, b.Y), MathF.Max(c.Y, d.Y)) - targetY;
+                if (TraceTerrainScanlines.Any(
+                        scanline => scanline >= minY && scanline <= maxY))
+                {
+                    GpuHle.TerrainTextureDescriptor tracedTexture =
+                        textures.Get(leaf.X, leaf.Z);
+                    Console.Error.WriteLine(
+                        "[DreamcastTerrainLeaf] " +
+                        $"frame={_frame} tick={GpuHle.DebugGameplayTick} " +
+                        $"target-y={targetY:F0} cell={cellX},{cellZ} " +
+                        $"leaf={leaf.X},{leaf.Z}/{leaf.Size} " +
+                        $"textured={(leaf.Textured ? 1 : 0)} " +
+                        $"screen-x={MathF.Min(MathF.Min(a.X, b.X), MathF.Min(c.X, d.X)):F3}.." +
+                            $"{MathF.Max(MathF.Max(a.X, b.X), MathF.Max(c.X, d.X)):F3} " +
+                        $"screen-y={minY:F3}..{maxY:F3} " +
+                        $"view-z={leaf.TopLeft.View.Z:F3},{leaf.TopRight.View.Z:F3}," +
+                            $"{leaf.BottomLeft.View.Z:F3},{leaf.BottomRight.View.Z:F3} " +
+                        $"fade={leaf.TopLeft.TextureFade:F4},{leaf.TopRight.TextureFade:F4}," +
+                            $"{leaf.BottomLeft.TextureFade:F4},{leaf.BottomRight.TextureFade:F4} " +
+                        $"rgb={a.R},{a.G},{a.B};{b.R},{b.G},{b.B};" +
+                            $"{c.R},{c.G},{c.B};{d.R},{d.G},{d.B} " +
+                        $"offset={a.TerrainOffsetR},{a.TerrainOffsetG},{a.TerrainOffsetB};" +
+                            $"{b.TerrainOffsetR},{b.TerrainOffsetG},{b.TerrainOffsetB};" +
+                            $"{c.TerrainOffsetR},{c.TerrainOffsetG},{c.TerrainOffsetB};" +
+                            $"{d.TerrainOffsetR},{d.TerrainOffsetG},{d.TerrainOffsetB} " +
+                        $"texture={tracedTexture.TextureId} " +
+                        $"flags=0x{tracedTexture.Flags:X2}");
+                }
+            }
             if (leaf.Textured)
             {
                 _traceDreamcastOneUnitLeaves++;
                 GpuHle.TerrainTextureDescriptor texture = textures.Get(leaf.X, leaf.Z);
                 if ((texture.Flags & 1) == 0)
-                    DrawTerrainTextureSquare(a, b, c, d, flags, texture);
+                    DrawTerrainTextureSquare(a, b, c, d, dreamcastFlags, texture);
             }
             else
             {
                 if (leaf.Size == 2) _traceDreamcastTwoUnitLeaves++;
                 else _traceDreamcastFourUnitLeaves++;
-                PrimFlags flat = flags;
+                PrimFlags flat = dreamcastFlags;
                 flat.Textured = false;
                 flat.RawTexture = false;
                 flat.Gouraud = true;
@@ -2239,33 +2662,53 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 DrawGeneratedTerrainTriangle(d, b, c, flat);
             }
         }
+        _finalOwnerLeaf = "none";
     }
 
     static HleVertex MakeDreamcastTerrainVertex(
         in HleVertex template, in DreamcastTerrainGeometry.Vertex source,
-        GpuHle.TerrainPatchGeometry patch, bool textured)
+        GpuHle.TerrainPatchGeometry patch, bool textured,
+        GlDisplayRt? target)
     {
         HleVertex result = template;
+        // The GTE projects into the display-local 320x240 viewport. Native
+        // packet vertices subsequently receive the GPU draw-environment
+        // origin, but these reconstructed vertices bypass that packet path.
+        // Restore the target origin here so both halves of a vertically
+        // double-buffered display project into the same local render-target
+        // coordinates after the backend applies its target bias.
+        float targetX = target?.X ?? 0f;
+        float targetY = target?.Y ?? 0f;
         result.SourceAddress = 0;
         result.ViewX = source.View.X;
         result.ViewY = source.View.Y;
         result.ViewZ = source.View.Z;
         result.HasViewSpace = result.HasProjectiveW = result.HasGteZ = true;
+        // These coordinates come directly from the reconstructed Dreamcast
+        // terrain transform.  They are not the screen-space-correlated view
+        // samples carried by the PS1 packet template.
+        result.ReconstructedViewSpace = false;
         result.HasCoherentGteZ = true;
         result.PerspectiveW = source.View.Z;
         result.Z = source.View.Z;
-        result.ProjectionCenterX = patch.ProjectionCenterX;
-        result.ProjectionCenterY = patch.ProjectionCenterY;
+        result.ProjectionCenterX = patch.ProjectionCenterX + targetX;
+        result.ProjectionCenterY = patch.ProjectionCenterY + targetY;
         result.ProjectionScale = patch.ProjectionScale;
         float denominator = MathF.Max(source.View.Z, 0.01f * 256f);
-        result.X = patch.ProjectionCenterX + source.View.X * patch.ProjectionScale / denominator;
-        result.Y = patch.ProjectionCenterY + source.View.Y * patch.ProjectionScale / denominator;
+        result.X = patch.ProjectionCenterX + targetX +
+            source.View.X * patch.ProjectionScale / denominator;
+        result.Y = patch.ProjectionCenterY + targetY +
+            source.View.Y * patch.ProjectionScale / denominator;
         float offset = Math.Clamp(source.TextureFade / 0.75f, 0f, 1f);
         static byte Pack(float value) => (byte)Math.Clamp((int)value, 0, 255);
         result.R = Pack(textured ? source.Ramp.X * (1f - offset) : source.Flat.X);
         result.G = Pack(textured ? source.Ramp.Y * (1f - offset) : source.Flat.Y);
         result.B = Pack(textured ? source.Ramp.Z * (1f - offset) : source.Flat.Z);
-        result.DreamcastTerrainColor = textured;
+        // Both PVR terrain headers use the same native vertex-colour and
+        // table-fog contract.  Keep the marker on coarse untextured leaves
+        // too; routing those leaves through the generic PS1 paint correction
+        // creates a visible line at every 1-to-2/4-unit LOD boundary.
+        result.DreamcastTerrainColor = true;
         result.TerrainOffsetR = textured ? Pack(source.Flat.X * offset) : (byte)0;
         result.TerrainOffsetG = textured ? Pack(source.Flat.Y * offset) : (byte)0;
         result.TerrainOffsetB = textured ? Pack(source.Flat.Z * offset) : (byte)0;
@@ -2767,8 +3210,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
     void DrawTriCore(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
-        if (CullByPacketNclip(a, b, c, f)) return;
         if (ClipAgainstNearPlane(a, b, c, f)) return;
+        if (CullByDreamcastWorldObjectWinding(a, b, c, f)) return;
+        if (CullByPacketNclip(a, b, c, f)) return;
         if (TraceModalRects && GpuHle.NativeModalActive && _modalTriLines++ < 300)
         {
             float lo = Math.Min(a.X, Math.Min(b.X, c.X));
@@ -2923,27 +3367,63 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         // materials. In particular, vehicle reflection/gloss polygons are
         // coplanar and interleaved with opaque body polygons; depth-testing
         // those packets against a partially reconstructed depth image rejects
-        // valid body coverage and makes the vehicle look hollow. Only source
-        // route surfaces with an explicit compare/update contract and deferred
-        // screen effects use the enhanced depth image. The latter are replayed
-        // after the world is complete so their authored OT depth can mask the
-        // weather/fog strip without changing native vehicle painter ordering.
+        // valid body coverage and makes the vehicle look hollow. Only terrain
+        // and route surfaces with an explicit compare/update contract, the
+        // recovered Dreamcast water passes, and deferred screen effects use
+        // the enhanced depth image. The latter are replayed after the world is
+        // complete so their authored OT depth can mask the weather/fog strip
+        // without changing native vehicle painter ordering.
         bool deferScreenEffect =
             GpuHle.GameplayActive &&
             f.Material == HleMaterialKind.ScreenEffect &&
             f.SemiTrans;
+        bool dreamcastWater = f.Material is
+            HleMaterialKind.WaterBase or HleMaterialKind.WaterSurface;
+        bool deferWater = GpuHle.GameplayActive && dreamcastWater;
+        bool skyPacket =
+            BackdropFill &&
+            GpuHle.GameplayActive &&
+            f.Textured &&
+            GpuHle.IsSkyPacket(f.PacketAddress);
+        // The static panorama packets are adjacent in the far PS1 OT bucket.
+        // Finish their combined strip before the first following world draw,
+        // retaining native background-before-scene order while extending the
+        // complete panorama across texture/state breaks.
+        if (!skyPacket && _deferredSky.Count != 0)
+        {
+            Flush();
+            ReplayDeferredSky();
+        }
+        GlDisplayRt? skyTarget = skyPacket ? Classify() : null;
+        bool deferSky = skyTarget is { Margin: > 0 };
+        // The recovered Dreamcast ISP words for terrain (0x80000000 /
+        // 0x90000000), ordinary world objects (0x98000000), reflections
+        // (0x90000000), and both water contexts (0x80000000) all leave the
+        // Z-write-disable bit clear. Preserve the PS1 painter-ordered colour
+        // result while recording the same scene depth: every function-owned
+        // world primitive writes the depth of the colour it submitted, while
+        // water alone performs the conventional-depth equivalent of the
+        // Dreamcast's strict GREATER comparison. The PS1-only deferred strip
+        // tests that completed image but must not replace it.
         bool depthWrite =
             depthEligible &&
-            !f.SemiTrans;
+            f.Material != HleMaterialKind.ScreenEffect;
         bool sourceOpaqueDepthTest =
             f.N64RouteDepthCompare &&
             !f.SemiTrans &&
             coherentRasterDepth;
+        bool dreamcastTerrainDepth =
+            f.DreamcastTerrainDepth &&
+            f.Material == HleMaterialKind.TerrainRoute &&
+            !f.SemiTrans &&
+            coherentRasterDepth;
         bool depthTest =
             depthEligible &&
-            (sourceOpaqueDepthTest || deferScreenEffect);
+            (sourceOpaqueDepthTest || dreamcastTerrainDepth ||
+             deferScreenEffect || dreamcastWater);
         bool sourceDepthCompareWrite =
-            sourceOpaqueDepthTest && depthTest && depthWrite;
+            (sourceOpaqueDepthTest || dreamcastTerrainDepth) &&
+            depthTest && depthWrite;
         if (TracePerformance && f.Material == HleMaterialKind.ScreenEffect)
         {
             _traceScreenEffectTriangles++;
@@ -2951,9 +3431,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 _traceDepthTestedScreenEffectTriangles++;
         }
         GlDisplayRt? deferredTarget =
-            deferScreenEffect ? Classify() : null;
+            (deferScreenEffect || deferWater) ? Classify() : null;
         GlDisplayRt? backdropTarget =
-            _kTarget is { Margin: > 0 } candidateBackdrop
+            skyTarget is { Margin: > 0 } deferredBackdrop
+                ? deferredBackdrop
+                : _kTarget is { Margin: > 0 } candidateBackdrop
                 ? candidateBackdrop
                 : null;
         GlDisplayRt? fullWidthTarget = _kTarget;
@@ -2972,13 +3454,19 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             Math.Min(a.V, Math.Min(b.V, c.V)),
             Math.Max(a.U, Math.Max(b.U, c.U)),
             Math.Max(a.V, Math.Max(b.V, c.V)));
-        if (!deferScreenEffect)
+        // Sky arrives at the far end of the ordering table.  Emit the complete
+        // buffered panorama before accepting the first non-sky primitive so
+        // its material breaks cannot split widescreen edge reconstruction.
+        if (!deferSky && _deferredSky.Count != 0)
+            ReplayDeferredSky();
+        if (!deferScreenEffect && !deferWater && !deferSky)
             Begin(
                 f,
                 3,
                 depthTest,
                 depthWrite,
-                sourceDepthCompareWrite);
+                sourceDepthCompareWrite,
+                dreamcastTerrainDepth);
         bool dith = DitherOf(f);
         bool hasDepth = f.Textured && a.HasGteZ && b.HasGteZ && c.HasGteZ;
         bool hasProjectiveW =
@@ -3032,7 +3520,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 HleMaterialKind.AlphaTest or
                 HleMaterialKind.Glass or
                 HleMaterialKind.VehicleReflection or
-                HleMaterialKind.TerrainRoute;
+                HleMaterialKind.TerrainRoute or
+                HleMaterialKind.WaterBase or
+                HleMaterialKind.WaterSurface;
             float minX = Math.Min(a.X, Math.Min(b.X, c.X));
             float maxX = Math.Max(a.X, Math.Max(b.X, c.X));
             float minY = Math.Min(a.Y, Math.Min(b.Y, c.Y));
@@ -3158,7 +3648,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             a.R < 96 && a.G < 96 && a.B < 96 && b.R < 96 && b.G < 96 && b.B < 96 &&
             c.R < 96 && c.G < 96 && c.B < 96;
         static float DepthOf(
-            in HleVertex vertex, int otDepth, bool useCoherentDepth)
+            in HleVertex vertex, int otDepth, bool useCoherentDepth,
+            bool forceTrueDepth)
         {
             // The ordering table is the game's authoritative visibility
             // contract.  Recovered per-vertex GTE samples are excellent for
@@ -3177,7 +3668,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             // a wall long enough to span two buckets gets a single flat depth
             // per primitive, and the half whose bucket sits behind the terrain
             // is discarded - a straight vertical cut through a solid object.
-            if (TrueVertexDepth && useCoherentDepth &&
+            if ((forceTrueDepth || TrueVertexDepth) && useCoherentDepth &&
                 vertex.HasViewSpace &&
                 !vertex.ReconstructedViewSpace &&
                 vertex.ViewZ >= 1f)
@@ -3248,13 +3739,16 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             ExpandBackdropEdge(ref drawC, backdropTarget!);
         }
         var va = V(drawA, f, dith, perspectiveCorrect, screenSpacePrimitive,
-            DepthOf(a, f.OtIndex, coherentRasterDepth), deferredTarget);
+            DepthOf(a, f.OtIndex, coherentRasterDepth,
+                dreamcastTerrainDepth), deferredTarget);
         va.BaryX = 1f;
         var vb = V(drawB, f, dith, perspectiveCorrect, screenSpacePrimitive,
-            DepthOf(b, f.OtIndex, coherentRasterDepth), deferredTarget);
+            DepthOf(b, f.OtIndex, coherentRasterDepth,
+                dreamcastTerrainDepth), deferredTarget);
         vb.BaryY = 1f;
         var vc = V(drawC, f, dith, perspectiveCorrect, screenSpacePrimitive,
-            DepthOf(c, f.OtIndex, coherentRasterDepth), deferredTarget);
+            DepthOf(c, f.OtIndex, coherentRasterDepth,
+                dreamcastTerrainDepth), deferredTarget);
         vc.BaryZ = 1f;
         // The panorama is two big textured quads at a constant far depth,
         // written to a small static packet buffer. They are positioned for the
@@ -3288,27 +3782,17 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 return;
         }
 
-        if (BackdropFill && GpuHle.GameplayActive &&
-            _kTarget is { Margin: > 0 } bdTarget &&
-            f.Material is HleMaterialKind.Opaque or HleMaterialKind.AlphaTest)
+        if (skyPacket && backdropTarget is { Margin: > 0 })
         {
-            float lo = MathF.Min(va.ViewZ, MathF.Min(vb.ViewZ, vc.ViewZ));
-            float hi = MathF.Max(va.ViewZ, MathF.Max(vb.ViewZ, vc.ViewZ));
-            float rx0 = ReconstructedX(va);
-            float rx1 = ReconstructedX(vb);
-            float rx2 = ReconstructedX(vc);
-            float span = MathF.Max(rx0, MathF.Max(rx1, rx2)) -
-                MathF.Min(rx0, MathF.Min(rx1, rx2));
-            // Far, flat in depth and very wide: the panorama, and nothing
-            // else in the scene looks like that.
-            if (lo > 2500f && hi < 4200f && (hi - lo) < 200f &&
-                span > bdTarget.Wide1x * 0.4f)
-            {
-                _backdropTriangles++;
-                _backdropPackets.Add(f.PacketAddress);
+            // func_8001C910 is the shared PS1 panorama emitter. Its exact
+            // packet interval is registered at the function boundary, so
+            // widescreen continuation no longer guesses from screen span or
+            // depth and cannot capture an ordinary distant object.
+            _backdropTriangles++;
+            _backdropPackets.Add(f.PacketAddress);
+            if (!deferSky)
                 _backdropPending.Add(
                     (_count, _count + 1, _count + 2, f.PacketAddress));
-            }
         }
 
         if (TraceTerrainFrames && GpuHle.GameplayActive)
@@ -3555,6 +4039,17 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     $"uv=({a.U},{a.V})({b.U},{b.V})({c.U},{c.V}) " +
                     $"rgb=({a.R},{a.G},{a.B})({b.R},{b.G},{b.B})" +
                     $"({c.R},{c.G},{c.B}) " +
+                    $"replacement=({va.ReplacementX:F0},{va.ReplacementY:F0}," +
+                        $"{va.ReplacementW:F0},{va.ReplacementH:F0}) " +
+                    $"replacement-scale=({va.ReplacementScaleR:F4}," +
+                        $"{va.ReplacementScaleG:F4}," +
+                        $"{va.ReplacementScaleB:F4}) " +
+                    $"replacement-bias=({va.ReplacementBiasR:F4}," +
+                        $"{va.ReplacementBiasG:F4}," +
+                        $"{va.ReplacementBiasB:F4}) " +
+                    $"terrain-mip=({va.TerrainMipX:F0},{va.TerrainMipY:F0}," +
+                        $"{va.TerrainMipW:F0},{va.TerrainMipH:F0}) " +
+                    $"terrain-offset=0x{va.TerrainOffset:X8} " +
                     $"area2={area2} probe={(coversProbe ? 1 : 0)} " +
                     $"target={_kTarget?.X ?? -1},{_kTarget?.Y ?? -1} " +
                     $"z=({a.Z},{b.Z},{c.Z}) " +
@@ -3641,10 +4136,35 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         ApplyTextureReplacement(
             ref va, ref vb, ref vc, f,
             uvMinX, uvMinY, uvMaxX, uvMaxY,
-            out _, out _,
+            out ulong replacementKey, out string replacementResolution,
             allowUiReplacement:
                 screenSpacePrimitive &&
-                !topGameplayHudTriangle);
+                !topGameplayHudTriangle,
+            includeResolution: TriangleProbe is not null);
+        if (TriangleProbe is { } replacementProbe &&
+            GpuHle.GameplayActive &&
+            _pendingProbeTriangles.Count < 1024)
+        {
+            float targetProbeX = (_kTarget?.X ?? 0) + replacementProbe.X;
+            float targetProbeY = (_kTarget?.Y ?? 0) + replacementProbe.Y;
+            float area2 = MathF.Abs(
+                (vb.X - va.X) * (vc.Y - va.Y) -
+                (vb.Y - va.Y) * (vc.X - va.X));
+            if (area2 > 0.001f && ContainsPoint(
+                    va, vb, vc, targetProbeX, targetProbeY))
+                Console.Error.WriteLine(
+                    "[V8TriangleProbeReplacement] " +
+                    $"frame={_frame} tick={GpuHle.DebugGameplayTick} " +
+                    $"packet=0x{f.PacketAddress:X8} material={f.Material} " +
+                    $"key={replacementKey:x16} " +
+                    $"rect={va.ReplacementX:F0},{va.ReplacementY:F0}," +
+                        $"{va.ReplacementW:F0},{va.ReplacementH:F0} " +
+                    $"terrain-mip={va.TerrainMipX:F0},{va.TerrainMipY:F0}," +
+                        $"{va.TerrainMipW:F0},{va.TerrainMipH:F0} " +
+                    $"uv={uvMinX:F0},{uvMinY:F0}-" +
+                        $"{uvMaxX:F0},{uvMaxY:F0} " +
+                    replacementResolution);
+        }
         if (particle) { va.Texpage |= 0x2000; vb.Texpage |= 0x2000; vc.Texpage |= 0x2000; }
         if (shadow)
         {
@@ -3656,7 +4176,43 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             va.Texpage |= 0x4000; vb.Texpage |= 0x4000; vc.Texpage |= 0x4000;
             va.Clut = vb.Clut = vc.Clut = longest;
         }
-        if (deferScreenEffect)
+        if (FinalOwnerActive)
+        {
+            _finalOwnerPackets[va] = f.PacketAddress;
+            _finalOwnerPackets[vb] = f.PacketAddress;
+            _finalOwnerPackets[vc] = f.PacketAddress;
+        }
+        if (deferSky)
+        {
+            AppendBufferedBatch(
+                _deferredSky,
+                va,
+                vb,
+                vc,
+                skyTarget,
+                f,
+                depthTest,
+                depthWrite,
+                sourceDepthCompareWrite,
+                dreamcastTerrainDepth);
+        }
+        else if (deferWater)
+        {
+            if (TracePerformance)
+                _traceDeferredTriangles++;
+            AppendBufferedBatch(
+                _deferredWater,
+                va,
+                vb,
+                vc,
+                deferredTarget,
+                f,
+                depthTest,
+                depthWrite,
+                sourceDepthCompareWrite,
+                dreamcastTerrainDepth);
+        }
+        else if (deferScreenEffect)
         {
             if (TracePerformance)
                 _traceDeferredTriangles++;
@@ -3666,14 +4222,142 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 f,
                 depthTest,
                 depthWrite,
-                sourceDepthCompareWrite));
+                sourceDepthCompareWrite,
+                dreamcastTerrainDepth));
         }
         else
         {
             _verts[_count++] = va;
             _verts[_count++] = vb;
             _verts[_count++] = vc;
+            TraceFinalOwnerTriangle(va, vb, vc, f);
         }
+    }
+
+    // Opt-in process-local framebuffer diagnostic. Coordinates are native
+    // display-local coordinates before the widescreen margin is added.
+    unsafe void TraceFinalOwnerTriangle(
+        in GlVertex a, in GlVertex b, in GlVertex c, in PrimFlags flags)
+    {
+        if (FinalOwnerPoints.Length == 0 || !GpuHle.GameplayActive ||
+            _kTarget is not { } target ||
+            TraceTerrainCellTicks is not { } ticks ||
+            GpuHle.DebugGameplayTick < ticks.Start ||
+            GpuHle.DebugGameplayTick > ticks.End)
+            return;
+        foreach (var point in FinalOwnerPoints)
+            TraceFinalOwnerTriangleAt(a, b, c, flags, point.X, point.Y, target);
+    }
+
+    unsafe void TraceFinalOwnerTriangleAt(
+        in GlVertex a, in GlVertex b, in GlVertex c, in PrimFlags flags,
+        float pointX, float pointY, GlDisplayRt target)
+    {
+        int order = ++_finalOwnerOrder;
+        int scale = GlVram.Scale;
+        int px = (int)MathF.Floor((pointX + target.Margin) * scale);
+        int py = (int)MathF.Floor(pointY * scale);
+        float x = (px + 0.5f) / scale + target.X - target.Margin;
+        float y = (py + 0.5f) / scale + target.Y;
+        static System.Numerics.Vector2 Project(in GlVertex v) => v.HasViewSpace > 0.5f
+            ? new(v.ProjectionCenterX + v.ViewX * v.ProjectionScale / v.ViewZ,
+                v.ProjectionCenterY + v.ViewY * v.ProjectionScale / v.ViewZ)
+            : new(v.X, v.Y);
+        System.Numerics.Vector2 av = Project(a), bv = Project(b), cv = Project(c);
+        float det = (bv.Y - cv.Y) * (av.X - cv.X) +
+            (cv.X - bv.X) * (av.Y - cv.Y);
+        if (MathF.Abs(det) < 0.00001f) return;
+        float wa = ((bv.Y - cv.Y) * (x - cv.X) +
+            (cv.X - bv.X) * (y - cv.Y)) / det;
+        float wb = ((cv.Y - av.Y) * (x - cv.X) +
+            (av.X - cv.X) * (y - cv.Y)) / det;
+        float wc = 1f - wa - wb;
+        if (MathF.Min(wa, MathF.Min(wb, wc)) < 0f) return;
+        float trueZ = 1f / (wa / a.ViewZ + wb / b.ViewZ + wc / c.ViewZ);
+        float reciprocalRaster = wa / (a.RasterDepth * 65535f) +
+            wb / (b.RasterDepth * 65535f) + wc / (c.RasterDepth * 65535f);
+        float windowDepth = 65535f / 65534f * (1f - reciprocalRaster);
+        bool test = _kDepthTest, write = _kDepthWrite;
+        Flush();
+        if (px < 0 || py < 0 || px >= target.TexW || py >= target.TexH) return;
+        _gl.Disable(EnableCap.ScissorTest);
+        if (target.MsaaFbo != 0)
+        {
+            _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, target.MsaaFbo);
+            _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, target.Fbo);
+            _gl.BlitFramebuffer(px, py, px + 1, py + 1, px, py, px + 1, py + 1,
+                ClearBufferMask.DepthBufferBit | ClearBufferMask.ColorBufferBit,
+                BlitFramebufferFilter.Nearest);
+        }
+        _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer,
+            target.MsaaFbo != 0 ? target.Fbo : target.DrawFbo);
+        Span<float> depth = stackalloc float[1];
+        Span<byte> rgba = stackalloc byte[4];
+        _gl.ReadPixels<float>(px, py, 1, 1, PixelFormat.DepthComponent, PixelType.Float, depth);
+        _gl.ReadPixels<byte>(px, py, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, rgba);
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, target.DrawFbo);
+        Console.Error.WriteLine($"[FinalOwner] frame={_frame} tick={GpuHle.DebugGameplayTick} order={order} " +
+            $"native={pointX},{pointY} sample={x},{y} pixel={px},{py} margin={target.Margin} " +
+            $"packet=0x{flags.PacketAddress:X8} owner={GpuHle.DescribePacketOwner(flags.PacketAddress)} " +
+            $"material={flags.Material} {_finalOwnerLeaf} " +
+            $"xy={av};{bv};{cv} view-z={a.ViewZ},{b.ViewZ},{c.ViewZ} " +
+            $"weights={wa},{wb},{wc} true-z={trueZ} raster-z={1f / reciprocalRaster} " +
+            $"expected-depth={windowDepth:F9} framebuffer-depth={depth[0]:F9} test={test} write={write} " +
+            $"rgba={rgba[0]},{rgba[1]},{rgba[2]},{rgba[3]} " +
+            $"uv={a.U},{a.V};{b.U},{b.V};{c.U},{c.V} " +
+            $"replacement={a.ReplacementX},{a.ReplacementY},{a.ReplacementW},{a.ReplacementH} " +
+            $"color=0x{a.Color:X8},0x{b.Color:X8},0x{c.Color:X8} " +
+            $"terrain-offset=0x{a.TerrainOffset:X8},0x{b.TerrainOffset:X8},0x{c.TerrainOffset:X8}");
+    }
+
+    unsafe void TraceFinalOwnerPixel(GlDisplayRt target, float x, float y,
+        string stage = "after-deferred")
+    {
+        int px = (int)MathF.Floor((x + target.Margin) * GlVram.Scale);
+        int py = (int)MathF.Floor(y * GlVram.Scale);
+        if (px < 0 || py < 0 || px >= target.TexW || py >= target.TexH) return;
+        _gl.Disable(EnableCap.ScissorTest);
+        if (target.MsaaFbo != 0)
+        {
+            _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, target.MsaaFbo);
+            _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, target.Fbo);
+            _gl.BlitFramebuffer(px, py, px + 1, py + 1, px, py, px + 1, py + 1,
+                ClearBufferMask.DepthBufferBit | ClearBufferMask.ColorBufferBit,
+                BlitFramebufferFilter.Nearest);
+        }
+        _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer,
+            target.MsaaFbo != 0 ? target.Fbo : target.DrawFbo);
+        Span<float> depth = stackalloc float[1];
+        Span<byte> rgba = stackalloc byte[4];
+        _gl.ReadPixels<float>(px, py, 1, 1, PixelFormat.DepthComponent, PixelType.Float, depth);
+        _gl.ReadPixels<byte>(px, py, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, rgba);
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, target.DrawFbo);
+        uint packedRgba = (uint)(rgba[0] | rgba[1] << 8 | rgba[2] << 16 | rgba[3] << 24);
+        var key = (target.X, target.Y, px, py);
+        var value = (depth[0], packedRgba);
+        bool changed = !_finalOwnerPixelHistory.TryGetValue(key, out var previous) || previous != value;
+        _finalOwnerPixelHistory[key] = value;
+        if (changed && stage.StartsWith("flush", StringComparison.Ordinal))
+            for (int i = 0; i < _count; i += 3)
+            {
+                var parts = new List<string>();
+                for (int j = 0; j < 3; j++)
+                {
+                    GlVertex v = _verts[i + j];
+                    uint packet = _finalOwnerPackets.GetValueOrDefault(v);
+                    parts.Add($"packet=0x{packet:X8} owner={GpuHle.DescribePacketOwner(packet)} " +
+                        $"xy={v.X},{v.Y} view={v.ViewX},{v.ViewY},{v.ViewZ} modern={v.HasViewSpace} " +
+                        $"projection={v.ProjectionCenterX},{v.ProjectionCenterY},{v.ProjectionScale} " +
+                        $"raster={v.RasterDepth * 65535f} material={v.Material} blend={v.BlendCode} " +
+                        $"texpage=0x{v.Texpage:X} clut=0x{v.Clut:X} uv={v.U},{v.V} " +
+                        $"color=0x{v.Color:X8} replacement={v.ReplacementX},{v.ReplacementY},{v.ReplacementW},{v.ReplacementH}");
+                }
+                Console.Error.WriteLine($"[FinalOwnerBatchTriangle] frame={_frame} tick={GpuHle.DebugGameplayTick} " +
+                    $"native={x},{y} triangle={i / 3} {stage} " + string.Join(" | ", parts));
+            }
+        Console.Error.WriteLine($"[FinalOwnerPixel] frame={_frame} tick={GpuHle.DebugGameplayTick} " +
+            $"stage={stage} native={x},{y} pixel={px},{py} target={target.X},{target.Y} " +
+            $"depth={depth[0]:F9} rgba={rgba[0]},{rgba[1]},{rgba[2]},{rgba[3]}");
     }
 
     bool CullByPacketNclip(
@@ -3682,7 +4366,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         in HleVertex c,
         in PrimFlags flags)
     {
-        if (!PacketNclipCull || !GpuHle.GameplayActive ||
+        if (!PacketNclipCull || !GpuHle.GameplayActive || flags.WorldObject ||
+            DreamcastDisablesFaceCulling(flags.Material) ||
             flags.Material is HleMaterialKind.TerrainRoute or
                 HleMaterialKind.Ui or HleMaterialKind.ScreenEffect)
             return false;
@@ -3768,6 +4453,57 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         return true;
     }
 
+    /// <summary>
+    /// Materials whose retail Dreamcast PVR contexts select no face culling.
+    /// The function-owned two-pass water surface must retain every emitted
+    /// triangle; applying the generic PS1 packet-NCLIP repair here turns its
+    /// continuous row strips into a serrated shoreline.
+    /// </summary>
+    public static bool DreamcastDisablesFaceCulling(HleMaterialKind material) =>
+        material is HleMaterialKind.WaterBase or HleMaterialKind.WaterSurface;
+
+    bool CullByDreamcastWorldObjectWinding(
+        in HleVertex a,
+        in HleVertex b,
+        in HleVertex c,
+        in PrimFlags flags)
+    {
+        if (!DreamcastWorldObjectCull || !GpuHle.GameplayActive ||
+            !flags.WorldObject || flags.Vehicle ||
+            !a.HasViewSpace || !b.HasViewSpace || !c.HasViewSpace)
+            return false;
+
+        return DreamcastCullClockwise(a, b, c);
+    }
+
+    /// <summary>
+    /// Returns the exact ordinary-object face decision encoded by the retail
+    /// Dreamcast ISP mode <c>PVR_CULLING_CW</c>.  Public only so the binary-
+    /// contract fixture can verify the coordinate convention without
+    /// constructing an OpenGL backend.
+    /// </summary>
+    public static bool DreamcastCullClockwise(
+        in HleVertex a,
+        in HleVertex b,
+        in HleVertex c)
+    {
+        double x0 = ReconstructedHleX(a);
+        double y0 = ReconstructedHleY(a);
+        double x1 = ReconstructedHleX(b);
+        double y1 = ReconstructedHleY(b);
+        double x2 = ReconstructedHleX(c);
+        double y2 = ReconstructedHleY(c);
+        double area =
+            x0 * (y1 - y2) +
+            x1 * (y2 - y0) +
+            x2 * (y0 - y1);
+
+        // Screen Y grows downward in both source and Enhanced projection, so
+        // positive signed area is clockwise.  PVR_CULLING_CW removes that
+        // winding and keeps counter-clockwise or degenerate faces.
+        return area > 0d;
+    }
+
     static double ReconstructedHleX(in HleVertex vertex) =>
         vertex.HasViewSpace && vertex.ViewZ > 0f &&
         vertex.ProjectionScale != 0f
@@ -3794,6 +4530,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
         if (!FogAtmosphereColor)
+            return;
+        if (_dreamcastFogActive)
             return;
 
         float r = (a.R + b.R + c.R) / (3f * 255f);
@@ -4010,6 +4748,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
     public void DrawRect(in HleRect r, in PrimFlags f)
     {
+        if (_deferredSky.Count != 0)
+        {
+            Flush();
+            ReplayDeferredSky();
+        }
         if (GpuHle.IsNativeModalPanel(f.PacketAddress))
         {
             DrawCleanModalPanel(r, f);
@@ -4334,6 +5077,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         vd.ReplacementBiasR = va.ReplacementBiasR;
         vd.ReplacementBiasG = va.ReplacementBiasG;
         vd.ReplacementBiasB = va.ReplacementBiasB;
+        vd.TerrainMipX = va.TerrainMipX;
+        vd.TerrainMipY = va.TerrainMipY;
+        vd.TerrainMipW = va.TerrainMipW;
+        vd.TerrainMipH = va.TerrainMipH;
         if (topGameplayHud)
         {
             va.Texpage &= ~0x800;
@@ -4356,6 +5103,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
     public void DrawLine(in HleVertex a, in HleVertex b, in PrimFlags f)
     {
+        if (_deferredSky.Count != 0)
+        {
+            Flush();
+            ReplayDeferredSky();
+        }
         Begin(f, 6);
         bool dith = _viewPs1Dithering && _env.Dither;
         float x1 = a.X, y1 = a.Y;
@@ -4552,25 +5304,43 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
         if (_kSourceDepthCompareWrite)
         {
-            // Converted N64 XRTP route surfaces retain the source RDP's
-            // opaque Z-compare/Z-update contract. A single color draw must
-            // both test and update depth so later route triangles see earlier
-            // route triangles in source submission order.
+            // Converted N64 XRTP routes retain RDP LEQUAL compare/update.
+            // Reconstructed Dreamcast terrain retains the retail PVR ISP
+            // word's strict GREATER compare, expressed as strict LESS in our
+            // conventional depth buffer. Both must test and update in the
+            // same color draw so overlapping leaves cannot overwrite nearer
+            // terrain according to the PS1 packet painter order.
             Debug.Assert(_kDepthTest && _kDepthWrite && !_kTransparent);
             _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthFunc(DepthFunction.Lequal);
+            _gl.DepthFunc(_kDreamcastTerrainDepth
+                ? DepthFunction.Less
+                : DepthFunction.Lequal);
             _gl.DepthMask(true);
         }
         else if (_kDepthTest)
         {
             _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthFunc(DepthFunction.Lequal);
-            _gl.DepthMask(false);
+            // Dreamcast water's recovered ISP word uses GREATER, not
+            // GREATER-OR-EQUAL. Our conventional depth image reverses that
+            // direction to strict LESS. LEQUAL admitted coplanar shoreline
+            // fragments that the retail PVR rejects, exposing water-grid
+            // edges as dark/jagged bands across land.
+            _gl.DepthFunc(_kMaterial is
+                    HleMaterialKind.WaterBase or
+                    HleMaterialKind.WaterSurface
+                ? DepthFunction.Less
+                : DepthFunction.Lequal);
+            _gl.DepthMask(_kDepthWrite);
         }
         else if (_kDepthWrite)
         {
-            _gl.Disable(EnableCap.DepthTest);
-            _gl.DepthMask(false);
+            // OpenGL does not update depth while depth testing is disabled.
+            // ALWAYS exactly preserves painter-order colour ownership while
+            // leaving the matching visible-surface depth for deferred water
+            // and screen-effect comparisons.
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthFunc(DepthFunction.Always);
+            _gl.DepthMask(true);
         }
         else
         {
@@ -4615,6 +5385,13 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.BindTexture(
             TextureTarget.Texture2D,
             _textureReplacements?.Texture ?? 0);
+        _gl.ActiveTexture(TextureUnit.Texture4);
+        _gl.BindTexture(
+            TextureTarget.Texture2D,
+            _textureReplacements?.TerrainMipTexture ?? 0);
+        EnsureDreamcastWaterTexture();
+        _gl.ActiveTexture(TextureUnit.Texture5);
+        _gl.BindTexture(TextureTarget.Texture2D, _dreamcastWaterTexture);
         _gl.ActiveTexture(TextureUnit.Texture0);
         if (rt != null)
         {
@@ -4631,17 +5408,32 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.Uniform1(_uCheckMask, _kCheckMask);
         _gl.Uniform4(_uBlendOpaque, 1f, 1f, 1f, 0f);
             _gl.Uniform1(_uTextureSmoothing, _kTextureSmoothing);
-            _gl.Uniform1(_uTextureMipmaps, ConfigManager.View.TextureMipmaps ? 1 : 0);
+            _gl.Uniform1(
+                _uTextureMipmaps,
+                ConfigManager.View.TextureMipmaps &&
+                !(DiagnosticDisableTerrainMipmaps &&
+                  _kMaterial == HleMaterialKind.TerrainRoute)
+                    ? 1
+                    : 0);
             _gl.Uniform1(_uAnisotropy, Math.Clamp(ConfigManager.View.AnisotropicFiltering, 1, 16));
             _gl.Uniform1(_uEnhancedShadows, ConfigManager.View.EnhancedShadows ? 1 : 0);
             _gl.Uniform1(
                 _uEnhancedParticles,
                 ConfigManager.View.EnhancedParticles ? 1 : 0);
-            _gl.Uniform1(_uEnhancedFog, ConfigManager.View.EnhancedFog ? 1 : 0);
+            _gl.Uniform1(
+                _uEnhancedFog,
+                ConfigManager.View.EnhancedFog &&
+                !(DiagnosticDisableDreamcastFog &&
+                  _kMaterial == HleMaterialKind.TerrainRoute)
+                    ? 1
+                    : 0);
             _gl.Uniform3(_uFogColor, _fogColorR, _fogColorG, _fogColorB);
             _gl.Uniform1(
                 _uFogColorValid,
                 _hasFogColor ? 1 : 0);
+            _gl.Uniform1(
+                _uDreamcastFogActive,
+                _dreamcastFogActive ? 1 : 0);
             _gl.Uniform1(
                 _uPerspectiveCorrectTextures,
                 ConfigManager.View.PerspectiveCorrectTextures ? 1 : 0);
@@ -4733,6 +5525,13 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             rt.NeedsResolve = true;
             rt.Dirty = true;
             rt.LastDrawFrame = _frame;
+            if (FinalOwnerPoints.Length != 0 && GpuHle.GameplayActive &&
+                TraceTerrainCellTicks is { } ownerTicks &&
+                GpuHle.DebugGameplayTick >= ownerTicks.Start &&
+                GpuHle.DebugGameplayTick <= ownerTicks.End)
+                foreach (var point in FinalOwnerPoints)
+                    TraceFinalOwnerPixel(rt, point.X, point.Y,
+                        $"flush material={_kMaterial} vertices={_count} test={_kDepthTest} write={_kDepthWrite} blend={blendState}/{_kBlend}");
         }
         if (TracePerformance)
             _traceFlushTicks += Stopwatch.GetTimestamp() - flushStarted;
@@ -4746,7 +5545,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _kDepthTest,
         _kDepthWrite,
         _kSourceDepthCompareWrite,
+        _kDreamcastTerrainDepth,
         _kMaterial,
+        0u,
+        null,
+        null,
         _kBlend,
         _kSetMask,
         _kCheckMask,
@@ -4766,9 +5569,22 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         in PrimFlags f,
         bool depthTest,
         bool depthWrite,
-        bool sourceDepthCompareWrite)
+        bool sourceDepthCompareWrite,
+        bool dreamcastTerrainDepth = false)
     {
         bool transparent = f.SemiTrans;
+        uint primitiveGroup = f.Material switch
+        {
+            HleMaterialKind.WaterBase => f.WaterBaseGroup,
+            HleMaterialKind.WaterSurface => f.WaterSurfaceGroup,
+            _ => 0u,
+        };
+        GpuHle.DreamcastWaterBaseQuad? waterBaseQuad =
+            f.Material == HleMaterialKind.WaterBase
+                ? f.WaterBaseQuad
+                : null;
+        GpuHle.DreamcastWaterSurfaceMesh? waterSurfaceMesh =
+            f.WaterSurfaceMesh;
         return new DeferredBatch(
             vertices,
             target,
@@ -4776,7 +5592,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             depthTest,
             depthWrite,
             sourceDepthCompareWrite,
+            dreamcastTerrainDepth,
             f.Material,
+            primitiveGroup,
+            waterBaseQuad,
+            waterSurfaceMesh,
             f.BlendMode,
             _env.SetMask ? 1 : 0,
             _env.CheckMask ? 1 : 0,
@@ -4791,10 +5611,343 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             ConfigManager.View.TextureSmoothing ? 1 : 0);
     }
 
-    void ReplayDeferredBatches(List<DeferredBatch> batches)
+    static bool SameDeferredState(
+        in DeferredBatch a,
+        in DeferredBatch b) =>
+        a.Target == b.Target &&
+        BlendStateOf(a.Transparent, a.Blend, a.Material) ==
+            BlendStateOf(b.Transparent, b.Blend, b.Material) &&
+        a.DepthTest == b.DepthTest &&
+        a.DepthWrite == b.DepthWrite &&
+        a.SourceDepthCompareWrite == b.SourceDepthCompareWrite &&
+        a.DreamcastTerrainDepth == b.DreamcastTerrainDepth &&
+        a.Material == b.Material &&
+        a.PrimitiveGroup == b.PrimitiveGroup &&
+        a.SetMask == b.SetMask &&
+        a.CheckMask == b.CheckMask &&
+        a.TwAndX == b.TwAndX &&
+        a.TwAndY == b.TwAndY &&
+        a.TwOrX == b.TwOrX &&
+        a.TwOrY == b.TwOrY &&
+        a.ClipX0 == b.ClipX0 &&
+        a.ClipY0 == b.ClipY0 &&
+        a.ClipX1 == b.ClipX1 &&
+        a.ClipY1 == b.ClipY1 &&
+        a.TextureSmoothing == b.TextureSmoothing;
+
+    void AppendBufferedBatch(
+        List<BufferedDeferredBatch> batches,
+        in GlVertex a,
+        in GlVertex b,
+        in GlVertex c,
+        GlDisplayRt? target,
+        in PrimFlags f,
+        bool depthTest,
+        bool depthWrite,
+        bool sourceDepthCompareWrite,
+        bool dreamcastTerrainDepth = false)
+    {
+        DeferredBatch state = CaptureDeferredBatch(
+            Array.Empty<GlVertex>(),
+            target,
+            f,
+            depthTest,
+            depthWrite,
+            sourceDepthCompareWrite,
+            dreamcastTerrainDepth);
+        BufferedDeferredBatch? batch = batches.Count != 0
+            ? batches[^1]
+            : null;
+        if (batch == null ||
+            !SameDeferredState(batch.State, state) ||
+            batch.Vertices.Count > MaxVerts - 3)
+        {
+            batch = new BufferedDeferredBatch(state);
+            batches.Add(batch);
+        }
+        batch.Vertices.Add(a);
+        batch.Vertices.Add(b);
+        batch.Vertices.Add(c);
+    }
+
+    void ReplaceWithDreamcastWaterBaseQuad(
+        BufferedDeferredBatch batch)
+    {
+        if (TraceDreamcastWaterBase &&
+            batch.State.Material == HleMaterialKind.WaterBase &&
+            _dreamcastWaterBaseTraceCount++ < 128)
+        {
+            Console.Error.WriteLine(
+                $"[DreamcastWaterBaseBatch] frame={_frame} " +
+                $"group=0x{batch.State.PrimitiveGroup:X8} " +
+                $"quad={(batch.State.WaterBaseQuad.HasValue ? 1 : 0)} " +
+                $"vertices={batch.Vertices.Count}");
+        }
+        if (batch.State.Material != HleMaterialKind.WaterBase ||
+            batch.State.PrimitiveGroup == 0u ||
+            batch.State.WaterBaseQuad is not { } quad ||
+            batch.Vertices.Count < 3)
+            return;
+
+        // Geometry and remaining vertex attributes come from a real native
+        // packet, but RGB does not: PS1 applies DPCS across its scanline
+        // approximation while Dreamcast uses the fixed COLS word-seven RGB
+        // carried by the recovered quad.
+        GlVertex material = batch.Vertices[0];
+        material.Color = (uint)(quad.R | (quad.G << 8) | (quad.B << 16));
+
+        float xOffset = batch.State.Target?.Margin ?? 0f;
+        GlVertex Convert(
+            in GpuHle.DreamcastWaterBaseVertex source,
+            float baryX,
+            float baryY,
+            float baryZ)
+        {
+            GlVertex result = material;
+            // The recovered Dreamcast helper already returns coordinates in
+            // the widened logical viewport. Backend target bias adds the
+            // margin during rasterization, so convert that logical X back to
+            // target-local space here instead of applying the margin twice.
+            // Restore the target origin that the common shader subtracts,
+            // including Y=240 on the second PS1 display buffer.
+            result.X = source.X - xOffset + (batch.State.Target?.X ?? 0f);
+            result.Y = source.Y + (batch.State.Target?.Y ?? 0f);
+            result.PerspectiveW = source.CameraDepth;
+            result.Depth = source.CameraDepth;
+            result.RasterDepth =
+                Math.Clamp(source.CameraDepth, 1f, 65535f) / 65535f;
+            result.BaryX = baryX;
+            result.BaryY = baryY;
+            result.BaryZ = baryZ;
+            result.ViewX = 0f;
+            result.ViewY = 0f;
+            result.ViewZ = 0f;
+            result.ProjectionCenterX = 0f;
+            result.ProjectionCenterY = 0f;
+            result.ProjectionScale = 0f;
+            result.HasViewSpace = 0f;
+            return result;
+        }
+
+        int sourceVertexCount = batch.Vertices.Count;
+        batch.Vertices.Clear();
+        batch.Vertices.Add(Convert(quad.V0, 1f, 0f, 0f));
+        batch.Vertices.Add(Convert(quad.V1, 0f, 1f, 0f));
+        batch.Vertices.Add(Convert(quad.V2, 0f, 0f, 1f));
+        batch.Vertices.Add(Convert(quad.V1, 1f, 0f, 0f));
+        batch.Vertices.Add(Convert(quad.V2, 0f, 1f, 0f));
+        batch.Vertices.Add(Convert(quad.V3, 0f, 0f, 1f));
+        _traceDreamcastWaterBaseReplacements++;
+        if (TraceDreamcastWaterBase &&
+            _dreamcastWaterBaseTraceCount++ < 128)
+        {
+            Console.Error.WriteLine(
+                $"[DreamcastWaterBaseQuad] frame={_frame} " +
+                $"group=0x{batch.State.PrimitiveGroup:X8} " +
+                $"source-vertices={sourceVertexCount} " +
+                $"colour=0x{material.Color:X8} margin={xOffset:F3} " +
+                $"quad=({quad.V0.X:F3},{quad.V0.Y:F3}," +
+                    $"{quad.V0.CameraDepth:F3});" +
+                    $"({quad.V1.X:F3},{quad.V1.Y:F3}," +
+                    $"{quad.V1.CameraDepth:F3});" +
+                    $"({quad.V2.X:F3},{quad.V2.Y:F3}," +
+                    $"{quad.V2.CameraDepth:F3});" +
+                    $"({quad.V3.X:F3},{quad.V3.Y:F3}," +
+                    $"{quad.V3.CameraDepth:F3})");
+        }
+    }
+
+    void ReplaceWithDreamcastWaterSurfaceMesh(
+        BufferedDeferredBatch batch)
+    {
+        if (TraceDreamcastWaterBase &&
+            batch.State.Material == HleMaterialKind.WaterSurface &&
+            _dreamcastWaterSurfaceTraceCount++ < 128)
+            Console.Error.WriteLine(
+                $"[DreamcastWaterSurfaceBatch] frame={_frame} " +
+                $"group=0x{batch.State.PrimitiveGroup:X8} " +
+                $"mesh={(batch.State.WaterSurfaceMesh != null ? 1 : 0)} " +
+                $"source-vertices={batch.Vertices.Count}");
+        if (batch.State.Material != HleMaterialKind.WaterSurface ||
+            batch.State.PrimitiveGroup == 0u ||
+            batch.State.WaterSurfaceMesh is not { } mesh ||
+            mesh.Vertices.Length < 3 ||
+            batch.Vertices.Count < 3)
+            return;
+
+        // The PS1 routine emits many individually depth-sorted water tiles.
+        // Dreamcast XWAT emits one continuous PVR row-strip mesh. Replace the
+        // PS1 positions, texture binding, wave UVs, and topology with the
+        // asset-direct XWAT surface recovered from the loaded level archive.
+        GlVertex material = batch.Vertices[0];
+        material.Color = 0x00FFFFFFu;
+        float xOffset = batch.State.Target?.Margin ?? 0f;
+
+        GlVertex Convert(
+            in GpuHle.DreamcastWaterSurfaceVertex source,
+            int triangleVertex)
+        {
+            GlVertex result = material;
+            // XWAT helper 8C0D70A0 has already projected this vertex with
+            // max(viewZ, 0.001). Preserve that exact screen-space result.
+            // Reprojecting its unclamped view position in the host shader
+            // changes how every independent row strip meets the camera plane
+            // and produces long horizontal bands across otherwise dry land.
+            // As for terrain/base water, restore the display-buffer origin
+            // before the shared shader applies its target-local bias.
+            result.X = source.X - xOffset + (batch.State.Target?.X ?? 0f);
+            result.Y = source.Y + (batch.State.Target?.Y ?? 0f);
+            // XWAT's recovered coordinates are normalized slope samples,
+            // not remapped PS1 packet UVs.
+            result.U = source.U;
+            result.V = source.V;
+            result.Texpage = 0;
+            result.Clut = 0;
+            result.Material = (int)HleMaterialKind.WaterSurface;
+            // Dreamcast terrain and XWAT both submit the same
+            // 0.9 * projection / viewZ reciprocal-depth convention. The
+            // common factor cancels when the PC backend represents both in
+            // conventional camera-depth space, so water must retain viewZ
+            // here rather than applying an unmatched bias.
+            float depthCompare = source.CameraDepth;
+            result.PerspectiveW = source.CameraDepth;
+            result.Depth = depthCompare;
+            result.RasterDepth =
+                Math.Clamp(depthCompare, 1f, 65535f) / 65535f;
+            result.BaryX = triangleVertex == 0 ? 1f : 0f;
+            result.BaryY = triangleVertex == 1 ? 1f : 0f;
+            result.BaryZ = triangleVertex == 2 ? 1f : 0f;
+            // PVR receives only projected X/Y and reciprocal depth from the
+            // retail helper; it does not receive the unclamped camera-space
+            // point. Mark this as projected geometry so the common shader
+            // cannot silently perform a second, different projection.
+            result.ViewX = 0f;
+            result.ViewY = 0f;
+            result.ViewZ = 0f;
+            result.ProjectionCenterX = 0f;
+            result.ProjectionCenterY = 0f;
+            result.ProjectionScale = 0f;
+            result.HasViewSpace = 0f;
+            return result;
+        }
+
+        batch.Vertices.Clear();
+        for (int index = 0; index < mesh.Vertices.Length; index++)
+            batch.Vertices.Add(Convert(mesh.Vertices[index], index % 3));
+        _traceDreamcastWaterSurfaceReplacements++;
+        if (TraceDreamcastWaterBase &&
+            _dreamcastWaterSurfaceTraceCount++ < 128)
+            Console.Error.WriteLine(
+                $"[DreamcastWaterSurfaceMesh] frame={_frame} " +
+                $"group=0x{batch.State.PrimitiveGroup:X8} " +
+                $"rows={mesh.Rows} columns={mesh.Columns} " +
+                $"vertices={mesh.Vertices.Length} " +
+                $"texture={(mesh.Texture != null ? 1 : 0)} " +
+                $"margin={xOffset:F3}");
+    }
+
+    unsafe void TraceDeferredWaterDepth(
+        string stage,
+        GlDisplayRt? target)
+    {
+        if (!TraceWaterDepthProbe ||
+            TriangleProbe is not { } probe ||
+            target == null)
+            return;
+
+        int scale = GlVram.Scale;
+        int pixelX = Math.Clamp(
+            (int)MathF.Floor(
+                (probe.X + target.Margin) * scale + scale * 0.5f),
+            0,
+            target.TexW - 1);
+        int pixelY = Math.Clamp(
+            (int)MathF.Floor(probe.Y * scale + scale * 0.5f),
+            0,
+            target.TexH - 1);
+
+        // Resolve only the matching depth attachment for this diagnostic
+        // read. The multisampled draw depth remains the active authority.
+        if (target.MsaaFbo != 0)
+        {
+            _gl.BindFramebuffer(
+                FramebufferTarget.ReadFramebuffer,
+                target.MsaaFbo);
+            _gl.BindFramebuffer(
+                FramebufferTarget.DrawFramebuffer,
+                target.Fbo);
+            _gl.BlitFramebuffer(
+                0, 0, target.TexW, target.TexH,
+                0, 0, target.TexW, target.TexH,
+                ClearBufferMask.DepthBufferBit,
+                BlitFramebufferFilter.Nearest);
+        }
+        _gl.BindFramebuffer(
+            FramebufferTarget.ReadFramebuffer,
+            target.MsaaFbo != 0 ? target.Fbo : target.DrawFbo);
+        Span<float> depth = stackalloc float[1];
+        _gl.ReadPixels<float>(
+            pixelX,
+            pixelY,
+            1,
+            1,
+            PixelFormat.DepthComponent,
+            PixelType.Float,
+            depth);
+        Console.Error.WriteLine(
+            $"[DreamcastWaterDepthProbe] frame={_frame} " +
+            $"stage={stage} probe={probe.X:F3},{probe.Y:F3} " +
+            $"pixel={pixelX},{pixelY} depth={depth[0]:F9}");
+        _gl.BindFramebuffer(
+            FramebufferTarget.Framebuffer,
+            target.DrawFbo);
+    }
+
+    void ReplayBufferedBatches(List<BufferedDeferredBatch> batches)
     {
         if (batches.Count == 0)
             return;
+
+        if (_emittedWaterBaseGroupFrame != _frame)
+        {
+            _emittedWaterBaseGroups.Clear();
+            _emittedWaterSurfaceGroups.Clear();
+            _emittedWaterBaseGroupFrame = _frame;
+        }
+
+        // The PS1 approximation changes colour/depth state partway through
+        // one scanline stack, which splits one function-owned base-water call
+        // into multiple host batches. Dreamcast submits that call as exactly
+        // one PVR strip and one material. Reunite every batch carrying the
+        // same recovered call provenance before replacing its geometry; two
+        // overlapping replacement quads would darken the water and retain
+        // the very banding this path removes.
+        Dictionary<uint, BufferedDeferredBatch> waterBaseGroups = [];
+        Dictionary<uint, BufferedDeferredBatch> waterSurfaceGroups = [];
+        foreach (BufferedDeferredBatch batch in batches)
+        {
+            bool waterBase =
+                batch.State.Material == HleMaterialKind.WaterBase &&
+                batch.State.WaterBaseQuad.HasValue;
+            bool waterSurface =
+                batch.State.Material == HleMaterialKind.WaterSurface &&
+                batch.State.WaterSurfaceMesh != null;
+            if ((!waterBase && !waterSurface) ||
+                batch.State.PrimitiveGroup == 0u ||
+                batch.Vertices.Count == 0)
+                continue;
+            Dictionary<uint, BufferedDeferredBatch> groups = waterBase
+                ? waterBaseGroups
+                : waterSurfaceGroups;
+            if (groups.TryGetValue(
+                    batch.State.PrimitiveGroup, out var first))
+            {
+                first.Vertices.AddRange(batch.Vertices);
+                batch.Vertices.Clear();
+            }
+            else
+                groups.Add(batch.State.PrimitiveGroup, batch);
+        }
 
         bool MatchesCurrent(in DeferredBatch batch) =>
             batch.Target == _kTarget &&
@@ -4803,6 +5956,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             batch.DepthTest == _kDepthTest &&
             batch.DepthWrite == _kDepthWrite &&
             batch.SourceDepthCompareWrite == _kSourceDepthCompareWrite &&
+            batch.DreamcastTerrainDepth == _kDreamcastTerrainDepth &&
             batch.SetMask == _kSetMask &&
             batch.CheckMask == _kCheckMask &&
             batch.TwAndX == _kTwAndX &&
@@ -4822,6 +5976,160 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _kDepthTest = batch.DepthTest;
             _kDepthWrite = batch.DepthWrite;
             _kSourceDepthCompareWrite = batch.SourceDepthCompareWrite;
+            _kDreamcastTerrainDepth = batch.DreamcastTerrainDepth;
+            _kMaterial = batch.Material;
+            _kBlend = batch.Blend;
+            _kSetMask = batch.SetMask;
+            _kCheckMask = batch.CheckMask;
+            _kTwAndX = batch.TwAndX;
+            _kTwAndY = batch.TwAndY;
+            _kTwOrX = batch.TwOrX;
+            _kTwOrY = batch.TwOrY;
+            _kClipX0 = batch.ClipX0;
+            _kClipY0 = batch.ClipY0;
+            _kClipX1 = batch.ClipX1;
+            _kClipY1 = batch.ClipY1;
+            _kTextureSmoothing = batch.TextureSmoothing;
+        }
+
+        bool pairedSurfaceAvailable = waterBaseGroups.Values.Any(batch =>
+            batch.State.WaterSurfaceMesh?.Texture != null);
+
+        GlDisplayRt? depthProbeTarget =
+            batches.Select(batch => batch.State.Target)
+                .FirstOrDefault(target => target != null);
+        if (TraceWaterDepthProbe)
+        {
+            Flush();
+            TraceDeferredWaterDepth("before-water", depthProbeTarget);
+        }
+
+        void Submit(BufferedDeferredBatch batch)
+        {
+            ReplaceWithDreamcastWaterBaseQuad(batch);
+            ReplaceWithDreamcastWaterSurfaceMesh(batch);
+            Debug.Assert(batch.Vertices.Count <= MaxVerts);
+            if (_count > 0 &&
+                (!MatchesCurrent(batch.State) ||
+                 _count + batch.Vertices.Count > MaxVerts))
+                Flush();
+            if (_count == 0)
+                Adopt(batch.State);
+            batch.Vertices.CopyTo(_verts, _count);
+            _count += batch.Vertices.Count;
+        }
+
+        foreach (BufferedDeferredBatch batch in batches)
+        {
+            if (batch.Vertices.Count == 0)
+                continue;
+            if (DiagnosticSkipDreamcastWaterAll &&
+                batch.State.Material is HleMaterialKind.WaterBase or
+                    HleMaterialKind.WaterSurface)
+                continue;
+            // Dreamcast submits one inseparable base/XWAT pair. When the base
+            // call already carries its asset-direct XWAT mesh, the conditional
+            // PS1 surface packets are an obsolete third pass.
+            if (pairedSurfaceAvailable &&
+                batch.State.Material == HleMaterialKind.WaterSurface)
+                continue;
+            // A UI boundary can force an early replay before the remaining
+            // packets from the same native water call reach PresentDisplay.
+            // Dreamcast emitted one strip for that call, so retain the first
+            // correctly coloured quad and discard later fragments carrying
+            // the same per-frame call provenance.
+            if (batch.State.Material == HleMaterialKind.WaterBase &&
+                batch.State.PrimitiveGroup != 0u &&
+                !_emittedWaterBaseGroups.Add(batch.State.PrimitiveGroup))
+            {
+                if (TraceDreamcastWaterBase &&
+                    _dreamcastWaterBaseTraceCount++ < 128)
+                    Console.Error.WriteLine(
+                        $"[DreamcastWaterBaseDuplicate] frame={_frame} " +
+                        $"group=0x{batch.State.PrimitiveGroup:X8} " +
+                        $"vertices={batch.Vertices.Count}");
+                continue;
+            }
+            if (batch.State.Material == HleMaterialKind.WaterSurface &&
+                batch.State.PrimitiveGroup != 0u &&
+                !_emittedWaterSurfaceGroups.Add(batch.State.PrimitiveGroup))
+                continue;
+            BufferedDeferredBatch? pairedSurface = null;
+            if (batch.State.Material == HleMaterialKind.WaterBase &&
+                batch.State.WaterSurfaceMesh?.Texture != null)
+            {
+                DeferredBatch surfaceState = batch.State with
+                {
+                    Transparent = true,
+                    Material = HleMaterialKind.WaterSurface,
+                    WaterBaseQuad = null,
+                };
+                pairedSurface = new BufferedDeferredBatch(surfaceState);
+                pairedSurface.Vertices.AddRange(batch.Vertices);
+            }
+
+            if (!DiagnosticSkipDreamcastWaterBase ||
+                batch.State.Material != HleMaterialKind.WaterBase)
+            {
+                Submit(batch);
+                if (TraceWaterDepthProbe &&
+                    batch.State.Material == HleMaterialKind.WaterBase)
+                {
+                    Flush();
+                    TraceDeferredWaterDepth("after-base", depthProbeTarget);
+                }
+            }
+            if (pairedSurface != null &&
+                _emittedWaterSurfaceGroups.Add(
+                    pairedSurface.State.PrimitiveGroup))
+            {
+                Submit(pairedSurface);
+                if (TraceWaterDepthProbe)
+                {
+                    Flush();
+                    TraceDeferredWaterDepth(
+                        "after-surface",
+                        depthProbeTarget);
+                }
+            }
+        }
+        Flush();
+        batches.Clear();
+    }
+
+    void ReplayDeferredBatches(List<DeferredBatch> batches)
+    {
+        if (batches.Count == 0)
+            return;
+
+        bool MatchesCurrent(in DeferredBatch batch) =>
+            batch.Target == _kTarget &&
+            BlendStateOf(batch.Transparent, batch.Blend, batch.Material) ==
+                BlendStateOf(_kTransparent, _kBlend, _kMaterial) &&
+            batch.DepthTest == _kDepthTest &&
+            batch.DepthWrite == _kDepthWrite &&
+            batch.SourceDepthCompareWrite == _kSourceDepthCompareWrite &&
+            batch.DreamcastTerrainDepth == _kDreamcastTerrainDepth &&
+            batch.SetMask == _kSetMask &&
+            batch.CheckMask == _kCheckMask &&
+            batch.TwAndX == _kTwAndX &&
+            batch.TwAndY == _kTwAndY &&
+            batch.TwOrX == _kTwOrX &&
+            batch.TwOrY == _kTwOrY &&
+            batch.ClipX0 == _kClipX0 &&
+            batch.ClipY0 == _kClipY0 &&
+            batch.ClipX1 == _kClipX1 &&
+            batch.ClipY1 == _kClipY1 &&
+            batch.TextureSmoothing == _kTextureSmoothing;
+
+        void Adopt(in DeferredBatch batch)
+        {
+            _kTarget = batch.Target;
+            _kTransparent = batch.Transparent;
+            _kDepthTest = batch.DepthTest;
+            _kDepthWrite = batch.DepthWrite;
+            _kSourceDepthCompareWrite = batch.SourceDepthCompareWrite;
+            _kDreamcastTerrainDepth = batch.DreamcastTerrainDepth;
             _kMaterial = batch.Material;
             _kBlend = batch.Blend;
             _kSetMask = batch.SetMask;
@@ -5097,6 +6405,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _packetNclipMissing = 0;
         }
         FlushSelectorRenderTrace();
+        FlushWorldTextureTrace();
         _frame++;
         RefreshViewSettings();
         // Re-armed each frame the modal is drawn, so it follows the overlay
@@ -5127,9 +6436,21 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 Console.Error.WriteLine(
                     $"[V8TriangleProbeContinuous] frame={_frame} {triangle}");
         _pendingProbeTriangles.Clear();
+        ReplayDeferredSky();
         Flush();
+        ReplayBufferedBatches(_deferredWater);
         ReplayDeferredBatches(_deferredScreenEffects);
         ReplayDeferredBatches(_deferredLoadingPrompt);
+        if (FinalOwnerPoints.Length != 0 && GpuHle.GameplayActive &&
+            _kTarget is { } ownerTarget && TraceTerrainCellTicks is { } ownerTicks &&
+            GpuHle.DebugGameplayTick >= ownerTicks.Start &&
+            GpuHle.DebugGameplayTick <= ownerTicks.End)
+        {
+            Flush();
+            foreach (var point in FinalOwnerPoints)
+                TraceFinalOwnerPixel(ownerTarget, point.X, point.Y);
+        }
+        _finalOwnerPackets.Clear();
         if (TraceTerrainVram && GpuHle.GameplayActive &&
             _frame - _terrainVramTraceFrame >= 120)
         {
@@ -5240,6 +6561,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 $"route-source-transition={_traceTerrainRouteSourceTransition} " +
                 $"route-source-unresolved={_traceTerrainRouteSourceUnresolved} " +
                 $"coarse-paired-quads={_traceCoarseTerrainPairedQuads} " +
+                $"dc-water-base={_traceDreamcastWaterBaseReplacements} " +
+                $"dc-water-surface={_traceDreamcastWaterSurfaceReplacements} " +
                 $"dc-leaves-1={_traceDreamcastOneUnitLeaves} dc-leaves-2={_traceDreamcastTwoUnitLeaves} dc-leaves-4={_traceDreamcastFourUnitLeaves} " +
                 $"coarse-unpaired-halves={_traceCoarseTerrainUnpairedHalves} " +
                 $"modern-overspan={_traceModernOverspanTriangles} " +
@@ -5261,6 +6584,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _traceTerrainRouteSourceTransition = 0;
             _traceTerrainRouteSourceUnresolved = 0;
             _traceCoarseTerrainPairedQuads = 0;
+            _traceDreamcastWaterBaseReplacements = 0;
+            _traceDreamcastWaterSurfaceReplacements = 0;
             _traceDreamcastOneUnitLeaves = _traceDreamcastTwoUnitLeaves = _traceDreamcastFourUnitLeaves = 0;
             _traceCoarseTerrainUnpairedHalves = 0;
             _traceWorldTriangles = 0;
@@ -5582,6 +6907,48 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _presentW = w; _presentH = h; _presentNearest = nearest;
     }
 
+    unsafe void EnsureDreamcastWaterTexture()
+    {
+        GpuHle.DreamcastWaterTexture? source =
+            GpuHle.CurrentDreamcastWaterTexture;
+        if (source == null ||
+            source.Revision == _dreamcastWaterTextureRevision)
+            return;
+        if (_dreamcastWaterTexture == 0)
+            _dreamcastWaterTexture = _gl.GenTexture();
+        _gl.ActiveTexture(TextureUnit.Texture5);
+        _gl.BindTexture(TextureTarget.Texture2D, _dreamcastWaterTexture);
+        fixed (byte* pixels = source.Rgba)
+            _gl.TexImage2D(
+                TextureTarget.Texture2D,
+                0,
+                InternalFormat.Rgba8,
+                (uint)source.Width,
+                (uint)source.Height,
+                0,
+                PixelFormat.Rgba,
+                PixelType.UnsignedByte,
+                pixels);
+        _gl.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureMinFilter,
+            (int)GLEnum.Linear);
+        _gl.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureMagFilter,
+            (int)GLEnum.Linear);
+        _gl.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureWrapS,
+            (int)GLEnum.Repeat);
+        _gl.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureWrapT,
+            (int)GLEnum.Repeat);
+        _dreamcastWaterTextureRevision = source.Revision;
+        _gl.ActiveTexture(TextureUnit.Texture0);
+    }
+
     public void Dispose()
     {
         foreach (var rt in _rts) rt?.Destroy(_gl);
@@ -5596,6 +6963,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         if (_progPresent != 0) _gl.DeleteProgram(_progPresent);
         if (_progPresent24 != 0) _gl.DeleteProgram(_progPresent24);
         if (_presentTex != 0) _gl.DeleteTexture(_presentTex);
+        if (_dreamcastWaterTexture != 0)
+            _gl.DeleteTexture(_dreamcastWaterTexture);
         if (_presentFbo != 0) _gl.DeleteFramebuffer(_presentFbo);
     }
 }

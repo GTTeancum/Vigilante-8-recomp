@@ -19,8 +19,13 @@ public sealed partial class Gpu
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESHES") == "1";
     static readonly bool TraceWaterNearGeometry =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_WATER_NEAR_GEOMETRY") == "1";
+    static readonly bool TraceNativeWaterPrims =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_V82_NATIVE_WATER_PRIMS") == "1";
     int _traceWaterNearTick = -1;
     int _traceWaterNearCount;
+    int _traceNativeWaterBasePrimCount;
+    int _traceNativeWaterSurfacePrimCount;
     static readonly bool TraceN64RouteColors =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_N64_ROUTE_COLORS") == "1";
@@ -39,8 +44,15 @@ public sealed partial class Gpu
     int _currentOtDepth;
     uint _currentOtPacketAddress;
     bool _currentOtPacketVehicle;
+    bool _currentOtPacketWorldObject;
     bool _currentOtPacketVehicleReflection;
     bool _currentOtPacketTerrainRoute;
+    bool _currentOtPacketWaterBase;
+    bool _currentOtPacketWaterSurface;
+    uint _currentOtPacketWaterBaseGroup;
+    GpuHle.DreamcastWaterBaseQuad? _currentOtPacketWaterBaseQuad;
+    uint _currentOtPacketWaterSurfaceGroup;
+    GpuHle.DreamcastWaterSurfaceMesh? _currentOtPacketWaterSurfaceMesh;
     int _traceVehiclePacketHits;
     int _traceVehicleTriangles;
     int _tracePacketOwnershipLookups;
@@ -98,10 +110,31 @@ public sealed partial class Gpu
     {
         _currentOtPacketAddress = address;
         _currentOtPacketVehicle = GpuHle.IsVehiclePacket(address);
+        _currentOtPacketWorldObject = GpuHle.IsWorldObjectPacket(address);
         _currentOtPacketVehicleReflection =
             GpuHle.IsVehicleReflectionPacket(address);
         _currentOtPacketTerrainRoute =
             GpuHle.IsTerrainRoutePacket(address);
+        _currentOtPacketWaterBase = GpuHle.IsWaterBasePacket(address);
+        _currentOtPacketWaterSurface = GpuHle.IsWaterSurfacePacket(address);
+        _currentOtPacketWaterBaseGroup = 0u;
+        _currentOtPacketWaterBaseQuad = null;
+        _currentOtPacketWaterSurfaceGroup = 0u;
+        _currentOtPacketWaterSurfaceMesh = null;
+        if (_currentOtPacketWaterBase &&
+            GpuHle.TryGetDreamcastWaterBaseQuad(
+                address, out uint waterBaseGroup, out var waterBaseQuad))
+        {
+            _currentOtPacketWaterBaseGroup = waterBaseGroup;
+            _currentOtPacketWaterBaseQuad = waterBaseQuad;
+        }
+        if ((_currentOtPacketWaterBase || _currentOtPacketWaterSurface) &&
+            GpuHle.TryGetDreamcastWaterSurfaceMesh(
+                address, out uint waterSurfaceGroup, out var waterSurfaceMesh))
+        {
+            _currentOtPacketWaterSurfaceGroup = waterSurfaceGroup;
+            _currentOtPacketWaterSurfaceMesh = waterSurfaceMesh;
+        }
         if (GpuHle.GameplayActive &&
             TracePacketOwners &&
             wordCount != 0)
@@ -114,8 +147,13 @@ public sealed partial class Gpu
                     $"[EnhancedPacketOwner] address=0x{address:X8} " +
                     $"words={wordCount} " +
                     $"vehicle={(_currentOtPacketVehicle ? 1 : 0)} " +
+                    $"world-object={(_currentOtPacketWorldObject ? 1 : 0)} " +
                     $"reflection={(_currentOtPacketVehicleReflection ? 1 : 0)} " +
                     $"terrain-route={(_currentOtPacketTerrainRoute ? 1 : 0)} " +
+                    $"water-base={(_currentOtPacketWaterBase ? 1 : 0)} " +
+                    $"water-base-quad={(_currentOtPacketWaterBaseQuad.HasValue ? 1 : 0)} " +
+                    $"water-surface={(_currentOtPacketWaterSurface ? 1 : 0)} " +
+                    $"water-surface-mesh={(_currentOtPacketWaterSurfaceMesh != null ? 1 : 0)} " +
                     $"owner={owner}");
         }
         if (GpuHle.GameplayActive && _currentOtPacketVehicle &&
@@ -142,8 +180,15 @@ public sealed partial class Gpu
         _currentOtDepth = 0;
         _currentOtPacketAddress = 0;
         _currentOtPacketVehicle = false;
+        _currentOtPacketWorldObject = false;
         _currentOtPacketVehicleReflection = false;
         _currentOtPacketTerrainRoute = false;
+        _currentOtPacketWaterBase = false;
+        _currentOtPacketWaterSurface = false;
+        _currentOtPacketWaterBaseGroup = 0u;
+        _currentOtPacketWaterBaseQuad = null;
+        _currentOtPacketWaterSurfaceGroup = 0u;
+        _currentOtPacketWaterSurfaceMesh = null;
         _projectiveDepthCache.Clear();
     }
 
@@ -240,7 +285,11 @@ public sealed partial class Gpu
         // Opaque packets can share the same CLUT row, but must retain the
         // ordinary PS1 keyed/STP material contract used by every vehicle.
         bool nativeVehicleGlass = semi && tex && IsNativeVehicleGlassClut(clut);
-        if (_currentOtPacketTerrainRoute)
+        if (_currentOtPacketWaterBase)
+            material = HleMaterialKind.WaterBase;
+        else if (_currentOtPacketWaterSurface)
+            material = HleMaterialKind.WaterSurface;
+        else if (_currentOtPacketTerrainRoute)
             material = HleMaterialKind.TerrainRoute;
         else if (_currentOtPacketVehicle)
             material = _currentOtPacketVehicleReflection && tex
@@ -285,7 +334,12 @@ public sealed partial class Gpu
             Clut = (ushort)clut,
             OtIndex = _currentOtDepth,
             PacketAddress = _currentOtPacketAddress,
+            WaterBaseGroup = _currentOtPacketWaterBaseGroup,
+            WaterBaseQuad = _currentOtPacketWaterBaseQuad,
+            WaterSurfaceGroup = _currentOtPacketWaterSurfaceGroup,
+            WaterSurfaceMesh = _currentOtPacketWaterSurfaceMesh,
             Vehicle = _currentOtPacketVehicle,
+            WorldObject = _currentOtPacketWorldObject && !_currentOtPacketVehicle,
             TerrainRoute = _currentOtPacketTerrainRoute,
             N64RouteColor =
                 _currentOtPacketTerrainRoute &&
@@ -304,6 +358,34 @@ public sealed partial class Gpu
         bool modernGeometry =
             a.HasViewSpace && b.HasViewSpace && c.HasViewSpace;
         if (!modernGeometry && (spanX > 1023 || spanY > 511)) return;
+
+        bool traceNativeWaterPrim =
+            TraceNativeWaterPrims &&
+            (_currentOtPacketWaterBase
+                ? _traceNativeWaterBasePrimCount++ < 512
+                : _currentOtPacketWaterSurface &&
+                  _traceNativeWaterSurfacePrimCount++ < 512);
+        if (traceNativeWaterPrim)
+            Console.Error.WriteLine(
+                $"[V82NativeWaterPrim] " +
+                $"kind={(_currentOtPacketWaterSurface ? "surface" : "base")} " +
+                $"packet=0x{_currentOtPacketAddress:X8} ot={_currentOtDepth} " +
+                $"words-page={_texPageX},{_texPageY} depth={_texDepth} " +
+                $"tpage=0x{CurTPage():X4} clut=0x{clut:X4} " +
+                $"blend={_blendMode} tex={(tex ? 1 : 0)} " +
+                $"semi={(semi ? 1 : 0)} raw={(raw ? 1 : 0)} " +
+                $"gouraud={(gouraud ? 1 : 0)} " +
+                $"xy=({a.X},{a.Y}),({b.X},{b.Y}),({c.X},{c.Y}) " +
+                $"uv=({a.U},{a.V}),({b.U},{b.V}),({c.U},{c.V}) " +
+                $"rgb=({a.R},{a.G},{a.B}),({b.R},{b.G},{b.B})," +
+                $"({c.R},{c.G},{c.B}) z=({a.Z},{b.Z},{c.Z}) " +
+                $"view-z=({a.ViewZ:R},{b.ViewZ:R},{c.ViewZ:R}) " +
+                $"view-space=({(a.HasViewSpace ? 1 : 0)}," +
+                    $"{(b.HasViewSpace ? 1 : 0)}," +
+                    $"{(c.HasViewSpace ? 1 : 0)}) " +
+                $"coherent=({(a.HasCoherentGteZ ? 1 : 0)}," +
+                    $"{(b.HasCoherentGteZ ? 1 : 0)}," +
+                    $"{(c.HasCoherentGteZ ? 1 : 0)})");
 
         int gameplayTick = GpuHle.DebugGameplayTick;
         // Diagnostic only: the generic far-to-near trace can exhaust its
@@ -417,6 +499,8 @@ public sealed partial class Gpu
         // projection/depth/fog.
         bool nativeScreenEffect =
             GpuHle.GameplayActive &&
+            flags.Material is not HleMaterialKind.WaterBase and
+                not HleMaterialKind.WaterSurface &&
             !flags.Vehicle &&
             semi && !tex &&
             minX <= 0 && maxX >= 320 &&

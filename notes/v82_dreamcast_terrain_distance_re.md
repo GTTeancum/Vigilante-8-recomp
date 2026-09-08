@@ -162,12 +162,13 @@ zone pointer grid at `0x8C28D160`, and submits each four-unit quad through
 This is the outer traversal cadence only. The submitter recursively selects
 four-, two-, or one-unit leaves using the distance conditions recorded above.
 
-At `0x8C1020E2`, `0x8C101FA0` reads material byte `+6` from the quad's
-top-left terrain record, indexes the 48-byte material table at `0x8C289958`,
-and submits one texture across the quad. Descriptor flags at `+30` select the
-direct/clipped path and diagonal; neither flag changes at a distance. The
-Dreamcast does not reconstruct the sixteen one-unit PS1 `XTIN` cells inside
-that quad.
+At `0x8C1020E2`, `0x8C101FA0` reads material byte `+6` from the current
+leaf's top-left terrain record, indexes the 48-byte material table at
+`0x8C289958`, and submits one texture across that leaf. Descriptor flags at
+`+30` select the direct/clipped path and diagonal; neither flag changes at a
+distance. A near four-unit outer patch recursively reaches sixteen one-unit
+leaves; two- and four-unit leaves use their own top-left record after the
+recovered distance decision.
 
 ## Terrain color data
 
@@ -180,9 +181,11 @@ ramp[channel, shade] = low[channel]
 ```
 
 The division is signed integer truncation. `low` is `COLS` bytes 12..14 and
-`high` is bytes 16..18. The PS1 loader keeps those same byte-identical words at
-`gp+0xE04` and `gp+0xDAC`, respectively. The shade index is the upper five bits
-of the terrain height word.
+`high` is bytes 16..18. Direct PS1 loader/runtime tracing places those same
+byte-identical words at `gp+0xE04` and `gp+0xDAC`, respectively. The separate
+fog word (COLS bytes 4..6) is at `gp+0xDA4`. The shade index is the upper five
+bits of the terrain height word. Values at `gp+0xE00` and `gp+0xDB4` are
+unrelated dynamic state and must not be used as terrain-ramp endpoints.
 
 `0x8C085100` stores each `XTIN` descriptor's average RGB. `0x8C085420` builds
 the terrain record and calls `0x8C084540`, which constructs the local flat
@@ -254,11 +257,15 @@ computed flat color to the 80-unit footprint clip.
 
 `0x8C095040` builds the terrain PVR material headers once before the walker and
 reuses them for every quad. `0x8C101FA0`, `0x8C102780`, and `0x8C101E20` do not
-alter filtering, texture format, mip selection, or material header bits based
-on depth. The native distance behavior is therefore the mesh/color transition
-above, not a hidden distance-dependent mipmap switch. Enhanced may use its
-global bounded texture-filter option, but that state is uniform and does not
-drive the terrain transition.
+alter filtering, texture identity, or material header bits based on depth.
+Asset-direct PVRT inventory subsequently established that every observed XBMP
+terrain tile is a 64-by-64 `PAL8_TWIDDLED_MIPMAP` texture. The PVR performs its
+ordinary projected-footprint mip selection inside that tile's authored chain;
+this is uniform material behavior, not a hidden switch to a second terrain
+texture. The native *distance transition* is still the mesh/color operation
+above. Enhanced must supply isolated per-tile mip chains for HD replacements
+without atlas bleed, while keeping that sampling separate from the recovered
+base/offset colour transition.
 
 ## Earlier Enhanced-renderer translation (incomplete; superseded above)
 

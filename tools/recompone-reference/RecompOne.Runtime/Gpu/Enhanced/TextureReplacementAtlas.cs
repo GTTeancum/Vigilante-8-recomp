@@ -33,6 +33,7 @@ internal sealed class TextureReplacementAtlas : IDisposable
         public bool Valid => W > 0f && H > 0f;
         public Vector3 ColorScale { get; init; } = Vector3.One;
         public Vector3 ColorBias { get; init; } = Vector3.Zero;
+        public Vector4 TerrainMipRect { get; init; } = Vector4.Zero;
     }
 
     readonly record struct Signature(
@@ -72,6 +73,7 @@ internal sealed class TextureReplacementAtlas : IDisposable
         public required int PackedX { get; init; }
         public required int PackedY { get; init; }
         public required Dictionary<TerrainTileKey, (int X, int Y)> Tiles { get; init; }
+        public Dictionary<(int X, int Y), Vector4> MipRects { get; } = [];
         public List<TerrainAnchor> Anchors { get; } = [];
     }
     sealed class FileFont
@@ -126,11 +128,16 @@ internal sealed class TextureReplacementAtlas : IDisposable
     long _performanceMarkedPixels;
     ulong _revision = 1;
     uint _texture;
+    uint _terrainMipTexture;
     int _width = 1, _height = 1;
+    int _terrainMipWidth = 1, _terrainMipHeight = 1;
 
     public uint Texture => _texture;
+    public uint TerrainMipTexture => _terrainMipTexture;
     public int Width => _width;
     public int Height => _height;
+    public int TerrainMipWidth => _terrainMipWidth;
+    public int TerrainMipHeight => _terrainMipHeight;
     public int Count => _entries.Count + _terrainAtlases.Count + _fileFonts.Count;
 
     public TextureReplacementAtlas(GL gl)
@@ -427,6 +434,7 @@ internal sealed class TextureReplacementAtlas : IDisposable
             TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
             (uint)_width, (uint)_height, 0,
             PixelFormat.Rgba, PixelType.UnsignedByte, rgba);
+        BuildTerrainMipAtlas();
         Console.WriteLine(
             $"[TexturePack] loaded {images.Count} loose DDS files / " +
             $"{_entries.Count} regions / {_routeEntries.Count} route regions / " +
@@ -436,6 +444,106 @@ internal sealed class TextureReplacementAtlas : IDisposable
             $"runtime-atlas={_width}x{_height}");
         Console.WriteLine(
             $"[TexturePack] manifest key shadows={_entryShadows.Count}");
+    }
+
+    void BuildTerrainMipAtlas()
+    {
+        int tileCount = 0;
+        int largestTile = 0;
+        foreach (TerrainAtlas atlas in _terrainAtlases)
+        {
+            int tileSize = atlas.SourceHeight / 4;
+            int scale = atlas.Image.Width / atlas.SourceWidth;
+            tileCount += (atlas.SourceWidth / tileSize) *
+                (atlas.SourceHeight / tileSize);
+            largestTile = Math.Max(largestTile, tileSize * scale);
+        }
+        if (tileCount == 0 || largestTile == 0)
+            return;
+
+        // Each authored terrain tile owns one power-of-two cell. Filling the
+        // unused part of that cell with its edge texels keeps every generated
+        // mip level isolated: no level can average a neighboring terrain tile
+        // or an unrelated packed replacement into the result.
+        int cellSize = 1;
+        while (cellSize < largestTile)
+            cellSize <<= 1;
+        int columns = (int)Math.Ceiling(Math.Sqrt(tileCount));
+        int rows = (tileCount + columns - 1) / columns;
+        _terrainMipWidth = checked(columns * cellSize);
+        _terrainMipHeight = checked(rows * cellSize);
+        byte[] pixels = new byte[checked(
+            _terrainMipWidth * _terrainMipHeight * 4)];
+
+        int tileIndex = 0;
+        foreach (TerrainAtlas atlas in _terrainAtlases)
+        {
+            int tileSize = atlas.SourceHeight / 4;
+            int scale = atlas.Image.Width / atlas.SourceWidth;
+            int outputSize = tileSize * scale;
+            for (int sourceY = 0;
+                 sourceY + tileSize <= atlas.SourceHeight;
+                 sourceY += tileSize)
+            for (int sourceX = 0;
+                 sourceX + tileSize <= atlas.SourceWidth;
+                 sourceX += tileSize)
+            {
+                int cellX = (tileIndex % columns) * cellSize;
+                int cellY = (tileIndex / columns) * cellSize;
+                for (int y = 0; y < cellSize; y++)
+                for (int x = 0; x < cellSize; x++)
+                {
+                    int imageX = sourceX * scale +
+                        Math.Min(x, outputSize - 1);
+                    int imageY = sourceY * scale +
+                        Math.Min(y, outputSize - 1);
+                    int source =
+                        (imageY * atlas.Image.Width + imageX) * 4;
+                    int target = ((cellY + y) * _terrainMipWidth +
+                        cellX + x) * 4;
+                    System.Buffer.BlockCopy(
+                        atlas.Image.Rgba, source, pixels, target, 4);
+                }
+                atlas.MipRects[(sourceX, sourceY)] = new Vector4(
+                    cellX,
+                    cellY,
+                    outputSize,
+                    outputSize);
+                tileIndex++;
+            }
+        }
+
+        _terrainMipTexture = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, _terrainMipTexture);
+        _gl.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureMinFilter,
+            (int)GLEnum.LinearMipmapLinear);
+        _gl.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureMagFilter,
+            (int)GLEnum.Linear);
+        _gl.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureWrapS,
+            (int)GLEnum.ClampToEdge);
+        _gl.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureWrapT,
+            (int)GLEnum.ClampToEdge);
+        _gl.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureMaxLevel,
+            BitOperations.Log2((uint)cellSize));
+        _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+        _gl.TexImage2D<byte>(
+            TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
+            (uint)_terrainMipWidth, (uint)_terrainMipHeight, 0,
+            PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+        _gl.GenerateMipmap(TextureTarget.Texture2D);
+        Console.WriteLine(
+            $"[TexturePack] Dreamcast terrain mip atlas tiles={tileCount} " +
+            $"cell={cellSize} atlas={_terrainMipWidth}x{_terrainMipHeight}");
     }
 
     public Rect ResolveFontFile(
@@ -978,6 +1086,19 @@ internal sealed class TextureReplacementAtlas : IDisposable
         (Vector3 colorScale, Vector3 colorBias) =
             TerrainPaletteTransform(
                 match, s, globalX, globalY, sourceWidth, sourceHeight);
+        Vector4 terrainMipRect = Vector4.Zero;
+        int tileSize = match.SourceHeight / 4;
+        int tileOriginX = tile.X / tileSize * tileSize;
+        int tileOriginY = tile.Y / tileSize * tileSize;
+        if (tile.X + sourceWidth <= tileOriginX + tileSize &&
+            tile.Y + sourceHeight <= tileOriginY + tileSize &&
+            match.MipRects.TryGetValue(
+                (tileOriginX, tileOriginY), out Vector4 mipCell))
+            terrainMipRect = new Vector4(
+                mipCell.X + (tile.X - tileOriginX) * scale,
+                mipCell.Y + (tile.Y - tileOriginY) * scale,
+                sourceWidth * scale,
+                sourceHeight * scale);
         rect = new Rect(
             match.PackedX + tile.X * scale,
             match.PackedY + tile.Y * scale,
@@ -985,6 +1106,7 @@ internal sealed class TextureReplacementAtlas : IDisposable
             sourceHeight * scale) {
             ColorScale = colorScale,
             ColorBias = colorBias,
+            TerrainMipRect = terrainMipRect,
         };
         key = match.IndexHash;
         if (_traceTerrainAtlasFragments &&
@@ -1333,6 +1455,9 @@ internal sealed class TextureReplacementAtlas : IDisposable
                 $"miss={_terrainAtlasMisses}");
         }
         if (_texture != 0) _gl.DeleteTexture(_texture);
+        if (_terrainMipTexture != 0)
+            _gl.DeleteTexture(_terrainMipTexture);
         _texture = 0;
+        _terrainMipTexture = 0;
     }
 }

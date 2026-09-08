@@ -30,4 +30,9 @@ public interface IGpuBackend
     // disturbing packet ownership or other renderer state still used while
     // the shell hands control to the next arena.
     void ResetAtmosphereState() { }
+
+    // Install the loaded arena's Dreamcast table-fog colour. The Enhanced
+    // backend combines this with the retail Dreamcast fog table and density;
+    // other backends may ignore it.
+    void SetDreamcastFogColor(byte red, byte green, byte blue) { }
 }

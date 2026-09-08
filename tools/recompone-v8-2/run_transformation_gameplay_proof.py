@@ -111,6 +111,12 @@ def review(out):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--exe", type=Path, default=LOOSE / "Vigilante82PC.exe",
+        help="Candidate executable; working directory and assets remain the loose PS1 root")
+    parser.add_argument("--final-owner-point", default="",
+        help="Opt-in native framebuffer points for shoreline writer diagnostics")
+    parser.add_argument("--final-owner-ticks", default="",
+        help="Bounded native gameplay tick range for the framebuffer diagnostic")
     parser.add_argument("--maps", default="3")
     parser.add_argument("--player", type=int, default=0)
     parser.add_argument("--players", help="Optional comma-separated type per map")
@@ -125,6 +131,8 @@ def main():
         help="Fixture camera yaw relative to vehicle, -180..180; requires --inspection-camera")
     parser.add_argument("--inspection-pitch-degrees", type=int, default=-45,
         help="Fixture camera elevation, -80..-5; requires --inspection-camera")
+    parser.add_argument("--inspection-distance-units", type=int, default=0,
+        help="Fixture-only exact chase distance, 1..16 world units; 0 keeps native/minimum-3 behavior")
     parser.add_argument("--attachment-trace", action="store_true")
     parser.add_argument("--water-site-separation-units", type=int, default=0,
         help="Fixture only: choose clear water this far from the nearest site, 0..128 world units")
@@ -138,6 +146,8 @@ def main():
         parser.error("Water-site separation must be 0..128 world units")
     if not -180 <= args.inspection_yaw_degrees <= 180 or not -80 <= args.inspection_pitch_degrees <= -5:
         parser.error("Inspection yaw must be -180..180 and pitch -80..-5 degrees")
+    if not 0 <= args.inspection_distance_units <= 16:
+        parser.error("Inspection distance must be 0..16 world units")
     if args.summarize_only:
         print(json.dumps(review(args.output.resolve()), indent=2))
         return
@@ -150,10 +160,14 @@ def main():
         raise RuntimeError("Game already running; refusing concurrent launch")
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    settings = LOOSE / "settings.json"
+    exe = args.exe.resolve()
+    settings = exe.parent / "settings.json"
+    settings_source = LOOSE / "settings.json"
     backup = out / "settings.before.json"
-    shutil.copy2(settings, backup)
-    config = json.loads(settings.read_text(encoding="utf-8-sig"))
+    shutil.copy2(settings if settings.exists() else settings_source, backup)
+    # ConfigManager resolves next to the executable, even with loose-root
+    # assets/CWD. Seed a candidate with the deployed settings for a valid A/B.
+    config = json.loads(settings_source.read_text(encoding="utf-8-sig"))
     config["V82Transformations"] = args.mode
     # Use the shared native menu/teardown replay without driving/healing actors.
     gate.active_route_pulses = lambda frames: ()
@@ -161,7 +175,6 @@ def main():
     match_frames = 1080 if args.profile == "attachment" else 660
     fixture.write_text(gate.fixture_text(match_frames, maps, capture_poll=150,
         hold_for_capture=True, proof_camera_cycles=args.camera_cycles), encoding="utf-8")
-    exe = LOOSE / "Vigilante82PC.exe"
     digest = hashlib.sha256(exe.read_bytes()).hexdigest()
     env = {k: v for k, v in os.environ.items() if not k.startswith("RECOMPONE_")}
     env.update({
@@ -180,12 +193,15 @@ def main():
         "RECOMPONE_V82_ARENA_SLOT_SEQUENCE": args.maps,
         "RECOMPONE_V82_PLAYER_TYPE_SEQUENCE": ",".join(str(p) for p in players),
         "RECOMPONE_V82_TRANSFORMATION_PROBE": "1",
+        "RECOMPONE_V82_TRANSFORMATION_PROBE_EXIT_AFTER_COMPLETE":
+            "1" if args.profile == "attachment" else "0",
         "RECOMPONE_V82_WATER_ATTACHMENT_TRACE": "1" if args.attachment_trace else "0",
         "RECOMPONE_V82_WATER_SITE_SEPARATION_UNITS": str(args.water_site_separation_units),
         "RECOMPONE_V82_WATER_ATTACHMENT_FIT": "1" if args.attachment_fit else "0",
         "RECOMPONE_V82_WATER_INSPECTION_CAMERA": "1" if args.inspection_camera else "0",
         "RECOMPONE_V82_WATER_INSPECTION_YAW_DEGREES": str(args.inspection_yaw_degrees),
         "RECOMPONE_V82_WATER_INSPECTION_PITCH_DEGREES": str(args.inspection_pitch_degrees),
+        "RECOMPONE_V82_WATER_INSPECTION_DISTANCE_UNITS": str(args.inspection_distance_units),
         "RECOMPONE_V82_TRANSFORMATION_PROBE_PROFILE": args.profile,
         "RECOMPONE_V82_TRANSFORMATION_PROBE_RESPAWN_GENERATION": str(args.respawn_generation),
         "RECOMPONE_V82_TRANSFORMATION_PROBE_IMAGES": "1" if args.images else "0",
@@ -194,6 +210,9 @@ def main():
         "RECOMPONE_DISABLE_SCRIPT_STAGE_CAPTURES": "1",
         "RECOMPONE_CAPTURE_DIR": str(out),
     })
+    if args.final_owner_point and args.final_owner_ticks:
+        env["RECOMPONE_TRACE_FINAL_OWNER_POINT"] = args.final_owner_point
+        env["RECOMPONE_TRACE_TERRAIN_CELL_TICKS"] = args.final_owner_ticks
     if args.packet_trace:
         env["RECOMPONE_TRACE_GAMEPLAY_TICKS"] = "150"
         env["RECOMPONE_TRACE_WATER_NEAR_GEOMETRY"] = "1"
@@ -213,7 +232,11 @@ def main():
                     raise TimeoutError("Native transformation integration timed out")
                 other_pids = [pid for pid in gate.game_process_ids() if pid != process.pid]
                 if other_pids:
-                    raise RuntimeError(f"Other game PID(s) {other_pids} appeared; stopping only fixture PID {process.pid}")
+                    details = gate.game_process_details(other_pids)
+                    raise RuntimeError(
+                        f"Other game PID(s) {other_pids} appeared with details "
+                        f"{json.dumps(details, separators=(',', ':'))}; "
+                        f"stopping only fixture PID {process.pid}")
                 time.sleep(3)
         log = (out / "runtime.log").read_text(errors="replace")
         records = [line for line in log.splitlines() if "[TransformationProbe]" in line or "[V82AutoWaterski]" in line]
@@ -227,6 +250,7 @@ def main():
             "inspection_camera": args.inspection_camera,
             "inspection_yaw_degrees": args.inspection_yaw_degrees,
             "inspection_pitch_degrees": args.inspection_pitch_degrees,
+            "inspection_distance_units": args.inspection_distance_units,
             "maps": slots, "mode": args.mode, "players": players, "profile": args.profile,
             "respawn_generation": args.respawn_generation,
             "elapsed_seconds": time.monotonic() - started,
@@ -255,6 +279,7 @@ def main():
                 "inspection_camera": args.inspection_camera,
                 "inspection_yaw_degrees": args.inspection_yaw_degrees,
                 "inspection_pitch_degrees": args.inspection_pitch_degrees,
+                "inspection_distance_units": args.inspection_distance_units,
                 "maps": slots, "mode": args.mode, "players": players, "profile": args.profile,
                 "respawn_generation": args.respawn_generation,
                 "generations": len(re.findall(r"\[TransformationProbe\] begin", log)),

@@ -34,18 +34,25 @@ public enum HleMaterialKind : byte
     ScreenEffect,
     TerrainRoute,
     VehicleReflection,
+    WaterBase,
+    WaterSurface,
 }
 
 public struct PrimFlags
 {
     public bool Textured, SemiTrans, RawTexture, Gouraud, Vehicle;
-    public bool TerrainRoute, N64RouteColor;
+    public bool WorldObject, TerrainRoute, N64RouteColor;
     public bool N64RouteDepthCompare;
+    public bool DreamcastTerrainDepth;
     public HleMaterialKind Material;
     public ushort TPage; 
     public ushort Clut; 
     public int OtIndex;
     public uint PacketAddress;
+    public uint WaterBaseGroup;
+    public GpuHle.DreamcastWaterBaseQuad? WaterBaseQuad;
+    public uint WaterSurfaceGroup;
+    public GpuHle.DreamcastWaterSurfaceMesh? WaterSurfaceMesh;
 
     public readonly int BlendMode => (TPage >> 5) & 3;
 }

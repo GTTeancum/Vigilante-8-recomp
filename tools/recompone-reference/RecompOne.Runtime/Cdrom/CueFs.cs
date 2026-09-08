@@ -28,6 +28,8 @@ public sealed class CueFs : IDisposable
     private readonly LooseEntry[] _looseByLba = [];
     private readonly Dictionary<string, FileStream> _looseStreams =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _structurallyScannedLooseAssets =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly object _looseIoGate = new();
     private readonly LooseCdda? _looseCdda;
 
@@ -91,7 +93,12 @@ public sealed class CueFs : IDisposable
         var located = LocateEntryWithPath(path) ??
             throw new FileNotFoundException($"File not found: {path}");
         if (TryGetLoose(located.Entry.Lba, out var loose))
-            return ReadLooseLogicalRange(loose, 0, checked((int)loose.LogicalSize));
+        {
+            byte[] data = ReadLooseLogicalRange(
+                loose, 0, checked((int)loose.LogicalSize));
+            TryRegisterStructuralAssets(loose, data);
+            return data;
+        }
         if (_bin != null)
             return ReadExtent(located.Entry.Lba, checked((int)located.Entry.Size));
         throw MissingLooseAsset(located.Path);
@@ -281,6 +288,7 @@ public sealed class CueFs : IDisposable
     {
         data = [];
         if (!TryGetLoose(startLba, out var loose)) return false;
+        TryRegisterStructuralAssets(loose);
         data = ReadLooseLogicalRange(loose, offset, count);
         return true;
     }
@@ -683,6 +691,7 @@ public sealed class CueFs : IDisposable
 
     private byte[] ReadLooseSector(LooseEntry entry, int sectorIndex, int size)
     {
+        TryRegisterStructuralAssets(entry);
         if (entry.Storage == LooseStorage.Raw2336)
         {
             byte[] raw = ReadHostRange(entry, (long)sectorIndex * 2336, 2336);
@@ -709,6 +718,30 @@ public sealed class CueFs : IDisposable
             _ => throw new NotSupportedException(
                 $"Loose cooked-sector size {size} is not supported"),
         };
+    }
+
+    void TryRegisterStructuralAssets(LooseEntry entry)
+    {
+        string path = NormalizeDiscPath(entry.DiscPath);
+        if (!path.StartsWith("LEVELS/", StringComparison.OrdinalIgnoreCase) ||
+            !path.EndsWith(".EXP", StringComparison.OrdinalIgnoreCase) ||
+            !_structurallyScannedLooseAssets.Add(path))
+            return;
+        byte[] data = ReadLooseLogicalRange(
+            entry, 0, checked((int)entry.LogicalSize));
+        TryRegisterStructuralAssets(entry, data);
+    }
+
+    static void TryRegisterStructuralAssets(
+        LooseEntry entry,
+        ReadOnlySpan<byte> data)
+    {
+        string path = NormalizeDiscPath(entry.DiscPath);
+        if (!path.StartsWith("LEVELS/", StringComparison.OrdinalIgnoreCase) ||
+            !path.EndsWith(".EXP", StringComparison.OrdinalIgnoreCase))
+            return;
+        RecompOne.Runtime.Hle.GpuHle.TryRegisterDreamcastWaterTexture(
+            path, data);
     }
 
     private static byte[] Prefix(byte[] source, int count)

@@ -807,6 +807,49 @@ PROVEN_PATCHES = [
         "mode": "post",
     },
     {
+        # Shared native water base pass. Capture packet provenance at the
+        # exact renderer boundary so Dreamcast material translation never
+        # depends on a map, texture, CLUT, or relocated object address.
+        "overlay": "main",
+        "address": "80015F28",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginNativeWaterBaseRender",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "80015F28",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndNativeWaterBaseRender",
+        "mode": "post",
+    },
+    {
+        # Shared near-water detail/surface pass. It is conditionally called
+        # by func_80017EB8 and is kept distinct from the base water geometry.
+        "overlay": "main",
+        "address": "80016664",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginNativeWaterSurfaceRender",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "80016664",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndNativeWaterSurfaceRender",
+        "mode": "post",
+    },
+    {
+        # Trace-only coordinate-seam probe. The SDK hook is a no-op outside
+        # the native water-surface scope and never mutates emulated state.
+        "overlay": "main",
+        "address": "80024008",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginNativeWaterTransform",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "80024008",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndNativeWaterTransform",
+        "mode": "post",
+    },
+    {
         # The outer terrain walker subdivides mixed-distance 4x4 cells into
         # four 2x2 calls here. Capture each inner packet range independently
         # so a coarse subcell can receive its native four texture descriptors
@@ -952,6 +995,21 @@ PROVEN_PATCHES = [
         "address": "8002D9E0",
         "target": "RecompOne.Runtime.Sdk.V82Compat.EndObjectRender",
         "mode": "post",
+    },
+    {
+        # The retail object renderer has completed its camera-distance query
+        # here and is about to choose object+0x40 (high mesh) or object+0x68
+        # (low mesh) using object+0x6C.  Trace the actual shared decision so a
+        # proximity-dependent building change cannot be mistaken for a mip or
+        # HD-texture replacement problem.
+        "overlay": "main",
+        # RecompOne emits the JAL delay-slot load after the managed call, so
+        # the first seam that observes object+0x6C in V1 is the following
+        # branch instruction rather than the architectural return address.
+        "address": "8002DBA0",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.TraceObjectLodDecision",
+        "mode": "inline",
+        "position": "before",
     },
     {
         # Resolve each native model descriptor to its authored imported bank

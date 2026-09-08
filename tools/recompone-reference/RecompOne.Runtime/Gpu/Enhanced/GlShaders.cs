@@ -77,6 +77,7 @@ internal static class GlShaders
         layout(location = 16) in vec3 inReplacementBias;
         layout(location = 17) in int inBlendCode;
         layout(location = 18) in uint inTerrainOffset;
+        layout(location = 19) in vec4 inTerrainMipRect;
 
         out vec4 vColorPerspective;
         noperspective out vec4 vColorAffine;
@@ -108,6 +109,7 @@ internal static class GlShaders
         flat out vec4  vReplacementRect;
         flat out vec3  vReplacementScale;
         flat out vec3  vReplacementBias;
+        flat out vec4  vTerrainMipRect;
         flat out ivec4 vUvBounds;
         noperspective out vec3 vBary;
         out float vDepth;
@@ -186,6 +188,7 @@ internal static class GlShaders
             vReplacementRect = inReplacementRect;
             vReplacementScale = inReplacementScale;
             vReplacementBias = inReplacementBias;
+            vTerrainMipRect = inTerrainMipRect;
             vLongestEdge = inClut;
             vUvBounds = ivec4(round(inUvBounds));
             vBary = inBary;
@@ -235,6 +238,7 @@ internal static class GlShaders
         flat in vec4  vReplacementRect;
         flat in vec3  vReplacementScale;
         flat in vec3  vReplacementBias;
+        flat in vec4  vTerrainMipRect;
         flat in ivec4 vUvBounds;
         noperspective in vec3 vBary;
         in float vDepth;
@@ -246,7 +250,10 @@ internal static class GlShaders
         uniform sampler2D uDest;
         uniform sampler2D uHudSvg;
         uniform sampler2D uReplacementAtlas;
+        uniform sampler2D uTerrainMipAtlas;
+        uniform sampler2D uDreamcastWater;
         uniform vec2  uReplacementAtlasSize;
+        uniform vec2  uTerrainMipAtlasSize;
         uniform ivec4 uTexWindow;
         uniform vec4  uBlend;
         uniform vec4  uBlendOpaque = vec4(1.0, 1.0, 1.0, 0.0);
@@ -260,12 +267,14 @@ internal static class GlShaders
         uniform int   uEnhancedFog;
         uniform vec3  uFogColor;
         uniform int   uFogColorValid;
+        uniform int   uDreamcastFogActive;
         uniform int   uPerspectiveCorrectTextures;
         uniform int   uPerspectiveCorrectColors;
         uniform int   uTrueColor;
         uniform int   uVectorFonts;
         uniform int   uVectorIcons;
         uniform int   uStockPaintCorrection;
+        uniform int   uDiagnosticMaterialOwnership;
         uniform int   uScale;
         uniform vec2  uPosBias;
 
@@ -274,6 +283,8 @@ internal static class GlShaders
         const int MaterialSubtractive = 6;
         const int MaterialTerrainRoute = 9;
         const int MaterialVehicleReflection = 10;
+        const int MaterialWaterBase = 11;
+        const int MaterialWaterSurface = 12;
 
         const int ditherTbl[16] = int[16](
             -4,  0, -3,  1,
@@ -346,13 +357,16 @@ internal static class GlShaders
                 ((vParticle != 0 && uVectorFonts != 0) ||
                  (vShadow != 0 && uVectorIcons != 0));
             if ((vUiTexture != 0 && !vectorUi) ||
+                vMaterial != MaterialTerrainRoute ||
                 (uTextureMipmaps == 0 && uAnisotropy <= 1))
                 return base;
 
-            // The source is an indexed PS1 VRAM page, so conventional hardware
-            // mipmaps would blend palette indices. Reconstruct the footprint
-            // after palette lookup instead. This is a bounded, shader-side
-            // mip/anisotropic filter and leaves UI texels and transparency exact.
+            // Only Dreamcast XBMP terrain and the small XRTP subset carry
+            // authored mip chains. Ordinary scene/building textures are
+            // explicitly non-mipmapped in the retail assets, so distance may
+            // never switch their sampling footprint. For native indexed
+            // terrain fallback, reconstruct that footprint after palette
+            // lookup; conventional hardware mipmaps would blend indices.
             vec2 dx = dFdx(uvf), dy = dFdy(uvf);
             float lx = length(dx), ly = length(dy);
             vec2 major = lx >= ly ? dx : dy;
@@ -405,73 +419,29 @@ internal static class GlShaders
                     0)
                 : replacementSample(
                     atlasPixel, minPixel, maxPixel, atlasSize);
-            vec2 atlasDx = dFdx(atlasPixel);
-            vec2 atlasDy = dFdy(atlasPixel);
-            float atlasDxLength = length(atlasDx);
-            float atlasDyLength = length(atlasDy);
-            float replacementFootprint = max(
-                atlasDxLength, atlasDyLength);
-            if (!exactUiReplacement && vUiTexture == 0 &&
-                (uTextureMipmaps != 0 || uAnisotropy > 1) &&
-                replacementFootprint > 1.0) {
-                // The replacement atlas deliberately has no hardware mip
-                // chain: conventional atlas mip levels blend unrelated
-                // packed images. Reconstruct one screen-pixel footprint
-                // inside this primitive's clamped rectangle instead.
-                vec2 major = atlasDxLength >= atlasDyLength
-                    ? atlasDx : atlasDy;
-                vec2 minor = atlasDxLength >= atlasDyLength
-                    ? atlasDy : atlasDx;
-                vec4 filtered = vec4(0.0);
-                float filteredSamples = 0.0;
-                if (vMaterial == MaterialTerrainRoute) {
-                    // The recovered Dreamcast terrain material is static
-                    // across distance; its separate base/offset vertex-color
-                    // transition is applied after this bounded footprint.
-                    // Keep minification inside this atlas rectangle so neither
-                    // the transition nor ordinary viewing can bleed into a
-                    // neighboring packed replacement.
-                    for (int iy = 0; iy < 4; ++iy) {
-                        for (int ix = 0; ix < 4; ++ix) {
-                            vec2 offset =
-                                atlasDx * ((float(ix) + 0.5) * 0.25 - 0.5) +
-                                atlasDy * ((float(iy) + 0.5) * 0.25 - 0.5);
-                            filtered += replacementSample(
-                                atlasPixel + offset,
-                                minPixel, maxPixel, atlasSize);
-                            filteredSamples += 1.0;
-                        }
-                    }
-                } else {
-                    // Four bounded taps are sufficient for ordinary world
-                    // replacements and keep their established cost/profile.
-                    filtered += replacementSample(
-                        atlasPixel + major * -0.25 + minor * -0.25,
-                        minPixel, maxPixel, atlasSize);
-                    filtered += replacementSample(
-                        atlasPixel + major * -0.25 + minor * 0.25,
-                        minPixel, maxPixel, atlasSize);
-                    filtered += replacementSample(
-                        atlasPixel + major * 0.25 + minor * -0.25,
-                        minPixel, maxPixel, atlasSize);
-                    filtered += replacementSample(
-                        atlasPixel + major * 0.25 + minor * 0.25,
-                        minPixel, maxPixel, atlasSize);
-                    filteredSamples = 4.0;
-                }
-                float filterAmount = uTextureMipmaps != 0
-                    ? smoothstep(
-                        1.0,
-                        vMaterial == MaterialTerrainRoute ? 4.0 : 2.25,
-                        replacementFootprint)
-                    : smoothstep(
-                        1.0, 2.25,
-                        replacementFootprint /
-                            max(min(atlasDxLength, atlasDyLength), 1.0));
-                texel = mix(
-                    texel,
-                    filtered / max(filteredSamples, 1.0),
-                    filterAmount);
+            if (!exactUiReplacement &&
+                vMaterial == MaterialTerrainRoute &&
+                uTextureMipmaps != 0 && vTerrainMipRect.z > 0.0) {
+                // Dreamcast XBMP terrain textures carry authored mip chains;
+                // ordinary object, building and vehicle textures do not.
+                // The dedicated atlas gives every terrain tile a complete,
+                // edge-extended cell so trilinear sampling cannot bleed from
+                // a neighboring tile at any usable mip level.
+                vec2 terrainPixel = vTerrainMipRect.xy +
+                    local * vTerrainMipRect.zw;
+                vec2 terrainSize = max(
+                    uTerrainMipAtlasSize, vec2(1.0));
+                texel = textureGrad(
+                    uTerrainMipAtlas,
+                    terrainPixel / terrainSize,
+                    // Dreamcast terrain-textured uses MIPMAP_D_0_50.  The
+                    // PVR value is a half-level positive LOD adjustment;
+                    // scale both explicit gradients by 2^0.5 so OpenGL's
+                    // textureGrad selects the same footprint.  Omitting it
+                    // leaves one source row visible as a long grazing-angle
+                    // strip even though the tile has an authored mip chain.
+                    dFdx(terrainPixel) * 1.41421356237 / terrainSize,
+                    dFdy(terrainPixel) * 1.41421356237 / terrainSize);
             }
             texel.rgb = clamp(
                 texel.rgb * vReplacementScale + vReplacementBias,
@@ -554,14 +524,65 @@ internal static class GlShaders
             if (abs(denominator) < 0.000001) return vDepth;
             return clamp(depthB / denominator, 1.0, depthFar);
         }
+        float dreamcastFogOpacityAt(float tableIndex) {
+            float i = clamp(floor(tableIndex), 0.0, 128.0);
+            float exponent = floor(i / 16.0);
+            float mantissa = mod(i, 16.0) + 16.0;
+            // Retail 0x8C094680 builds a 129-float fog-opacity table from
+            // these exact single-precision constants. 0x8C043D00 truncates
+            // every entry to eight bits before the PVR linearly interpolates
+            // adjacent values.
+            float inverseDepth =
+                4.4160004 / (mantissa * exp2(exponent));
+            float opacity;
+            if (inverseDepth < 0.080000006)
+                opacity = 0.0;
+            else if (inverseDepth > 0.13800001)
+                opacity = 1.0;
+            else
+                opacity =
+                    (inverseDepth - 0.080000006) * 17.241377;
+            return floor(clamp(opacity, 0.0, 1.0) * 255.0) / 255.0;
+        }
+        float dreamcastFogAmount(float ps1Depth) {
+            // The converted levels retain a 256:1 PS1-to-Dreamcast world
+            // scale. Dreamcast projection uses a 512-pixel focal scalar and
+            // 0x8C101DC0 submits reciprocal PVR depth as
+            // 0.9 * 512 / viewDepth. The PVR density register receives
+            // 0.276f, truncated by 0x8C094640 to mantissa 141 / exponent -2
+            // = 0.275390625, and scales that submitted reciprocal depth.
+            float dreamcastDepth = max(ps1Depth / 256.0, 0.000001);
+            // The retail Dreamcast build stores a 512.0 projection scale at
+            // 0x8c2747cc.  Its transform path multiplies reciprocal view Z by
+            // that value and the recovered 0.9 depth bias before submitting
+            // the vertex to the PVR (0.9 * 512.0 = 460.8).  The adjacent
+            // 320.0/240.0 constants are the screen centre, not projection.
+            float pvrReciprocalDepth = 460.8 / dreamcastDepth;
+            float z = clamp(
+                0.275390625 * pvrReciprocalDepth, 1.0, 255.9999);
+            float exponent = floor(log2(z));
+            float m = z * 16.0 / exp2(exponent) - 16.0;
+            float tableIndex = floor(m) + exponent * 16.0;
+            float fraction = m - floor(m);
+            float opacity0 = dreamcastFogOpacityAt(tableIndex);
+            float opacity1 = dreamcastFogOpacityAt(
+                min(tableIndex + 1.0, 128.0));
+            return mix(opacity0, opacity1, fraction);
+        }
         vec3 distanceFog(vec3 rgb) {
             if (uEnhancedFog == 0 ||
                 vUiTexture != 0 ||
                 vShadow != 0 ||
-                vMaterial == MaterialTerrainRoute ||
                 vDepth <= 1.0) {
                 return rgb;
             }
+            if (uDreamcastFogActive != 0 && uFogColorValid != 0) {
+                return clamp(
+                    mix(rgb, uFogColor, dreamcastFogAmount(vDepth)),
+                    0.0, 1.0);
+            }
+            if (vMaterial == MaterialTerrainRoute)
+                return rgb;
             // Terrain packets already carry the engine's authored distance
             // lighting in their Gouraud colours. Applying host atmosphere to
             // that material a second time erases the visible texture and
@@ -642,6 +663,23 @@ internal static class GlShaders
         }
         void main() {
             if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
+            if (uDiagnosticMaterialOwnership != 0) {
+                if (vMaterial == MaterialTerrainRoute) {
+                    FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+                    BlendColor = uBlendOpaque;
+                    return;
+                }
+                if (vMaterial == MaterialWaterBase) {
+                    FragColor = vec4(1.0, 0.0, 1.0, 1.0);
+                    BlendColor = uBlendOpaque;
+                    return;
+                }
+                if (vMaterial == MaterialWaterSurface) {
+                    FragColor = vec4(0.0, 1.0, 1.0, 1.0);
+                    BlendColor = uBlendOpaque;
+                    return;
+                }
+            }
             if (vModalPanel != 0) {
                 // Analytic geometry in native layout units, antialiased at
                 // the actual output resolution. No low-res border texture.
@@ -677,9 +715,26 @@ internal static class GlShaders
                     : (uPerspectiveCorrectColors != 0
                         ? vColorPerspective
                         : vColorAffine);
+                if (vDreamcastTerrainColor != 0) {
+                    // Dreamcast terrain-base (TSP 0x2001A140) uses the same
+                    // table-fog mode as terrain-textured (0x2001A245).  Its
+                    // packed vertex RGB is already the final native material
+                    // colour: do not pass it through the PS1 paint transform.
+                    vec3 terrainColor = distanceFog(vertexColor.rgb);
+                    FragColor = vec4(
+                        quant5(ivec3(terrainColor * 255.0 + 0.5)),
+                        uSetMask);
+                    BlendColor = uBlendOpaque;
+                    return;
+                }
                 vec3 corrected = distanceFog(
                     stockPaintCorrection(vertexColor.rgb));
-                FragColor = vec4(quant5(ivec3(corrected * 255.0 + 0.5)), uSetMask);
+                float materialAlpha = vMaterial == MaterialWaterBase
+                    ? 0.6901960784
+                    : uSetMask;
+                FragColor = vec4(
+                    quant5(ivec3(corrected * 255.0 + 0.5)),
+                    materialAlpha);
                 float coverage = 1.0;
                 if (uEnhancedShadows != 0 && vShadow != 0) {
                     // Shadow quads arrive as two triangles. Ignore each
@@ -716,13 +771,19 @@ internal static class GlShaders
                 ivec2 boundMax = max(vUvBounds.zw, boundMin);
                 nearestUv = clamp(nearestUv, boundMin, boundMax);
             }
-            vec4 nearestTexel = textureTexel(nearestUv);
+            vec4 nearestTexel = vMaterial == MaterialWaterSurface
+                ? texture(
+                    uDreamcastWater,
+                    fract(sampleUV))
+                : textureTexel(nearestUv);
             bool hasReplacement = vReplacementRect.z > 0.0;
-            vec4 texel = hasReplacement
-                ? replacementTexture(sampleUV)
-                : (uTextureSmoothing != 0 && vSmooth != 0
-                    ? filteredTexture(sampleUV, nearestTexel)
-                    : nearestTexel);
+            vec4 texel = vMaterial == MaterialWaterSurface
+                ? nearestTexel
+                : hasReplacement
+                    ? replacementTexture(sampleUV)
+                    : (uTextureSmoothing != 0 && vSmooth != 0
+                        ? filteredTexture(sampleUV, nearestTexel)
+                        : nearestTexel);
             bool vehicleReflection =
                 vMaterial == MaterialVehicleReflection;
             bool fontPrimitive =
@@ -818,7 +879,20 @@ internal static class GlShaders
                 // only the authored SVG supplies color and edge coverage.
                 texel = vec4(vectorTexel.rgb, 1.0);
             }
-            texel.rgb = stockPaintCorrection(texel.rgb);
+            if (vMaterial == MaterialWaterSurface) {
+                // Dreamcast XWAT uses MODULATEALPHA with an exact white
+                // 0x80FFFFFF vertex. Its colour is therefore the filtered
+                // texture itself; the PS1 /128 packet modulation below would
+                // incorrectly double and clamp every channel.
+                FragColor = vec4(
+                    distanceFog(texel.rgb),
+                    0.5019607843);
+                BlendColor = primitiveBlend();
+                return;
+            }
+            if (vDreamcastTerrainColor == 0) {
+                texel.rgb = stockPaintCorrection(texel.rgb);
+            }
             if (vehicleReflection) {
                 // Kind-12 packets already carry V8:2's native environment
                 // sample and normal-derived UVs. Preserve both native roles:
@@ -843,7 +917,7 @@ internal static class GlShaders
                     texel.rgb * vertexColor.rgb + terrainOffset,
                     vec3(0.0), vec3(1.0));
                 FragColor = vec4(
-                    quant5(ivec3(terrainColor * 255.0 + 0.5)),
+                    quant5(ivec3(distanceFog(terrainColor) * 255.0 + 0.5)),
                     max(texel.a, uSetMask));
                 BlendColor = nearestTexel.a >= 0.5
                     ? primitiveBlend()
@@ -897,9 +971,12 @@ internal static class GlShaders
                 if (contourCoverage <= 0.001) discard;
             }
             vec3 corrected = distanceFog(stockPaintCorrection8(c8));
+            float materialAlpha = vMaterial == MaterialWaterSurface
+                ? 0.5019607843
+                : max(texel.a, uSetMask);
             FragColor = vec4(
                 quant5(ivec3(corrected * 255.0 + 0.5)),
-                max(texel.a, uSetMask));
+                materialAlpha);
             if (svgHud) {
                 vec4 analyticBlend =
                     texel.a >= 0.5 ? primitiveBlend() : uBlendOpaque;

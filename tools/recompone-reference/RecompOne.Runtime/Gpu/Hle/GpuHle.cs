@@ -38,7 +38,59 @@ public static class GpuHle
         uint Start,
         uint End,
         string Owner);
+    public readonly record struct DreamcastWaterBaseVertex(
+        float X,
+        float Y,
+        float CameraDepth);
+    public readonly record struct DreamcastWaterBaseQuad(
+        DreamcastWaterBaseVertex V0,
+        DreamcastWaterBaseVertex V1,
+        DreamcastWaterBaseVertex V2,
+        DreamcastWaterBaseVertex V3,
+        byte R,
+        byte G,
+        byte B);
+    public readonly record struct DreamcastWaterSurfaceVertex(
+        float X,
+        float Y,
+        float CameraDepth,
+        float U,
+        float V,
+        float ViewX,
+        float ViewY,
+        float ViewZ,
+        float ProjectionCenterX,
+        float ProjectionCenterY,
+        float ProjectionScale);
+    public sealed record DreamcastWaterTexture(
+        int Width,
+        int Height,
+        byte[] Rgba,
+        ulong Revision,
+        string Source);
+    public sealed record DreamcastWaterSurfaceMesh(
+        DreamcastWaterSurfaceVertex[] Vertices,
+        int Rows,
+        int Columns,
+        DreamcastWaterTexture? Texture = null);
+    readonly record struct DreamcastWaterBaseRange(
+        uint Start,
+        uint End,
+        DreamcastWaterBaseQuad Quad);
+    readonly record struct DreamcastWaterSurfaceRange(
+        uint Start,
+        uint End,
+        DreamcastWaterSurfaceMesh Mesh);
     static readonly List<PacketRange> VehiclePacketRanges = [];
+    static readonly List<PacketRange> WorldObjectPacketRanges = [];
+    static readonly List<PacketRange> SkyPacketRanges = [];
+    static readonly List<PacketRange> WaterBasePacketRanges = [];
+    static readonly List<PacketRange> WaterSurfacePacketRanges = [];
+    static readonly List<DreamcastWaterBaseRange> DreamcastWaterBaseRanges = [];
+    static readonly List<DreamcastWaterSurfaceRange>
+        DreamcastWaterSurfaceRanges = [];
+    static DreamcastWaterTexture? _dreamcastWaterTexture;
+    static ulong _dreamcastWaterTextureRevision;
     static readonly List<OwnedPacketRange> OwnedPacketRanges = [];
     static readonly HashSet<uint> VehiclePackets = [];
     static readonly HashSet<uint> VehicleReflectionPackets = [];
@@ -219,6 +271,240 @@ public static class GpuHle
             insert,
             new PacketRange(mergedStart, mergedEnd));
     }
+
+    public static void RegisterWorldObjectPacketRange(uint start, uint end) =>
+        RegisterPacketRange(WorldObjectPacketRanges, start, end);
+
+    public static bool IsWorldObjectPacket(uint address) =>
+        IsPacketInRanges(WorldObjectPacketRanges, address);
+
+    static void RegisterPacketRange(
+        List<PacketRange> ranges,
+        uint start,
+        uint end)
+    {
+        start = NormalizePacketAddress(start);
+        end = NormalizePacketAddress(end);
+        if (end <= start)
+            return;
+
+        uint mergedStart = start;
+        uint mergedEnd = end;
+        for (int index = ranges.Count - 1; index >= 0; index--)
+        {
+            PacketRange existing = ranges[index];
+            if (existing.End < mergedStart || existing.Start > mergedEnd)
+                continue;
+            mergedStart = Math.Min(mergedStart, existing.Start);
+            mergedEnd = Math.Max(mergedEnd, existing.End);
+            ranges.RemoveAt(index);
+        }
+
+        int insert = ranges.BinarySearch(
+            new PacketRange(mergedStart, mergedEnd),
+            PacketRangeStartComparer.Instance);
+        if (insert < 0)
+            insert = ~insert;
+        ranges.Insert(insert, new PacketRange(mergedStart, mergedEnd));
+    }
+
+    static bool IsPacketInRanges(List<PacketRange> ranges, uint address)
+    {
+        address = NormalizePacketAddress(address);
+        int low = 0;
+        int high = ranges.Count - 1;
+        while (low <= high)
+        {
+            int middle = low + ((high - low) >> 1);
+            PacketRange range = ranges[middle];
+            if (address < range.Start)
+                high = middle - 1;
+            else if (address >= range.End)
+                low = middle + 1;
+            else
+                return true;
+        }
+        return false;
+    }
+
+    public static void RegisterSkyPacketRange(uint start, uint end) =>
+        RegisterPacketRange(SkyPacketRanges, start, end);
+
+    public static bool IsSkyPacket(uint address) =>
+        IsPacketInRanges(SkyPacketRanges, address);
+
+    public static void RegisterWaterBasePacketRange(uint start, uint end) =>
+        RegisterPacketRange(WaterBasePacketRanges, start, end);
+
+    public static void RegisterDreamcastWaterBaseQuad(
+        uint start,
+        uint end,
+        in DreamcastWaterBaseQuad quad)
+    {
+        start = NormalizePacketAddress(start);
+        end = NormalizePacketAddress(end);
+        if (end <= start)
+            return;
+        DreamcastWaterBaseRanges.Add(new(start, end, quad));
+    }
+
+    public static bool TryGetDreamcastWaterBaseQuad(
+        uint address,
+        out uint rangeStart,
+        out DreamcastWaterBaseQuad quad)
+    {
+        address = NormalizePacketAddress(address);
+        for (int index = DreamcastWaterBaseRanges.Count - 1;
+             index >= 0;
+             index--)
+        {
+            DreamcastWaterBaseRange range = DreamcastWaterBaseRanges[index];
+            if (address < range.Start || address >= range.End)
+                continue;
+            rangeStart = range.Start;
+            quad = range.Quad;
+            return true;
+        }
+        rangeStart = 0;
+        quad = default;
+        return false;
+    }
+
+    public static void RegisterWaterSurfacePacketRange(uint start, uint end) =>
+        RegisterPacketRange(WaterSurfacePacketRanges, start, end);
+
+    public static DreamcastWaterTexture? CurrentDreamcastWaterTexture =>
+        _dreamcastWaterTexture;
+
+    /// <summary>
+    /// Decodes the level's authored XWAT TIM directly from its EA-IFF bytes.
+    /// Selection is structural: neither a level name nor a runtime texture
+    /// address participates, so relocated PS1 VRAM cannot break the binding.
+    /// </summary>
+    public static bool TryRegisterDreamcastWaterTexture(
+        string source,
+        ReadOnlySpan<byte> data)
+    {
+        static uint U32Le(ReadOnlySpan<byte> bytes, int offset) =>
+            (uint)(bytes[offset] |
+                bytes[offset + 1] << 8 |
+                bytes[offset + 2] << 16 |
+                bytes[offset + 3] << 24);
+        static ushort U16Le(ReadOnlySpan<byte> bytes, int offset) =>
+            (ushort)(bytes[offset] | bytes[offset + 1] << 8);
+        static uint U32Be(ReadOnlySpan<byte> bytes, int offset) =>
+            (uint)(bytes[offset] << 24 |
+                bytes[offset + 1] << 16 |
+                bytes[offset + 2] << 8 |
+                bytes[offset + 3]);
+        static byte Expand5(int value) =>
+            (byte)(((value & 31) << 3) | ((value & 31) >> 2));
+
+        for (int chunk = 0; chunk + 8 <= data.Length; chunk++)
+        {
+            if (data[chunk] != (byte)'X' ||
+                data[chunk + 1] != (byte)'W' ||
+                data[chunk + 2] != (byte)'A' ||
+                data[chunk + 3] != (byte)'T')
+                continue;
+            uint payloadSize = U32Be(data, chunk + 4);
+            if (payloadSize > int.MaxValue ||
+                chunk + 8L + payloadSize > data.Length)
+                continue;
+            ReadOnlySpan<byte> tim = data.Slice(
+                chunk + 8, checked((int)payloadSize));
+            if (tim.Length < 32 || U32Le(tim, 0) != 0x10u ||
+                U32Le(tim, 4) != 0x08u)
+                continue;
+
+            int clutSize = checked((int)U32Le(tim, 8));
+            int clutWidth = U16Le(tim, 16);
+            int clutHeight = U16Le(tim, 18);
+            int imageHeader = 8 + clutSize;
+            if (clutSize < 12 || clutWidth <= 0 || clutWidth > 16 ||
+                clutHeight != 1 || imageHeader + 12 > tim.Length ||
+                20 + clutWidth * 2 > imageHeader)
+                continue;
+            int imageSize = checked((int)U32Le(tim, imageHeader));
+            int widthWords = U16Le(tim, imageHeader + 8);
+            int height = U16Le(tim, imageHeader + 10);
+            int width = widthWords * 4;
+            int packed = imageHeader + 12;
+            int packedBytes = checked(widthWords * 2 * height);
+            if (imageSize != 12 + packedBytes || width <= 0 || height <= 0 ||
+                packed + packedBytes > tim.Length)
+                continue;
+
+            ushort[] palette = new ushort[clutWidth];
+            for (int index = 0; index < palette.Length; index++)
+                palette[index] = U16Le(tim, 20 + index * 2);
+            byte[] rgba = new byte[checked(width * height * 4)];
+            int output = 0;
+            for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++, output += 4)
+            {
+                int packedOffset = packed + y * widthWords * 2 + (x >> 1);
+                int index = (tim[packedOffset] >> ((x & 1) * 4)) & 15;
+                ushort pixel = index < palette.Length ? palette[index] : (ushort)0;
+                rgba[output] = Expand5(pixel);
+                rgba[output + 1] = Expand5(pixel >> 5);
+                rgba[output + 2] = Expand5(pixel >> 10);
+                rgba[output + 3] = (byte)((pixel & 0x8000) != 0 ? 255 : 0);
+            }
+            _dreamcastWaterTexture = new(
+                width,
+                height,
+                rgba,
+                ++_dreamcastWaterTextureRevision,
+                source);
+            Console.WriteLine(
+                $"[DreamcastWater] asset-direct XWAT {width}x{height} " +
+                $"source={source} revision={_dreamcastWaterTextureRevision}");
+            return true;
+        }
+        return false;
+    }
+
+    public static void RegisterDreamcastWaterSurfaceMesh(
+        uint start,
+        uint end,
+        DreamcastWaterSurfaceMesh mesh)
+    {
+        start = NormalizePacketAddress(start);
+        end = NormalizePacketAddress(end);
+        if (end <= start || mesh.Vertices.Length == 0)
+            return;
+        DreamcastWaterSurfaceRanges.Add(new(start, end, mesh));
+    }
+
+    public static bool TryGetDreamcastWaterSurfaceMesh(
+        uint address,
+        out uint rangeStart,
+        out DreamcastWaterSurfaceMesh? mesh)
+    {
+        address = NormalizePacketAddress(address);
+        for (int index = DreamcastWaterSurfaceRanges.Count - 1;
+             index >= 0;
+             index--)
+        {
+            DreamcastWaterSurfaceRange range =
+                DreamcastWaterSurfaceRanges[index];
+            if (address < range.Start || address >= range.End)
+                continue;
+            rangeStart = range.Start;
+            mesh = range.Mesh;
+            return true;
+        }
+        rangeStart = 0;
+        mesh = null;
+        return false;
+    }
+
+    public static bool IsWaterBasePacket(uint address) =>
+        IsPacketInRanges(WaterBasePacketRanges, address);
+
+    public static bool IsWaterSurfacePacket(uint address) =>
+        IsPacketInRanges(WaterSurfacePacketRanges, address);
 
     public static bool IsVehiclePacket(uint address)
     {
@@ -538,6 +824,12 @@ public static class GpuHle
     {
         NativeModalPanels.Clear();
         VehiclePacketRanges.Clear();
+        WorldObjectPacketRanges.Clear();
+        SkyPacketRanges.Clear();
+        WaterBasePacketRanges.Clear();
+        WaterSurfacePacketRanges.Clear();
+        DreamcastWaterBaseRanges.Clear();
+        DreamcastWaterSurfaceRanges.Clear();
         OwnedPacketRanges.Clear();
         VehiclePackets.Clear();
         VehicleReflectionPackets.Clear();
@@ -559,6 +851,12 @@ public static class GpuHle
         Backend?.ResetAtmosphereState();
     }
 
+    public static void SetDreamcastFogColor(
+        byte red, byte green, byte blue)
+    {
+        Backend?.SetDreamcastFogColor(red, green, blue);
+    }
+
     public static void BeginPacketArena(uint start, uint end)
     {
         start = NormalizePacketAddress(start);
@@ -567,6 +865,10 @@ public static class GpuHle
             return;
 
         int vehicleRangesBefore = VehiclePacketRanges.Count;
+        int worldObjectRangesBefore = WorldObjectPacketRanges.Count;
+        int skyRangesBefore = SkyPacketRanges.Count;
+        int waterBaseRangesBefore = WaterBasePacketRanges.Count;
+        int waterSurfaceRangesBefore = WaterSurfacePacketRanges.Count;
         int ownedRangesBefore = OwnedPacketRanges.Count;
         int vehiclePacketsBefore = VehiclePackets.Count;
         int reflectionPacketsBefore = VehicleReflectionPackets.Count;
@@ -576,6 +878,18 @@ public static class GpuHle
         // global per-present clear races the game's double buffering and
         // strips material identity from the list about to be consumed.
         VehiclePacketRanges.RemoveAll(range =>
+            range.Start < end && range.End > start);
+        WorldObjectPacketRanges.RemoveAll(range =>
+            range.Start < end && range.End > start);
+        SkyPacketRanges.RemoveAll(range =>
+            range.Start < end && range.End > start);
+        WaterBasePacketRanges.RemoveAll(range =>
+            range.Start < end && range.End > start);
+        WaterSurfacePacketRanges.RemoveAll(range =>
+            range.Start < end && range.End > start);
+        DreamcastWaterBaseRanges.RemoveAll(range =>
+            range.Start < end && range.End > start);
+        DreamcastWaterSurfaceRanges.RemoveAll(range =>
             range.Start < end && range.End > start);
         OwnedPacketRanges.RemoveAll(range =>
             range.Start < end && range.End > start);
@@ -608,6 +922,10 @@ public static class GpuHle
                 $"[PacketArenaRetire] gameplay={(GameplayActive ? 1 : 0)} " +
                 $"range=0x{start:X8}..0x{end:X8} " +
                 $"vehicle-ranges={vehicleRangesBefore}->{VehiclePacketRanges.Count} " +
+                $"world-object-ranges={worldObjectRangesBefore}->{WorldObjectPacketRanges.Count} " +
+                $"sky-ranges={skyRangesBefore}->{SkyPacketRanges.Count} " +
+                $"water-base-ranges={waterBaseRangesBefore}->{WaterBasePacketRanges.Count} " +
+                $"water-surface-ranges={waterSurfaceRangesBefore}->{WaterSurfacePacketRanges.Count} " +
                 $"owned-ranges={ownedRangesBefore}->{OwnedPacketRanges.Count} " +
                 $"vehicle-packets={vehiclePacketsBefore}->{VehiclePackets.Count} " +
                 $"reflection-packets={reflectionPacketsBefore}->{VehicleReflectionPackets.Count}");

@@ -751,8 +751,15 @@ def run_one(
     presentation_frames = []
     frame_sources = [
         *capture_source.glob("recompone_present_frame_*.ppm"),
-        *capture_source.glob(
-            "recompone_present_gameplay_[0-9][0-9][0-9][0-9]_*.ppm"
+        *(
+            source
+            for source in capture_source.glob(
+                "recompone_present_gameplay_*.ppm"
+            )
+            if re.match(
+                r"^recompone_present_gameplay_\d{3,4}_",
+                source.name,
+            )
         ),
     ]
     for source in sorted(frame_sources):

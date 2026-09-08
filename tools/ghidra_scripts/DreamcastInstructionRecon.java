@@ -8,6 +8,8 @@ import ghidra.program.model.symbol.Reference;
 
 import java.io.File;
 import java.io.PrintWriter;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 public class DreamcastInstructionRecon extends GhidraScript {
     @Override
@@ -52,6 +54,26 @@ public class DreamcastInstructionRecon extends GhidraScript {
                                 line.append('|');
                             line.append(references[ref].getReferenceType())
                                 .append(':').append(references[ref].getToAddress());
+                        }
+                    }
+                    for (Reference reference : references) {
+                        if (!reference.getReferenceType().isRead() ||
+                            !reference.getToAddress().isMemoryAddress())
+                            continue;
+                        byte[] value = new byte[4];
+                        try {
+                            currentProgram.getMemory().getBytes(
+                                reference.getToAddress(), value);
+                            int word = ByteBuffer.wrap(value)
+                                .order(ByteOrder.LITTLE_ENDIAN).getInt();
+                            line.append(" value=")
+                                .append(String.format("%08x", word))
+                                .append(" float=")
+                                .append(Float.intBitsToFloat(word));
+                        }
+                        catch (Exception ignored) {
+                            // Sparse raw imports legitimately reference
+                            // memory which was never mapped into the image.
                         }
                     }
                     out.println(line);

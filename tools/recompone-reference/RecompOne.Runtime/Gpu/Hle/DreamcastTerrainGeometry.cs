@@ -14,7 +14,9 @@ public static class DreamcastTerrainGeometry
         Vector3 View, float Height, float DecisionDepth,
         Vector3 Ramp, Vector3 Flat, float TextureFade);
 
-    public readonly record struct Leaf(int X, int Z, int Size, bool Textured);
+    public readonly record struct Leaf(
+        int X, int Z, int Size, bool Textured,
+        Vertex TopLeft, Vertex TopRight, Vertex BottomLeft, Vertex BottomRight);
 
     public static int Build(
         ReadOnlySpan<Sample> samples, Vector3 heightAxis, bool alternate,
@@ -60,7 +62,14 @@ public static class DreamcastTerrainGeometry
         float end = state == 2 ? 34.3f : alternate ? 19.6f : 25.2f;
         if (state == 0 || minimum > end)
         {
-            leaves[count++] = new Leaf(x, z, size, state == 0);
+            // 0x8C101FA0 submits this leaf before the native work stack moves
+            // on to a sibling.  Preserve those four processed vertex records
+            // now: sibling subdivision can reuse and rewrite midpoint slots,
+            // and retaining only grid indices would render the leaf with a
+            // later sibling's colour/morph state.
+            leaves[count++] = new Leaf(
+                x, z, size, state == 0,
+                vertices[tl], vertices[tr], vertices[bl], vertices[br]);
             return;
         }
         int half = size / 2;
@@ -101,7 +110,12 @@ public static class DreamcastTerrainGeometry
         float weight = factor > 0.75f ? (4f * factor - 3f) * factor : 0f;
         float height = own.Height + (parentHeight - own.Height) * weight;
         Vector3 view = own.View + heightAxis * (height - own.Height);
-        Vector3 parentFlat = (samples[a].Flat + samples[b].Flat) * 0.5f;
+        // The native caller passes the colour pointers stored by the two
+        // already-processed parent vertices (vertex +32, then +12), not the
+        // raw authored samples.  At state 1 those parents can themselves be
+        // morphed state-2 midpoints; reaching back to the samples introduces
+        // a colour discontinuity along the 4-to-2/1-unit subdivision seam.
+        Vector3 parentFlat = (vertices[a].Flat + vertices[b].Flat) * 0.5f;
         Vector3 flat = factor > 0f
             ? own.Flat * (1f - factor) + parentFlat * factor
             : state == 2 ? own.Flat : parentFlat;

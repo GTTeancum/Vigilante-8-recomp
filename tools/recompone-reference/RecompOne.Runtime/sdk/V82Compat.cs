@@ -418,10 +418,99 @@ public static class V82Compat
         uint Descriptor,
         bool Resolved,
         V82VehicleRegistry.ImportedRenderGroupInfo Info);
+    readonly record struct NativeWaterBaseRenderScope(
+        uint PacketStart,
+        GpuHle.DreamcastWaterBaseQuad Quad,
+        GpuHle.DreamcastWaterSurfaceMesh? SurfaceMesh);
+    sealed class NativeWaterSurfaceRenderScope
+    {
+        public uint PacketStart { get; }
+        public short NormalX { get; }
+        public short NormalY { get; }
+        public short NormalZ { get; }
+        public int WaterCameraDelta { get; }
+        public int Projection { get; }
+        public int Width { get; }
+        public int Height { get; }
+        public short[] Rotation { get; }
+        public int TranslationX { get; private set; }
+        public int TranslationY { get; private set; }
+        public int TranslationZ { get; private set; }
+        public float MaximumWorldZ { get; }
+        public bool CameraCaptured { get; private set; }
+        public List<NativeWaterTransformSample> Transforms { get; } = [];
+
+        public NativeWaterSurfaceRenderScope(
+            uint packetStart,
+            short normalX,
+            short normalY,
+            short normalZ,
+            int waterCameraDelta,
+            int projection,
+            int width,
+            int height,
+            short[] rotation,
+            int translationX,
+            int translationY,
+            int translationZ,
+            float maximumWorldZ)
+        {
+            PacketStart = packetStart;
+            NormalX = normalX;
+            NormalY = normalY;
+            NormalZ = normalZ;
+            WaterCameraDelta = waterCameraDelta;
+            Projection = projection;
+            Width = width;
+            Height = height;
+            Rotation = rotation;
+            TranslationX = translationX;
+            TranslationY = translationY;
+            TranslationZ = translationZ;
+            MaximumWorldZ = maximumWorldZ;
+        }
+
+        public void CaptureInstalledCamera()
+        {
+            for (int element = 0; element < Rotation.Length; element++)
+            {
+                uint pair = Gte.ReadControl(element / 2);
+                Rotation[element] = unchecked((short)(
+                    pair >> ((element & 1) * 16)));
+            }
+            TranslationX = unchecked((int)Gte.ReadControl(5));
+            TranslationY = unchecked((int)Gte.ReadControl(6));
+            TranslationZ = unchecked((int)Gte.ReadControl(7));
+            CameraCaptured = true;
+        }
+    }
+    readonly record struct NativeWaterTransformScope(
+        uint OutputAddress,
+        int InputX,
+        int InputY,
+        int InputZ);
+    readonly record struct NativeWaterTransformSample(
+        int InputX,
+        int InputY,
+        int InputZ,
+        int OutputX,
+        int OutputY,
+        int OutputZ);
     static readonly Stack<ObjectRenderScope> ObjectRenderScopes = [];
+    static readonly Stack<(uint Bucket, uint PreviousHead)> NativeSkyRenderScopes = [];
+    static readonly Stack<NativeWaterBaseRenderScope>
+        NativeWaterBaseRenderScopes = [];
+    static readonly Stack<NativeWaterSurfaceRenderScope>
+        NativeWaterSurfaceRenderScopes = [];
+    static readonly Stack<NativeWaterTransformScope>
+        NativeWaterTransformScopes = [];
     static readonly bool TraceRendererOwnership =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_ENHANCED_RENDERER") == "1";
+    static readonly bool TraceObjectLod =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_V82_OBJECT_LOD") == "1";
+    static readonly Dictionary<uint, string> ObjectLodSelections = [];
     static readonly uint TraceObjectAddress =
         uint.TryParse(
             Environment.GetEnvironmentVariable("RECOMPONE_TRACE_V82_OBJECT"),
@@ -2327,10 +2416,15 @@ public static class V82Compat
         // artifact appears, and an unattributed packet cannot be traced to the
         // object that failed to draw it.
         if (!scope.IsVehicle && packetEnd > scope.PacketStart)
+        {
+            GpuHle.RegisterWorldObjectPacketRange(
+                scope.PacketStart,
+                packetEnd);
             GpuHle.RegisterPacketOwnerRange(
                 scope.PacketStart,
                 packetEnd,
                 $"v82-object=0x{scope.ObjectAddress:X8}");
+        }
         if (!scope.IsVehicle || packetEnd <= scope.PacketStart)
             return;
 
@@ -2643,11 +2737,673 @@ public static class V82Compat
     public static void EndSkyPass(CpuContext c, IMemory m) =>
         EndNamedRender(c, m);
 
-    public static void BeginLatePass(CpuContext c, IMemory m) =>
-        BeginNamedRender(c, m, "pass-8001C910");
+    public static void BeginLatePass(CpuContext c, IMemory m)
+    {
+        BeginNamedRender(c, m, "sky-8001C910");
+        m = Dispatcher.UnwrapMemory(m);
+        // HIGH: PS1 8001CA90/8001CAF4/8001CDDC prepend two static
+        // textured panorama packets and the backdrop to the far OT bucket.
+        // They do not advance the dynamic scenery packet cursor at gp+610.
+        uint bucket = m.ReadU32(c.GP + 0xCE0u) + 0x3FFCu;
+        NativeSkyRenderScopes.Push((bucket, m.ReadU32(bucket) & 0xFFFFFFu));
+    }
 
-    public static void EndLatePass(CpuContext c, IMemory m) =>
+    public static void EndLatePass(CpuContext c, IMemory m)
+    {
         EndNamedRender(c, m);
+        if (NativeSkyRenderScopes.Count == 0)
+            return;
+        m = Dispatcher.UnwrapMemory(m);
+        var scope = NativeSkyRenderScopes.Pop();
+        uint packet = m.ReadU32(scope.Bucket) & 0xFFFFFFu;
+        // Follow only the packets this invocation actually linked. This
+        // preserves buffer selection and excludes every pre-existing scene
+        // primitive, without a texture, world-coordinate or packet-address
+        // whitelist. Textured primitives alone use panorama continuation.
+        for (int count = 0; count < 64 && packet != scope.PreviousHead &&
+             packet != 0xFFFFFFu; count++)
+        {
+            uint address = packet | 0x80000000u;
+            if (!IsShapeAddress(address, 4u))
+                break;
+            uint tag = m.ReadU32(address);
+            uint end = address + ((tag >> 24) + 1u) * 4u;
+            GpuHle.RegisterSkyPacketRange(address, end);
+            GpuHle.RegisterPacketOwnerRange(address, end, "v82-sky=8001C910");
+            uint next = tag & 0xFFFFFFu;
+            if (next == packet)
+                break;
+            packet = next;
+        }
+    }
+
+    static readonly bool TraceNativeWaterPasses =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_TRACE_V82_NATIVE_WATER") == "1";
+    static int _nativeWaterTraceCount;
+
+    static uint NativePacketWriteCursor(CpuContext c, IMemory m) =>
+        Dispatcher.UnwrapMemory(m).ReadU32(c.GP + 0x610u);
+
+    /// <summary>
+    /// Translates the retail Dreamcast untextured-water emitter at 8C0D72A0.
+    /// That function submits one four-vertex strip between two fixed
+    /// reciprocal-depth planes. The PS1 build approximates the same plane as
+    /// a stack of one-pixel scanline strips, which exposes stair-stepped water
+    /// boundaries when those packets are rendered at modern resolution.
+    /// </summary>
+    public static GpuHle.DreamcastWaterBaseQuad BuildDreamcastWaterBaseQuad(
+        short normalX,
+        short normalY,
+        short normalZ,
+        int waterCameraDelta,
+        int projectionScale,
+        int viewportWidth,
+        int viewportHeight,
+        byte red = 128,
+        byte green = 128,
+        byte blue = 128)
+    {
+        const float fixedNormalScale = 4096f;
+        const float fixedWorldScale = 65536f;
+        const float dreamcastDepthNumerator = 460.8f;
+        const float ps1UnitsPerDreamcastUnit = 256f;
+        const float firstPlaneScale = 41.666668f;
+        const float firstPlaneReciprocalDepth = 37.5f;
+        const float secondPlaneScale = 7.8124995f;
+        const float secondPlaneReciprocalDepth = 7.0312495f;
+
+        float a = normalX / fixedNormalScale;
+        float b = normalY / fixedNormalScale;
+        float c = normalZ / fixedNormalScale;
+        float t = waterCameraDelta / fixedWorldScale;
+        float width = Math.Max(1, viewportWidth);
+        float height = Math.Max(1, viewportHeight);
+        float centerX = width * 0.5f;
+        float centerY = height * 0.5f;
+        float projection = Math.Max(1, projectionScale);
+        // The recovered screen slopes use Dreamcast's 512-pixel projection.
+        // Scale them into this viewport along with XY; the world-space depth
+        // planes below remain unchanged. Otherwise the PS1 256-pixel viewport
+        // places the base layer at twice the authored water-plane distance.
+        float viewportScale = projection / 512f;
+        float firstDepth =
+            dreamcastDepthNumerator /
+            firstPlaneReciprocalDepth *
+            ps1UnitsPerDreamcastUnit;
+        float secondDepth =
+            dreamcastDepthNumerator /
+            secondPlaneReciprocalDepth *
+            ps1UnitsPerDreamcastUnit;
+
+        GpuHle.DreamcastWaterBaseVertex V(float x, float y, float depth) =>
+            new(x, y, depth);
+
+        if (MathF.Abs(b) > MathF.Abs(a) && MathF.Abs(b) > 1e-6f)
+        {
+            float halfNormalSpan = 0.5f * a * width;
+            float firstCommon =
+                firstPlaneScale * viewportScale * t - c * projection;
+            float secondCommon =
+                secondPlaneScale * viewportScale * t - c * projection;
+            return new(
+                V(0f,
+                    centerY + (firstCommon + halfNormalSpan) / b,
+                    firstDepth),
+                V(width,
+                    centerY + (firstCommon - halfNormalSpan) / b,
+                    firstDepth),
+                V(0f,
+                    centerY + (secondCommon + halfNormalSpan) / b,
+                    secondDepth),
+                V(width,
+                    centerY + (secondCommon - halfNormalSpan) / b,
+                    secondDepth),
+                red,
+                green,
+                blue);
+        }
+
+        if (MathF.Abs(a) > 1e-6f)
+        {
+            float halfNormalSpan = 0.5f * b * height;
+            float firstCommon =
+                firstPlaneScale * viewportScale * t - c * projection;
+            float secondCommon =
+                secondPlaneScale * viewportScale * t - c * projection;
+            return new(
+                V(centerX + (firstCommon + halfNormalSpan) / a,
+                    0f,
+                    firstDepth),
+                V(centerX + (firstCommon - halfNormalSpan) / a,
+                    height,
+                    firstDepth),
+                V(centerX + (secondCommon + halfNormalSpan) / a,
+                    0f,
+                    secondDepth),
+                V(centerX + (secondCommon - halfNormalSpan) / a,
+                    height,
+                    secondDepth),
+                red,
+                green,
+                blue);
+        }
+
+        return default;
+    }
+
+    /// <summary>
+    /// Reconstructs Dreamcast XWAT's continuous water row strips from the
+    /// directly recovered viewport, plane-boundary, wave, UV, and submission
+    /// rules. World coordinates are the shared terrain-grid units established
+    /// by the retail PS1 camera transform (one unit = 256 PS1 render units).
+    /// </summary>
+    public static GpuHle.DreamcastWaterSurfaceMesh?
+        BuildDreamcastWaterSurfaceMesh(
+            short normalX,
+            short normalY,
+            short normalZ,
+            int waterCameraDelta,
+            int projectionScale,
+            int viewportWidth,
+            int viewportHeight,
+            short[] cameraToWorld,
+            int translationX,
+            int translationY,
+            int translationZ,
+            int animationTick,
+            float maximumWorldZ = float.PositiveInfinity)
+    {
+        if (cameraToWorld.Length < 9 ||
+            projectionScale <= 0 ||
+            viewportWidth <= 0 ||
+            viewportHeight <= 0)
+            return null;
+
+        const float fixedNormalScale = 4096f;
+        const float fixedWorldScale = 65536f;
+        const float dreamcastProjection = 512f;
+        const float ps1UnitsPerDreamcastUnit = 256f;
+        const float primaryWavePeriod = 240f;
+        const float secondaryWavePeriod = 420f;
+        const float primaryWaveStep = 13981.014f;
+        const float secondaryWaveStep = 23301.69f;
+        const float primaryWaveAmplitude = 0.15625f;
+        const float secondaryWaveAmplitude = 0.03125f;
+        const float waterUvScale = 2.6666667f;
+        const int maximumCellSpan = 31;
+
+        float nx = normalX / fixedNormalScale;
+        float ny = normalY / fixedNormalScale;
+        float nz = normalZ / fixedNormalScale;
+        float planeDistance = waterCameraDelta / fixedWorldScale;
+        float logicalScale = dreamcastProjection / projectionScale;
+        float dreamcastWidth = viewportWidth * logicalScale;
+        float dreamcastHeight = viewportHeight * logicalScale;
+        float cameraX = translationX / fixedWorldScale;
+        float cameraY = translationY / fixedWorldScale;
+        float cameraZ = translationZ / fixedWorldScale;
+
+        float[] rotation = new float[9];
+        for (int index = 0; index < rotation.Length; index++)
+            rotation[index] = cameraToWorld[index] / fixedNormalScale;
+
+        static (float X, float Y, float Z) LocalPoint(
+            float x, float y, float z) => (x, y, z);
+
+        (float X, float Y, float Z) ToWorld(
+            (float X, float Y, float Z) local) =>
+            (
+                cameraX + rotation[0] * local.X +
+                    rotation[1] * local.Y + rotation[2] * local.Z,
+                cameraY + rotation[3] * local.X +
+                    rotation[4] * local.Y + rotation[5] * local.Z,
+                cameraZ + rotation[6] * local.X +
+                    rotation[7] * local.Y + rotation[8] * local.Z
+            );
+
+        var boundary = new (float X, float Y, float Z)[4];
+        if (nz > 0.9f)
+        {
+            int corner = 0;
+            foreach (float sy in new[] { -1f, 1f })
+            foreach (float sx in new[] { -1f, 1f })
+            {
+                float denominator =
+                    nz * dreamcastProjection +
+                    0.5f * sx * nx * dreamcastWidth +
+                    0.5f * sy * ny * dreamcastHeight;
+                if (MathF.Abs(denominator) < 1e-6f)
+                    return null;
+                float z = planeDistance * dreamcastProjection / denominator;
+                boundary[corner++] = ToWorld(LocalPoint(
+                    sx * dreamcastWidth * 0.5f * z /
+                        dreamcastProjection,
+                    sy * dreamcastHeight * 0.5f * z /
+                        dreamcastProjection,
+                    z));
+            }
+        }
+        else
+        {
+            float nearSpan = dreamcastWidth * 0.001f;
+            float farSpan = dreamcastWidth * 0.012f;
+            float nearZ = dreamcastProjection * 0.002f;
+            float farZ = dreamcastProjection * 0.024f;
+            bool solveY = MathF.Abs(ny) > MathF.Abs(nx);
+            float divisor = solveY ? ny : nx;
+            if (MathF.Abs(divisor) < 1e-6f)
+                return null;
+
+            (float X, float Y, float Z) Solve(float span, float z, float sign)
+            {
+                if (solveY)
+                {
+                    float x = sign * span;
+                    float y = (planeDistance - nx * x - nz * z) / ny;
+                    return ToWorld(LocalPoint(x, y, z));
+                }
+                float solvedY = sign * span;
+                float solvedX =
+                    (planeDistance - ny * solvedY - nz * z) / nx;
+                return ToWorld(LocalPoint(solvedX, solvedY, z));
+            }
+
+            boundary[0] = Solve(nearSpan, nearZ, -1f);
+            boundary[1] = Solve(nearSpan, nearZ, 1f);
+            boundary[2] = Solve(farSpan, farZ, -1f);
+            boundary[3] = Solve(farSpan, farZ, 1f);
+        }
+
+        int minimumX = (int)MathF.Floor(boundary.Min(point => point.X));
+        int maximumX = (int)MathF.Ceiling(boundary.Max(point => point.X));
+        int minimumZ = (int)MathF.Floor(boundary.Min(point => point.Z));
+        int maximumZ = (int)MathF.Ceiling(boundary.Max(point => point.Z));
+        if (float.IsFinite(maximumWorldZ))
+            maximumZ = Math.Min(maximumZ, (int)MathF.Floor(maximumWorldZ));
+        maximumX = Math.Min(maximumX, minimumX + maximumCellSpan);
+        maximumZ = Math.Min(maximumZ, minimumZ + maximumCellSpan);
+        int columns = maximumX - minimumX;
+        int rows = maximumZ - minimumZ;
+        if (columns <= 0 || rows <= 0)
+            return null;
+
+        int paddedWidth = columns + 3;
+        int paddedHeight = rows + 3;
+        float[] displacement = new float[paddedWidth * paddedHeight];
+        int primaryPhase = unchecked((int)(
+            animationTick * 65536L / (long)primaryWavePeriod));
+        int secondaryPhase = unchecked((int)(
+            animationTick * 65536L / (long)secondaryWavePeriod));
+
+        static float Fsca(int phase) =>
+            MathF.Sin((ushort)phase * (2f * MathF.PI / 65536f));
+
+        for (int zOffset = -1; zOffset <= rows + 1; zOffset++)
+        for (int xOffset = -1; xOffset <= columns + 1; xOffset++)
+        {
+            int worldX = minimumX + xOffset;
+            int worldZ = minimumZ + zOffset;
+            int primaryX = unchecked(primaryPhase +
+                (int)(worldX * primaryWaveStep));
+            int primaryZ = unchecked(primaryPhase +
+                (int)(worldZ * primaryWaveStep));
+            int secondaryX = unchecked(secondaryPhase +
+                (int)(worldX * secondaryWaveStep));
+            int secondaryZ = unchecked(secondaryPhase +
+                (int)(worldZ * secondaryWaveStep));
+            displacement[(zOffset + 1) * paddedWidth + xOffset + 1] =
+                Fsca(primaryX) * Fsca(primaryZ) * primaryWaveAmplitude +
+                Fsca(secondaryX) * Fsca(secondaryZ) * secondaryWaveAmplitude;
+        }
+
+        float Displacement(int x, int z) =>
+            displacement[(z + 1) * paddedWidth + x + 1];
+
+        float waterWorldY = cameraY + planeDistance;
+        var grid = new GpuHle.DreamcastWaterSurfaceVertex[
+            (columns + 1) * (rows + 1)];
+        for (int z = 0; z <= rows; z++)
+        for (int x = 0; x <= columns; x++)
+        {
+            float worldX = minimumX + x;
+            float worldY = waterWorldY + Displacement(x, z);
+            float worldZ = minimumZ + z;
+            float dx = worldX - cameraX;
+            float dy = worldY - cameraY;
+            float dz = worldZ - cameraZ;
+            // The traced retail transform is camera-to-world; its inverse is
+            // the transposed orthonormal basis used here for projection.
+            float viewX = rotation[0] * dx + rotation[3] * dy + rotation[6] * dz;
+            float viewY = rotation[1] * dx + rotation[4] * dy + rotation[7] * dz;
+            float viewZ = rotation[2] * dx + rotation[5] * dy + rotation[8] * dz;
+            float projectionZ = MathF.Max(viewZ, 0.001f);
+            float screenX = viewportWidth * 0.5f +
+                viewX * projectionScale / projectionZ;
+            float screenY = viewportHeight * 0.5f +
+                viewY * projectionScale / projectionZ;
+            float u = waterUvScale * MathF.Abs(
+                Displacement(x + 1, z) - Displacement(x - 1, z));
+            float v = waterUvScale * MathF.Abs(
+                Displacement(x, z + 1) - Displacement(x, z - 1));
+            grid[z * (columns + 1) + x] = new(
+                screenX,
+                screenY,
+                MathF.Max(1f, viewZ * ps1UnitsPerDreamcastUnit),
+                u,
+                v,
+                viewX * ps1UnitsPerDreamcastUnit,
+                viewY * ps1UnitsPerDreamcastUnit,
+                viewZ * ps1UnitsPerDreamcastUnit,
+                viewportWidth * 0.5f,
+                viewportHeight * 0.5f,
+                projectionScale);
+        }
+
+        var triangles = new GpuHle.DreamcastWaterSurfaceVertex[
+            rows * columns * 6];
+        int output = 0;
+        int stride = columns + 1;
+        for (int z = 0; z < rows; z++)
+        for (int x = 0; x < columns; x++)
+        {
+            GpuHle.DreamcastWaterSurfaceVertex topLeft =
+                grid[z * stride + x];
+            GpuHle.DreamcastWaterSurfaceVertex bottomLeft =
+                grid[(z + 1) * stride + x];
+            GpuHle.DreamcastWaterSurfaceVertex topRight =
+                grid[z * stride + x + 1];
+            GpuHle.DreamcastWaterSurfaceVertex bottomRight =
+                grid[(z + 1) * stride + x + 1];
+            triangles[output++] = topLeft;
+            triangles[output++] = bottomLeft;
+            triangles[output++] = topRight;
+            triangles[output++] = bottomLeft;
+            triangles[output++] = bottomRight;
+            triangles[output++] = topRight;
+        }
+
+        return new(
+            triangles,
+            rows,
+            columns,
+            GpuHle.CurrentDreamcastWaterTexture);
+    }
+
+    static float LoadedTerrainMaximumWorldZ(IMemory memory)
+    {
+        const uint terrainPageTable = 0x800B93F0u;
+        int maximumBlockZ = -1;
+        for (uint blockX = 0; blockX < 32u; blockX++)
+        for (uint blockZ = 0; blockZ < 32u; blockZ++)
+        {
+            uint slot = terrainPageTable +
+                ((blockX * 32u + blockZ) << 2) + 0x80u;
+            if (IsShapeAddress(memory.ReadU32(slot), 0x4042u))
+                maximumBlockZ = Math.Max(maximumBlockZ, (int)blockZ);
+        }
+        return maximumBlockZ >= 0
+            ? (maximumBlockZ + 1) * 64f
+            : float.PositiveInfinity;
+    }
+
+    public static void BeginNativeWaterBaseRender(CpuContext c, IMemory m)
+    {
+        IMemory memory = Dispatcher.UnwrapMemory(m);
+        static short S16(IMemory source, uint address) =>
+            unchecked((short)source.ReadU16(address));
+        short normalX = S16(memory, c.A0 + 6);
+        short normalY = S16(memory, c.A0 + 8);
+        short normalZ = S16(memory, c.A0 + 10);
+        int translation = unchecked((int)memory.ReadU32(c.A0 + 0x18));
+        int projection = unchecked((int)memory.ReadU32(c.GP + 0xED8u));
+        int width = unchecked((int)memory.ReadU32(c.GP + 0xEDCu));
+        int height = unchecked((int)memory.ReadU32(c.GP + 0xF20u));
+        int water = unchecked((int)c.A1);
+        // The PS1 water renderer loads its GTE far-colour word from gp+DE0.
+        // Dreamcast LOAD 8C084700 copies the same authored COLS word seven
+        // to 8C28EBF0, and water emitter 8C0D72A0 consumes its first three
+        // bytes as the fixed RGB for the one translucent PVR strip. Keep the
+        // semantic material with the recovered strip instead of selecting a
+        // depth-cued colour from one of the PS1 scanline batches.
+        byte waterR = memory.ReadU8(c.GP + 0xDE0u);
+        byte waterG = memory.ReadU8(c.GP + 0xDE1u);
+        byte waterB = memory.ReadU8(c.GP + 0xDE2u);
+        GpuHle.DreamcastWaterBaseQuad quad = BuildDreamcastWaterBaseQuad(
+            normalX,
+            normalY,
+            normalZ,
+            water - translation,
+            projection,
+            width,
+            height,
+            waterR,
+            waterG,
+            waterB);
+        NativeWaterBaseRenderScopes.Push(new(
+            NativePacketWriteCursor(c, memory),
+            quad,
+            null));
+        if (TraceNativeWaterPasses && _nativeWaterTraceCount < 512)
+        {
+            Console.Error.WriteLine(
+                $"[V82NativeWaterPlane] tick={GpuHle.DebugGameplayTick} " +
+                $"matrix=0x{c.A0:X8} water={water} " +
+                $"normal={normalX},{normalY},{normalZ} " +
+                $"translation={translation} projection={projection} " +
+                $"viewport={width}x{height} " +
+                $"rgb={waterR:X2},{waterG:X2},{waterB:X2} " +
+                $"quad=({quad.V0.X:F3},{quad.V0.Y:F3}," +
+                    $"{quad.V0.CameraDepth:F3});" +
+                    $"({quad.V1.X:F3},{quad.V1.Y:F3}," +
+                    $"{quad.V1.CameraDepth:F3});" +
+                    $"({quad.V2.X:F3},{quad.V2.Y:F3}," +
+                    $"{quad.V2.CameraDepth:F3});" +
+                $"({quad.V3.X:F3},{quad.V3.Y:F3}," +
+                    $"{quad.V3.CameraDepth:F3})");
+        }
+    }
+
+    public static void EndNativeWaterBaseRender(CpuContext c, IMemory m)
+    {
+        if (NativeWaterBaseRenderScopes.Count == 0)
+            return;
+        NativeWaterBaseRenderScope scope =
+            NativeWaterBaseRenderScopes.Pop();
+        uint start = scope.PacketStart;
+        uint end = NativePacketWriteCursor(c, m);
+        if (end <= start)
+            return;
+        GpuHle.RegisterWaterBasePacketRange(start, end);
+        GpuHle.RegisterDreamcastWaterBaseQuad(start, end, scope.Quad);
+        if (scope.SurfaceMesh != null)
+            GpuHle.RegisterDreamcastWaterSurfaceMesh(
+                start, end, scope.SurfaceMesh);
+        GpuHle.RegisterPacketOwnerRange(start, end, "v82-water=base-80015F28");
+        if (TraceNativeWaterPasses && _nativeWaterTraceCount++ < 512)
+            Console.Error.WriteLine(
+                $"[V82NativeWaterPass] kind=base start=0x{start:X8} " +
+                $"end=0x{end:X8} bytes={end - start} " +
+                $"paired-surface={(scope.SurfaceMesh != null ? 1 : 0)} " +
+                $"rows={scope.SurfaceMesh?.Rows ?? 0} " +
+                $"columns={scope.SurfaceMesh?.Columns ?? 0} " +
+                $"texture={(scope.SurfaceMesh?.Texture != null ? 1 : 0)}");
+    }
+
+    public static void BeginNativeWaterSurfaceRender(CpuContext c, IMemory m)
+    {
+        IMemory memory = Dispatcher.UnwrapMemory(m);
+        static short S16(IMemory source, uint address) =>
+            unchecked((short)source.ReadU16(address));
+        var rotation = new short[9];
+        for (int element = 0; element < rotation.Length; element++)
+        {
+            uint pair = Gte.ReadControl(element / 2);
+            rotation[element] = unchecked((short)(
+                pair >> ((element & 1) * 16)));
+        }
+        NativeWaterSurfaceRenderScopes.Push(new(
+            NativePacketWriteCursor(c, memory),
+            S16(memory, c.A0),
+            S16(memory, c.A0 + 2u),
+            S16(memory, c.A0 + 4u),
+            unchecked((int)c.A1),
+            unchecked((int)memory.ReadU32(c.GP + 0xED8u)),
+            unchecked((int)memory.ReadU32(c.GP + 0xEDCu)),
+            unchecked((int)memory.ReadU32(c.GP + 0xF20u)),
+            rotation,
+            unchecked((int)Gte.ReadControl(5)),
+            unchecked((int)Gte.ReadControl(6)),
+            unchecked((int)Gte.ReadControl(7)),
+            LoadedTerrainMaximumWorldZ(memory)));
+    }
+
+    /// <summary>
+    /// Trace-only seam probe around the retail fixed-point point-transform
+    /// helper. While the native water-surface routine owns the call, retain
+    /// its exact camera-space input and transformed output. This measures the
+    /// PS1-to-Dreamcast coordinate conversion without changing game memory or
+    /// renderer behavior.
+    /// </summary>
+    public static void BeginNativeWaterTransform(CpuContext c, IMemory m)
+    {
+        if (NativeWaterSurfaceRenderScopes.Count == 0)
+            return;
+        IMemory memory = Dispatcher.UnwrapMemory(m);
+        NativeWaterSurfaceRenderScope scope =
+            NativeWaterSurfaceRenderScopes.Peek();
+        if (!scope.CameraCaptured)
+            scope.CaptureInstalledCamera();
+        if (!TraceNativeWaterPasses)
+            return;
+        NativeWaterTransformScopes.Push(new(
+            c.A1,
+            unchecked((int)memory.ReadU32(c.A0)),
+            unchecked((int)memory.ReadU32(c.A0 + 4u)),
+            unchecked((int)memory.ReadU32(c.A0 + 8u))));
+    }
+
+    public static void EndNativeWaterTransform(CpuContext c, IMemory m)
+    {
+        if (!TraceNativeWaterPasses ||
+            NativeWaterTransformScopes.Count == 0 ||
+            NativeWaterSurfaceRenderScopes.Count == 0)
+            return;
+        IMemory memory = Dispatcher.UnwrapMemory(m);
+        NativeWaterTransformScope transform = NativeWaterTransformScopes.Pop();
+        NativeWaterSurfaceRenderScopes.Peek().Transforms.Add(new(
+            transform.InputX,
+            transform.InputY,
+            transform.InputZ,
+            unchecked((int)memory.ReadU32(transform.OutputAddress)),
+            unchecked((int)memory.ReadU32(transform.OutputAddress + 4u)),
+            unchecked((int)memory.ReadU32(transform.OutputAddress + 8u))));
+    }
+
+    public static void EndNativeWaterSurfaceRender(CpuContext c, IMemory m)
+    {
+        if (NativeWaterSurfaceRenderScopes.Count == 0)
+            return;
+        NativeWaterSurfaceRenderScope scope =
+            NativeWaterSurfaceRenderScopes.Pop();
+        uint start = scope.PacketStart;
+        uint end = NativePacketWriteCursor(c, m);
+        if (TraceNativeWaterPasses && _nativeWaterTraceCount < 512)
+        {
+            var text = new System.Text.StringBuilder(512);
+            text.Append("[V82NativeWaterSeam] tick=")
+                .Append(GpuHle.DebugGameplayTick)
+                .Append(" normal=")
+                .Append(scope.NormalX).Append(',')
+                .Append(scope.NormalY).Append(',')
+                .Append(scope.NormalZ)
+                .Append(" normal-f=")
+                .Append((scope.NormalX / 4096f).ToString("F7"))
+                .Append(',')
+                .Append((scope.NormalY / 4096f).ToString("F7"))
+                .Append(',')
+                .Append((scope.NormalZ / 4096f).ToString("F7"))
+                .Append(" delta=").Append(scope.WaterCameraDelta)
+                .Append(" delta-f=")
+                .Append((scope.WaterCameraDelta / 65536f).ToString("F7"))
+                .Append(" viewport=").Append(scope.Width).Append('x')
+                .Append(scope.Height)
+                .Append(" projection=").Append(scope.Projection)
+                .Append(" rotation=");
+            for (int element = 0; element < scope.Rotation.Length; element++)
+            {
+                if (element != 0)
+                    text.Append(',');
+                text.Append(scope.Rotation[element]);
+            }
+            text.Append(" rotation-f=");
+            for (int element = 0; element < scope.Rotation.Length; element++)
+            {
+                if (element != 0)
+                    text.Append(',');
+                text.Append((scope.Rotation[element] / 4096f).ToString("F7"));
+            }
+            text.Append(" translation=")
+                .Append(scope.TranslationX).Append(',')
+                .Append(scope.TranslationY).Append(',')
+                .Append(scope.TranslationZ);
+            for (int index = 0; index < scope.Transforms.Count; index++)
+            {
+                NativeWaterTransformSample sample = scope.Transforms[index];
+                text.Append(" p").Append(index)
+                    .Append("-raw=")
+                    .Append(sample.InputX).Append(',')
+                    .Append(sample.InputY).Append(',')
+                    .Append(sample.InputZ).Append("->")
+                    .Append(sample.OutputX).Append(',')
+                    .Append(sample.OutputY).Append(',')
+                    .Append(sample.OutputZ)
+                    .Append(" p").Append(index).Append("-f=")
+                    .Append((sample.InputX / 65536f).ToString("F7"))
+                    .Append(',')
+                    .Append((sample.InputY / 65536f).ToString("F7"))
+                    .Append(',')
+                    .Append((sample.InputZ / 65536f).ToString("F7"))
+                    .Append("->")
+                    .Append((sample.OutputX / 65536f).ToString("F7"))
+                    .Append(',')
+                    .Append((sample.OutputY / 65536f).ToString("F7"))
+                    .Append(',')
+                    .Append((sample.OutputZ / 65536f).ToString("F7"));
+            }
+            Console.Error.WriteLine(text.ToString());
+        }
+        if (end <= start)
+            return;
+        GpuHle.RegisterWaterSurfacePacketRange(start, end);
+        GpuHle.DreamcastWaterSurfaceMesh? mesh = scope.CameraCaptured
+            ? BuildDreamcastWaterSurfaceMesh(
+                scope.NormalX,
+                scope.NormalY,
+                scope.NormalZ,
+                scope.WaterCameraDelta,
+                scope.Projection,
+                scope.Width,
+                scope.Height,
+                scope.Rotation,
+                scope.TranslationX,
+                scope.TranslationY,
+                scope.TranslationZ,
+                GpuHle.DebugGameplayTick,
+                scope.MaximumWorldZ)
+            : null;
+        if (mesh != null)
+            GpuHle.RegisterDreamcastWaterSurfaceMesh(start, end, mesh);
+        GpuHle.RegisterPacketOwnerRange(
+            start, end, "v82-water=surface-80016664");
+        if (TraceNativeWaterPasses && _nativeWaterTraceCount++ < 512)
+            Console.Error.WriteLine(
+                $"[V82NativeWaterPass] kind=surface start=0x{start:X8} " +
+                $"end=0x{end:X8} bytes={end - start} " +
+                $"mesh={(mesh != null ? 1 : 0)} " +
+                $"rows={mesh?.Rows ?? 0} columns={mesh?.Columns ?? 0} " +
+                $"vertices={mesh?.Vertices.Length ?? 0}");
+    }
 
     public static void ExpandObjectFrustum(CpuContext c, IMemory m)
     {
@@ -3678,15 +4434,16 @@ public static class V82Compat
     /// Maps the PS1 terrain emitter onto the recovered Dreamcast terrain
     /// distance contract while modern maximum detail is active.
     ///
-    /// Dreamcast 1ST_READ.BIN renders one uniformly coarse terrain path in
-    /// four-unit steps across an 80-unit clipped view polygon. Each quad uses
-    /// the material ID in its top-left terrain record; it does not reproduce
-    /// the sixteen one-unit PS1 texture cells inside that quad. PS1 V8:2
-    /// already traverses the same 80-unit extent, but scratchpad
+    /// Dreamcast 1ST_READ.BIN walks four-unit outer patches across an 80-unit
+    /// clipped view polygon, then recursively emits 4/2/1-unit leaves. Near
+    /// leaves reach the authored one-unit texture cells; farther leaves use
+    /// the top-left material of their parent. PS1 V8:2 already traverses the
+    /// same 80-unit extent, but scratchpad
     /// <c>+0x98</c> and <c>+0x9A</c> select its detail and transition paths.
     /// Zeroing both depth thresholds makes the native emitter use its existing
-    /// four-unit coarse geometry for the complete visible polygon. The
-    /// Enhanced backend then applies the recovered single-material quad rule.
+    /// four-unit coarse scaffolding for the complete visible polygon. The
+    /// Enhanced backend then rebuilds the recovered recursive leaves, height
+    /// morph, material cadence, and base/offset colour contract.
     /// </summary>
     public static void ExtendTerrainTextureDetail(CpuContext c, IMemory m)
     {
@@ -3707,20 +4464,19 @@ public static class V82Compat
         long sample = ++_terrainDetailRangeSamples;
         if (sample == 1 || sample % 600 == 0)
         {
-            ushort nativeViewExtent = m.ReadU16(c.GP + 0xDB4u);
             Console.Error.WriteLine(
                 $"[V82TerrainDetailRange] " +
                 $"inner={innerDetailPlane}->0 " +
                 $"outer={outerDetailPlane}->0 " +
-                $"view={nativeViewExtent} dreamcast-view=80 " +
+                "dreamcast-view=80 " +
                 "dreamcast-step=4 dreamcast-material=top-left " +
-                $"cols-far={m.ReadU8(c.GP + 0xE04u)}," +
+                $"cols-ramp-low={m.ReadU8(c.GP + 0xE04u)}," +
                 $"{m.ReadU8(c.GP + 0xE05u)}," +
                 $"{m.ReadU8(c.GP + 0xE06u)} " +
-                $"cols-high={m.ReadU8(c.GP + 0xDACu)}," +
+                $"cols-ramp-high={m.ReadU8(c.GP + 0xDACu)}," +
                 $"{m.ReadU8(c.GP + 0xDADu)}," +
                 $"{m.ReadU8(c.GP + 0xDAEu)} " +
-                $"cols-back={m.ReadU8(c.GP + 0xDA4u)}," +
+                $"cols-fog={m.ReadU8(c.GP + 0xDA4u)}," +
                 $"{m.ReadU8(c.GP + 0xDA5u)}," +
                 $"{m.ReadU8(c.GP + 0xDA6u)} " +
                 $"cols-source=0x{m.ReadU32(c.GP + 0xDDCu):X8} " +
@@ -4005,6 +4761,15 @@ public static class V82Compat
         IMemory m)
     {
         m = Dispatcher.UnwrapMemory(m);
+        // Dreamcast LOAD 0x8C084700 copies COLS word one to 0x8C288904;
+        // 0x8C094680 installs those three bytes as the global PVR table-fog
+        // colour. Direct PS1 loader/runtime tracing places that same word at
+        // gp+DA4. Feed the shared Enhanced renderer from the loaded arena
+        // data instead of inferring atmosphere from a backdrop polygon.
+        GpuHle.SetDreamcastFogColor(
+            m.ReadU8(c.GP + 0xDA4u),
+            m.ReadU8(c.GP + 0xDA5u),
+            m.ReadU8(c.GP + 0xDA6u));
         GpuHle.ClearTerrainRouteColorRamp();
         GpuHle.BeginTerrainRoutePacketWrites();
         Gte.BeginTerrainProjection();
@@ -4337,10 +5102,12 @@ public static class V82Compat
             !IsMaximumLevelOfDetail())
             return default;
 
-        // SHELL/LOAD's COLS handler keeps words three and four at gp+E04 and
-        // gp+DAC. Dreamcast 0x8C084700 builds its 32-entry terrain ramp from
-        // those exact RGB endpoints, inclusive. Use the loaded globals so
-        // every retail, converted, and modded level follows its own data.
+        // Direct SHELL/LOAD runtime tracing keeps COLS words three and four
+        // at gp+E04 and gp+DAC. Dreamcast 0x8C084700 builds its 32-entry
+        // terrain ramp from those exact RGB endpoints, inclusive. Word one
+        // at gp+DA4 is the
+        // separate table-fog colour and must never be substituted for the
+        // ramp's high endpoint.
         byte lowR = m.ReadU8(c.GP + 0xE04u);
         byte lowG = m.ReadU8(c.GP + 0xE05u);
         byte lowB = m.ReadU8(c.GP + 0xE06u);
@@ -4798,6 +5565,58 @@ public static class V82Compat
         return maximum;
     }
 
+    /// <summary>
+    /// Records the retail renderer's exact high/low mesh decision after its
+    /// distance calculation.  This is deliberately attached to the shared
+    /// object-render branch rather than inferred from pixels or map content:
+    /// Florida buildings, vehicles, and every other scenery object therefore
+    /// pass through the same diagnostic seam.
+    /// </summary>
+    public static void TraceObjectLodDecision(CpuContext c, IMemory m)
+    {
+        if (!TraceObjectLod || !GpuHle.GameplayActive)
+            return;
+
+        m = Dispatcher.UnwrapMemory(m);
+        uint objectAddress = c.S1;
+        if (objectAddress == 0u ||
+            (objectAddress & 0x1FFFFFFFu) > 0x00FFFF90u)
+            return;
+
+        uint effectiveThreshold = c.V1;
+        uint distance = m.ReadU32(c.SP + 0x2Cu);
+        uint highMesh = m.ReadU32(objectAddress + 0x40u);
+        uint lowMesh = m.ReadU32(objectAddress + 0x68u);
+        uint authoredThreshold = effectiveThreshold;
+        if (effectiveThreshold == 0u &&
+            LodThresholds.TryGetValue(objectAddress, out var stock) &&
+            stock.HighMesh == highMesh && stock.LowMesh == lowMesh)
+            authoredThreshold = stock.Threshold;
+
+        bool low = effectiveThreshold != 0u &&
+            unchecked((int)effectiveThreshold) < unchecked((int)distance);
+        string selection = low ? "low" : "high";
+        string state =
+            $"{selection}:{highMesh:X8}:{lowMesh:X8}:" +
+            $"{effectiveThreshold:X8}:{authoredThreshold:X8}";
+        if (ObjectLodSelections.TryGetValue(objectAddress, out string? previous) &&
+            string.Equals(previous, state, StringComparison.Ordinal))
+            return;
+        ObjectLodSelections[objectAddress] = state;
+
+        int x = unchecked((int)m.ReadU32(objectAddress + 0x34u));
+        int y = unchecked((int)m.ReadU32(objectAddress + 0x38u));
+        int z = unchecked((int)m.ReadU32(objectAddress + 0x3Cu));
+        Console.Error.WriteLine(
+            "[V82ObjectLOD] " +
+            $"tick={GpuHle.DebugGameplayTick} object=0x{objectAddress:X8} " +
+            $"world={x},{y},{z} selection={selection} " +
+            $"distance=0x{distance:X8} effective-threshold=0x{effectiveThreshold:X8} " +
+            $"authored-threshold=0x{authoredThreshold:X8} " +
+            $"high=0x{highMesh:X8} low=0x{lowMesh:X8} " +
+            $"configured={(IsMaximumLevelOfDetail() ? "Maximum" : "Stock")}");
+    }
+
     static uint ExpandedPrimitiveBase(uint buffer) =>
         ExpandedPrimitiveBufferBase +
         (buffer & 1u) * ExpandedPrimitiveBufferSize;
@@ -5092,6 +5911,11 @@ public static class V82Compat
         V82AutoWaterski.Reset();
         V82TransformationProbe.Reset();
         ObjectRenderScopes.Clear();
+        NativeSkyRenderScopes.Clear();
+        NativeWaterBaseRenderScopes.Clear();
+        NativeWaterSurfaceRenderScopes.Clear();
+        NativeWaterTransformScopes.Clear();
+        _nativeWaterTraceCount = 0;
         TracedRenderObjects.Clear();
         _rendererOwnershipTraceCount = 0;
     }

@@ -1,6 +1,6 @@
 # Vigilante 8 PC - Open Work Only
 
-Last updated: 2026-09-04 EDT
+Last updated: 2026-09-07 EDT
 Status: ACTIVE
 
 This tracker contains only open or explicitly deferred work. Remove an entry
@@ -17,25 +17,25 @@ work added by Codex.
 to do, start with the highest `NEXT PRIORITY` item before considering any other
 open work.
 
-1. **User — NEXT PRIORITY** - Verify every map's renderer fidelity against original gameplay before release.
+1. **User — IN PROGRESS / NEXT PRIORITY** - Fully reverse-engineer and globally reproduce the Dreamcast terrain, water, sky, texture, and building renderer while preserving widescreen draw fixes.
 2. **User** - Reusable cross-game vehicle/map conversion infrastructure with no content-specific runtime hacks.
 3. **User** - Windows controller-family detection and matching controls models.
 4. **User** - Install and prefer original V8 music; balance the default music,
    voice, and SFX mix.
 5. **User** - Add four-player local multiplayer after release.
-6. **User — IN PROGRESS** - Fix detached water attachments and verify all 30 vehicles except Y; retain the three transformation settings.
-7. **User — PARTIAL** - Finish the sole original-V8-style UI; review remaining fonts and menu layouts.
-8. **User** - Move player-facing features from the Windows menu bar (Mods, Cheats, Guest Vehicles, etc.) into controller-friendly in-game menus, then remove that external bar.
-9. **User** - Add customizable controls with Modern, Classic, and Southpaw presets.
-10. **User** - Fix shared near-object viewport-edge clipping, including scenery and other vehicles.
-11. **Codex** - Complete physical-controller and arena/split-screen user signoff.
-12. **User** - Fix incorrect audio during character and AI selection.
-13. **User** - Wire original Vigilante 8 quests into the existing quest system and audit every quest-bearing character.
-14. **User** - Fix repeated-match texture loss and severe framerate degradation.
+6. **User — PARTIAL** - Finish the sole original-V8-style UI; review remaining fonts and menu layouts.
+7. **User** - Move player-facing features from the Windows menu bar (Mods, Cheats, Guest Vehicles, etc.) into controller-friendly in-game menus, then remove that external bar.
+8. **User** - Add customizable controls with Modern, Classic, and Southpaw presets.
+9. **User** - Fix shared near-object viewport-edge clipping, including scenery and other vehicles.
+10. **Codex** - Complete physical-controller and arena/split-screen user signoff.
+11. **User** - Fix incorrect audio during character and AI selection.
+12. **User** - Wire original Vigilante 8 quests into the existing quest system and audit every quest-bearing character.
+13. **User** - Fix repeated-match texture loss and severe framerate degradation.
     Latest UI proof run still fails the performance floor (52.51 median /
     10.65 minimum FPS); see `notes/v82_pause_style.md`. UI changes do not close this.
-15. **User** - Correct Houston's converted special-weapon enemy tracking.
-16. **User — PENDING REVIEW** - Verify the shared main-menu reset that prevents a prior imported character from remaining stuck on Y.
+14. **User** - Correct Houston's converted special-weapon enemy tracking.
+15. **User — PENDING REVIEW** - Verify the shared main-menu reset that prevents a prior imported character from remaining stuck on Y.
+16. **User — DEFERRED** - Low/medium-risk Enhanced-renderer efficiency polish; review all six candidates before starting work.
 
 ## Goal and conversion rules
 
@@ -79,48 +79,6 @@ Test and deployment target: `V8_2_LOOSE` only.
 - [ ] Support independent devices/input, stable 2x2 and three-player layouts,
       correct camera/HUD ownership, pause, results, scoring, and teardown.
 - [ ] Pass representative-arena soak testing and sequential visual review.
-
-### V82-OPEN-017 - Three-mode transformation setting
-
-- **ACTIVE FOLLOW-UP:** water attachments look detached. Diagnose and fix the
-  shared native attachment path, then verify all 18 stock and 12 imported
-  vehicles (types 0–17 and 64–75); exclude Y/type 76 only. No per-vehicle
-  authored offset fixes. Require per-vehicle native visual fit evidence plus
-  water/land/re-activation checks; previous buoyancy tests do not pass fit.
-  See `notes/v82_water_attachment_fit.md`. All 30 currently pending.
-
-- **IMPLEMENTED — PENDING USER REVIEW:** available under **OPTIONS → Gameplay → Transformations**;
-  native menu replay selected/saved all three policies and a full-size menu
-  proof is retained in `artifacts/transformation-modes-20260904/options`.
-  237 focused assertions pass. First native Florida test shows Sheila afloat
-  with automatic water attachments and wheels restored on land; both full-size
-  proofs inspected (`artifacts/transformation-modes-20260904/auto-native-01`).
-  Three native matches (Florida/Louisiana/Florida) exited cleanly with player
-    and AI water/land transitions; All/None/Auto native action checks pass
-    (20 player/AI requests per policy, not physical pickup collection).
-    Imported Chassey floats/retracts in Florida; Y retains native flight;
-    Sheila's equipped native recovery returns to normal wheels (frame 210).
-    Final OPTIONS proof inspected on `E3F11E82...A744163`, 60.07 FPS, mode 2
-    saved and original settings restored. User visual approval and guest
-    texture integrity remain outstanding; loader allocation failures are
-    recorded under #14. Not a release or visual acceptance claim.
-- [x] Add a normal in-game option, persist it in user settings, and show the
-      selected mode: **All transformations**, **No transformations**, or
-      **Auto Waterski**.
-- [x] **All transformations:** retain the original powerup-driven behavior.
-- [x] **No transformations:** disable transformation powerups and their effects.
-- [ ] **Auto Waterski:** disable powerup-driven transformations, automatically
-      equip waterskis when a vehicle enters dangerous water, and remove them
-      once it returns to land. No pickup, inventory item, or powerup is required.
-- [ ] Apply it through the authoritative gameplay path for human and AI
-      vehicles in every mode while leaving unrelated pickups/rules unchanged.
-- [ ] Use shared water-hazard and vehicle-capability logic, not map/vehicle
-      exceptions. Preserve inherently water-safe hover/flying behavior rather
-      than forcing waterskis onto vehicles that do not need them.
-- [ ] Verify activation before drowning/teleport, stable shoreline transitions
-      without rapid equip/unequip flicker, removal on land, and no stale ski
-      state after respawn or match exit. Switching back to All transformations
-      must fully restore original behavior.
 
 ### V82-OPEN-018 - Port the original Vigilante 8 UI (PARTIAL)
 
@@ -172,14 +130,107 @@ Test and deployment target: `V8_2_LOOSE` only.
 
 ### V82-OPEN-024 - Map-by-map renderer fidelity release gate
 
+**CURRENT GOAL — IN PROGRESS: complete Dreamcast renderer RE and shared
+Enhanced-renderer parity.** Treat the Dreamcast release as the closest visual
+benchmark for the PC port. Reverse-engineer the remaining terrain, water, sky,
+texture/material/LOD, and building-rendering pipeline directly from the
+Dreamcast executable and assets, document the recovered rules, and reproduce
+them globally in the Enhanced renderer. This supersedes partial or inferred
+distance-only fixes; it is not permission for map-, building-, texture-,
+packet-, or content-specific exceptions.
+
+The retail Dreamcast executable and its asset payloads are sufficient and are
+the sole reference authority for this work. Do not install, launch, capture,
+or depend on Flycast or another Dreamcast emulator.
+
+**Current acceptance focus:** visual correctness and complete HD-texture-pack
+use. Frame-rate optimization is a separate later run under the repeated-match
+performance and deferred efficiency items; record FPS with proofs, but do not
+hold back visually correct evidence for a performance score unless the build
+is genuinely unplayable.
+
+**Current review build (2026-09-07):** `V8_2_LOOSE/Vigilante82PC.exe`
+SHA-256 `D8065C9E4C9B0F931A8D604C95BB9C5D275A8F304D73477F03E7F70591317F0E`.
+Direct executable contracts now cover the Dreamcast sky, fog, two-pass water,
+terrain-mip, stable ordinary-object/building material rules, and the complete
+ordinary-object mesh near-plane clipping/submission boundary. A shared
+function-owned panorama batch fixes the newly exposed white widescreen sky
+margin without map or texture exceptions. Florida, Louisiana, and Hoover Dam
+completed one hidden/silent Enhanced-only process with every functional, HD,
+terrain, fog, route, edge-pool, and no-content-branch gate passing; 1,294
+traced panorama frames had zero edge-coverage failures. Florida's full-size
+visual run measured 58.01 median / 39.48 minimum FPS. A separate 4:3 Florida
+gate passed at 60.01 / 59.15, proving the widescreen-only continuation leaves
+the original-aspect path unchanged. Two additional full-size proofs were then
+captured directly from that deployed executable on the same deterministic
+Florida route: poll 150 (near/mid/horizon, 39.28 median FPS with a 4.81 startup
+capture transient) and poll 300 (mid/horizon, 46.15 median / 31.20 minimum
+FPS, every gate passing). Both use the HD terrain/loading replacements and
+show stable ordinary-object sampling; the separate 1,200-tick owner trace
+recorded zero same-surface material or replacement-identity changes across
+137 objects. Deployed-build poll-300 proofs now also cover Louisiana and
+Hoover Dam: both passed their functional/HD/route/edge checks and frame the
+near/mid/horizon scene, while the rejected Louisiana rectangular overlay and
+Hoover serrated detail cutoff are absent. Their isolated proof runs were slow
+(26.75/14.37 and 30.27/11.25 median/minimum FPS), so they are visual-only
+evidence pending the separate performance work. The five-map set now also has
+deployed Utah and Minnesota poll-300 frames. Utah no longer shows the prior
+isolated fullbright/jagged distant triangle, but remains user-ungraded.
+Minnesota's frame is too close to its billboard and contains ambiguous dark
+geometry at the upper viewport boundary, so it does not clear the previous
+missing/backface-cull failure; a better mid-distance proof is still required.
+Their isolated proof runs measured 34.47/10.25 and 17.10/5.66 median/minimum
+FPS respectively, with Minnesota independently unplayable. User visual
+approval remains open.
+
+- [ ] Recover and document the complete relevant Dreamcast render contract,
+      including terrain traversal/subdivision and distance transitions;
+      shoreline geometry and land/water composition; water surface, blending,
+      depth, and fog behavior; sky/horizon composition; texture/material/LOD
+      selection; and building submission, culling, lighting, and near/far
+      texture behavior. Record executable addresses, tables, state fields, and
+      confidence for every recovered rule.
+- [ ] Implement the recovered behavior through shared Enhanced-renderer paths.
+      Preserve HD texture replacement support and all accepted widescreen draw,
+      projection, near-edge, and viewport-coverage fixes. Validate both 4:3 and
+      widescreen so Dreamcast parity cannot regress the wider field of view.
+- [ ] Correct land/water boundaries so shorelines meet cleanly without hard
+      rectangular bands, gaps, overdraw across drivable land, or incompatible
+      near/far representations.
+- [ ] Eliminate Florida buildings changing textures or material appearance as
+      the camera approaches. Prove the underlying shared texture/material/LOD
+      rule and check representative buildings on other maps; do not patch the
+      Florida assets or identities.
+- [ ] Regression-test terrain distance transitions, sky/horizon, water,
+      buildings, transparency/reflections, winding/culling, close and
+      viewport-edge geometry, HD replacements, and the prior alternate-frame
+      corruption on representative maps using hidden, silent, Enhanced-only
+      runs with at most one game process.
+- [ ] Retain full-size near/mid/horizon visual proofs from the exact deployed
+      `V8_2_LOOSE` executable, with executable SHA-256, capture point, map,
+      aspect ratio, and FPS recorded. Technical gates cannot close this goal;
+      final visual approval is the user's.
+
 Current matrix and evidence index:
 `notes/v82_map_fidelity_release_gate.md`. The current Enhanced-renderer
+build `5DB44B52...5AC0B` corrects the global terrain A/B flash caused by
+reconstructed GTE projection coordinates omitting the active PS1 framebuffer
+origin. Florida and Utah each completed a 20-frame fixed-camera/pause burst
+with zero large world swaps while Dreamcast terrain reconstruction remained
+active. The exact executable deployed to `V8_2_LOOSE` then repeated the
+Florida burst Enhanced-only in one process: clean exit, no fatal diagnostics,
+59.86 median / 52.49 minimum FPS, and settled adjacent frames changed only
+0-2,211 pixels instead of the broken build's 840,000+ pixel A/B swaps. Keep
+this correction pending hands-on user confirmation; automated frame parity
+does not close the visual gate.
+
+The earlier Enhanced-renderer
 candidate `F881E249...AB418` passed two consecutive four-match technical gates
 covering Route 66, Olympic, Bayou, and Florida. Both runs retained every HD
 asset and renderer contract, completed all setup/gameplay/return transitions,
 and kept every measured 60-frame window above 40 FPS. The prior third-match
 performance collapse and fourth-match stale-overlay crash are technically
-resolved. Per-map review is now 1 pass, 5 fails, 1 provisional fail, and 12
+resolved. Per-map review is now 1 pass, 6 fails, and 12
 ungraded: Arizona Meteor Crater passes; Utah Winter Games fails for distant
 objects that remain jagged and fullbright; Florida Launch Site fails because
 translucent rectangular water-surface polygons draw across dry drivable
@@ -188,8 +239,8 @@ close-range building-edge/geometry clipping that may affect other maps;
 Minnesota Nuclear Plant fails for missing or backface-culled triangles and
 inconsistently bright adjacent polygons; Alaska Alaskan Pipeline fails for the
 recurring hard-edged translucent rectangular surface/band, whose mist-versus-
-water identity remains unconfirmed; Louisiana Ghastly Bayou is a provisional
-fail pending comparison of its hard-edged mist band against PS1 gameplay;
+water identity remains unconfirmed; Louisiana Ghastly Bayou fails because its
+water edge remains visibly jagged;
   Super Dreamland 64 is ungraded because earlier issue-level passes were not
   whole-map certification. Shared screen-effect depth and monotonic-NCLIP
   corrections plus restored native translucent ordering were staged in exact
@@ -416,6 +467,25 @@ fail pending comparison of its hard-edged mist band against PS1 gameplay;
       track enemy targets with original-V8 behavior. Fix conversion metadata or
       the shared imported-weapon contract; do not branch on Houston's name,
       vehicle ID, or weapon ID in runtime code.
+
+### V82-OPEN-026 - Deferred Enhanced-renderer efficiency polish
+
+- [ ] Before making any implementation change for this goal, review all six
+      candidates below with the user and confirm which are still appropriate.
+      Do not treat the saved ranking as authorization to begin work.
+- [ ] Reduce renderer flushes and compatible state changes.
+- [ ] Reuse GPU vertex/index upload buffers safely.
+- [ ] Cache texture-replacement lookup results.
+- [ ] Reuse unchanged duplicate presentations without rerunning composition.
+- [ ] Coalesce changed PS1 VRAM uploads.
+- [ ] Remove disabled diagnostic and tracing overhead from ordinary play.
+- [ ] Preserve native 30 FPS drawing on the 60 Hz game clock. True 60 FPS,
+      interpolation, static-terrain geometry caching, culling changes, and all
+      other high-risk renderer architecture work are explicitly out of scope.
+- [ ] Preserve every existing renderer-fidelity contract and the release gate:
+      sustained median/tail windows at least 40 FPS and no 60-frame window
+      below 30 FPS.
+
 ## User review and signoff
 
 - [ ] Review physical-controller feel on the user's hardware: buttons, sticks,
