@@ -88,7 +88,8 @@ internal static class V82WaterAttachmentProbe
             vehicle, frame, type=m.ReadU8(vehicle+0xDC), mode=m.ReadU8(vehicle+0xAC),
             transition=m.ReadU16(vehicle+0xB4),
             mounts=Enumerable.Range(0,6).Select(i=>m.ReadU32(vehicle+0x104+(uint)i*4)).ToArray(), nodes,
-            lastRenderFit=V82WaterAttachmentFit.DescribeCached(m,vehicle) }));
+            lastRenderFit=V82WaterAttachmentFit.DescribeCached(m,vehicle),
+            lastRenderPlacement=V82WaterAttachmentPlacement.DescribeCached(vehicle) }));
         Console.Error.WriteLine($"[WaterAttachment] geometry={path} nodes={nodes.Count}");
     }
 

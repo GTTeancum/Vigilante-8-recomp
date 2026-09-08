@@ -1,6 +1,6 @@
 # Vigilante 8 PC - Open Work Only
 
-Last updated: 2026-09-07 EDT
+Last updated: 2026-09-08 EDT
 Status: ACTIVE
 
 This tracker contains only open or explicitly deferred work. Remove an entry
@@ -17,7 +17,7 @@ work added by Codex.
 to do, start with the highest `NEXT PRIORITY` item before considering any other
 open work.
 
-1. **User — IN PROGRESS / NEXT PRIORITY** - Fully reverse-engineer and globally reproduce the Dreamcast terrain, water, sky, texture, and building renderer while preserving widescreen draw fixes.
+1. **User — IN PROGRESS / NEXT PRIORITY** - Finish shared renderer visual correctness using PS1 runtime assets; Dreamcast is an RE reference only. Preserve accepted widescreen and geometry fixes.
 2. **User** - Reusable cross-game vehicle/map conversion infrastructure with no content-specific runtime hacks.
 3. **User** - Windows controller-family detection and matching controls models.
 4. **User** - Install and prefer original V8 music; balance the default music,
@@ -130,18 +130,18 @@ Test and deployment target: `V8_2_LOOSE` only.
 
 ### V82-OPEN-024 - Map-by-map renderer fidelity release gate
 
-**CURRENT GOAL — IN PROGRESS: complete Dreamcast renderer RE and shared
-Enhanced-renderer parity.** Treat the Dreamcast release as the closest visual
-benchmark for the PC port. Reverse-engineer the remaining terrain, water, sky,
-texture/material/LOD, and building-rendering pipeline directly from the
-Dreamcast executable and assets, document the recovered rules, and reproduce
-them globally in the Enhanced renderer. This supersedes partial or inferred
-distance-only fixes; it is not permission for map-, building-, texture-,
-packet-, or content-specific exceptions.
+**CURRENT GOAL: shared renderer visual correctness with PS1 runtime assets.**
+Dreamcast is an RE reference only, not the asset source or sole visual authority.
+Preserve accepted widescreen, geometry and texture fixes.
 
-The retail Dreamcast executable and its asset payloads are sufficient and are
-the sole reference authority for this work. Do not install, launch, capture,
-or depend on Flycast or another Dreamcast emulator.
+**2026-09-08 status:** The user accepted rigid deployed pontoon placement;
+that repair is closed. Remaining visual follow-up includes the unreproduced
+Dreamland flicker and Oilfield sky sliver, residual faceted shoreline
+intersections, and broader arena/edge-view acceptance. Current repair evidence
+and limits are in `notes/v82_visual_issue_fixes.md` and
+`notes/v82_rigid_water_attachments.md`. Older build reports below are historical
+and do not describe the current executable. Do not start performance runs
+without a new user request; other-level efficiency work remains deferred.
 
 **Current acceptance focus:** visual correctness and complete HD-texture-pack
 use. Frame-rate optimization is a separate later run under the repeated-match

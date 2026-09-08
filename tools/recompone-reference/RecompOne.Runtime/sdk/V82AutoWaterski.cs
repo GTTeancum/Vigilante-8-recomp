@@ -21,7 +21,7 @@ public static class V82AutoWaterski
     sealed class State { public bool Owned; public int DryTicks; }
     static readonly Dictionary<uint, State> States = [];
 
-    public static void Reset() { States.Clear(); V82WaterAttachmentFit.Reset(); }
+    public static void Reset() { States.Clear(); V82WaterAttachmentFit.Reset(); V82WaterAttachmentPlacement.Reset(); }
     public static void Forget(uint vehicle) => States.Remove(vehicle);
 
     public static bool HasWaterMovement(IMemory memory, uint vehicle) =>

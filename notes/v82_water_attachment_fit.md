@@ -1,6 +1,10 @@
 # Water attachment fit — active goal
 
-Current concise coverage: `notes/v82_water_attachment_verification.md`.
+Current follow-up: the user approved whole-assembly chassis anchoring. See `notes/v82_rigid_water_attachments.md`; the old vertex-stretching helper remains inactive. Historical findings below are retained chronologically.
+
+The support-vertex fitting experiment was removed from object rendering at user request on 2026-09-08. It is not canonical animation. The separation still needs a source-grounded diagnosis.
+
+Historical evidence and concise coverage: `notes/v82_water_attachment_verification.md`.
 
 User report: water attachments look detached from the vehicle. Previous
 buoyancy and mode-transition results do not establish correct attachment fit.

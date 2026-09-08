@@ -222,6 +222,7 @@ public static partial class Vigilante82PC
             "real RECT traversal activates outside native boundary");
         Check(V82AutoWaterski.HasWaterMovement(m, vehicle), "native water mode exempts imported drowning");
         CheckWaterFit();
+        CheckWaterPlacement();
         Console.WriteLine($"PASS: {checks} transformation settings / OPTIONS / water-fit assertions");
     }
 }

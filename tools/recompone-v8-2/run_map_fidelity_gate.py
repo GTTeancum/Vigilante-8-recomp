@@ -521,6 +521,10 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=7200.0)
     parser.add_argument("--unthrottled", action="store_true")
     parser.add_argument(
+        "--allow-repeated-maps", action="store_true",
+        help="exercise repeated visits to the same arena for performance triage",
+    )
+    parser.add_argument(
         "--original-renderer-oracle",
         action="store_true",
         help=(
@@ -621,7 +625,7 @@ def main() -> int:
             parser.error("map slots must be comma-separated integers")
         if not selected_slots:
             parser.error("map slots cannot be empty")
-        if len(set(selected_slots)) != len(selected_slots):
+        if not args.allow_repeated_maps and len(set(selected_slots)) != len(selected_slots):
             parser.error("map slots must be unique")
         invalid_slots = [
             slot for slot in selected_slots if slot < 0 or slot >= len(MAPS)

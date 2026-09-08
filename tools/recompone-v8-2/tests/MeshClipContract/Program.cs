@@ -97,15 +97,33 @@ foreach (float[] depths in new[] {new float[] {40, 90, 260}, new float[] {180, 2
         ProjectionScale = 256,
         HasViewSpace = true,
     };
-    Check(EnhancedGlBackend.DreamcastCullClockwise(
+    Check(!EnhancedGlBackend.Ps1CullBackFace(
             V(0, 0), V(10, 0), V(0, 10)),
-        "Dreamcast PVR_CULLING_CW removes positive screen-space area");
-    Check(!EnhancedGlBackend.DreamcastCullClockwise(
+        "PS1 scenery retains positive screen-space area");
+    Check(EnhancedGlBackend.Ps1CullBackFace(
             V(0, 0), V(0, 10), V(10, 0)),
-        "Dreamcast PVR_CULLING_CW retains counter-clockwise area");
-    Check(!EnhancedGlBackend.DreamcastCullClockwise(
+        "PS1 scenery removes negative screen-space area");
+    Check(!EnhancedGlBackend.Ps1CullBackFace(
             V(0, 0), V(5, 5), V(10, 10)),
-        "Dreamcast PVR_CULLING_CW retains a degenerate strip face");
+        "PS1 scenery leaves degenerate faces unchanged");
+    // Hoover rib_1 packets 0/1 are the nearer exterior X=40 wall;
+    // packets 2/3 are its farther X=-39 wall (native tick 301 capture).
+    HleVertex[] near = [V(-734, -236.2358f, 958.9451f),
+        V(-643, -236.2358f, 958.9451f), V(-640, -110.1660f, 974.2930f),
+        V(-766, -50.6055f, 981.5439f)];
+    HleVertex[] far = [V(-734, -245.7830f, 1037.3665f),
+        V(-766, -60.1526f, 1059.9653f), V(-640, -119.7131f, 1052.7144f),
+        V(-643, -245.7830f, 1037.3665f)];
+    foreach (float advance in new[] {0f, 200f, 600f})
+    {
+        HleVertex Shift(HleVertex v) { v.ViewZ -= advance; return v; }
+        Check(!EnhancedGlBackend.Ps1CullBackFace(Shift(near[0]), Shift(near[1]), Shift(near[2])) &&
+              !EnhancedGlBackend.Ps1CullBackFace(Shift(near[2]), Shift(near[3]), Shift(near[0])),
+            "Hoover nearer exterior wall survives camera approach");
+        Check(EnhancedGlBackend.Ps1CullBackFace(Shift(far[0]), Shift(far[1]), Shift(far[2])) &&
+              EnhancedGlBackend.Ps1CullBackFace(Shift(far[2]), Shift(far[3]), Shift(far[0])),
+            "Hoover farther inward-facing wall is rejected during approach");
+    }
     Check(EnhancedGlBackend.DreamcastDisablesFaceCulling(
             HleMaterialKind.WaterBase),
         "Dreamcast untextured water pass disables face culling");
@@ -256,5 +274,249 @@ foreach (float[] depths in new[] {new float[] {40, 90, 260}, new float[] {180, 2
     Check(!GpuHle.IsSkyPacket(0x70040),
         "panorama provenance does not include dynamic scenery arena");
     GpuHle.ClearPacketOwners();
+}
+{
+    ushort[] vram = new ushort[1024 * 512];
+    for (int i = 0; i < vram.Length; i++)
+        vram[i] = (ushort)((i * 7919) ^ (i >> 9));
+    foreach (int x in new[] { -1, 0, 1, 62, 63, 64, 1000, 1023, 1024 })
+    foreach (int y in new[] { -1, 0, 63, 64, 500, 511, 512 })
+    foreach (var size in new[] { (2, 1), (1, 64), (8, 8), (64, 1) })
+    {
+        var region = VramReadbackRegion.ForRead(x, y, size.Item1, size.Item2);
+        ushort[] pixels = new ushort[region.Width * region.Height];
+        for (int row = 0; row < region.Height; row++)
+            vram.AsSpan((region.Y + row) * 1024 + region.X, region.Width)
+                .CopyTo(pixels.AsSpan(row * region.Width));
+        ushort[] actual = new ushort[size.Item1 * size.Item2];
+        ushort[] expected = new ushort[actual.Length];
+        region.CopyTo(pixels, x, y, size.Item1, size.Item2, actual);
+        VramReadbackRegion.Full.CopyTo(vram, x, y, size.Item1, size.Item2, expected);
+        Check(region.Contains(x, y, size.Item1, size.Item2) && actual.SequenceEqual(expected),
+            $"regional VRAM read preserves every word at {x},{y} size {size}");
+    }
+    var tile = VramReadbackRegion.ForRead(64, 64, 2, 1);
+    Check(tile.Width * tile.Height == 4096 && tile.Contains(65, 65, 2, 1),
+        "small VRAM reads reuse a 4096-pixel window rather than downloading 524288 pixels");
+    Check(!tile.Contains(63, 64, 2, 1) && !tile.Contains(127, 64, 2, 1),
+        "requests outside the cached VRAM window must refill it");
+}
+// Regression: the imported tower's planar face is not a parallelogram.
+// Both triangle halves must map their shared diagonal intersection to the
+// texture center, independent of camera rotation/translation and depth.
+{
+    System.Numerics.Vector3[] face = [new(-39,-127,-3), new(-39,-127,-94),
+        new(-39,60,-126), new(-39,0,0)];
+    float[] q = new float[4];
+    Check(PlanarQuadMapping.TryWeights(face, q), "tower planar mapping");
+    var a = face[2]-face[0]; var b = face[3]-face[1];
+    var n = System.Numerics.Vector3.Cross(a,b);
+    float s = System.Numerics.Vector3.Dot(System.Numerics.Vector3.Cross(face[1]-face[0],b),n)/n.LengthSquared();
+    float t = System.Numerics.Vector3.Dot(System.Numerics.Vector3.Cross(face[1]-face[0],a),n)/n.LengthSquared();
+    Check(MathF.Abs(s-0.5f)>0.05f, "old per-triangle mapping exposes real tower seam");
+    Check(MathF.Abs(s*q[2]/((1-s)*q[0]+s*q[2])-0.5f)<0.00001f, "first diagonal maps to UV center");
+    Check(MathF.Abs(t*q[3]/((1-t)*q[1]+t*q[3])-0.5f)<0.00001f, "second diagonal maps to UV center");
+    var rotation=System.Numerics.Quaternion.CreateFromYawPitchRoll(0.6f,0.12f,0.2f);
+    var transformed=face.Select(p=>System.Numerics.Vector3.Transform(p,rotation)+new System.Numerics.Vector3(-700,-200,1050)).ToArray();
+    float[] rotatedQ=new float[4];
+    Check(PlanarQuadMapping.TryWeights(transformed,rotatedQ), "rotated translated planar face");
+    for(int i=0;i<4;i++) Check(MathF.Abs(q[i]-rotatedQ[i])<0.00001f, "camera-independent UV weights");
+    System.Numerics.Vector3[] rectangle=[new(0,0,100),new(5,0,100),new(5,9,100),new(0,9,100)];
+    Check(PlanarQuadMapping.TryWeights(rectangle,rotatedQ) && rotatedQ.All(x=>x==1f), "parallelogram exactly preserves existing interpolation");
+    rectangle[2]=new(-2,-2,100);
+    Check(!PlanarQuadMapping.TryWeights(rectangle,rotatedQ), "concave face rejected");
+    face[3].X += 10;
+    Check(!PlanarQuadMapping.TryWeights(face,q), "nonplanar face rejected");
+    Check(!PlanarQuadMapping.TryWeights(new System.Numerics.Vector3[4],q), "degenerate face rejected");
+}
+// Exercise the backend's actual pairing/writeback without creating a GL
+// context. A shared edge must receive identical Q in both emitted triangles.
+{
+    var backendType=typeof(EnhancedGlBackend);
+    var vertexType=backendType.GetNestedType("GlVertex",BindingFlags.NonPublic)!;
+    var candidateField=backendType.GetField("_quadCandidates",BindingFlags.Instance|BindingFlags.NonPublic)!;
+    var verticesField=backendType.GetField("_verts",BindingFlags.Instance|BindingFlags.NonPublic)!;
+    var pairMethod=backendType.GetMethod("CorrectWorldQuad",BindingFlags.Instance|BindingFlags.NonPublic)!;
+    (object Backend,Array Vertices) PairFixture(bool nonplanar)
+    {
+        var backend=System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(backendType);
+        var vertices=Array.CreateInstance(vertexType,6);
+        (float Y,float Z,float U,float V)[] data=[(-127,-94,26,0),(60,-126,26,39),(0,0,0,39),
+            (0,0,0,39),(-127,-3,0,0),(-127,-94,26,0)];
+        for(int i=0;i<6;i++)
+        {
+            var v=Activator.CreateInstance(vertexType)!;
+            void Set(string name,object value)=>vertexType.GetField(name)!.SetValue(v,value);
+            Set("ViewX",nonplanar && i==4 ? -29f : -39f);
+            Set("ViewY",data[i].Y); Set("ViewZ",data[i].Z+1000f);
+            Set("U",data[i].U); Set("V",data[i].V);
+            Set("HasViewSpace",2f); Set("PerspectiveW",data[i].Z+1000f);
+            vertices.SetValue(v,i);
+        }
+        verticesField.SetValue(backend,vertices);
+        candidateField.SetValue(backend,Activator.CreateInstance(candidateField.FieldType));
+        pairMethod.Invoke(backend,[0]); pairMethod.Invoke(backend,[3]);
+        return (backend,vertices);
+    }
+    float W(Array vertices,int i)=>(float)vertexType.GetField("PerspectiveW")!.GetValue(vertices.GetValue(i))!;
+    var valid=PairFixture(false);
+    Check(Enumerable.Range(0,6).All(i=>W(valid.Vertices,i)<0), "backend writes projective Q to both halves");
+    Check(W(valid.Vertices,0)==W(valid.Vertices,5) && W(valid.Vertices,2)==W(valid.Vertices,3), "backend shared-edge Q agrees exactly");
+    var invalid=PairFixture(true);
+    Check(Enumerable.Range(0,6).All(i=>W(invalid.Vertices,i)>0), "backend preserves a nonplanar authored crease");
+}
+{
+    // Secret Base warehouse header: an intermediate point on a straight
+    // bottom edge uses U84 although its source position lies at U79.95.
+    var a = new System.Numerics.Vector3(-856, -31, 1) / 16f;
+    var b = new System.Numerics.Vector3(-856, -30, -575) / 16f;
+    var mid = new System.Numerics.Vector3(-856, -31, -410) / 16f;
+    Check(RecompOne.Runtime.Enhanced.PlanarQuadMapping.TryStraightEdgeUv(a,b,mid,
+        new(0,22),new(112,22),new(84,22),out var uv), "split planar texture edge recognized");
+    Check(MathF.Abs(uv.X - 79.9164f) < 0.01f && uv.Y == 22,
+        "source edge subdivision receives continuous UV");
+    Check(!RecompOne.Runtime.Enhanced.PlanarQuadMapping.TryStraightEdgeUv(a,b,mid + new System.Numerics.Vector3(1,0,0),
+        new(0,22),new(112,22),new(84,22),out _), "real bent edge preserved");
+    Check(!RecompOne.Runtime.Enhanced.PlanarQuadMapping.TryStraightEdgeUv(a,b,mid,
+        new(0,22),new(112,22),new(84,30),out _), "authored non-straight UV edge preserved");
+    Check(PlanarQuadMapping.TryStraightEdgeUv(
+        new(473,-209.3257f,604.5232f), new(-102,-208.3330f,604.6440f), new(62,-209.3257f,604.5232f),
+        new(40,22),new(152,22),new(129,22),out var capturedUv) && MathF.Abs(capturedUv.X-120.057f)<0.01f,
+        "actual Secret Base camera-space edge tolerates authored integer quantization");
+}
+{
+    var type = typeof(EnhancedGlBackend);
+    var vt = type.GetNestedType("GlVertex", BindingFlags.NonPublic)!;
+    var backend = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(type);
+    var vertices = Array.CreateInstance(vt, 6);
+    (float Y,float Z,float U,float V)[] data = [(-31,-410,84,22),(-30,-575,112,22),(-112,-575,112,0),
+        (-31,1,0,22),(-31,-410,84,22),(-112,-575,112,0)];
+    for (int i=0; i<6; i++)
+    {
+        var v = Activator.CreateInstance(vt)!;
+        void Set(string field, object value) => vt.GetField(field)!.SetValue(v,value);
+        Set("ViewX", -856f/16); Set("ViewY",data[i].Y/16); Set("ViewZ",data[i].Z/16+1000);
+        Set("U",data[i].U); Set("V",data[i].V); Set("HasViewSpace",2f); Set("PerspectiveW",1000f);
+        float minU=i<3 ? 84 : 0;
+        Set("UvMinX",minU); Set("UvMaxX",112f); Set("UvMinY",0f); Set("UvMaxY",22f);
+        Set("ReplacementX",2+minU*2); Set("ReplacementY",5414f);
+        Set("ReplacementW",(113-minU)*2); Set("ReplacementH",46f);
+        vertices.SetValue(v,i);
+    }
+    type.GetField("_verts",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(backend,vertices);
+    var method=type.GetMethod("CorrectSplitTextureEdge",BindingFlags.Instance|BindingFlags.NonPublic)!;
+    method.Invoke(backend,[0]); method.Invoke(backend,[3]);
+    float U(int i)=>(float)vt.GetField("U")!.GetValue(vertices.GetValue(i))!;
+    Check(MathF.Abs(U(0)-79.9164f)<0.01f && U(0)==U(4),
+        "backend repairs both copies of the warehouse split edge");
+    Check(U(1)==112 && U(2)==112 && U(3)==0 && U(5)==112,
+        "backend retains all surrounding texture corners");
+    Check(Enumerable.Range(0,6).All(i =>
+        (float)vt.GetField("ReplacementX")!.GetValue(vertices.GetValue(i))! == 2 &&
+        (float)vt.GetField("ReplacementW")!.GetValue(vertices.GetValue(i))! == 226 &&
+        (float)vt.GetField("UvMinX")!.GetValue(vertices.GetValue(i))! == 0),
+        "different crops of one texture acquire a shared window without clamping the corrected edge");
+    // OT playback may reverse the source triangle sequence.
+    for (int i=0; i<6; i++)
+    {
+        int source=(i+3)%6;
+        var v=vertices.GetValue(source)!;
+        vt.GetField("U")!.SetValue(v,data[source].U);
+        vertices.SetValue(v,source);
+    }
+    var reversed=Array.CreateInstance(vt,6);
+    for (int i=0; i<6; i++) reversed.SetValue(vertices.GetValue((i+3)%6),i);
+    vertices=reversed;
+    type.GetField("_verts",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(backend,vertices);
+    type.GetField("_lastSplitTextureEdge",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(backend,-1);
+    method.Invoke(backend,[0]); method.Invoke(backend,[3]);
+    Check(MathF.Abs(U(1)-79.9164f)<0.01f && U(1)==U(3),
+        "backend repairs the split edge with reversed OT submission order");
+    // Two repeated corners in either triangle are not two distinct shared
+    // endpoints. In particular, repeated index 2 used to produce index -1.
+    vertices.SetValue(vertices.GetValue(5),0);
+    vertices.SetValue(vertices.GetValue(5),1);
+    type.GetField("_lastSplitTextureEdge",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(backend,3);
+    method.Invoke(backend,[3]);
+    Check(true,"collapsed prior triangle cannot form an out-of-range shared edge");
+    var swapped=Array.CreateInstance(vt,6);
+    for(int i=0;i<6;i++) swapped.SetValue(vertices.GetValue((i+3)%6),i);
+    type.GetField("_verts",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(backend,swapped);
+    method.Invoke(backend,[3]);
+    Check(true,"collapsed current triangle cannot form an out-of-range shared edge");
+}
+{
+    // A coarse native rejection must retain its authored subdivision data,
+    // tied to the originating traversal rather than a later camera/buffer.
+    RecompOne.Runtime.Config.ConfigManager.View.HighResolution3D = true;
+    RecompOne.Runtime.Config.ConfigManager.View.LevelOfDetail = "Maximum";
+    var m = new PSMemory();
+    var c = new CpuContext { GP=0x80080000, A0=4, A1=4, A2=0x10000 };
+    m.WriteU32(0x800B9470,0x80100000);
+    var field=typeof(V82Compat).GetField("_culledTerrainCells",BindingFlags.Static|BindingFlags.NonPublic)!;
+    V82Compat.TraceTerrainTraversalPolygon(c,m);
+    V82Compat.BeginTerrainRoutePacketWrites(c,m);
+    c.V0=c.A2;
+    V82Compat.EndTerrainRoutePacketWrites(c,m);
+    var cells=(List<GpuHle.CoarseTerrainPacket>)field.GetValue(null)!;
+    Check(cells.Count==1 && cells[0].X==4 && cells[0].Z==4,
+        "rejected coarse cell retained for enhanced terrain clipping");
+    Check(cells[0].Textures.DistanceColors.Patch?.Samples.Length==25,
+        "rejected cell retains every authored terrain sample");
+    Check(ReferenceEquals(cells[0].Textures.DistanceColors.Patch!.CulledCells,cells),
+        "terrain snapshot owns its rejected-cell cohort");
+    c.A0=8;
+    V82Compat.BeginTerrainRoutePacketWrites(c,m);
+    c.V0=c.A2+28;
+    V82Compat.EndTerrainRoutePacketWrites(c,m);
+    Check(cells.Count==1,"native emitted cells are not added to the repair list");
+    V82Compat.TraceTerrainTraversalPolygon(c,m);
+    Check(!ReferenceEquals(field.GetValue(null),cells) && cells.Count==1,
+        "next traversal cannot mutate the previous buffer's retained cells");
+}
+{
+    var type=typeof(EnhancedGlBackend);
+    var backend=System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(type);
+    var method=type.GetMethod("V",BindingFlags.Instance|BindingFlags.NonPublic)!;
+    GpuHle.GameplayActive=true;
+    foreach (int margin in new[] {0,54})
+    foreach (int origin in new[] {0,240})
+    {
+        var target=new GlDisplayRt { X=0, Y=origin, W=320, H=240, Margin=margin };
+        var source=new HleVertex { X=160, Y=origin+120, ProjectionCenterX=160,
+            ProjectionCenterY=origin+120, ProjectionScale=256, ViewZ=1000,
+            HasViewSpace=true, HasProjectiveW=true, PerspectiveW=1000 };
+        var flags=new PrimFlags { Material=HleMaterialKind.TerrainRoute };
+        var result=method.Invoke(backend,[source,flags,false,true,false,0f,target])!;
+        float Field(string name)=>(float)result.GetType().GetField(name)!.GetValue(result)!;
+        Check(Field("ProjectionCenterX")+margin==target.Wide1x*0.5f &&
+            Field("ProjectionCenterY")-origin==120,
+            "world projection and deferred water share one target margin in both buffers");
+    }
+    GpuHle.GameplayActive=false;
+}
+{
+    var m=new PSMemory(); var c=new CpuContext { GP=0x80080000 };
+    var view=RecompOne.Runtime.Config.ConfigManager.View;
+    bool oldHigh=view.HighResolution3D, oldWide=view.Widescreen;
+    float oldAspect=GpuHle.WideAspect;
+    view.HighResolution3D=true; view.Widescreen=true; GpuHle.GameplayActive=true;
+    foreach(float aspect in new[] {16f/9f,21f/9f})
+    foreach(uint width in new uint[] {320,512,640})
+    {
+        GpuHle.WideAspect=aspect;
+        m.WriteU32(c.GP+0xEDC,width);
+        uint targetWidth=width+(uint)(2*GpuHle.WideMargin((int)width));
+        V82Compat.ExpandTerrainFrustum(c,m);
+        Check(m.ReadU32(c.GP+0xEDC)==targetWidth,"water/terrain frustum exactly spans symmetric framebuffer margins");
+        V82Compat.RestoreTerrainFrustum(c,m);
+        Check(m.ReadU32(c.GP+0xEDC)==width,"terrain frustum restores authored width");
+        V82Compat.ExpandObjectFrustum(c,m);
+        Check(m.ReadU32(c.GP+0xEDC)==targetWidth,"objects use the same widened viewport as water");
+        V82Compat.RestoreObjectFrustum(c,m);
+        Check(m.ReadU32(c.GP+0xEDC)==width,"object frustum restores authored width");
+    }
+    GpuHle.WideAspect=oldAspect; GpuHle.GameplayActive=false;
+    view.HighResolution3D=oldHigh; view.Widescreen=oldWide;
 }
 Console.WriteLine($"PASS: {checks} mesh clipping packet/provenance assertions");

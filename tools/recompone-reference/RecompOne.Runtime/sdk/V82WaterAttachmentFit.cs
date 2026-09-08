@@ -11,10 +11,11 @@ namespace RecompOne.Runtime.Sdk;
 /// </summary>
 internal static class V82WaterAttachmentFit
 {
-    // Candidate remains opt-in until native visual verification is complete.
+    // Historical experimental helper only: disconnected from object rendering.
+    // Fitting support vertices to the body is not a recovered PS1 animation.
     static readonly bool Enabled = Environment.GetEnvironmentVariable("RECOMPONE_V82_WATER_ATTACHMENT_FIT") == "1";
     static readonly int[] PacketSizes = [12,32,20,32,12,24,12,24,16,28,12,28,24,24,0,24];
-    readonly record struct Pose(Vector3 X, Vector3 Y, Vector3 Z, Vector3 Position)
+    internal readonly record struct Pose(Vector3 X, Vector3 Y, Vector3 Z, Vector3 Position)
     {
         public static Pose Identity => new(Vector3.UnitX,Vector3.UnitY,Vector3.UnitZ,Vector3.Zero);
         public Vector3 Vector(Vector3 v) => X*v.X+Y*v.Y+Z*v.Z;
@@ -29,7 +30,7 @@ internal static class V82WaterAttachmentFit
                 Vector3.Dot(v,Vector3.Cross(Z,X))/det,Vector3.Dot(v,Vector3.Cross(X,Y))/det);
         }
     }
-    readonly record struct Triangle(Vector3 A,Vector3 B,Vector3 C);
+    internal readonly record struct Triangle(Vector3 A,Vector3 B,Vector3 C);
     readonly record struct Node(uint Address,Pose Pose);
     internal sealed record Replacement(uint Mesh,uint Original,byte[] Vertices,int Changed);
     sealed record Cached(ulong Signature,List<Replacement> Replacements);
@@ -198,7 +199,7 @@ internal static class V82WaterAttachmentFit
         return changed==0 ? null : new(mesh,source,bytes,changed);
     }
 
-    static bool RayHit(Vector3 origin,Vector3 direction,Triangle t,out float travel)
+    internal static bool RayHit(Vector3 origin,Vector3 direction,Triangle t,out float travel)
     {
         // Two-sided Moller-Trumbore: body winding must not change where an
         // attachment joins. No renderer culling or physics state is changed.
@@ -218,7 +219,7 @@ internal static class V82WaterAttachmentFit
         return travel>=0 && float.IsFinite(travel);
     }
 
-    static bool ReadTriangles(IMemory m,uint mesh,Pose pose,List<Triangle> triangles)
+    internal static bool ReadTriangles(IMemory m,uint mesh,Pose pose,List<Triangle> triangles)
     {
         if (mesh==0) return true; // Native transform-only parent.
         if (!ReadVertices(m,mesh,pose,out var vertices,out _,out _)) return false;
@@ -247,7 +248,7 @@ internal static class V82WaterAttachmentFit
         triangles.AddRange(parsed);
         return true;
     }
-    static bool ReadVertices(IMemory m,uint mesh,Pose pose,out Vector3[] points,out uint source,out float unit)
+    internal static bool ReadVertices(IMemory m,uint mesh,Pose pose,out Vector3[] points,out uint source,out float unit)
     {
         points=[]; source=0; unit=1;
         if (!Valid(mesh,0x1C)) return false;
@@ -259,13 +260,13 @@ internal static class V82WaterAttachmentFit
             (short)m.ReadU16(source+i*8),(short)m.ReadU16(source+i*8+2),(short)m.ReadU16(source+i*8+4))*unit);
         return true;
     }
-    static bool Valid(uint p,int length)=>p>=0x80010000 && p<0x80800000-length;
-    static Pose ReadPose(IMemory m,uint p)=>new(
+    internal static bool Valid(uint p,int length)=>p>=0x80010000 && p<0x80800000-length;
+    internal static Pose ReadPose(IMemory m,uint p)=>new(
         new Vector3((short)m.ReadU16(p+0x20),(short)m.ReadU16(p+0x26),(short)m.ReadU16(p+0x2C))/4096,
         new Vector3((short)m.ReadU16(p+0x22),(short)m.ReadU16(p+0x28),(short)m.ReadU16(p+0x2E))/4096,
         new Vector3((short)m.ReadU16(p+0x24),(short)m.ReadU16(p+0x2A),(short)m.ReadU16(p+0x30))/4096,
         new Vector3((int)m.ReadU32(p+0x34),(int)m.ReadU32(p+0x38),(int)m.ReadU32(p+0x3C)));
-    static Vector3 Closest(Vector3 p,Triangle t)
+    internal static Vector3 Closest(Vector3 p,Triangle t)
     {
         var ab=t.B-t.A; var ac=t.C-t.A; var ap=p-t.A;
         float d1=Vector3.Dot(ab,ap),d2=Vector3.Dot(ac,ap);

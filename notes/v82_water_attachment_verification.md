@@ -1,8 +1,10 @@
 # Water attachment verification â€” current coverage
 
+Current follow-up: the user approved whole-assembly chassis anchoring. See `notes/v82_rigid_water_attachments.md`; the old vertex-stretching helper remains inactive. Historical findings below are retained chronologically.
+
 Scope: all 30 installed vehicles (stock 0â€“17, imported 64â€“75). Y76 excluded.
 Roster/source hashes: `artifacts/water-attachment-fit-20260905/roster.json`.
-Candidate remains opt-in, not release-approved. User visual approval is pending.
+Current runtime has removed the experimental support fitting from object rendering (2026-09-08, user correction). It changed mesh geometry and was not a recovered native animation. Historical fit images and checks below do not establish canonical behavior.
 
 This is a chronological evidence ledger: later entries explicitly supersede
 earlier rejected or pre-correction runs. The current conclusion and remaining
@@ -515,3 +517,15 @@ source packet addresses and view-space projections. Separate8192 record
 budget avoids the generic trace's distant-geometry exhaustion. Read-only
 `audit_water_near_triangles.py` clips/ranks projected area; it does not model
 depth, materials or occlusion and must never be used as a visual pass.
+
+## 2026-09-08 — shipping default restored
+
+The user reported detached water attachments in normal gameplay. The shared fit was still gated behind environment value 1, so ordinary launches omitted it. It now runs unless explicitly disabled with value 0. The transformation proof harness also respects this shipping default rather than silently forcing it off.
+
+Native default-only proof: `artifacts/visual-issues-attachment-default/proof.json` and adjacent runtime log/capture. Player 0 completed repeated water/dry transitions through tick 1050, clean exit and no fixture failures. The individually inspected oblique capture shows visible support roots reaching the body; far-side roots are occluded. This supplements the prior all-30 shared-rule evidence; it is not a fresh all-30 review. Metadata explicitly records removal of the old harness environment override.
+
+## 2026-09-08 — user rejected noncanonical fitting
+
+The user explicitly requested removal if attachment continuity came from a workaround. It did: body-facing support vertices were translated to intersect the chassis, extending the authored mesh. Removed Begin/Dispose fitting calls and scope storage from object rendering entirely; environment flags cannot reactivate it through normal rendering. Historical helper remains for analysis only. Native transformation routines remain in control. Previous default-on images prove the experiment only and are superseded as shipping acceptance. The underlying separation is unresolved; no native-equivalence claim is made.
+
+Native unstretched validation: `artifacts/visual-issues-attachments-unstretched/proof.json`, executable 6C1B926F. Exit 0; all initial and repeated water/dry samples pass through tick 1050; no fitting log entries. Individually inspected native frame150: original support geometry, partly obscured by water. This is removal/lifecycle evidence, not proof that the underlying gap is fixed. 349 transformation assertions pass after removal.

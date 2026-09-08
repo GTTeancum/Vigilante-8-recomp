@@ -111,6 +111,8 @@ def review(out):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--animation-frames", default="",
+        help="Comma-separated native gameplay ticks (90..1050) for attachment animation captures")
     parser.add_argument("--exe", type=Path, default=LOOSE / "Vigilante82PC.exe",
         help="Candidate executable; working directory and assets remain the loose PS1 root")
     parser.add_argument("--final-owner-point", default="",
@@ -138,10 +140,14 @@ def main():
         help="Fixture only: choose clear water this far from the nearest site, 0..128 world units")
     parser.add_argument("--packet-trace", action="store_true",
         help="Log native triangle coordinates and ownership at frame150; no extra images")
-    parser.add_argument("--attachment-fit", action="store_true", help="Enable the shared fit candidate for this isolated run")
+    fit_options = parser.add_mutually_exclusive_group()
+    fit_options.add_argument("--attachment-fit", action="store_true", help="Retired experiment; rejected because the fit is not canonical")
+    fit_options.add_argument("--without-attachment-fit", action="store_true", help="Diagnostic baseline with the shared fit disabled")
     parser.add_argument("--profile", choices=("water", "powerups", "attachment"), default="water")
     parser.add_argument("--summarize-only", action="store_true")
     args = parser.parse_args()
+    if args.attachment_fit:
+        parser.error("The experimental support stretching was removed from rendering; --attachment-fit is retired")
     if not 0 <= args.water_site_separation_units <= 128:
         parser.error("Water-site separation must be 0..128 world units")
     if not -180 <= args.inspection_yaw_degrees <= 180 or not -80 <= args.inspection_pitch_degrees <= -5:
@@ -152,6 +158,14 @@ def main():
         print(json.dumps(review(args.output.resolve()), indent=2))
         return
     slots = [int(s) for s in args.maps.split(",")]
+    try:
+        animation_frames = sorted({int(s) for s in args.animation_frames.split(",") if s.strip()})
+    except ValueError:
+        parser.error("--animation-frames must contain integer ticks")
+    if any(frame < 90 or frame > 1050 for frame in animation_frames):
+        parser.error("--animation-frames ticks must be within 90..1050")
+    if animation_frames and (args.profile != "attachment" or not args.images):
+        parser.error("--animation-frames requires --profile attachment --images")
     players = [int(s) for s in args.players.split(",")] if args.players else [args.player] * len(slots)
     if len(players) != len(slots) or any(p < 0 or p > 255 for p in players):
         parser.error("--players must specify one valid type per map")
@@ -197,7 +211,6 @@ def main():
             "1" if args.profile == "attachment" else "0",
         "RECOMPONE_V82_WATER_ATTACHMENT_TRACE": "1" if args.attachment_trace else "0",
         "RECOMPONE_V82_WATER_SITE_SEPARATION_UNITS": str(args.water_site_separation_units),
-        "RECOMPONE_V82_WATER_ATTACHMENT_FIT": "1" if args.attachment_fit else "0",
         "RECOMPONE_V82_WATER_INSPECTION_CAMERA": "1" if args.inspection_camera else "0",
         "RECOMPONE_V82_WATER_INSPECTION_YAW_DEGREES": str(args.inspection_yaw_degrees),
         "RECOMPONE_V82_WATER_INSPECTION_PITCH_DEGREES": str(args.inspection_pitch_degrees),
@@ -205,11 +218,14 @@ def main():
         "RECOMPONE_V82_TRANSFORMATION_PROBE_PROFILE": args.profile,
         "RECOMPONE_V82_TRANSFORMATION_PROBE_RESPAWN_GENERATION": str(args.respawn_generation),
         "RECOMPONE_V82_TRANSFORMATION_PROBE_IMAGES": "1" if args.images else "0",
+        "RECOMPONE_V82_WATER_ANIMATION_CAPTURE_FRAMES": ",".join(map(str, animation_frames)),
         "RECOMPONE_PRESENTATION_CAPTURE": "1" if args.images else "0",
         "RECOMPONE_PRESENTATION_RESOLUTION": "1920x1080",
         "RECOMPONE_DISABLE_SCRIPT_STAGE_CAPTURES": "1",
         "RECOMPONE_CAPTURE_DIR": str(out),
     })
+    if args.attachment_fit or args.without_attachment_fit:
+        env["RECOMPONE_V82_WATER_ATTACHMENT_FIT"] = "0" if args.without_attachment_fit else "1"
     if args.final_owner_point and args.final_owner_ticks:
         env["RECOMPONE_TRACE_FINAL_OWNER_POINT"] = args.final_owner_point
         env["RECOMPONE_TRACE_TERRAIN_CELL_TICKS"] = args.final_owner_ticks
@@ -245,7 +261,8 @@ def main():
         report = {"executable_sha256": digest, "exit_code": process.returncode,
             "packet_trace": args.packet_trace,
             "water_site_separation_units": args.water_site_separation_units,
-            "attachment_fit": args.attachment_fit,
+            "attachment_fit": False, "animation_capture_frames": animation_frames,
+            "attachment_fit_override": env.get("RECOMPONE_V82_WATER_ATTACHMENT_FIT"),
             "camera_cycles": args.camera_cycles,
             "inspection_camera": args.inspection_camera,
             "inspection_yaw_degrees": args.inspection_yaw_degrees,
@@ -274,7 +291,7 @@ def main():
             log = log_path.read_text(errors="replace")
             report = {"executable_sha256": digest, "exit_code": None,
                 "fixture_pid": process.pid if process else None,
-                "outcome": f"Interrupted: {error}", "attachment_fit": args.attachment_fit,
+                "outcome": f"Interrupted: {error}", "attachment_fit": False, "animation_capture_frames": animation_frames,
                 "camera_cycles": args.camera_cycles,
                 "inspection_camera": args.inspection_camera,
                 "inspection_yaw_degrees": args.inspection_yaw_degrees,

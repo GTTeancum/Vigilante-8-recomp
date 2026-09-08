@@ -81,7 +81,7 @@ internal static class GlShaders
 
         out vec4 vColorPerspective;
         noperspective out vec4 vColorAffine;
-        out vec2 vUVPerspective;
+        out vec3 vUVPerspective;
         noperspective out vec2 vUVAffine;
         flat out ivec2 clutBase;
         flat out ivec2 pageBase;
@@ -194,7 +194,10 @@ internal static class GlShaders
             vBary = inBary;
             vDepth = inDepth;
 
-            vUVPerspective = inUV;
+            // A negative W carries an independent planar-quad UV weight;
+            // geometry still uses the exact camera Z for projection/clipping.
+            float uvQ = modernGeometry && inPerspectiveW < 0.0 ? -inPerspectiveW : 1.0;
+            vUVPerspective = vec3(inUV * uvQ, uvQ);
             vUVAffine = inUV;
             if ((inTexpage & 0x8000) != 0) {
                 texMode = 4;
@@ -210,7 +213,7 @@ internal static class GlShaders
         #version 330 core
         in vec4 vColorPerspective;
         noperspective in vec4 vColorAffine;
-        in vec2 vUVPerspective;
+        in vec3 vUVPerspective;
         noperspective in vec2 vUVAffine;
         flat in ivec2 clutBase;
         flat in ivec2 pageBase;
@@ -753,7 +756,7 @@ internal static class GlShaders
             }
 
             vec2 sampleUV = uPerspectiveCorrectTextures != 0
-                ? vUVPerspective
+                ? vUVPerspective.xy / vUVPerspective.z
                 : vUVAffine;
             // RDP shade coefficients are affine screen-space planes. The
             // N64 route path carries its decoded COLS shade in vertexColor;

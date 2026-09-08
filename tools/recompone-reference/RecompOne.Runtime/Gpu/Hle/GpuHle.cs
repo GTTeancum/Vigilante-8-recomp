@@ -173,7 +173,12 @@ public static class GpuHle
     public sealed record TerrainPatchGeometry(
         DreamcastTerrainGeometry.Sample[] Samples,
         System.Numerics.Vector3 HeightAxis,
-        float ProjectionCenterX, float ProjectionCenterY, float ProjectionScale);
+        float ProjectionCenterX, float ProjectionCenterY, float ProjectionScale)
+    {
+        // Shared only by patches from one native terrain traversal. Retain
+        // rejected coarse cells with the packets that own that camera snapshot.
+        public List<CoarseTerrainPacket>? CulledCells { get; init; }
+    }
 
     public readonly record struct CoarseTerrainPacket(
         TerrainCellTextures Textures,

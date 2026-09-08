@@ -23,6 +23,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         public float X, Y;
         public uint Color;
         public int Clut, Texpage;
+        // Exact-view vertices project with ViewZ, freeing PerspectiveW to
+        // carry a negative planar UV weight without adding a vertex attribute.
+        // Positive values retain the ordinary projective/legacy contract.
         public float U, V, PerspectiveW, Depth, RasterDepth;
         public float BaryX, BaryY, BaryZ;
         public float UvMinX, UvMinY, UvMaxX, UvMaxY;
@@ -36,6 +39,185 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         public int BlendCode;
         public uint TerrainOffset;
         public float TerrainMipX, TerrainMipY, TerrainMipW, TerrainMipH;
+    }
+
+    // Pair only complementary rectangular-UV triangles from exact world meshes.
+    // The diagonal key includes positions and UVs, so adjacent unrelated faces
+    // cannot acquire one another's mapping. Entries live for one GPU batch.
+    readonly Dictionary<(System.Numerics.Vector3, System.Numerics.Vector3,
+        float, float, float, float, int, int, uint), int> _quadCandidates = new();
+
+    static readonly bool DisablePlanarQuadMapping =
+        Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_PLANAR_QUAD_MAPPING") == "1";
+    static readonly bool TracePlanarQuadMapping =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_PLANAR_QUAD_MAPPING") == "1";
+    int _quadMappingTraceCount;
+    static readonly bool DisableStraightEdgeMapping =
+        Environment.GetEnvironmentVariable("RECOMPONE_DISABLE_STRAIGHT_EDGE_MAPPING") == "1";
+    int _lastSplitTextureEdge = -1;
+    readonly HashSet<List<GpuHle.CoarseTerrainPacket>> _renderedCulledTerrainCells = [];
+    static readonly bool DiagnosticDoubleWideMargin =
+        Environment.GetEnvironmentVariable("RECOMPONE_DIAGNOSTIC_DOUBLE_WIDE_MARGIN") == "1";
+
+    void CorrectSplitTextureEdge(int current)
+    {
+        static System.Numerics.Vector3 P(GlVertex v) => new(v.ViewX, v.ViewY, v.ViewZ);
+        static System.Numerics.Vector2 Uv(GlVertex v) => new(v.U, v.V);
+        var first = _verts[current];
+        float minU = first.U, maxU = first.U, minV = first.V, maxV = first.V;
+        for (int i = 0; i < 3; i++)
+        {
+            var v = _verts[current + i];
+            if (v.HasViewSpace != 2f) return;
+            minU = MathF.Min(minU, v.U); maxU = MathF.Max(maxU, v.U);
+            minV = MathF.Min(minV, v.V); maxV = MathF.Max(maxV, v.V);
+        }
+        bool rectangleCorners = true;
+        for (int i = 0; i < 3; i++)
+        {
+            var v = _verts[current + i];
+            rectangleCorners &= (v.U == minU || v.U == maxU) &&
+                (v.V == minV || v.V == maxV);
+        }
+        if (rectangleCorners && (_lastSplitTextureEdge < 0 || current - _lastSplitTextureEdge > 24)) return;
+        if (!rectangleCorners) _lastSplitTextureEdge = current;
+        // Only the split-edge triangle needs a search. The native model
+        // stream places adjoining face triangles together; bound the search
+        // to eight preceding triangles instead of indexing every scene edge.
+        for (int previous = current - 3; previous >= Math.Max(0, current - 24); previous -= 3)
+        {
+            var prior = _verts[previous];
+            if (prior.Texpage != first.Texpage || prior.Clut != first.Clut) continue;
+            int a = -1, b = -1, pa = -1, pb = -1, matches = 0;
+            for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++)
+                if (P(_verts[current + i]) == P(_verts[previous + j]) &&
+                    Uv(_verts[current + i]) == Uv(_verts[previous + j]))
+                {
+                    if (matches++ == 0) { a = i; pa = j; }
+                    else { b = i; pb = j; }
+                }
+            // Collapsed native triangles can match one corner twice. They do
+            // not define a shared edge or a valid third-corner index.
+            if (matches != 2 || a == b || pa == pb) continue;
+            if (!SameTextureMapping(first, prior)) continue;
+            int other = current + 3 - a - b;
+            int priorOther = previous + 3 - pa - pb;
+            for (int side = 0; side < 2; side++)
+            {
+                int middle = current + (side == 0 ? a : b);
+                int priorMiddle = previous + (side == 0 ? pa : pb);
+                if (_verts[priorMiddle].PerspectiveW < 0) continue;
+                if (!PlanarQuadMapping.TryStraightEdgeUv(
+                    P(_verts[other]), P(_verts[priorOther]), P(_verts[middle]),
+                    Uv(_verts[other]), Uv(_verts[priorOther]), Uv(_verts[middle]), out var uv)) continue;
+                _verts[middle].U = _verts[priorMiddle].U = uv.X;
+                _verts[middle].V = _verts[priorMiddle].V = uv.Y;
+                // Atlas entries can be different crops of one texture. The
+                // corrected point may leave the smaller crop, so share the
+                // union window without changing the UV-to-atlas transform.
+                UnifyTextureWindow(current, previous);
+                if (TracePlanarQuadMapping && GpuHle.DebugGameplayTick == 301)
+                    Console.Error.WriteLine($"[SplitTextureUv] index={current} previous={previous} uv={uv} position={P(_verts[middle])}");
+                return;
+            }
+        }
+    }
+
+    static bool SameTextureMapping(in GlVertex a, in GlVertex b)
+    {
+        if (a.ReplacementW <= 0 || b.ReplacementW <= 0)
+            return a.ReplacementW == b.ReplacementW;
+        float ax = a.ReplacementW / (a.UvMaxX - a.UvMinX + 1);
+        float ay = a.ReplacementH / (a.UvMaxY - a.UvMinY + 1);
+        float bx = b.ReplacementW / (b.UvMaxX - b.UvMinX + 1);
+        float by = b.ReplacementH / (b.UvMaxY - b.UvMinY + 1);
+        return MathF.Abs(ax - bx) < 0.0001f && MathF.Abs(ay - by) < 0.0001f &&
+            MathF.Abs(a.ReplacementX - a.UvMinX * ax - (b.ReplacementX - b.UvMinX * bx)) < 0.001f &&
+            MathF.Abs(a.ReplacementY - a.UvMinY * ay - (b.ReplacementY - b.UvMinY * by)) < 0.001f;
+    }
+
+    void UnifyTextureWindow(int current, int previous)
+    {
+        var a = _verts[current]; var b = _verts[previous];
+        float minU = MathF.Min(a.UvMinX, b.UvMinX), minV = MathF.Min(a.UvMinY, b.UvMinY);
+        float maxU = MathF.Max(a.UvMaxX, b.UvMaxX), maxV = MathF.Max(a.UvMaxY, b.UvMaxY);
+        float sx = a.ReplacementW / (a.UvMaxX - a.UvMinX + 1);
+        float sy = a.ReplacementH / (a.UvMaxY - a.UvMinY + 1);
+        for (int i = 0; i < 6; i++)
+        {
+            ref var v = ref _verts[i < 3 ? current + i : previous + i - 3];
+            v.UvMinX = minU; v.UvMinY = minV; v.UvMaxX = maxU; v.UvMaxY = maxV;
+            if (a.ReplacementW <= 0) continue;
+            v.ReplacementX = a.ReplacementX + (minU - a.UvMinX) * sx;
+            v.ReplacementY = a.ReplacementY + (minV - a.UvMinY) * sy;
+            v.ReplacementW = (maxU - minU + 1) * sx;
+            v.ReplacementH = (maxV - minV + 1) * sy;
+        }
+    }
+
+    void CorrectWorldQuad(int current)
+    {
+        Span<int> corners = stackalloc int[3];
+        float minU = float.MaxValue, minV = float.MaxValue;
+        float maxU = float.MinValue, maxV = float.MinValue;
+        for (int j = 0; j < 3; j++)
+        {
+            var v = _verts[current + j];
+            if (v.HasViewSpace != 2f) return;
+            minU = MathF.Min(minU, v.U); maxU = MathF.Max(maxU, v.U);
+            minV = MathF.Min(minV, v.V); maxV = MathF.Max(maxV, v.V);
+        }
+        if (maxU <= minU || maxV <= minV) return;
+        int diagonalA = -1, diagonalB = -1;
+        for (int j = 0; j < 3; j++)
+        {
+            var v = _verts[current + j];
+            if ((v.U != minU && v.U != maxU) ||
+                (v.V != minV && v.V != maxV)) return;
+            corners[j] = (v.U == maxU ? 1 : 0) | (v.V == maxV ? 2 : 0);
+            for (int k = 0; k < j; k++)
+                if ((corners[j] ^ corners[k]) == 3)
+                { diagonalA = k; diagonalB = j; }
+        }
+        if (diagonalA < 0) return;
+        if (corners[diagonalA] > corners[diagonalB])
+            (diagonalA, diagonalB) = (diagonalB, diagonalA);
+        static System.Numerics.Vector3 Position(GlVertex v) => new(v.ViewX, v.ViewY, v.ViewZ);
+        var a = _verts[current + diagonalA];
+        var b = _verts[current + diagonalB];
+        var key = (Position(a), Position(b), a.U, a.V, b.U, b.V,
+            a.Texpage, a.Clut, a.Color);
+        if (!_quadCandidates.Remove(key, out int previous))
+        { _quadCandidates[key] = current; return; }
+        Span<System.Numerics.Vector3> points = stackalloc System.Numerics.Vector3[4];
+        Span<int> indices = stackalloc int[6];
+        int mask = 0;
+        for (int j = 0; j < 6; j++)
+        {
+            var v = _verts[j < 3 ? previous + j : current + j - 3];
+            if (v.Color != a.Color || v.ReplacementX != a.ReplacementX ||
+                v.ReplacementY != a.ReplacementY ||
+                (v.U != minU && v.U != maxU) || (v.V != minV && v.V != maxV)) return;
+            int corner = (v.U == maxU ? 1 : 0) | (v.V == maxV ? 2 : 0);
+            // Clockwise rectangle order: 00, 10, 11, 01.
+            corner = corner == 2 ? 3 : corner == 3 ? 2 : corner;
+            if ((mask & (1 << corner)) != 0 && points[corner] != Position(v)) return;
+            mask |= 1 << corner; points[corner] = Position(v); indices[j] = corner;
+        }
+        if (mask != 15) return;
+        Span<float> q = stackalloc float[4];
+        if (!PlanarQuadMapping.TryWeights(points, q)) return;
+        if (q[0] == 1f && q[1] == 1f && q[2] == 1f && q[3] == 1f) return;
+        if (TracePlanarQuadMapping && _quadMappingTraceCount++ < 100)
+            Console.Error.WriteLine($"[PlanarQuadMapping] tick={GpuHle.DebugGameplayTick} q={q[0]},{q[1]},{q[2]},{q[3]} p0={points[0]} p1={points[1]} p2={points[2]} p3={points[3]}");
+        for (int j = 0; j < 6; j++)
+        {
+            ref GlVertex vertex = ref _verts[j < 3 ? previous + j : current + j - 3];
+            uint packet = FinalOwnerActive ? _finalOwnerPackets.GetValueOrDefault(vertex) : 0u;
+            vertex.PerspectiveW = -q[indices[j]];
+            if (FinalOwnerActive) _finalOwnerPackets[vertex] = packet;
+        }
     }
 
     readonly struct DrawTriTimingScope : IDisposable
@@ -401,15 +583,12 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     static readonly bool PacketNclipCull =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_V82_PACKET_NCLIP_CULL") != "0";
-    // The retail Dreamcast ordinary-object context compiles ISP culling mode
-    // 3 (PVR_CULLING_CW).  V8:2's PS1 emitter can submit coincident,
-    // oppositely-wound faces carrying different texture state; a packet-level
-    // GTE association is not fine-grained enough to choose between them.
-    // Apply the recovered PVR rule from each submitted triangle's own exact
-    // projection after near-plane clipping.
-    static readonly bool DreamcastWorldObjectCull =
+    // PS1 scenery packets keep positive projected area (screen Y downward).
+    // Test each emitted triangle after near clipping: coincident opposite
+    // faces can share GTE provenance, but require separate face decisions.
+    static readonly bool Ps1WorldObjectCull =
         Environment.GetEnvironmentVariable(
-            "RECOMPONE_V82_DREAMCAST_WORLD_OBJECT_CULL") != "0";
+            "RECOMPONE_V82_PS1_WORLD_OBJECT_CULL") != "0";
     static readonly bool TracePacketNclipCull =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_PACKET_NCLIP_CULL") == "1";
@@ -695,6 +874,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     static readonly bool DiagnosticSkipDreamcastWaterAll =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_DIAGNOSTIC_SKIP_DC_WATER_ALL") == "1";
+    static readonly bool DiagnosticWaterBaseDepthWrite =
+        Environment.GetEnvironmentVariable(
+            "RECOMPONE_DIAGNOSTIC_WATER_BASE_DEPTH_WRITE") == "1";
     static readonly bool DiagnosticDisableDreamcastFog =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_DIAGNOSTIC_DISABLE_DC_FOG") == "1";
@@ -920,6 +1102,14 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     int _count;
     ushort[] _readCache = Array.Empty<ushort>();
     bool _readCacheValid;
+    VramReadbackRegion _readCacheRegion;
+    static readonly bool FullVramReadback =
+        Environment.GetEnvironmentVariable("RECOMPONE_FULL_VRAM_READBACK") == "1";
+    static readonly bool VerifyVramReadback =
+        Environment.GetEnvironmentVariable("RECOMPONE_VERIFY_VRAM_READBACK") == "1";
+    ushort[] _readbackOracle = [];
+    int _verifiedReadbacks;
+    long _traceVramReadbacks, _traceVramReadbackPixels, _traceVramReadCacheHits;
 
     HleDrawEnv _env;
 
@@ -1817,15 +2007,14 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         float projectionCenterY = v.ProjectionCenterY;
         float projectionScale = v.ProjectionScale;
         GlDisplayRt? projectionTarget = targetOverride ?? _kTarget;
-        if (!uiTexture &&
+        if (DiagnosticDoubleWideMargin && !uiTexture &&
             GpuHle.GameplayActive &&
             projectionTarget is { Margin: > 0 } wideTarget)
         {
-            // Preserve the native vertical FOV and projection scale. The
-            // enhanced target owns real pixels on both sides of the authored
-            // 4:3 viewport, so centering the recovered projection in that
-            // target exposes additional horizontal view instead of stretching
-            // or vertically cropping the original camera.
+            // Diagnostic replay of the old double-margin bug. Flush already
+            // adds Margin-X through uPosBias for every vertex. Adding it here
+            // again shifts the world relative to the deferred water projection
+            // and makes shoreline depth tests compare different camera rays.
             screenX += wideTarget.Margin;
             projectionCenterX += wideTarget.Margin;
         }
@@ -2529,8 +2718,18 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 if (_renderedDreamcastPatchFrame != _frame)
                 {
                     _renderedDreamcastPatches.Clear();
+                    _renderedCulledTerrainCells.Clear();
                     _renderedDreamcastPatchFrame = _frame;
                 }
+                // Native coarse NCLIP only sees the four corner heights.
+                // Its rejected square can contain visible interior slopes
+                // after subdivision (Airplane Graveyard). Clip those exact
+                // authored leaves through the same depth-tested terrain path.
+                if (patch.CulledCells is { } culled && _renderedCulledTerrainCells.Add(culled))
+                    foreach (var cell in culled)
+                        if (cell.Textures.DistanceColors.Patch is { } missing &&
+                            _renderedDreamcastPatches.Add(missing))
+                            DrawDreamcastTerrainPatch(a, f, cell.Textures, missing, cell.X, cell.Z);
                 if (_renderedDreamcastPatches.Add(patch))
                     DrawDreamcastTerrainPatch(
                         a, f, coarseTerrain.Textures, patch,
@@ -3211,7 +3410,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     void DrawTriCore(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
         if (ClipAgainstNearPlane(a, b, c, f)) return;
-        if (CullByDreamcastWorldObjectWinding(a, b, c, f)) return;
+        if (CullByPs1WorldObjectWinding(a, b, c, f)) return;
         if (CullByPacketNclip(a, b, c, f)) return;
         if (TraceModalRects && GpuHle.NativeModalActive && _modalTriLines++ < 300)
         {
@@ -3396,18 +3595,15 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         }
         GlDisplayRt? skyTarget = skyPacket ? Classify() : null;
         bool deferSky = skyTarget is { Margin: > 0 };
-        // The recovered Dreamcast ISP words for terrain (0x80000000 /
-        // 0x90000000), ordinary world objects (0x98000000), reflections
-        // (0x90000000), and both water contexts (0x80000000) all leave the
-        // Z-write-disable bit clear. Preserve the PS1 painter-ordered colour
-        // result while recording the same scene depth: every function-owned
-        // world primitive writes the depth of the colour it submitted, while
-        // water alone performs the conventional-depth equivalent of the
-        // Dreamcast's strict GREATER comparison. The PS1-only deferred strip
-        // tests that completed image but must not replace it.
+        // Record the depth of the painter-ordered scene for deferred water
+        // and screen effects. The flat water underlay must not replace that
+        // depth: otherwise it rejects the troughs of the displaced surface
+        // drawn over it, exposing hard grid edges between the two passes.
+        // The visible wave surface still tests and writes scene depth.
         bool depthWrite =
             depthEligible &&
-            f.Material != HleMaterialKind.ScreenEffect;
+            f.Material != HleMaterialKind.ScreenEffect &&
+            (f.Material != HleMaterialKind.WaterBase || DiagnosticWaterBaseDepthWrite);
         bool sourceOpaqueDepthTest =
             f.N64RouteDepthCompare &&
             !f.SemiTrans &&
@@ -4230,6 +4426,18 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _verts[_count++] = va;
             _verts[_count++] = vb;
             _verts[_count++] = vc;
+            if (!DisablePlanarQuadMapping && f.WorldObject && !f.Vehicle &&
+                f.Textured && perspectiveCorrect &&
+                f.Material is HleMaterialKind.Opaque or HleMaterialKind.AlphaTest)
+            {
+                if (TracePlanarQuadMapping && GpuHle.DebugGameplayTick == 301)
+                    Console.Error.WriteLine($"[SplitTextureInput] index={_count - 3} packet={f.PacketAddress:X8} " +
+                        $"p={va.ViewX},{va.ViewY},{va.ViewZ};{vb.ViewX},{vb.ViewY},{vb.ViewZ};{vc.ViewX},{vc.ViewY},{vc.ViewZ} " +
+                        $"uv={va.U},{va.V};{vb.U},{vb.V};{vc.U},{vc.V} " +
+                        $"rect={va.ReplacementX},{va.ReplacementY},{va.ReplacementW},{va.ReplacementH}");
+                if (!DisableStraightEdgeMapping) CorrectSplitTextureEdge(_count - 3);
+                CorrectWorldQuad(_count - 3);
+            }
             TraceFinalOwnerTriangle(va, vb, vc, f);
         }
     }
@@ -4462,27 +4670,26 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     public static bool DreamcastDisablesFaceCulling(HleMaterialKind material) =>
         material is HleMaterialKind.WaterBase or HleMaterialKind.WaterSurface;
 
-    bool CullByDreamcastWorldObjectWinding(
+    bool CullByPs1WorldObjectWinding(
         in HleVertex a,
         in HleVertex b,
         in HleVertex c,
         in PrimFlags flags)
     {
-        if (!DreamcastWorldObjectCull || !GpuHle.GameplayActive ||
+        if (!Ps1WorldObjectCull || !GpuHle.GameplayActive ||
             !flags.WorldObject || flags.Vehicle ||
+            DreamcastDisablesFaceCulling(flags.Material) ||
             !a.HasViewSpace || !b.HasViewSpace || !c.HasViewSpace)
             return false;
 
-        return DreamcastCullClockwise(a, b, c);
+        return Ps1CullBackFace(a, b, c);
     }
 
     /// <summary>
-    /// Returns the exact ordinary-object face decision encoded by the retail
-    /// Dreamcast ISP mode <c>PVR_CULLING_CW</c>.  Public only so the binary-
-    /// contract fixture can verify the coordinate convention without
-    /// constructing an OpenGL backend.
+    /// Rejects the back winding of PS1 scenery packets using the exact
+    /// post-clip projection. Public for geometry contract verification.
     /// </summary>
-    public static bool DreamcastCullClockwise(
+    public static bool Ps1CullBackFace(
         in HleVertex a,
         in HleVertex b,
         in HleVertex c)
@@ -4498,10 +4705,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             x1 * (y2 - y0) +
             x2 * (y0 - y1);
 
-        // Screen Y grows downward in both source and Enhanced projection, so
-        // positive signed area is clockwise.  PVR_CULLING_CW removes that
-        // winding and keeps counter-clockwise or degenerate faces.
-        return area > 0d;
+        // The PS1 packet convention retains clockwise/positive area.
+        // Dreamcast PVR_CULLING_CW has the opposite sign and cannot be
+        // applied here: it removes exterior walls and exposes their backs.
+        return area < 0d;
     }
 
     static double ReconstructedHleX(in HleVertex vertex) =>
@@ -5219,54 +5426,58 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     public void ReadVram(int x, int y, int w, int h, Span<ushort> px)
     {
         Flush();
-        if (!_readCacheValid && (long)w * h > 64)
+        if (w <= 0 || h <= 0) return;
+        bool cacheHit = _readCacheValid && _readCacheRegion.Contains(x, y, w, h);
+        if (!cacheHit && (long)w * h > 64)
         {
             WritebackDirtyWrappedIntersecting(x, y, w, h);
             _vram.ReadRect(x, y, w, h, px);
+            _traceVramReadbacks++;
+            _traceVramReadbackPixels += (long)w * h;
             return;
         }
 
-        int cacheWidth = VramShadow.Width;
-        int cacheHeight = VramShadow.Height;
-        int cachePixels = cacheWidth * cacheHeight;
-        if (!_readCacheValid)
+        if (!cacheHit)
         {
+            _readCacheRegion = FullVramReadback ? VramReadbackRegion.Full :
+                VramReadbackRegion.ForRead(x, y, w, h);
+            int cachePixels = _readCacheRegion.Width * _readCacheRegion.Height;
             if (_readCache.Length < cachePixels)
                 _readCache = new ushort[cachePixels];
-            WritebackDirtyIntersecting(0, 0, cacheWidth, cacheHeight);
+            // Keep the original framebuffer-to-VRAM writeback boundary. Only
+            // the CPU download/conversion window changes, so subsequent GPU
+            // texture feedback observes exactly the same VRAM contents.
+            WritebackDirtyIntersecting(0, 0, VramShadow.Width, VramShadow.Height);
             _vram.ReadRect(
-                0, 0, cacheWidth, cacheHeight,
+                _readCacheRegion.X, _readCacheRegion.Y,
+                _readCacheRegion.Width, _readCacheRegion.Height,
                 _readCache.AsSpan(0, cachePixels));
+            _traceVramReadbacks++;
+            _traceVramReadbackPixels += cachePixels;
             _readCacheValid = true;
         }
-
-        int rows = Math.Min(h, px.Length / Math.Max(1, w));
-        if (x >= 0 && y >= 0 &&
-            x + w <= cacheWidth && y + rows <= cacheHeight)
+        else _traceVramReadCacheHits++;
+        _readCacheRegion.CopyTo(_readCache, x, y, w, h, px);
+        if (VerifyVramReadback)
         {
-            for (int row = 0; row < rows; row++)
-            {
-                _readCache.AsSpan((y + row) * cacheWidth + x, w)
-                    .CopyTo(px.Slice(row * w, w));
-            }
-            return;
-        }
-
-        for (int row = 0; row < rows; row++)
-        {
-            int sourceY = (y + row) & (cacheHeight - 1);
-            for (int col = 0; col < w; col++)
-            {
-                int sourceX = (x + col) & (cacheWidth - 1);
-                px[row * w + col] =
-                    _readCache[sourceY * cacheWidth + sourceX];
-            }
+            if (_readbackOracle.Length == 0)
+                _readbackOracle = new ushort[VramShadow.Width * VramShadow.Height];
+            _vram.ReadRect(0, 0, VramShadow.Width, VramShadow.Height, _readbackOracle);
+            for (int row = 0; row < h; row++)
+                for (int col = 0; col < w; col++)
+                    if (px[row * w + col] != _readbackOracle[
+                        ((y + row) & 511) * VramShadow.Width + ((x + col) & 1023)])
+                        throw new InvalidOperationException("VRAM region readback differs from full readback");
+            if ((++_verifiedReadbacks % 60) == 0)
+                Console.Error.WriteLine($"[VramReadbackVerify] exact-reads={_verifiedReadbacks}");
         }
     }
 
     public unsafe void Flush()
     {
         if (_count == 0) return;
+        _quadCandidates.Clear();
+        _lastSplitTextureEdge = -1;
         long flushStarted = TracePerformance
             ? Stopwatch.GetTimestamp()
             : 0;
@@ -6062,6 +6273,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 {
                     Transparent = true,
                     Material = HleMaterialKind.WaterSurface,
+                    // The underlay preserves land depth; the displaced
+                    // surface must still resolve its own overlapping waves.
+                    DepthWrite = true,
                     WaterBaseQuad = null,
                 };
                 pairedSurface = new BufferedDeferredBatch(surfaceState);
@@ -6838,6 +7052,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     $"set-mask-flushes={_traceSetMaskFlushes} " +
                     $"partial-writebacks={_tracePartialWritebacks} " +
                     $"partial-writeback-pixels={_tracePartialWritebackPixels} " +
+                    $"vram-readbacks={_traceVramReadbacks} " +
+                    $"vram-readback-pixels={_traceVramReadbackPixels} " +
+                    $"vram-read-cache-hits={_traceVramReadCacheHits} " +
                     $"present-reallocations={_tracePresentReallocations} " +
                     $"presentation-source-switches=" +
                         $"{_tracePresentationSourceSwitches} " +
@@ -6889,6 +7106,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 _traceSetMaskFlushes = 0;
                 _tracePartialWritebacks = 0;
                 _tracePartialWritebackPixels = 0;
+                _traceVramReadbacks = _traceVramReadbackPixels = _traceVramReadCacheHits = 0;
             }
         }
         return (_presentTex, fbW, fbH, aspect);

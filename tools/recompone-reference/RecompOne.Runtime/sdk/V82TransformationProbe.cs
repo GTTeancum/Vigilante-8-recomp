@@ -13,6 +13,11 @@ internal static class V82TransformationProbe
         Environment.GetEnvironmentVariable("RECOMPONE_V82_TRANSFORMATION_PROBE") == "1";
     static readonly bool Capture =
         Environment.GetEnvironmentVariable("RECOMPONE_V82_TRANSFORMATION_PROBE_IMAGES") == "1";
+    static readonly HashSet<int> AttachmentCaptureFrames =
+        (Environment.GetEnvironmentVariable("RECOMPONE_V82_WATER_ANIMATION_CAPTURE_FRAMES") ?? "")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(s => int.TryParse(s, out int frame) ? frame : 0)
+        .Where(frame => frame >= 90 && frame <= 1050).ToHashSet();
     static readonly bool PowerupProfile =
         Environment.GetEnvironmentVariable("RECOMPONE_V82_TRANSFORMATION_PROBE_PROFILE") == "powerups";
     static readonly bool AttachmentProfile =
@@ -61,6 +66,13 @@ internal static class V82TransformationProbe
     {
         if (!Enabled) return;
         var m = Dispatcher.UnwrapMemory(memory);
+        if (Capture && AttachmentProfile && AttachmentCaptureFrames.Contains(frame) &&
+            player >= 0x80010000 && player < 0x807FFE00)
+        {
+            V82WaterAttachmentProbe.Dump(c, m, player, frame);
+            Console.Error.WriteLine($"[WaterAnimationCapture] frame={frame} mode={m.ReadU8(player + 0xAC)} transition={m.ReadU16(player + 0xB4)}");
+            HostWindow.RequestDisplayCapture($"water_animation_{frame:0000}");
+        }
         if (frame == 1)
         {
             Actors.Clear();

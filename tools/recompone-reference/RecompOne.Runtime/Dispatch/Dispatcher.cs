@@ -361,6 +361,22 @@ public static class Dispatcher
                  _relocatedAliases.TryGetValue(addr, out uint aliasDelta) &&
                  _funcMap.ContainsKey(addr + aliasDelta))
             addr += aliasDelta;
+        // Native DLL allocations can reuse the same address and entry offset.
+        // A cache hit alone does not mean that the registered image is still
+        // resident (Sand Factory -> Oilfield exercises exactly this case).
+        // Check the immutable native image-size header before executing it.
+        if (_relocatedFunctions.TryGetValue(addr, out var cachedImage) &&
+            cachedImage.Overlay.ImageSize != 0u &&
+            baseMemory.ReadU32(cachedImage.Overlay.Base + cachedImage.Delta) !=
+                cachedImage.Overlay.ImageSize)
+        {
+            TryLoadRelocatedOverlay(baseMemory, addr);
+            if (!_relocatedFunctions.TryGetValue(addr, out var replacement) ||
+                baseMemory.ReadU32(replacement.Overlay.Base + replacement.Delta) !=
+                    replacement.Overlay.ImageSize)
+                throw new InvalidOperationException(
+                    $"retired overlay callback: 0x{addr:X8} ({cachedImage.Overlay.Name})");
+        }
         if (!_funcMap.ContainsKey(addr))
             TryLoadRelocatedOverlay(m, addr);
         if (!_funcMap.TryGetValue(addr, out var fn))

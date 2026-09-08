@@ -412,7 +412,7 @@ public static class V82Compat
         uint PacketStart,
         uint Caller,
         bool IsVehicle,
-        V82WaterAttachmentFit.Scope? WaterFit);
+        V82WaterAttachmentPlacement.Scope? WaterPlacement);
     readonly record struct ImportedRenderGroupScope(
         uint PacketStart,
         uint Descriptor,
@@ -1462,6 +1462,7 @@ public static class V82Compat
     }
 
     static readonly Stack<TerrainCellScope> TerrainCellScopes = [];
+    static List<GpuHle.CoarseTerrainPacket>? _culledTerrainCells;
     static readonly Stack<TerrainTransitionScope> TerrainTransitionScopes = [];
     static TerrainCellFrameStats? _terrainCellFrame;
     static int _terrainCellFramesLogged;
@@ -1488,6 +1489,16 @@ public static class V82Compat
     static bool _testDefeatInjected;
     static readonly int _proofHoldPlayerFrame = Math.Max(
         0, ReadOptionalInt("RECOMPONE_V82_PROOF_HOLD_PLAYER_FRAME") ?? 0);
+    static readonly int ProofApproachStepFrames = Math.Max(0,
+        ReadOptionalInt("RECOMPONE_V82_PROOF_APPROACH_STEP_FRAMES") ?? 0);
+    static readonly int ProofApproachLateral = Math.Clamp(
+        ReadOptionalInt("RECOMPONE_V82_PROOF_APPROACH_LATERAL") ?? 0, -256, 256);
+    static readonly int ProofApproachForward = Math.Clamp(
+        ReadOptionalInt("RECOMPONE_V82_PROOF_APPROACH_FORWARD") ?? 0, -256, 256);
+    static readonly int? ProofPositionX = ReadOptionalInt("RECOMPONE_V82_PROOF_POSITION_X");
+    static readonly int? ProofPositionY = ReadOptionalInt("RECOMPONE_V82_PROOF_POSITION_Y");
+    static readonly int? ProofPositionZ = ReadOptionalInt("RECOMPONE_V82_PROOF_POSITION_Z");
+    static readonly int? ProofYaw = ReadOptionalInt("RECOMPONE_V82_PROOF_YAW");
     static readonly uint[] ProofHoldTransformOffsets =
     [
         0x20u, 0x24u, 0x28u, 0x2Cu, 0x30u,
@@ -2334,7 +2345,7 @@ public static class V82Compat
                 packetStart,
                 c.RA,
                 isVehicle,
-                isVehicle ? V82WaterAttachmentFit.Begin(c,m,objectAddress) : null));
+                isVehicle ? V82WaterAttachmentPlacement.Begin(m, objectAddress) : null));
     }
 
     public static void EndObjectRender(CpuContext c, IMemory m)
@@ -2346,7 +2357,7 @@ public static class V82Compat
 
         m = Dispatcher.UnwrapMemory(m);
         ObjectRenderScope scope = ObjectRenderScopes.Pop();
-        scope.WaterFit?.Dispose();
+        scope.WaterPlacement?.Dispose();
         uint packetEnd = m.ReadU32(c.GP + 0x610u);
         if (TraceRendererOwnership &&
             scope.ObjectAddress != 0u &&
@@ -3424,10 +3435,11 @@ public static class V82Compat
         double scale = ObjectFrustumScale >= 1d
             ? ObjectFrustumScale
             : (double)GpuHle.WideAspect / GpuHle.BaseAspect;
-        uint expandedWidth = checked((uint)Math.Clamp(
-            Math.Round(nativeWidth * scale, MidpointRounding.AwayFromZero),
-            1d,
-            0x00100000d));
+        uint expandedWidth = ObjectFrustumScale >= 1d
+            ? checked((uint)Math.Clamp(
+                Math.Round(nativeWidth * scale, MidpointRounding.AwayFromZero),
+                1d, 0x00100000d))
+            : nativeWidth + (uint)(2 * GpuHle.WideMargin((int)nativeWidth));
         if (expandedWidth <= nativeWidth)
             return;
 
@@ -3474,12 +3486,14 @@ public static class V82Compat
         double scale = TerrainFrustumScaleOverride >= 1d
             ? TerrainFrustumScaleOverride
             : aspectScale;
-        uint expandedWidth = checked((uint)Math.Clamp(
-            Math.Round(
-                nativeWidth * scale,
-                MidpointRounding.AwayFromZero),
-            1d,
-            0x00100000d));
+        // The target uses symmetric integer margins. Rounding the aspect
+        // product independently gives 427 instead of 428 at 16:9, leaving
+        // water short of the right edge and moving its centre by half a unit.
+        uint expandedWidth = TerrainFrustumScaleOverride >= 1d
+            ? checked((uint)Math.Clamp(
+                Math.Round(nativeWidth * scale, MidpointRounding.AwayFromZero),
+                1d, 0x00100000d))
+            : nativeWidth + (uint)(2 * GpuHle.WideMargin((int)nativeWidth));
         if (expandedWidth <= nativeWidth)
             return;
 
@@ -3533,6 +3547,10 @@ public static class V82Compat
         CpuContext c,
         IMemory m)
     {
+        // func_8001BECC starts a complete row walk for this camera. A new
+        // collection avoids mixing double buffers or split-screen views.
+        _culledTerrainCells = ConfigManager.View.HighResolution3D &&
+            IsMaximumLevelOfDetail() ? [] : null;
         bool traceFrame = TraceTerrainCells && GpuHle.GameplayActive;
         if ((!TraceTerrainTraversal || _terrainTraversalTraceCount >= 8) &&
             !traceFrame)
@@ -4808,6 +4826,10 @@ public static class V82Compat
             return;
 
         TerrainCellScope scope = TerrainCellScopes.Pop();
+        if (c.V0 == scope.PacketStart &&
+            scope.Textures.DistanceColors.Patch?.CulledCells is { } culled)
+            culled.Add(new GpuHle.CoarseTerrainPacket(
+                scope.Textures, false, scope.Source, scope.X, scope.Z));
         if (!TraceTerrainCells)
             return;
 
@@ -5194,7 +5216,7 @@ public static class V82Compat
         var patch = new GpuHle.TerrainPatchGeometry(samples, heightAxis,
             unchecked((int)Gte.ReadControl(24)) / 65536f,
             unchecked((int)Gte.ReadControl(25)) / 65536f,
-            Gte.ReadControl(26) & 0xFFFFu);
+            Gte.ReadControl(26) & 0xFFFFu) { CulledCells = _culledTerrainCells };
         return new GpuHle.TerrainQuadDistanceColors(
             ReadCorner(0, 0),
             ReadCorner(4, 0),
@@ -6327,6 +6349,26 @@ public static class V82Compat
             for (int i = 0; i < ProofHoldTransformOffsets.Length; i++)
                 transform[i] =
                     m.ReadU32(vehicle + ProofHoldTransformOffsets[i]);
+            // Reproducible process-local visual fixture, gated by the hold
+            // switch above. Coordinates are native fixed-point values.
+            if (vehicle == _playerVehicle && ProofPositionX is { } px &&
+                ProofPositionY is { } py && ProofPositionZ is { } pz)
+            {
+                for (int i = 5; i <= 10; i++)
+                    transform[i] = unchecked((uint)(((i - 5) % 3) switch
+                    { 0 => px, 1 => py, _ => pz }));
+                if (ProofYaw is { } yaw)
+                {
+                    double angle = (yaw & 4095) * (Math.PI * 2 / 4096);
+                    short sin = (short)Math.Round(Math.Sin(angle) * 4096);
+                    short cos = (short)Math.Round(Math.Cos(angle) * 4096);
+                    transform[0] = (ushort)cos;
+                    transform[1] = (ushort)sin;
+                    transform[2] = 4096;
+                    transform[3] = unchecked((ushort)-sin);
+                    transform[4] = (ushort)cos;
+                }
+            }
             ProofHeldVehicleTransforms.Add(vehicle, transform);
             Console.Error.WriteLine(
                 $"[V82ProofHold] captured frame={_gameplayFrameCount} " +
@@ -6338,6 +6380,21 @@ public static class V82Compat
             m.WriteU32(
                 vehicle + ProofHoldTransformOffsets[i],
                 transform[i]);
+        // Opt-in capture fixture: translate the held player and its chase
+        // camera toward one scene feature, preserving the native orientation.
+        // No host input, render-state or scenery changes are involved.
+        if (vehicle == _playerVehicle && ProofApproachStepFrames > 0)
+        {
+            int step = Math.Clamp((_gameplayFrameCount - 300) / ProofApproachStepFrames, 0, 4);
+            Span<int> side = [(short)transform[0], (short)(transform[1] >> 16), (short)transform[3]];
+            Span<int> forward = [(short)transform[1], (short)(transform[2] >> 16), (short)transform[4]];
+            for (int i = 5; i <= 10; i++)
+            {
+                int axis = (i - 5) % 3;
+                int delta = (side[axis] * ProofApproachLateral + forward[axis] * ProofApproachForward) * step * 16;
+                m.WriteU32(vehicle + ProofHoldTransformOffsets[i], unchecked(transform[i] + (uint)delta));
+            }
+        }
         // Process-local diagnostic scene only: the first two existing AI
         // vehicles flank the held player. No synthetic mesh or rendering
         // override; both still use their normal native model/material paths.
