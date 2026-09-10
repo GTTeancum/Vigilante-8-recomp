@@ -5080,7 +5080,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         else if (fullDisplayGameplayRect)
             anchor = 0f;
         else if (_viewHudAnchoring && GpuHle.GameplayActive &&
-            _kTarget is { Margin: > 0 } target)
+            _kTarget is { Margin: > 0 } target &&
+            // A split viewport owns its own HUD placement. Full-display
+            // margin anchoring would move its individual pieces off-screen.
+            _env.ClipX1 - _env.ClipX0 + 1 >= target.W &&
+            _env.ClipY1 - _env.ClipY0 + 1 >= target.H)
         {
             float localCenter = drawX + drawW * 0.5f - target.X;
             float localTop = r.Y - target.Y;
@@ -5154,7 +5158,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         // game-driven texture.
         bool mainHudPlate = statusHudBacking;
         bool healthHudPlate =
-            topGameplayHud && f.Textured && r.W == 16 && r.H == 49;
+            (topGameplayHud || GpuHle.ViewportHudActive) && f.Textured && r.W == 16 && r.H == 49;
         bool hudBackgroundPlate =
             radarPlate || mainHudPlate || healthHudPlate;
         bool iconLike =

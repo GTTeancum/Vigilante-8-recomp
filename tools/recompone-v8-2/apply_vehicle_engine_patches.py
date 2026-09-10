@@ -249,7 +249,9 @@ def main() -> int:
             text = text.replace(old, new, 1)
             changed += 1
     for old, new in REPLACEMENTS:
-        if new in text:
+        split_new = new.replace("c.A0 = c.A0 + c.V0;", "c.A0 = SplitUpgradeAddress(c.A0 + c.V0);")
+        split_new_a1 = new.replace("c.A0 = c.A0 + c.A1;", "c.A0 = SplitUpgradeAddress(c.A0 + c.A1);")
+        if new in text or split_new in text or split_new_a1 in text:
             continue
         count = text.count(old)
         if count != 1:

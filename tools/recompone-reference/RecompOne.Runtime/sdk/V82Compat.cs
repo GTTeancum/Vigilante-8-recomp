@@ -1182,13 +1182,20 @@ public static class V82Compat
     // double-buffer relationship while running the native projection and
     // packet-builder functions for every expanded record.
     public static bool ProcessExpandedEdgePool(CpuContext c, IMemory m)
+        => ProcessExpandedEdgePool(c, m, consumeCurrent: false);
+
+    // Sequential views consume their own completed draw before arena reuse.
+    public static bool ProcessCurrentExpandedEdgePool(CpuContext c, IMemory m)
+        => ProcessExpandedEdgePool(c, m, consumeCurrent: true);
+
+    static bool ProcessExpandedEdgePool(CpuContext c, IMemory m, bool consumeCurrent)
     {
         m = Dispatcher.UnwrapMemory(m);
         if (!ExpandedEdgePoolActive(m, c.GP))
             return true;
 
         uint currentBuffer = m.ReadU32(c.GP + 0x20u) & 1u;
-        uint poolBase = ExpandedEdgePoolBase(currentBuffer ^ 1u);
+        uint poolBase = ExpandedEdgePoolBase(consumeCurrent ? currentBuffer : currentBuffer ^ 1u);
         int count = unchecked((int)m.ReadU32(poolBase));
         if (count <= 0)
         {

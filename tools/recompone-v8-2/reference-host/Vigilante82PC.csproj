@@ -38,6 +38,8 @@
          already relies on; the hand-written seams use the same form so a
          regeneration cannot overwrite the staged project with paths that
          only worked from the template's own directory. -->
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82SplitScreenHarness.cs"
+             Link="V82SplitScreenHarness.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeControlOptions.cs"
              Link="V82NativeControlOptions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeVideoOption.cs"
@@ -82,6 +84,7 @@
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_vehicle_engine_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_selector_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot; --main-source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_options_patches.py&quot; --shell-source &quot;$(MSBuildProjectDirectory)\SHELL_SHELL.cs&quot; --main-source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_split_screen_patches.py&quot; --source &quot;$(MSBuildProjectDirectory)\main.cs&quot;" />
   </Target>
   <Target Name="GenerateConvertedDreamlandOverlay"
           BeforeTargets="CoreCompile">

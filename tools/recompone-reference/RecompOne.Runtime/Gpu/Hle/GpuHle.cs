@@ -9,6 +9,8 @@ public static class GpuHle
     public static float OutputAspect { get; set; } = 4f / 3f;
     public static bool NativeResolution { get; set; }
     public static bool GameplayActive { get; set; }
+    // Explicit scope for a viewport HUD submitted outside the retail top layout.
+    public static bool ViewportHudActive { get; set; }
     public static bool WidescreenMenuReturnPending { get; set; }
 
     // Set for the frame in which the retail PAUSED / QUEST OBJECTIVES /
