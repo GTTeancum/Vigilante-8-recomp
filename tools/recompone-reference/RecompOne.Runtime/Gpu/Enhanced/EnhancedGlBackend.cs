@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Globalization;
+using Vector4 = System.Numerics.Vector4;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Hle;
 using System.Linq;
@@ -862,9 +863,27 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             "RECOMPONE_V82_TRACE_SEVERED") == "1";
     readonly List<(uint Packet, float Ax, float Ay, float Bx, float By,
         float Cx, float Cy)> _severedTriangles = [];
+    internal static float DepthOf(
+        in HleVertex vertex, int otDepth, bool useCoherentDepth,
+        bool forceTrueDepth)
+    {
+        // Terrain compares against this image using camera-space depth.
+        // Record the same units for exact source vertices: a road's flat
+        // OT bucket can lie behind the sand even when the road is in front.
+        // This does not enable depth testing on painter-ordered materials.
+        // Keep the OT fallback for reconstructed or uncorrelated samples,
+        // whose screen coordinates can alias unrelated surfaces.
+        if ((forceTrueDepth || TrueVertexDepth) && useCoherentDepth &&
+            vertex.HasViewSpace &&
+            !vertex.ReconstructedViewSpace &&
+            vertex.ViewZ >= 1f)
+            return Math.Clamp(vertex.ViewZ, 1f, 65535f) / 65535f;
+        return Math.Clamp(otDepth, 1, 0x1FFF) / 8192f;
+    }
+
     static readonly bool TrueVertexDepth =
         Environment.GetEnvironmentVariable(
-            "RECOMPONE_V82_TRUE_DEPTH") == "1";
+            "RECOMPONE_V82_TRUE_DEPTH") != "0";
     static readonly bool TraceDreamcastWaterBase =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_V82_NATIVE_WATER") == "1";
@@ -1098,6 +1117,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     int _presentW, _presentH;
     bool _presentNearest;
 
+    static readonly bool StreamBatches = Environment.GetEnvironmentVariable("RECOMPONE_STREAM_BATCHES") != "0";
+    int _streamVertex;
     readonly GlVertex[] _verts = new GlVertex[MaxVerts];
     int _count;
     ushort[] _readCache = Array.Empty<ushort>();
@@ -1413,6 +1434,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     {
         _vram.Init();
 
+        _uniformState.Clear(); _depthEnabled = _depthWrite = null; _depthFunction = null;
         _progPrim = GlShaders.Build(_gl, GlShaders.PrimVs, GlShaders.PrimFs, "prim");
         _progPresent = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.PresentFs, "present");
         _progPresent24 = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.Present24Fs, "present24");
@@ -2782,6 +2804,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         in GpuHle.TerrainCellTextures textures, GpuHle.TerrainPatchGeometry patch,
         uint cellX, uint cellZ)
     {
+        if (CullTerrainPatches && Sdk.V82Compat.DirectSceneRendering && TerrainPatchOutsideView(patch))
+            return;
         Span<DreamcastTerrainGeometry.Vertex> vertices =
             stackalloc DreamcastTerrainGeometry.Vertex[25];
         Span<DreamcastTerrainGeometry.Leaf> leaves =
@@ -2862,6 +2886,21 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             }
         }
         _finalOwnerLeaf = "none";
+    }
+
+    static readonly bool CullTerrainPatches = Environment.GetEnvironmentVariable("RECOMPONE_TERRAIN_PATCH_CULL") != "0";
+
+    bool TerrainPatchOutsideView(GpuHle.TerrainPatchGeometry patch)
+    {
+        var target = Classify();
+        if (target == null) return false;
+        float left = _env.ClipX0 - target.X, right = _env.ClipX1 - target.X + 1;
+        if (_env.ClipX0 <= target.X && _env.ClipX1 >= target.X + target.W - 1)
+        { left = -target.Margin; right = target.W + target.Margin; }
+        float top = _env.ClipY0 - target.Y, bottom = _env.ClipY1 - target.Y + 1;
+        return DreamcastTerrainGeometry.OutsideViewport(patch.Samples, patch.HeightAxis,
+            patch.ProjectionCenterX, patch.ProjectionCenterY, patch.ProjectionScale,
+            left, right, top, bottom);
     }
 
     static HleVertex MakeDreamcastTerrainVertex(
@@ -3602,6 +3641,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         // The visible wave surface still tests and writes scene depth.
         bool depthWrite =
             depthEligible &&
+            !skyPacket &&
             f.Material != HleMaterialKind.ScreenEffect &&
             (f.Material != HleMaterialKind.WaterBase || DiagnosticWaterBaseDepthWrite);
         bool sourceOpaqueDepthTest =
@@ -3843,34 +3883,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         bool shadow = !f.Textured && f.SemiTrans && a.HasGteZ && b.HasGteZ && c.HasGteZ &&
             a.R < 96 && a.G < 96 && a.B < 96 && b.R < 96 && b.G < 96 && b.B < 96 &&
             c.R < 96 && c.G < 96 && c.B < 96;
-        static float DepthOf(
-            in HleVertex vertex, int otDepth, bool useCoherentDepth,
-            bool forceTrueDepth)
-        {
-            // The ordering table is the game's authoritative visibility
-            // contract.  Recovered per-vertex GTE samples are excellent for
-            // perspective-correct UVs and sub-pixel XY, but they are not
-            // globally unique: independently projected terrain and vehicle
-            // vertices can reuse the same screen coordinate.  Mixing those
-            // samples in one hardware Z buffer caused whole vehicle sections
-            // to fall behind the road.  Give every primitive its native OT
-            // bucket depth instead.  This retains exact far-to-near game
-            // ordering while still allowing the Enhanced renderer to use
-            // modern projection and texture interpolation.
-            //
-            // That reasoning holds for depth recovered by screen-space
-            // correlation. Where the renderer has the vertex's own exact
-            // camera-space Z from the GTE seam, the bucket is strictly worse:
-            // a wall long enough to span two buckets gets a single flat depth
-            // per primitive, and the half whose bucket sits behind the terrain
-            // is discarded - a straight vertical cut through a solid object.
-            if ((forceTrueDepth || TrueVertexDepth) && useCoherentDepth &&
-                vertex.HasViewSpace &&
-                !vertex.ReconstructedViewSpace &&
-                vertex.ViewZ >= 1f)
-                return Math.Clamp(vertex.ViewZ, 1f, 65535f) / 65535f;
-            return Math.Clamp(otDepth, 1, 0x1FFF) / 8192f;
-        }
         bool screenSpacePrimitive = f.Material is
             HleMaterialKind.Ui or HleMaterialKind.ScreenEffect;
         float triMinY = MathF.Min(a.Y, MathF.Min(b.Y, c.Y));
@@ -5477,6 +5489,64 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         }
     }
 
+    public void BeginVisibilityProbes() => _vram.BeginProbes();
+
+    public int QueueVisibilityProbes(ReadOnlySpan<int> xy)
+    {
+        Flush();
+        if (xy.Length == 0) return _vram.QueueProbes(xy);
+        int x0=1023, y0=511, x1=0, y1=0;
+        for (int i=0; i<xy.Length; i+=2)
+        { x0=Math.Min(x0,xy[i]); x1=Math.Max(x1,xy[i]); y0=Math.Min(y0,xy[i+1]); y1=Math.Max(y1,xy[i+1]); }
+        // Preserve the original VRAM writeback side effect and conversion.
+        WritebackDirtyWrappedIntersecting(x0,y0,x1-x0+1,y1-y0+1);
+        int start = _vram.QueueProbes(xy);
+        _vram.IssueProbeReadback();
+        _traceVramReadbacks++;
+        _traceVramReadbackPixels += _vram.ProbeCount;
+        return start;
+    }
+
+    public void ReadVisibilityProbes(Span<ushort> pixels)
+    {
+        Flush();
+        _vram.ReadProbes(pixels);
+    }
+
+    static readonly bool CacheDrawState = Environment.GetEnvironmentVariable("RECOMPONE_CACHE_DRAW_STATE") != "0";
+    readonly Dictionary<int, (int Kind, Vector4 Value)> _uniformState = [];
+    bool? _depthEnabled, _depthWrite;
+    DepthFunction? _depthFunction;
+    bool CacheStateActive => CacheDrawState && Sdk.V82Compat.DirectSceneRendering;
+    bool ChangedUniform(int location, int kind, Vector4 value)
+    {
+        if (CacheStateActive && _uniformState.TryGetValue(location, out var old) && old == (kind, value)) return false;
+        _uniformState[location] = (kind, value);
+        return true;
+    }
+    void PrimUniform1(int location, int x) { if (ChangedUniform(location, 1, new(x,0,0,0))) _gl.Uniform1(location,x); }
+    void PrimUniform1(int location, float x) { if (ChangedUniform(location, 2, new(x,0,0,0))) _gl.Uniform1(location,x); }
+    void PrimUniform2(int location, float x, float y) { if (ChangedUniform(location, 3, new(x,y,0,0))) _gl.Uniform2(location,x,y); }
+    void PrimUniform3(int location, float x, float y, float z) { if (ChangedUniform(location, 4, new(x,y,z,0))) _gl.Uniform3(location,x,y,z); }
+    void PrimUniform4(int location, int x, int y, int z, int w) { if (ChangedUniform(location, 5, new(x,y,z,w))) _gl.Uniform4(location,x,y,z,w); }
+    void PrimUniform4(int location, float x, float y, float z, float w) { if (ChangedUniform(location, 6, new(x,y,z,w))) _gl.Uniform4(location,x,y,z,w); }
+    void SetDepthEnabled(bool value)
+    {
+        if (CacheStateActive && _depthEnabled == value) return;
+        _depthEnabled = value;
+        if (value) _gl.Enable(EnableCap.DepthTest); else _gl.Disable(EnableCap.DepthTest);
+    }
+    void SetDepthWrite(bool value)
+    {
+        if (CacheStateActive && _depthWrite == value) return;
+        _depthWrite = value; _gl.DepthMask(value);
+    }
+    void SetDepthFunction(DepthFunction value)
+    {
+        if (CacheStateActive && _depthFunction == value) return;
+        _depthFunction = value; _gl.DepthFunc(value);
+    }
+
     public unsafe void Flush()
     {
         if (_count == 0) return;
@@ -5515,7 +5585,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             if (_kCheckMask != 0)
                 ResolveCheckMaskRegion(rt);
         }
-        _vram.Barrier();
+        if (!CacheStateActive || rt == null || _kCheckMask != 0) _vram.Barrier();
 
         if (_kSourceDepthCompareWrite)
         {
@@ -5526,26 +5596,26 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             // same color draw so overlapping leaves cannot overwrite nearer
             // terrain according to the PS1 packet painter order.
             Debug.Assert(_kDepthTest && _kDepthWrite && !_kTransparent);
-            _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthFunc(_kDreamcastTerrainDepth
+            SetDepthEnabled(true);
+            SetDepthFunction(_kDreamcastTerrainDepth
                 ? DepthFunction.Less
                 : DepthFunction.Lequal);
-            _gl.DepthMask(true);
+            SetDepthWrite(true);
         }
         else if (_kDepthTest)
         {
-            _gl.Enable(EnableCap.DepthTest);
+            SetDepthEnabled(true);
             // Dreamcast water's recovered ISP word uses GREATER, not
             // GREATER-OR-EQUAL. Our conventional depth image reverses that
             // direction to strict LESS. LEQUAL admitted coplanar shoreline
             // fragments that the retail PVR rejects, exposing water-grid
             // edges as dark/jagged bands across land.
-            _gl.DepthFunc(_kMaterial is
+            SetDepthFunction(_kMaterial is
                     HleMaterialKind.WaterBase or
                     HleMaterialKind.WaterSurface
                 ? DepthFunction.Less
                 : DepthFunction.Lequal);
-            _gl.DepthMask(_kDepthWrite);
+            SetDepthWrite(_kDepthWrite);
         }
         else if (_kDepthWrite)
         {
@@ -5553,14 +5623,14 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             // ALWAYS exactly preserves painter-order colour ownership while
             // leaving the matching visible-surface depth for deferred water
             // and screen-effect comparisons.
-            _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthFunc(DepthFunction.Always);
-            _gl.DepthMask(true);
+            SetDepthEnabled(true);
+            SetDepthFunction(DepthFunction.Always);
+            SetDepthWrite(true);
         }
         else
         {
-            _gl.Disable(EnableCap.DepthTest);
-            _gl.DepthMask(false);
+            SetDepthEnabled(false);
+            SetDepthWrite(false);
         }
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.ScissorTest);
@@ -5610,64 +5680,74 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.ActiveTexture(TextureUnit.Texture0);
         if (rt != null)
         {
-            _gl.Uniform2(_uPosBias, (float)(rt.Margin - rt.X), (float)(-rt.Y));
-            _gl.Uniform2(_uFbInv, 2f / rt.Wide1x, 2f / rt.H);
+            PrimUniform2(_uPosBias, (float)(rt.Margin - rt.X), (float)(-rt.Y));
+            PrimUniform2(_uFbInv, 2f / rt.Wide1x, 2f / rt.H);
         }
         else
         {
-            _gl.Uniform2(_uPosBias, 0f, 0f);
-            _gl.Uniform2(_uFbInv, 2f / VramShadow.Width, 2f / VramShadow.Height);
+            PrimUniform2(_uPosBias, 0f, 0f);
+            PrimUniform2(_uFbInv, 2f / VramShadow.Width, 2f / VramShadow.Height);
         }
-        _gl.Uniform4(_uTexWindow, _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY);
-        _gl.Uniform1(_uSetMask, _kSetMask == 1 ? 1f : 0f);
-        _gl.Uniform1(_uCheckMask, _kCheckMask);
+        PrimUniform4(_uTexWindow, _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY);
+        PrimUniform1(_uSetMask, _kSetMask == 1 ? 1f : 0f);
+        PrimUniform1(_uCheckMask, _kCheckMask);
         _gl.Uniform4(_uBlendOpaque, 1f, 1f, 1f, 0f);
-            _gl.Uniform1(_uTextureSmoothing, _kTextureSmoothing);
-            _gl.Uniform1(
+            PrimUniform1(_uTextureSmoothing, _kTextureSmoothing);
+            PrimUniform1(
                 _uTextureMipmaps,
                 ConfigManager.View.TextureMipmaps &&
                 !(DiagnosticDisableTerrainMipmaps &&
                   _kMaterial == HleMaterialKind.TerrainRoute)
                     ? 1
                     : 0);
-            _gl.Uniform1(_uAnisotropy, Math.Clamp(ConfigManager.View.AnisotropicFiltering, 1, 16));
-            _gl.Uniform1(_uEnhancedShadows, ConfigManager.View.EnhancedShadows ? 1 : 0);
-            _gl.Uniform1(
+            PrimUniform1(_uAnisotropy, Math.Clamp(ConfigManager.View.AnisotropicFiltering, 1, 16));
+            PrimUniform1(_uEnhancedShadows, ConfigManager.View.EnhancedShadows ? 1 : 0);
+            PrimUniform1(
                 _uEnhancedParticles,
                 ConfigManager.View.EnhancedParticles ? 1 : 0);
-            _gl.Uniform1(
+            PrimUniform1(
                 _uEnhancedFog,
                 ConfigManager.View.EnhancedFog &&
                 !(DiagnosticDisableDreamcastFog &&
                   _kMaterial == HleMaterialKind.TerrainRoute)
                     ? 1
                     : 0);
-            _gl.Uniform3(_uFogColor, _fogColorR, _fogColorG, _fogColorB);
-            _gl.Uniform1(
+            PrimUniform3(_uFogColor, _fogColorR, _fogColorG, _fogColorB);
+            PrimUniform1(
                 _uFogColorValid,
                 _hasFogColor ? 1 : 0);
-            _gl.Uniform1(
+            PrimUniform1(
                 _uDreamcastFogActive,
                 _dreamcastFogActive ? 1 : 0);
-            _gl.Uniform1(
+            PrimUniform1(
                 _uPerspectiveCorrectTextures,
                 ConfigManager.View.PerspectiveCorrectTextures ? 1 : 0);
-            _gl.Uniform1(
+            PrimUniform1(
                 _uPerspectiveCorrectColors,
                 ConfigManager.View.PerspectiveCorrectColors ? 1 : 0);
-            _gl.Uniform1(_uTrueColor, ConfigManager.View.TrueColor ? 1 : 0);
-            _gl.Uniform1(
+            PrimUniform1(_uTrueColor, ConfigManager.View.TrueColor ? 1 : 0);
+            PrimUniform1(
                 _uVectorFonts,
                 ConfigManager.View.VectorFonts ||
                 ConfigManager.View.HighResolutionTextures ? 1 : 0);
-            _gl.Uniform1(_uVectorIcons, ConfigManager.View.VectorIcons ? 1 : 0);
+            PrimUniform1(_uVectorIcons, ConfigManager.View.VectorIcons ? 1 : 0);
 
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
-        _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, 0, _verts.AsSpan(0, _count));
+        // Append without overwriting vertices still consumed by previous draws.
+        // Orphan only when the bounded stream fills; preserve every draw's order.
+        bool stream = StreamBatches && Sdk.V82Compat.DirectSceneRendering;
+        if (stream && _streamVertex + _count > MaxVerts)
+        {
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(MaxVerts * sizeof(GlVertex)), null, BufferUsageARB.StreamDraw);
+            _streamVertex = 0;
+        }
+        int firstVertex = stream ? _streamVertex : 0;
+        _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, firstVertex * sizeof(GlVertex), _verts.AsSpan(0, _count));
+        _streamVertex = firstVertex + _count;
 
         void DrawBatch()
         {
-            _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+            _gl.DrawArrays(PrimitiveType.Triangles, firstVertex, (uint)_count);
         }
 
         int blendState = BlendStateOf(_kTransparent, _kBlend, _kMaterial);
@@ -5692,9 +5772,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 // nearest-surface depth image for later transparent tests in
                 // this single pass.  The former colour pass plus duplicate
                 // depth-only pass submitted every opaque batch twice.
-                _gl.Enable(EnableCap.DepthTest);
-                _gl.DepthFunc(DepthFunction.Always);
-                _gl.DepthMask(true);
+                SetDepthEnabled(true);
+                SetDepthFunction(DepthFunction.Always);
+                SetDepthWrite(true);
                 DrawBatch();
             }
             else DrawBatch();
@@ -5734,7 +5814,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             }
         }
         _gl.Disable(EnableCap.ScissorTest);
-        _gl.DepthMask(true);
+        SetDepthWrite(true);
         if (rt != null)
         {
             rt.NeedsResolve = true;
@@ -5972,8 +6052,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         }
     }
 
-    void ReplaceWithDreamcastWaterSurfaceMesh(
-        BufferedDeferredBatch batch)
+    void AppendDreamcastWaterSurfaceMesh(
+        BufferedDeferredBatch batch, GpuHle.DreamcastWaterSurfaceMesh mesh)
     {
         if (TraceDreamcastWaterBase &&
             batch.State.Material == HleMaterialKind.WaterSurface &&
@@ -5983,13 +6063,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 $"group=0x{batch.State.PrimitiveGroup:X8} " +
                 $"mesh={(batch.State.WaterSurfaceMesh != null ? 1 : 0)} " +
                 $"source-vertices={batch.Vertices.Count}");
-        if (batch.State.Material != HleMaterialKind.WaterSurface ||
-            batch.State.PrimitiveGroup == 0u ||
-            batch.State.WaterSurfaceMesh is not { } mesh ||
-            mesh.Vertices.Length < 3 ||
-            batch.Vertices.Count < 3)
-            return;
-
         // The PS1 routine emits many individually depth-sorted water tiles.
         // Dreamcast XWAT emits one continuous PVR row-strip mesh. Replace the
         // PS1 positions, texture binding, wave UVs, and topology with the
@@ -6046,9 +6119,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             return result;
         }
 
-        batch.Vertices.Clear();
+        // Submit owns the destination range. Convert directly into the existing
+        // upload buffer instead of growing and discarding a mesh-sized list.
         for (int index = 0; index < mesh.Vertices.Length; index++)
-            batch.Vertices.Add(Convert(mesh.Vertices[index], index % 3));
+            _verts[_count + index] = Convert(mesh.Vertices[index], index % 3);
         _traceDreamcastWaterSurfaceReplacements++;
         if (TraceDreamcastWaterBase &&
             _dreamcastWaterSurfaceTraceCount++ < 128)
@@ -6222,16 +6296,23 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         void Submit(BufferedDeferredBatch batch)
         {
             ReplaceWithDreamcastWaterBaseQuad(batch);
-            ReplaceWithDreamcastWaterSurfaceMesh(batch);
-            Debug.Assert(batch.Vertices.Count <= MaxVerts);
+            var mesh = batch.State.Material == HleMaterialKind.WaterSurface &&
+                batch.State.PrimitiveGroup != 0u && batch.Vertices.Count >= 3 &&
+                batch.State.WaterSurfaceMesh is { Vertices.Length: >= 3 } surface
+                    ? surface : null;
+            int vertexCount = mesh?.Vertices.Length ?? batch.Vertices.Count;
+            Debug.Assert(vertexCount <= MaxVerts);
             if (_count > 0 &&
                 (!MatchesCurrent(batch.State) ||
-                 _count + batch.Vertices.Count > MaxVerts))
+                 _count + vertexCount > MaxVerts))
                 Flush();
             if (_count == 0)
                 Adopt(batch.State);
-            batch.Vertices.CopyTo(_verts, _count);
-            _count += batch.Vertices.Count;
+            if (mesh != null)
+                AppendDreamcastWaterSurfaceMesh(batch, mesh);
+            else
+                batch.Vertices.CopyTo(_verts, _count);
+            _count += vertexCount;
         }
 
         foreach (BufferedDeferredBatch batch in batches)
@@ -6914,8 +6995,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _presentFbo);
         _gl.Viewport(0, 0, (uint)fbW, (uint)fbH);
-        _gl.Disable(EnableCap.DepthTest);
-        _gl.DepthMask(true);
+        SetDepthEnabled(false);
+        SetDepthWrite(true);
         _gl.Disable(EnableCap.Blend);
         _gl.Disable(EnableCap.ScissorTest);
         _gl.Disable(EnableCap.CullFace);

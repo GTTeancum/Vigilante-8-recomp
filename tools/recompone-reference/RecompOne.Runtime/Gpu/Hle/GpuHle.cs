@@ -187,7 +187,8 @@ public static class GpuHle
         bool SecondHalf,
         string Source,
         uint X,
-        uint Z);
+        uint Z,
+        bool Direct = false);
 
     public readonly record struct TerrainTransitionPacket(
         TerrainCellTextures Textures,
@@ -683,12 +684,13 @@ public static class GpuHle
         bool secondHalf,
         string source,
         uint x,
-        uint z)
+        uint z,
+        bool direct = false)
     {
         if (!textures.Valid)
             return;
         CoarseTerrainPackets[NormalizePacketAddress(address)] =
-            new CoarseTerrainPacket(textures, secondHalf, source, x, z);
+            new CoarseTerrainPacket(textures, secondHalf, source, x, z, direct);
     }
 
     public static bool TryGetCoarseTerrainPacket(

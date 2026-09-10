@@ -12,6 +12,16 @@ public static class V82MeshClipCompat
         Environment.GetEnvironmentVariable("RECOMPONE_V82_MODERN_MESH_CLIP") != "0";
     static int _traceCount;
 
+    // 80021F70/80021FA8 shift 16.16 camera translation by (16 - mesh[1]).
+    // Terrain and water use 256 camera units per world unit, while a mesh
+    // uses 2^mesh[1]. Normalize only enhanced metadata at projection time.
+    public static float BeginMeshDepth(IMemory m, uint mesh)
+    {
+        float previous = Gte.PreciseViewScale;
+        Gte.PreciseViewScale = MathF.ScaleB(1f, 8 - m.ReadU8(mesh + 1u));
+        return previous;
+    }
+
     // All four retail subdividers share this scratch layout. They recursively
     // approximate affine texturing, discard leaves with median SZ < 128, and
     // test saturated SXY against the retail window. Enhanced instead has exact
@@ -52,6 +62,24 @@ public static class V82MeshClipCompat
         {
             c.V0 = c.A0;
             return false;
+        }
+
+        if (V82Compat.DirectSceneRendering && GpuHle.Active &&
+            GpuHle.Backend is RecompOne.Runtime.Enhanced.EnhancedGlBackend { Ready: true } &&
+            Runtime.Gpu is { } gpu &&
+            gpu.TryGetProjectionViewport(out float left, out float right, out float top, out float bottom,
+                packetCoordinates: true))
+        {
+            Span<DreamcastTerrainGeometry.Sample> bounds = stackalloc DreamcastTerrainGeometry.Sample[3];
+            for (int i = 0; i < 3; i++)
+                bounds[i] = new(new(vertices[i].ViewX, vertices[i].ViewY, vertices[i].ViewZ), 0, default, default);
+            if (DreamcastTerrainGeometry.OutsideViewport(bounds, default,
+                vertices[0].ProjectionCenterX, vertices[0].ProjectionCenterY, vertices[0].ProjectionScale,
+                left, right, top, bottom))
+            {
+                c.V0 = c.A0;
+                return false;
+            }
         }
 
         // Reproduce AVSZ3 and the caller's OT shift, as in the native leaf

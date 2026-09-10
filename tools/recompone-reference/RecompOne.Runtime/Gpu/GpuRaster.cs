@@ -321,7 +321,10 @@ public sealed partial class Gpu
                     $"[PacketGeometry] tick={GpuHle.DebugGameplayTick} packet=0x{_currentOtPacketAddress:X8} command=0x{cmd:X8} ot={_currentOtDepth} owner=\"{GpuHle.DescribePacketOwner(_currentOtPacketAddress)}\" vertices=[{string.Join(';', endpoints)}]");
             }
             HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-            if (quad) HleTri(v[1], v[2], v[3], tex, gouraud, semi, raw, clut);
+            // PS1 quads are triangle strips. Reverse the shared edge for the
+            // second triangle so both halves retain the authored front face
+            // when Enhanced performs camera-space backface culling.
+            if (quad) HleTri(v[2], v[1], v[3], tex, gouraud, semi, raw, clut);
         }
         else
         {

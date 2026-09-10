@@ -9,7 +9,7 @@ using RecompOne.Runtime.Memory;
 
 namespace RecompOne.Runtime.Sdk;
 
-public static class V82Compat
+public static partial class V82Compat
 {
     static long _lastRegisteredTriangleNclip;
 
@@ -1188,6 +1188,13 @@ public static class V82Compat
     public static bool ProcessCurrentExpandedEdgePool(CpuContext c, IMemory m)
         => ProcessExpandedEdgePool(c, m, consumeCurrent: true);
 
+    static ushort[] EdgeReadbackPixels = Array.Empty<ushort>();
+    static readonly bool BatchEdgeReadback =
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_BATCH_EDGE_READBACK") != "0";
+    static readonly bool VerifyEdgeReadback =
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_VERIFY_EDGE_READBACK") == "1";
+    static long EdgeReadbackVerified;
+
     static bool ProcessExpandedEdgePool(CpuContext c, IMemory m, bool consumeCurrent)
     {
         m = Dispatcher.UnwrapMemory(m);
@@ -1210,6 +1217,30 @@ public static class V82Compat
         uint offsetX = c.A0;
         uint offsetY = c.A1;
         uint packetContext = c.A2;
+        // Repair packets are built here and submitted later; all probes see
+        // the same completed image. Read their bounding rectangle once rather
+        // than synchronizing the GPU for scattered one-pixel requests.
+        bool batched = BatchEdgeReadback && GpuHle.Active &&
+            GpuHle.Backend is { Ready: true };
+        int minX = 1023, minY = 511, maxX = 0, maxY = 0, readWidth = 0;
+        if (batched)
+        {
+            for (int index = 0; index < count; index++)
+            {
+                uint record = poolBase + 4u + (uint)index * ExpandedEdgePoolRecordSize;
+                int x = (int)(m.ReadU16(record + 12u) + offsetX) & 1023;
+                int y = (int)(m.ReadU16(record + 14u) + offsetY) & 511;
+                minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
+                minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+            }
+            readWidth = maxX - minX + 1;
+            int readHeight = maxY - minY + 1;
+            int pixels = readWidth * readHeight;
+            if (EdgeReadbackPixels.Length < pixels)
+                EdgeReadbackPixels = new ushort[pixels];
+            GpuHle.Backend!.ReadVram(minX, minY, readWidth, readHeight,
+                EdgeReadbackPixels.AsSpan(0, pixels));
+        }
         var entryState = c.Snapshot();
         uint scratch = c.SP - 0x38u;
         m.WriteU16(scratch + 0x14u, (ushort)1);
@@ -1227,14 +1258,28 @@ public static class V82Compat
                     scratch + 0x12u,
                     (ushort)(m.ReadU16(record + 14u) + offsetY));
 
-                c.Restore(entryState);
-                c.SP = scratch;
-                c.A0 = scratch + 0x10u;
-                c.A1 = scratch + 0x18u;
-                c.RA = 0x8001D518u;
-                Dispatcher.Call(c, m, 0x8005C294u);
-                bool repair =
-                    (m.ReadU16(scratch + 0x18u) & 0x7FFFu) == 0x7FFFu;
+                ushort pixel = 0;
+                if (batched)
+                {
+                    int x = m.ReadU16(scratch + 0x10u) & 1023;
+                    int y = m.ReadU16(scratch + 0x12u) & 511;
+                    pixel = EdgeReadbackPixels[(y - minY) * readWidth + x - minX];
+                }
+                if (!batched || VerifyEdgeReadback)
+                {
+                    c.Restore(entryState);
+                    c.SP = scratch;
+                    c.A0 = scratch + 0x10u;
+                    c.A1 = scratch + 0x18u;
+                    c.RA = 0x8001D518u;
+                    Dispatcher.Call(c, m, 0x8005C294u);
+                    ushort nativePixel = m.ReadU16(scratch + 0x18u);
+                    if (batched && pixel != nativePixel)
+                        throw new InvalidOperationException($"Edge readback mismatch: {pixel:X4}!={nativePixel:X4}");
+                    pixel = nativePixel;
+                    if (batched) EdgeReadbackVerified++;
+                }
+                bool repair = (pixel & 0x7FFFu) == 0x7FFFu;
                 if (!repair)
                     continue;
 
@@ -1251,6 +1296,8 @@ public static class V82Compat
             m.WriteU32(poolBase, 0u);
             c.Restore(entryState);
         }
+        if (VerifyEdgeReadback && (m.ReadU32(c.GP + 0x28u) % 120) == 0)
+            Console.Error.WriteLine($"[EdgeReadbackVerified] samples={EdgeReadbackVerified} rectangle={readWidth}x{maxY-minY+1} buffer-bytes={EdgeReadbackPixels.Length*2}");
         return false;
     }
 
@@ -1435,6 +1482,7 @@ public static class V82Compat
                 m.ReadU8(descriptor + 0x1Eu);
         }
         _authoredTerrainMaterialAveragesValid = true;
+        _authoredTerrainAverageVersion++;
     }
 
     static void ReadTerrainMaterialAverage(
@@ -2495,10 +2543,12 @@ public static class V82Compat
                     $"[V82RenderGroupMiss] descriptor=0x{c.A0:X8} " +
                     relationship);
         }
+        V82ModelBounds.BeginGroup(c,m);
     }
 
     public static void EndImportedRenderGroup(CpuContext c, IMemory m)
     {
+        V82ModelBounds.EndGroup(c,m);
         if (ImportedRenderGroupScopes.Count == 0)
             return;
         m = Dispatcher.UnwrapMemory(m);
@@ -2911,9 +2961,9 @@ public static class V82Compat
     }
 
     /// <summary>
-    /// Reconstructs Dreamcast XWAT's continuous water row strips from the
-    /// directly recovered viewport, plane-boundary, wave, UV, and submission
-    /// rules. World coordinates are the shared terrain-grid units established
+    /// Retains the recovered XWAT wave and UV rules on a continuous unit grid,
+    /// covering the visible PC water plane through the far underlay boundary.
+    /// World coordinates are the shared terrain-grid units established
     /// by the retail PS1 camera transform (one unit = 256 PS1 render units).
     /// </summary>
     public static GpuHle.DreamcastWaterSurfaceMesh?
@@ -2940,7 +2990,6 @@ public static class V82Compat
 
         const float fixedNormalScale = 4096f;
         const float fixedWorldScale = 65536f;
-        const float dreamcastProjection = 512f;
         const float ps1UnitsPerDreamcastUnit = 256f;
         const float primaryWavePeriod = 240f;
         const float secondaryWavePeriod = 420f;
@@ -2949,15 +2998,11 @@ public static class V82Compat
         const float primaryWaveAmplitude = 0.15625f;
         const float secondaryWaveAmplitude = 0.03125f;
         const float waterUvScale = 2.6666667f;
-        const int maximumCellSpan = 31;
 
         float nx = normalX / fixedNormalScale;
         float ny = normalY / fixedNormalScale;
         float nz = normalZ / fixedNormalScale;
         float planeDistance = waterCameraDelta / fixedWorldScale;
-        float logicalScale = dreamcastProjection / projectionScale;
-        float dreamcastWidth = viewportWidth * logicalScale;
-        float dreamcastHeight = viewportHeight * logicalScale;
         float cameraX = translationX / fixedWorldScale;
         float cameraY = translationY / fixedWorldScale;
         float cameraZ = translationZ / fixedWorldScale;
@@ -2980,58 +3025,42 @@ public static class V82Compat
                     rotation[7] * local.Y + rotation[8] * local.Z
             );
 
-        var boundary = new (float X, float Y, float Z)[4];
-        if (nz > 0.9f)
+        // Cover the visible water plane through the far underlay depth. The
+        // original 12.288-unit row patch and 31-cell buffer limit leave a
+        // rectangular untextured gap in the wider, longer PC terrain view.
+        // Intersect the plane with the actual view frustum instead of moving
+        // that cutoff or stretching the existing waves over a larger area.
+        const float nearZ = 0.001f;
+        const float farZ = 65.536f;
+        var corners = new (float X, float Y, float Z)[8];
+        for (int index = 0; index < 8; index++)
         {
-            int corner = 0;
-            foreach (float sy in new[] { -1f, 1f })
-            foreach (float sx in new[] { -1f, 1f })
+            float z = index < 4 ? nearZ : farZ;
+            corners[index] = LocalPoint(
+                ((index & 1) == 0 ? -1f : 1f) * viewportWidth * 0.5f * z / projectionScale,
+                ((index & 2) == 0 ? -1f : 1f) * viewportHeight * 0.5f * z / projectionScale,
+                z);
+        }
+        var boundary = new List<(float X, float Y, float Z)>(12);
+        ReadOnlySpan<int> edges = [0,1, 1,3, 3,2, 2,0, 4,5, 5,7, 7,6, 6,4, 0,4, 1,5, 2,6, 3,7];
+        for (int edge = 0; edge < edges.Length; edge += 2)
+        {
+            var first = corners[edges[edge]];
+            var second = corners[edges[edge + 1]];
+            float d0 = nx * first.X + ny * first.Y + nz * first.Z - planeDistance;
+            float d1 = nx * second.X + ny * second.Y + nz * second.Z - planeDistance;
+            if (d0 == 0f) boundary.Add(ToWorld(first));
+            if (d1 == 0f) boundary.Add(ToWorld(second));
+            if ((d0 < 0f && d1 > 0f) || (d0 > 0f && d1 < 0f))
             {
-                float denominator =
-                    nz * dreamcastProjection +
-                    0.5f * sx * nx * dreamcastWidth +
-                    0.5f * sy * ny * dreamcastHeight;
-                if (MathF.Abs(denominator) < 1e-6f)
-                    return null;
-                float z = planeDistance * dreamcastProjection / denominator;
-                boundary[corner++] = ToWorld(LocalPoint(
-                    sx * dreamcastWidth * 0.5f * z /
-                        dreamcastProjection,
-                    sy * dreamcastHeight * 0.5f * z /
-                        dreamcastProjection,
-                    z));
+                float t = d0 / (d0 - d1);
+                boundary.Add(ToWorld(LocalPoint(
+                    first.X + t * (second.X - first.X),
+                    first.Y + t * (second.Y - first.Y),
+                    first.Z + t * (second.Z - first.Z))));
             }
         }
-        else
-        {
-            float nearSpan = dreamcastWidth * 0.001f;
-            float farSpan = dreamcastWidth * 0.012f;
-            float nearZ = dreamcastProjection * 0.002f;
-            float farZ = dreamcastProjection * 0.024f;
-            bool solveY = MathF.Abs(ny) > MathF.Abs(nx);
-            float divisor = solveY ? ny : nx;
-            if (MathF.Abs(divisor) < 1e-6f)
-                return null;
-
-            (float X, float Y, float Z) Solve(float span, float z, float sign)
-            {
-                if (solveY)
-                {
-                    float x = sign * span;
-                    float y = (planeDistance - nx * x - nz * z) / ny;
-                    return ToWorld(LocalPoint(x, y, z));
-                }
-                float solvedY = sign * span;
-                float solvedX =
-                    (planeDistance - ny * solvedY - nz * z) / nx;
-                return ToWorld(LocalPoint(solvedX, solvedY, z));
-            }
-
-            boundary[0] = Solve(nearSpan, nearZ, -1f);
-            boundary[1] = Solve(nearSpan, nearZ, 1f);
-            boundary[2] = Solve(farSpan, farZ, -1f);
-            boundary[3] = Solve(farSpan, farZ, 1f);
-        }
+        if (boundary.Count < 3) return null;
 
         int minimumX = (int)MathF.Floor(boundary.Min(point => point.X));
         int maximumX = (int)MathF.Ceiling(boundary.Max(point => point.X));
@@ -3039,8 +3068,6 @@ public static class V82Compat
         int maximumZ = (int)MathF.Ceiling(boundary.Max(point => point.Z));
         if (float.IsFinite(maximumWorldZ))
             maximumZ = Math.Min(maximumZ, (int)MathF.Floor(maximumWorldZ));
-        maximumX = Math.Min(maximumX, minimumX + maximumCellSpan);
-        maximumZ = Math.Min(maximumZ, minimumZ + maximumCellSpan);
         int columns = maximumX - minimumX;
         int rows = maximumZ - minimumZ;
         if (columns <= 0 || rows <= 0)
@@ -3118,13 +3145,38 @@ public static class V82Compat
                 projectionScale);
         }
 
-        var triangles = new GpuHle.DreamcastWaterSurfaceVertex[
-            rows * columns * 6];
-        int output = 0;
         int stride = columns + 1;
+        // Reject only cells wholly outside one camera plane. Keep crossing
+        // cells intact, including their original wave spacing and UVs.
+        var outside = new byte[grid.Length];
+        for (int i = 0; i < grid.Length; i++)
+        {
+            var vertex = grid[i];
+            float horizontal = viewportWidth * 0.5f * vertex.ViewZ;
+            float vertical = viewportHeight * 0.5f * vertex.ViewZ;
+            float x = projectionScale * vertex.ViewX;
+            float y = projectionScale * vertex.ViewY;
+            outside[i] = (byte)((x < -horizontal ? 1 : 0) |
+                (x > horizontal ? 2 : 0) | (y < -vertical ? 4 : 0) |
+                (y > vertical ? 8 : 0) | (vertex.ViewZ < nearZ * 256f ? 16 : 0) |
+                (vertex.ViewZ > farZ * 256f ? 32 : 0));
+        }
+        var visible = new bool[rows * columns];
+        int cellCount = 0;
         for (int z = 0; z < rows; z++)
         for (int x = 0; x < columns; x++)
         {
+            int i = z * stride + x;
+            if ((outside[i] & outside[i+1] & outside[i+stride] & outside[i+stride+1]) != 0) continue;
+            visible[z * columns + x] = true;
+            cellCount++;
+        }
+        var triangles = new GpuHle.DreamcastWaterSurfaceVertex[cellCount * 6];
+        int output = 0;
+        for (int z = 0; z < rows; z++)
+        for (int x = 0; x < columns; x++)
+        {
+            if (!visible[z * columns + x]) continue;
             GpuHle.DreamcastWaterSurfaceVertex topLeft =
                 grid[z * stride + x];
             GpuHle.DreamcastWaterSurfaceVertex bottomLeft =
@@ -4781,7 +4833,7 @@ public static class V82Compat
         }
     }
 
-    public static void BeginTerrainRoutePacketWrites(
+    public static bool BeginTerrainRoutePacketWrites(
         CpuContext c,
         IMemory m)
     {
@@ -4802,6 +4854,11 @@ public static class V82Compat
         // A2 is the packet cursor handed to func_800288E0; it returns the new
         // cursor in V0, which only advances when the cell emitted something.
         _terrainCellPacketCursor = c.A2;
+        if (TrySkipOffscreenTerrain(c, m))
+        {
+            c.V0 = c.A2;
+            return false;
+        }
         int frame = GpuHle.DebugGameplayTick;
         GpuHle.TerrainCellTextures textures = ReadTerrainCellTextures(c, m);
         TerrainCellScopes.Push(new TerrainCellScope(
@@ -4811,14 +4868,92 @@ public static class V82Compat
             c.A1,
             c.A2,
             textures));
+        bool direct = TrySubmitDirectTerrainPatch(c, m, textures);
         if (!TraceTerrainCells)
-            return;
+            return !direct;
 
         if (_terrainCellFrame is null || _terrainCellFrame.Frame != frame)
         {
             FlushTerrainCellFrame();
             _terrainCellFrame = new TerrainCellFrameStats { Frame = frame };
         }
+        return !direct;
+    }
+
+    static readonly bool DirectTerrainRequested = Environment.GetEnvironmentVariable("RECOMPONE_DIRECT_TERRAIN") == "1";
+    static readonly bool DirectTerrainDisabled = Environment.GetEnvironmentVariable("RECOMPONE_DIRECT_TERRAIN") == "0";
+    public static bool DirectSceneRendering => DirectTerrainRequested || _sharedTerrainFrame;
+    static bool DirectTerrain => DirectSceneRendering;
+    static long _directTerrainPatches;
+    static readonly bool EarlyTerrainCull = Environment.GetEnvironmentVariable("RECOMPONE_EARLY_TERRAIN_CULL") != "0";
+
+    static bool TrySkipOffscreenTerrain(CpuContext c, IMemory m)
+    {
+        if (!DirectTerrain || !EarlyTerrainCull || !GpuHle.GameplayActive ||
+            !GpuHle.Active || GpuHle.Backend is not Enhanced.EnhancedGlBackend { Ready: true } ||
+            !ConfigManager.View.HighResolution3D || !IsMaximumLevelOfDetail() ||
+            Runtime.Gpu is not { } gpu || !gpu.TryGetProjectionViewport(out float left, out float right, out float top, out float bottom))
+            return false;
+        uint x = c.A0, z = c.A1;
+        if (x >= 2048 || z >= 2048) return false;
+        Span<DreamcastTerrainGeometry.Sample> samples = stackalloc DreamcastTerrainGeometry.Sample[25];
+        Span<float> r = stackalloc float[9];
+        for (int i = 0; i < 9; i++) r[i] = unchecked((short)(Gte.ReadControl(i/2) >> ((i&1)*16))) / 4096f;
+        int ox = unchecked((int)m.ReadU32(0x1F800084)), oy = unchecked((int)m.ReadU32(0x1F800088)), oz = unchecked((int)m.ReadU32(0x1F80008C));
+        int tx = unchecked((int)Gte.ReadControl(5)), ty = unchecked((int)Gte.ReadControl(6)), tz = unchecked((int)Gte.ReadControl(7));
+        for (int sx = 0; sx <= 4; sx++)
+        for (int sz = 0; sz <= 4; sz++)
+        {
+            float h = (ReadTerrainHeight(m, (int)x+sx, (int)z+sz) & 0x7FF)*8;
+            float vx = unchecked((short)(((int)x+sx)*256+ox)), vy = unchecked((short)((int)h+oy)), vz = unchecked((short)(((int)z+sz)*256+oz));
+            samples[sx*5+sz] = new(new System.Numerics.Vector3(tx+r[0]*vx+r[1]*vy+r[2]*vz,
+                ty+r[3]*vx+r[4]*vy+r[5]*vz, tz+r[6]*vx+r[7]*vy+r[8]*vz), h, default, default);
+        }
+        return DreamcastTerrainGeometry.OutsideViewport(samples, new(r[1],r[4],r[7]),
+            unchecked((int)Gte.ReadControl(24))/65536f, unchecked((int)Gte.ReadControl(25))/65536f,
+            Gte.ReadControl(26)&0xFFFF, left, right, top, bottom);
+    }
+
+    static bool TrySubmitDirectTerrainPatch(CpuContext c, IMemory m,
+        in GpuHle.TerrainCellTextures textures)
+    {
+        if (!DirectTerrain || !GpuHle.GameplayActive || !GpuHle.Active ||
+            GpuHle.Backend is not Enhanced.EnhancedGlBackend { Ready: true } ||
+            textures.DistanceColors.Patch is not { } patch)
+            return false;
+
+        // The enhanced terrain path already reconstructs the complete authored
+        // patch. Keep only a marker in the native OT instead of generating,
+        // storing and decoding coarse polygons that will be discarded.
+        // Retain the native four-corner GTE/AVSZ4 bucket calculation.
+        uint x = c.A0, z = c.A1;
+        int ox = unchecked((int)m.ReadU32(0x1F800084));
+        int oy = unchecked((int)m.ReadU32(0x1F800088));
+        int oz = unchecked((int)m.ReadU32(0x1F80008C));
+        for (int i = 0; i < 4; i++)
+        {
+            int sx = (i & 1) * 4, sz = (i >> 1) * 4;
+            uint vx = (ushort)((x + (uint)sx) * 256 + ox);
+            uint vy = (ushort)((int)patch.Samples[sx * 5 + sz].Height + oy);
+            uint vz = (ushort)((z + (uint)sz) * 256 + oz);
+            Gte.Write(0, vx | (vy << 16));
+            Gte.Write(1, vz);
+            Gte.Execute(0x4A180001u);
+        }
+        Gte.Execute(0x4B68002Eu);
+        uint bucket = Gte.Read(7) >> 1;
+        uint table = m.ReadU32(0x1F800080);
+        uint link = table + bucket * 4u;
+        uint packet = c.A2;
+        m.WriteU32(packet, (m.ReadU32(link) & 0xFFFFFFu) | 0x01000000u);
+        m.WriteU32(packet + 4, 0);
+        m.WriteU32(link, packet & 0xFFFFFFu);
+        GpuHle.RegisterCoarseTerrainPacket(packet, textures, false, "direct", x, z, direct: true);
+        Gte.LoadMemoryWord(6, m, c.GP + 0xDDCu);
+        c.A2 = c.V0 = packet + 8;
+        if (++_directTerrainPatches == 1)
+            Console.Error.WriteLine("[DirectTerrain] authored patches bypass native polygon generation");
+        return true;
     }
 
     public static void EndTerrainRoutePacketWrites(
@@ -4896,6 +5031,58 @@ public static class V82Compat
         uint z = c.A1;
         if (x >= 2048u || z >= 2048u)
             return default;
+        TerrainSourceKey sourceKey = _sharedTerrainFrame ? TerrainSourceVersion(c, m, x, z) : default;
+        if (_sharedTerrainFrame && _sharedTerrain.TryGetValue((x, z), out var cached) &&
+            cached.Key == sourceKey && cached.Textures.DistanceColors.Patch is { } sourcePatch)
+        {
+            var shared = cached.Textures;
+            var samples = new DreamcastTerrainGeometry.Sample[25];
+            Span<float> rotation = stackalloc float[9];
+            for (int i = 0; i < 9; i++)
+                rotation[i] = unchecked((short)(Gte.ReadControl(i / 2) >> ((i & 1) * 16))) / 4096f;
+            int ox = unchecked((int)m.ReadU32(0x1F800084));
+            int oy = unchecked((int)m.ReadU32(0x1F800088));
+            int oz = unchecked((int)m.ReadU32(0x1F80008C));
+            int tx = unchecked((int)Gte.ReadControl(5));
+            int ty = unchecked((int)Gte.ReadControl(6));
+            int tz = unchecked((int)Gte.ReadControl(7));
+            for (int sx = 0; sx <= 4; sx++)
+            for (int sz = 0; sz <= 4; sz++)
+            {
+                var sample = sourcePatch.Samples[sx * 5 + sz];
+                float vx = unchecked((short)(((int)x + sx) * 256 + ox));
+                float vy = unchecked((short)((int)sample.Height + oy));
+                float vz = unchecked((short)(((int)z + sz) * 256 + oz));
+                samples[sx * 5 + sz] = sample with { View = new System.Numerics.Vector3(
+                    tx + rotation[0]*vx + rotation[1]*vy + rotation[2]*vz,
+                    ty + rotation[3]*vx + rotation[4]*vy + rotation[5]*vz,
+                    tz + rotation[6]*vx + rotation[7]*vy + rotation[8]*vz) };
+            }
+            var patch = new GpuHle.TerrainPatchGeometry(samples,
+                new System.Numerics.Vector3(rotation[1], rotation[4], rotation[7]),
+                unchecked((int)Gte.ReadControl(24)) / 65536f,
+                unchecked((int)Gte.ReadControl(25)) / 65536f,
+                Gte.ReadControl(26) & 0xFFFFu) { CulledCells = _culledTerrainCells };
+            var reused = shared with { DistanceColors = shared.DistanceColors with { Patch = patch } };
+            if (VerifySharedTerrain)
+            {
+                _sharedTerrainFrame = false;
+                GpuHle.TerrainCellTextures original;
+                try { original = ReadTerrainCellTextures(c, m); }
+                finally { _sharedTerrainFrame = true; }
+                var expected = original.DistanceColors.Patch!;
+                if (!original.Tiles!.AsSpan().SequenceEqual(reused.Tiles) ||
+                    !expected.Samples.AsSpan().SequenceEqual(patch.Samples) ||
+                    expected.HeightAxis != patch.HeightAxis ||
+                    expected.ProjectionCenterX != patch.ProjectionCenterX ||
+                    expected.ProjectionCenterY != patch.ProjectionCenterY ||
+                    expected.ProjectionScale != patch.ProjectionScale ||
+                    (original.DistanceColors with { Patch = null }) != (reused.DistanceColors with { Patch = null }))
+                    throw new InvalidOperationException($"Shared terrain mismatch at {x},{z}");
+                _sharedTerrainVerified++;
+            }
+            return reused;
+        }
 
         uint block = terrainPageTable +
             ((((x >> 6) << 5) + (z >> 6)) << 2);
@@ -4908,8 +5095,80 @@ public static class V82Compat
         ushort clut = m.ReadU16(c.GP + 0xDA8u);
         GpuHle.TerrainQuadDistanceColors distanceColors =
             ReadDreamcastTerrainDistanceColors(c, m, x, z);
-        return ReadTerrainTextureGrid(
+        var result = ReadTerrainTextureGrid(
             m, textureGrid, clut, 4, distanceColors);
+        if (_sharedTerrainFrame && result.DistanceColors.Patch is { } retained)
+            _sharedTerrain[(x, z)] = new(sourceKey, result with {
+                DistanceColors = result.DistanceColors with { Patch = retained with { CulledCells = null } } });
+        return result;
+    }
+
+    static bool _sharedTerrainFrame;
+    static readonly bool VerifySharedTerrain = Environment.GetEnvironmentVariable("RECOMPONE_VERIFY_SHARED_TERRAIN") == "1";
+    static long _sharedTerrainVerified;
+    readonly record struct TerrainSourceKey(long A, long B, long C, long D, long Materials,
+        uint Low, uint High, ushort Clut, byte Mode, int AverageVersion);
+    readonly record struct CachedTerrainInput(TerrainSourceKey Key, GpuHle.TerrainCellTextures Textures);
+    static readonly Dictionary<(uint X, uint Z), CachedTerrainInput> _sharedTerrain = [];
+    sealed class TerrainRegionSnapshot
+    {
+        public byte[] Bytes = [];
+        public long Frame, Version;
+    }
+    static readonly Dictionary<(uint Address, int Length), TerrainRegionSnapshot> _terrainRegions = [];
+    static PSMemory? _terrainSourceMemory;
+    static long _terrainSourceFrame, _terrainSourceVersion;
+    static int _authoredTerrainAverageVersion;
+
+    static long TerrainRegionVersion(PSMemory memory, uint address, int length)
+    {
+        uint physical = (address & 0x1FFFFFFF) % (uint)memory.Ram.Length;
+        if ((ulong)physical + (uint)length > (ulong)memory.Ram.Length) return ++_terrainSourceVersion;
+        var key = (physical, length);
+        if (!_terrainRegions.TryGetValue(key, out var snapshot))
+        { snapshot = new(); _terrainRegions.Add(key, snapshot); }
+        if (snapshot.Frame == _terrainSourceFrame && snapshot.Version != 0) return snapshot.Version;
+        var bytes = memory.Ram.Slice((int)physical, length);
+        if (!bytes.SequenceEqual(snapshot.Bytes))
+        {
+            if (snapshot.Bytes.Length != length) snapshot.Bytes = new byte[length];
+            bytes.CopyTo(snapshot.Bytes);
+            snapshot.Version = ++_terrainSourceVersion;
+        }
+        snapshot.Frame = _terrainSourceFrame;
+        return snapshot.Version;
+    }
+
+    static TerrainSourceKey TerrainSourceVersion(CpuContext c, IMemory m, uint x, uint z)
+    {
+        if (m is not PSMemory memory || RamLogger.TrackReads)
+            return new(++_terrainSourceVersion, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        if (!ReferenceEquals(memory, _terrainSourceMemory))
+        { _sharedTerrain.Clear(); _terrainRegions.Clear(); _terrainSourceMemory = memory; }
+        long Page(int px, int pz)
+        {
+            if ((uint)px >= 2048 || (uint)pz >= 2048) return 0;
+            uint pointer = m.ReadU32(0x800B9470u + (uint)((px >> 6)*32 + (pz >> 6))*4);
+            return IsShapeAddress(pointer, 0x4042) ? TerrainRegionVersion(memory, pointer, 0x4042) : 0;
+        }
+        return new(Page((int)x-1,(int)z-1), Page((int)x+4,(int)z-1),
+            Page((int)x-1,(int)z+4), Page((int)x+4,(int)z+4),
+            TerrainRegionVersion(memory,TerrainTextureTable,256*0x20),
+            m.ReadU32(c.GP+0xE04),m.ReadU32(c.GP+0xDAC),m.ReadU16(c.GP+0xDA8),
+            m.ReadU8(c.GP+0x31),_authoredTerrainAverageVersion);
+    }
+    public static void BeginSharedTerrainFrame(bool enableDirect = true)
+    {
+        if (_sharedTerrain.Count > 2048 || _terrainRegions.Count > 128)
+        { _sharedTerrain.Clear(); _terrainRegions.Clear(); }
+        _terrainSourceFrame++;
+        _sharedTerrainFrame = !DirectTerrainDisabled && (enableDirect || DirectTerrainRequested);
+    }
+    public static void EndSharedTerrainFrame()
+    {
+        if (VerifySharedTerrain && GpuHle.DebugGameplayTick % 120 == 0)
+            Console.Error.WriteLine($"[SharedTerrainVerified] patches={_sharedTerrainVerified}");
+        _sharedTerrainFrame = false;
     }
 
     public static void BeginTerrainDetailPacketWrites(
@@ -8359,6 +8618,12 @@ public static class V82Compat
 
         if (m.ReadU32(c.GP + 0x614u) != 0u) return;
 
+        // A completed GPU list can still have a display flip pending at the
+        // next VBlank. Finish that flip before delivering another DrawSync
+        // completion: 80014CCC installs 80014BE4 and saves its predecessor.
+        // Delivering it twice before VBlank makes that predecessor itself.
+        DrainPendingDisplayFlip(m, Runtime.PresentFrame);
+
         const uint drawSyncCallbackSlot = 0x8006A4FCu;
         uint callback = m.ReadU32(drawSyncCallbackSlot);
         if (callback == 0u)
@@ -8384,6 +8649,54 @@ public static class V82Compat
         if (m.ReadU32(c.GP + 0x614u) == 0u)
             throw new InvalidOperationException(
                 $"Vigilante 8: 2nd Offense DrawSync wait did not complete after {frames} VSync frames");
+    }
+
+    internal static void DrainPendingDisplayFlip(IMemory m, Action present)
+    {
+        // PsyQ800555E0 exchanges VSyncCallbacks[index] at80065460.
+        // VSyncCallback uses index4;80014BE4 restores the previous callback.
+        const uint displayCallbackSlot = 0x80065470u;
+        int frames = 0;
+        while (m.ReadU32(displayCallbackSlot) == 0x80014BE4u && frames++ < 16)
+            present();
+        if (m.ReadU32(displayCallbackSlot) == 0x80014BE4u)
+            throw new InvalidOperationException("Pending V8:2 display flip did not finish at VBlank");
+    }
+
+    static readonly bool TraceDisplayCallbacks =
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_TRACE_DISPLAY_CALLBACKS") == "1";
+
+    static readonly bool TraceClock =
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_TRACE_CLOCK") == "1";
+
+    // Read-only seam diagnostic. The arena uses the native PsyQ counter,
+    // not LibEtc's private VSync-call count. Keep this opt-in: per-present
+    // logging changes wall-clock cost and is not a performance benchmark.
+    public static void TracePresentationClock(CpuContext? c, IMemory? m, string phase)
+    {
+        if (!TraceClock || c == null || m == null || _gameplayFrameCount == 0)
+            return;
+        Console.Error.WriteLine(
+            $"[V82Clock] phase={phase} frame={_gameplayFrameCount} " +
+            $"stamp={System.Diagnostics.Stopwatch.GetTimestamp()} " +
+            $"caller={c.RA:X8} vblank={m.ReadU32(0x80065480u)} " +
+            $"physics={m.ReadU32(c.GP + 0x28u)} " +
+            $"replay={m.ReadU32(c.GP + 0xD0Cu)} " +
+            $"flags={m.ReadU32(c.GP + 0x40u):X8} " +
+            $"flip={m.ReadU32(0x80065470u):X8} " +
+            $"done={m.ReadU32(c.GP + 0x614u)}");
+    }
+
+    public static void TraceDisplayCallbackChange(
+        CpuContext c, IMemory m, uint caller, uint requested)
+    {
+        if (!TraceDisplayCallbacks) return;
+        Console.Error.WriteLine(
+            $"[V82DisplayCallback] tick={_gameplayFrameCount} caller={caller:X8} " +
+            $"requested={requested:X8} previous={c.V0:X8} " +
+            $"saved={m.ReadU32(c.GP + 0xCD8u):X8} " +
+            $"drawDone={m.ReadU32(c.GP + 0x614u)} " +
+            $"drawCallback={m.ReadU32(0x8006A4FCu):X8}");
     }
 
     // The display-fade callback advances gp+E98 from active to complete during
@@ -8439,6 +8752,9 @@ public static class V82Compat
     {
         IMemory m = Dispatcher.UnwrapMemory(memory);
         uint flags = ConfigManager.Game.V82CheatFlags & 0x001FFFFFu;
+        if (int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_V82_SPLIT_PLAYERS"), out int harnessPlayers)
+            && harnessPlayers is >= 2 and <= 4)
+            flags &= ~64u; // Harness needs bots; do not mutate saved preferences.
         m.WriteU32(CheatFlagsAddress, flags);
         if (_lastLoggedCheatFlags != flags)
         {

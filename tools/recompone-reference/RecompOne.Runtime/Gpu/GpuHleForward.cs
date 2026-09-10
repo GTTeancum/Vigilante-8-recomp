@@ -162,6 +162,48 @@ public sealed partial class Gpu
             Console.Error.WriteLine($"[V8VehiclePacketHit] address=0x{address:X8}");
     }
 
+    public bool TryDrawDirectTerrainPacket(uint count)
+    {
+        if (count != 1 || !HleOn ||
+            !GpuHle.TryGetCoarseTerrainPacket(_currentOtPacketAddress, out var packet) ||
+            !packet.Direct)
+            return false;
+        var backend = GpuHle.Backend!;
+        backend.SetDrawEnv(CurEnv());
+        var flags = PrimOf(false, false, false, 0, true);
+        backend.DrawTri(default, default, default, flags);
+        return true;
+    }
+
+    public bool TryGetProjectionViewport(out float left, out float right, out float top, out float bottom,
+        bool packetCoordinates = false)
+    {
+        left = right = top = bottom = 0;
+        long best = -1;
+        for (int i = 0; i < GpuHle.RectCount; i++)
+        {
+            var r = GpuHle.GetRect(i);
+            if (!r.Valid || r.Stamp <= best || r.W <= 0 || r.H <= 0) continue;
+            int clipW = _drawAreaRight - _drawAreaLeft + 1, clipH = _drawAreaBottom - _drawAreaTop + 1;
+            bool inside = _drawAreaLeft >= r.X && _drawAreaRight < r.X+r.W &&
+                _drawAreaTop >= r.Y && _drawAreaBottom < r.Y+r.H;
+            bool covers = _drawAreaLeft <= r.X && _drawAreaRight >= r.X+r.W-1 &&
+                _drawAreaTop <= r.Y && _drawAreaBottom >= r.Y+r.H-1 &&
+                clipW-r.W <= 64 && clipH-r.H <= 32;
+            if (!inside && !covers) continue;
+            int x = inside ? r.X : _drawAreaLeft, y = inside ? r.Y : _drawAreaTop;
+            int w = inside ? r.W : clipW;
+            best = r.Stamp;
+            int originX = packetCoordinates ? _drawOffsetX : x;
+            int originY = packetCoordinates ? _drawOffsetY : y;
+            left = _drawAreaLeft-originX; right = _drawAreaRight-originX+1;
+            top = _drawAreaTop-originY; bottom = _drawAreaBottom-originY+1;
+            if (_drawAreaLeft <= x && _drawAreaRight >= x+w-1)
+            { left = x-originX-GpuHle.WideMargin(w); right = x-originX+w+GpuHle.WideMargin(w); }
+        }
+        return best >= 0;
+    }
+
     public void EndOrderingTable()
     {
         if (TraceN64RouteColors &&
@@ -523,7 +565,11 @@ public sealed partial class Gpu
         // screen-effect layer together as one ordered pass.
         if (nativeScreenEffect)
             flags.Material = HleMaterialKind.ScreenEffect;
-        else if (screenSpaceOverlay || misownedGameplayCaption)
+        // The native water pass has authoritative provenance. Its scanlines
+        // deliberately have no GTE projection; incidental matches against
+        // earlier model projections must not decide whether they become UI.
+        else if ((screenSpaceOverlay || misownedGameplayCaption) &&
+            flags.Material is not HleMaterialKind.WaterBase and not HleMaterialKind.WaterSurface)
             flags.Material = HleMaterialKind.Ui;
         be.DrawTri(HV(a, flags), HV(b, flags), HV(c, flags), flags);
     }

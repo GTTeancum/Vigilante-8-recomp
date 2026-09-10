@@ -54,11 +54,12 @@ public static class LibGpu
                 IsSafeGameplayOrderingTablePacket(
                     m, addr, count, out string reason))
             {
-                for (uint i = 0; i < count; i++)
-                {
-                    uint source = addr + 4u + i * 4u;
-                    gpu.WriteGp0(m.ReadU32(source), source);
-                }
+                if (!gpu.TryDrawDirectTerrainPacket(count))
+                    for (uint i = 0; i < count; i++)
+                    {
+                        uint source = addr + 4u + i * 4u;
+                        gpu.WriteGp0(m.ReadU32(source), source);
+                    }
             }
             else if (_rejectedGameplayOtPackets++ < 32)
             {

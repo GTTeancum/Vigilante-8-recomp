@@ -6,6 +6,9 @@ using RecompOne.Runtime.Memory;
 
 public static class Gte
 {
+    // Renderer-only conversion to common scene units; native SZ/OT and SXY
+    // retain the mesh's original fixed-point scale.
+    public static float PreciseViewScale { get; set; } = 1f;
     static long _wideProjectionVertices;
     static long _wideProjectionExpandedVertices;
     static long _wideProjectionSaturatedVertices;
@@ -836,6 +839,10 @@ public static class Gte
             ? Math.Clamp(unclampedY, -1e7f, 1e7f) : 0f;
         SxyPreciseX[2] = Math.Clamp(unclampedX, -1024f, 1023f);
         SxyPreciseY[2] = Math.Clamp(unclampedY, -1024f, 1023f);
+        SxyViewX[2] *= PreciseViewScale;
+        SxyViewY[2] *= PreciseViewScale;
+        SxyViewZ[2] *= PreciseViewScale;
+        SxyPerspectiveW[2] *= PreciseViewScale;
         SxyHasPrecisePosition[2] =
             float.IsFinite(SxyPreciseX[2]) &&
             float.IsFinite(SxyPreciseY[2]) &&
@@ -1460,7 +1467,11 @@ public static class Gte
                 // winding and make the cull after near-plane clipping.  Only
                 // bypass the retail object rejection when that replacement
                 // decision is available; terrain keeps its native walker.
+                // Cached route/effect emitters also use NCLIP, with their own
+                // sign conventions. They do not register the replacement
+                // mesh cull, so forcing their result positive can erase roads.
                 if (NoRetailCull && !terrainNclip &&
+                    Sdk.V82Compat.ObjectRenderScopeDepth > 0 &&
                     hasPreciseNclipArea &&
                     ConfigManager.View.HighResolution3D &&
                     GpuHle.GameplayActive)

@@ -114,6 +114,7 @@ public static class Runtime
 
     public static void PresentFrame()
     {
+        Sdk.V82Compat.TracePresentationClock(Cpu, Mem, "enter");
         int traceFrame = _presentTraceCount++;
         if (TraceVSync && traceFrame < 10) Console.Error.WriteLine($"[VSync] present {traceFrame}: window");
         if (Gpu != null && _lastDisplayEnabled != Gpu.DisplayEnabled)
@@ -153,6 +154,7 @@ public static class Runtime
         if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); } //is this correct?
         if (TraceVSync && traceFrame < 10) Console.Error.WriteLine($"[VSync] present {traceFrame}: irq");
         DispatchIrq(0); //using this to dispatch irqs too if necessary, probably not needed after the rest of stuff is reimplemented
+        Sdk.V82Compat.TracePresentationClock(Cpu, Mem, "leave");
         if (TraceVSync && traceFrame < 10) Console.Error.WriteLine($"[VSync] present {traceFrame}: done");
     }
 

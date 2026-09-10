@@ -18,6 +18,28 @@ public static class DreamcastTerrainGeometry
         int X, int Z, int Size, bool Textured,
         Vertex TopLeft, Vertex TopRight, Vertex BottomLeft, Vertex BottomRight);
 
+    public static bool OutsideViewport(ReadOnlySpan<Sample> samples, Vector3 heightAxis,
+        float centerX, float centerY, float scale, float left, float right, float top, float bottom)
+    {
+        float low = float.MaxValue, high = float.MinValue;
+        foreach (var sample in samples)
+        { low = MathF.Min(low, sample.Height); high = MathF.Max(high, sample.Height); }
+        left -= 4; right += 4; top -= 4; bottom += 4;
+        int outside = 31;
+        // All authored positions, including signed-coordinate wraps, and both
+        // height extrema bound every convex height morph produced by Build.
+        foreach (var sample in samples)
+        for (int end = 0; end < 2; end++)
+        {
+            var v = sample.View + heightAxis * ((end == 0 ? low : high) - sample.Height);
+            float px = v.X * scale + v.Z * centerX, py = v.Y * scale + v.Z * centerY;
+            outside &= (v.Z <= 0 ? 1 : 0) | (px < left*v.Z ? 2 : 0) |
+                (px > right*v.Z ? 4 : 0) | (py < top*v.Z ? 8 : 0) | (py > bottom*v.Z ? 16 : 0);
+            if (outside == 0) return false;
+        }
+        return outside != 0;
+    }
+
     public static int Build(
         ReadOnlySpan<Sample> samples, Vector3 heightAxis, bool alternate,
         Span<Vertex> vertices, Span<Leaf> leaves)

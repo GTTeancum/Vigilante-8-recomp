@@ -37,6 +37,45 @@ MIGRATIONS = (
 
 REPLACEMENTS = (
     (
+        '    public static void func_80054EEC(CpuContext c, IMemory m)\n    {\n',
+        '''    public static void func_80054EEC(CpuContext c, IMemory m)
+    {
+        uint caller = c.RA, requested = c.A0;
+        func_80054EEC_Impl(c, m);
+        RecompOne.Runtime.Sdk.V82Compat.TraceDisplayCallbackChange(c, m, caller, requested);
+    }
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static void func_80054EEC_Impl(CpuContext c, IMemory m)
+    {
+''',
+    ),
+    (
+        '''        func_80021F70_Impl(c, m);
+        RecompOne.Runtime.Sdk.V82Compat.EndImportedRenderGroup(c, m);
+''',
+        '''        float previousScale = RecompOne.Runtime.Sdk.V82MeshClipCompat.BeginMeshDepth(m, c.A0);
+        try { func_80021F70_Impl(c, m); }
+        finally
+        {
+            RecompOne.Runtime.Gte.PreciseViewScale = previousScale;
+            RecompOne.Runtime.Sdk.V82Compat.EndImportedRenderGroup(c, m);
+        }
+''',
+    ),
+    (
+        '    public static void func_80021FA8(CpuContext c, IMemory m)\n    {\n',
+        '''    public static void func_80021FA8(CpuContext c, IMemory m)
+    {
+        float previousScale = RecompOne.Runtime.Sdk.V82MeshClipCompat.BeginMeshDepth(m, c.A0);
+        try { func_80021FA8_Impl(c, m); }
+        finally { RecompOne.Runtime.Gte.PreciseViewScale = previousScale; }
+    }
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static void func_80021FA8_Impl(CpuContext c, IMemory m)
+    {
+''',
+    ),
+    (
         """    public static void func_80041B0C(CpuContext c, IMemory m)
     {
 """,
@@ -260,6 +299,18 @@ def main() -> int:
                 f"{old.splitlines()[0].strip()}"
             )
         text = text.replace(old, new, 1)
+        changed += 1
+
+    start = text.index("public static void func_80021F70_Impl(")
+    end = text.index("public static void func_80021FA8(", start)
+    body = text[start:end]
+    seam = "        RecompOne.Runtime.Sdk.V82ModelBounds.SkipInvisibleFaces(c);\n"
+    if seam not in body:
+        marker = "        L8002215C: ;"
+        if body.count(marker) != 1:
+            raise RuntimeError("model face traversal boundary changed")
+        body = body.replace(marker, seam + marker, 1)
+        text = text[:start] + body + text[end:]
         changed += 1
 
     if changed:

@@ -15,6 +15,72 @@ public sealed class GlVram
     uint _scratchTex;
     byte[] _uploadRgba = [];
     byte[] _readRgba = [];
+    uint _probeTex, _probeFbo, _probeBuffer;
+    int _probeCount;
+    readonly byte[] _probeRgba = new byte[4096 * 4];
+
+    public int ProbeCount => _probeCount;
+
+    public void BeginProbes() => _probeCount = 0;
+
+    // Snapshot each original nearest-filtered native pixel now; download
+    // after preparing the next camera. Later draws cannot alter snapshots.
+    public int QueueProbes(ReadOnlySpan<int> xy)
+    {
+        int count = xy.Length / 2;
+        if (_probeCount + count > 4096) throw new InvalidOperationException("probe staging capacity");
+        if (_probeFbo == 0) { _probeTex = CreateTex(1024, 4); _probeFbo = CreateFbo(_probeTex); }
+        int start = _probeCount;
+        _gl.Disable(EnableCap.ScissorTest);
+        _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _fbo);
+        _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, _probeFbo);
+        for (int i = 0; i < count; i++)
+        {
+            int x = xy[2*i] & 1023, y = xy[2*i+1] & 511;
+            int index = _probeCount++;
+            _gl.BlitFramebuffer(x*Scale, y*Scale, (x+1)*Scale, (y+1)*Scale,
+                index%1024, index/1024, index%1024+1, index/1024+1,
+                ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+        }
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+        return start;
+    }
+
+    public unsafe void IssueProbeReadback()
+    {
+        if (_probeCount == 0) return;
+        if (_probeBuffer == 0)
+        {
+            _probeBuffer = _gl.GenBuffer();
+            _gl.BindBuffer(BufferTargetARB.PixelPackBuffer, _probeBuffer);
+            _gl.BufferData(BufferTargetARB.PixelPackBuffer, 4096*4, null, BufferUsageARB.StreamRead);
+        }
+        else _gl.BindBuffer(BufferTargetARB.PixelPackBuffer, _probeBuffer);
+        int width = Math.Min(_probeCount,1024), height = (_probeCount+1023)/1024;
+        _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _probeFbo);
+        _gl.PixelStore(PixelStoreParameter.PackAlignment,1);
+        _gl.ReadPixels(0,0,(uint)width,(uint)height,PixelFormat.Rgba,PixelType.UnsignedByte,(void*)0);
+        _gl.BindBuffer(BufferTargetARB.PixelPackBuffer,0);
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer,_fbo);
+        // Let the GPU transfer while the CPU prepares the following camera.
+        _gl.Flush();
+    }
+
+    public void ReadProbes(Span<ushort> dst)
+    {
+        if (_probeCount == 0) return;
+        int width = Math.Min(_probeCount,1024), height = (_probeCount+1023)/1024;
+        _gl.BindBuffer(BufferTargetARB.PixelPackBuffer,_probeBuffer);
+        _gl.GetBufferSubData<byte>(BufferTargetARB.PixelPackBuffer,0,_probeRgba.AsSpan(0,width*height*4));
+        _gl.BindBuffer(BufferTargetARB.PixelPackBuffer,0);
+        for (int i = 0; i < _probeCount; i++)
+        {
+            int o = i*4;
+            dst[i] = (ushort)((_probeRgba[o]>>3) | ((_probeRgba[o+1]>>3)<<5) |
+                ((_probeRgba[o+2]>>3)<<10) | (_probeRgba[o+3]>=128 ? 0x8000 : 0));
+        }
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+    }
 
     public uint Texture => _tex;
     public uint Fbo => _fbo;
@@ -322,6 +388,9 @@ public sealed class GlVram
 
     public void Dispose()
     {
+        if (_probeBuffer != 0) _gl.DeleteBuffer(_probeBuffer);
+        if (_probeFbo != 0) _gl.DeleteFramebuffer(_probeFbo);
+        if (_probeTex != 0) _gl.DeleteTexture(_probeTex);
         if (_fbo != 0) _gl.DeleteFramebuffer(_fbo);
         if (_stageFbo != 0) _gl.DeleteFramebuffer(_stageFbo);
         if (_tex != 0) _gl.DeleteTexture(_tex);

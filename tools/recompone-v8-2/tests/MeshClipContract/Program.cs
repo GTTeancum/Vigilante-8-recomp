@@ -226,10 +226,10 @@ foreach (float[] depths in new[] {new float[] {40, 90, 260}, new float[] {180, 2
         82733044,
         150);
     Check(mesh != null, "Dreamcast XWAT mesh exists for traced Louisiana camera");
-    Check(mesh!.Rows is > 0 and <= 31 && mesh.Columns is > 0 and <= 31,
-        "Dreamcast XWAT cell spans retain the decoded 31-cell caps");
-    Check(mesh.Vertices.Length == mesh.Rows * mesh.Columns * 6,
-        "Dreamcast XWAT row strips triangulate every rectangular cell");
+    Check(mesh!.Rows > 31 && mesh.Columns > 31,
+        "Visible water coverage is not truncated to the original 31-cell scratch buffer");
+    Check(mesh.Vertices.Length > 0 && mesh.Vertices.Length < mesh.Rows * mesh.Columns * 6 && mesh.Vertices.Length % 6 == 0,
+        "Water keeps complete wave cells and omits cells wholly outside the view");
     Check(mesh.Vertices.All(vertex =>
             float.IsFinite(vertex.X) &&
             float.IsFinite(vertex.Y) &&
@@ -244,6 +244,28 @@ foreach (float[] depths in new[] {new float[] {40, 90, 260}, new float[] {180, 2
         57564424, 2954907, 82733044, 150);
     Check(repeated != null && mesh.Vertices.SequenceEqual(repeated.Vertices),
         "Dreamcast XWAT mesh is deterministic for one retail camera/tick");
+}
+{
+    // Native Dreamland bank trace: the old 12.288-unit patch did not cover
+    // this visible water pixel, leaving only the dark underlay ahead of land.
+    var water = V82Compat.BuildDreamcastWaterSurfaceMesh(
+        0, 4066, 495, 127214, 256, 428, 240,
+        [-2191,418,-3436, 0,4066,495, 3461,264,-2175],
+        59326868,2843410,86864432,300);
+    bool covered = false;
+    if (water != null)
+    for (int i = 0; i < water.Vertices.Length; i += 3)
+    {
+        var a = water.Vertices[i]; var b = water.Vertices[i+1]; var d = water.Vertices[i+2];
+        if (a.CameraDepth <= 256 || b.CameraDepth <= 256 || d.CameraDepth <= 256) continue;
+        float area = (b.X-a.X)*(d.Y-a.Y)-(b.Y-a.Y)*(d.X-a.X);
+        if (MathF.Abs(area) < 0.0001f) continue;
+        float u = ((b.X-387)*(d.Y-118)-(b.Y-118)*(d.X-387))/area;
+        float v = ((d.X-387)*(a.Y-118)-(d.Y-118)*(a.X-387))/area;
+        float w = 1-u-v;
+        if (u >= 0 && v >= 0 && w >= 0) { covered = true; break; }
+    }
+    Check(covered, "Textured water reaches the traced Dreamland bank gap without stretching wave cells");
 }
 {
     // The panorama emitter links static packets into the far OT bucket;
@@ -519,4 +541,9 @@ foreach (float[] depths in new[] {new float[] {40, 90, 260}, new float[] {180, 2
     GpuHle.WideAspect=oldAspect; GpuHle.GameplayActive=false;
     view.HighResolution3D=oldHigh; view.Widescreen=oldWide;
 }
+checks += QuadStripChecks.Run();
+checks += NclipScopeChecks.Run();
+checks += SceneDepthChecks.Run();
+checks += MeshDepthScaleChecks.Run();
+checks += DisplayCallbackChecks.Run();
 Console.WriteLine($"PASS: {checks} mesh clipping packet/provenance assertions");

@@ -149,6 +149,23 @@ public static partial class Vigilante82PC
         if (SplitHarnessPlayers < 3 || SplitStorage == 0) return false;
         var registers = c.Snapshot();
         uint frame = m.ReadU32(c.GP + 0x24) & 1;
+        V82Compat.BeginSharedTerrainFrame(SplitHarnessPlayers == 4);
+        bool pipelinedFeedback = SplitHarnessPlayers == 4 && V82Compat.BeginPipelinedFeedback();
+        void FinishFeedback(int player)
+        {
+            // Only CPU preparation overlaps the prior view's transfer. Keep
+            // GPU world/effect/HUD order identical, including cross-view reads.
+            var saved = c.Snapshot();
+            uint env = SplitStorage+0x100u+(uint)player*0x5C;
+            uint hud = SplitStorage+0x80u+(uint)player*4;
+            m.WriteU32(hud,0xFFFFFF);
+            c.A0=env; func_8005C5EC(c,m);
+            V82Compat.CompleteFeedbackView(c,m,player,hud);
+            SplitDrawMinimalHud(c,m,SplitVehicles[player],hud,player);
+            bool previousHud = GpuHle.ViewportHudActive;
+            try { GpuHle.ViewportHudActive=true; c.A0=hud; func_8005C57C(c,m); }
+            finally { GpuHle.ViewportHudActive=previousHud; c.Restore(saved); }
+        }
         try
         {
             // Each native call gets its own argument/save area below the main
@@ -174,6 +191,11 @@ public static partial class Vigilante82PC
                 if (player < 2)
                     for (uint i = 0; i < 32; i += 4) m.WriteU32(0x800BDFF0u+(uint)player*32+i, m.ReadU32(matrix+i));
                 func_80031678(c, m);
+                if (pipelinedFeedback && player > 0)
+                {
+                    FinishFeedback(player-1);
+                    c.A0=env; func_8005C5EC(c,m);
+                }
                 uint world = m.ReadU32(c.GP + 0xCE0) + 0x3FFC;
                 uint hud = SplitStorage + 0x80u + (uint)player*4;
                 m.WriteU32(hud, 0xFFFFFF);
@@ -181,6 +203,11 @@ public static partial class Vigilante82PC
                 c.A0 = 0; func_8005BF88(c, m);
                 m.WriteU32(hud, 0xFFFFFF);
                 c.A0 = x; c.A1 = y; c.A2 = hud;
+                if (pipelinedFeedback)
+                {
+                    V82Compat.QueueCurrentFeedback(c, m);
+                    continue;
+                }
                 V82Compat.ProcessCurrentExpandedEdgePool(c, m);
                 if (SplitHarnessPlayers != 4)
                 {
@@ -199,13 +226,14 @@ public static partial class Vigilante82PC
                 }
                 finally { GpuHle.ViewportHudActive = previousHud; }
             }
+            if (pipelinedFeedback) FinishFeedback(3);
             c.A0 = 0; func_8005BF88(c, m);
             c.A0 = 0x8006C240u + frame*20;
             LibGpu.PutDispEnv(c, m);
             m.WriteU32(c.GP+0x614, 1);
             m.WriteU32(c.GP+0x618, 1);
         }
-        finally { c.Restore(registers); }
+        finally { V82Compat.EndSharedTerrainFrame(); c.Restore(registers); }
         return true;
     }
 
