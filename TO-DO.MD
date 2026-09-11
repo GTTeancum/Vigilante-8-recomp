@@ -1,6 +1,6 @@
 # Vigilante 8 PC - Open Work Only
 
-Last updated: 2026-09-08 EDT
+Last updated: 2026-09-10 EDT
 Status: ACTIVE
 
 This tracker contains only open or explicitly deferred work. Remove an entry
@@ -10,32 +10,23 @@ superseded attempts do not belong here.
 ## Open items at a glance
 
 This is one line per major open deliverable or defect. Detailed implementation
-and acceptance work remains below. `User` marks user-added work; `Codex` marks
+and acceptance work remains below. `Codex` marks
 work added by Codex.
 
 **Work-selection rule:** When the user asks Codex to find or choose something
 to do, start with the highest `NEXT PRIORITY` item before considering any other
 open work.
 
-1. **User — IN PROGRESS / NEXT PRIORITY** - Finish shared renderer visual correctness using PS1 runtime assets; Dreamcast is an RE reference only. Preserve accepted widescreen and geometry fixes.
-2. **User** - Reusable cross-game vehicle/map conversion infrastructure with no content-specific runtime hacks.
-3. **User** - Windows controller-family detection and matching controls models.
-4. **User** - Install and prefer original V8 music; balance the default music,
-   voice, and SFX mix.
-5. **User** - Add four-player local multiplayer after release.
-6. **User — PARTIAL** - Finish the sole original-V8-style UI; review remaining fonts and menu layouts.
-7. **User** - Move player-facing features from the Windows menu bar (Mods, Cheats, Guest Vehicles, etc.) into controller-friendly in-game menus, then remove that external bar.
-8. **User** - Add customizable controls with Modern, Classic, and Southpaw presets.
-9. **User** - Fix shared near-object viewport-edge clipping, including scenery and other vehicles.
-10. **Codex** - Complete physical-controller and arena/split-screen user signoff.
-11. **User** - Fix incorrect audio during character and AI selection.
-12. **User** - Wire original Vigilante 8 quests into the existing quest system and audit every quest-bearing character.
-13. **User** - Fix repeated-match texture loss and severe framerate degradation.
-    Latest UI proof run still fails the performance floor (52.51 median /
-    10.65 minimum FPS); see `notes/v82_pause_style.md`. UI changes do not close this.
-14. **User** - Correct Houston's converted special-weapon enemy tracking.
-15. **User — PENDING REVIEW** - Verify the shared main-menu reset that prevents a prior imported character from remaining stuck on Y.
-16. **User — DEFERRED** - Low/medium-risk Enhanced-renderer efficiency polish; review all six candidates before starting work.
+1. **IN PROGRESS / NEXT PRIORITY** - Finish shared renderer visual correctness using PS1 runtime assets; Dreamcast is an RE reference only. Preserve accepted widescreen and geometry fixes.
+2. Reusable cross-game vehicle/map conversion infrastructure with no content-specific runtime hacks.
+3. **PARTIAL / PENDING REVIEW** - Soundtrack choice implemented; balance the
+   default music, voice, and SFX mix.
+4. **PENDING MENU UPDATES** - Four-player local multiplayer.
+5. **PARTIAL** - Finish the sole original-V8-style UI; review remaining fonts and menu layouts.
+6. **Codex** - Complete physical-controller and arena/split-screen user signoff.
+7. **ACCEPTED** - Character/AI carousel audio repair accepted; dedicated two-player coverage remains.
+8. Wire original Vigilante 8 quests into the existing quest system and audit every quest-bearing character.
+9. **PENDING REVIEW** - Verify the shared main-menu reset that prevents a prior imported character from remaining stuck on Y.
 
 ## Goal and conversion rules
 
@@ -53,27 +44,22 @@ open work.
 - [ ] Stage every V8:2 test build and mod only in `V8_2_LOOSE`; never place
       `Vigilante82PC.exe` or V8:2 mods in `PS1 game`.
 
-## User-entered priorities
-
-- [ ] Detect the connected Windows controller family (Xbox, PlayStation, and
-      supported alternatives) and show the corresponding controller model in
-      the controls UI. This remains a wishlist item.
 ## V8: 2nd Offense issue register
 
 Test and deployment target: `V8_2_LOOSE` only.
 
 ### V82-OPEN-012 - Balance default music volume
 
-- [ ] Install the original Vigilante 8 music and make it the preferred
-      soundtrack, retaining the V8:2 music as the fallback when the original
-      tracks are unavailable.
+- [ ] User acceptance of Audio > Soundtrack: Vigilante 8 (default), Second
+      Offense, or Both. Original music is installed; selection, playback,
+      full-song fidelity, and native menu checks pass.
 - [ ] Measure the default CDDA, voice, and SFX mix and choose a balanced music
       level for a clean configuration.
 - [ ] Preserve user volume changes across restart.
 - [ ] Obtain audible acceptance that music neither clips nor overpowers voice
       or SFX; muted visual automation cannot close this item.
 
-### V82-OPEN-015 - Four-player local support (deferred post-release)
+### V82-OPEN-015 - Four-player local support (pending menu updates)
 
 - [ ] Add normal-UI setup for two, three, and four local players.
 - [ ] Support independent devices/input, stable 2x2 and three-player layouts,
@@ -118,15 +104,14 @@ Test and deployment target: `V8_2_LOOSE` only.
       inject a character-specific menu branch, or treat direct mission loading
       as proof that normal character selection works.
 
-### V82-OPEN-023 - Character and AI selector audio is incorrect
+### V82-OPEN-023 - Character and AI selector audio (repair accepted)
 
-- [ ] Trace stock V8:2 character-selection and AI-selection audio events,
-      including navigation, confirmation, voice, music, and transition state.
-- [ ] Restore the native V8:2 event ordering, sound identities, channel use,
-      interruption, and teardown without character-specific substitutions.
-- [ ] Validate stock and imported rosters in one-player and two-player flows,
-      repeated traversal, player-to-AI handoff, confirmation, cancellation,
-      match loading, and return to the selector.
+- [x] User accepted the carousel audio repair ("That works," September 8).
+      Native source identity, timing, pitch and cancellation checks are recorded.
+- [ ] Cover two-player use and repeated return-to-selector on user hardware.
+      The live-bank overwrite and delayed/random-pitch imported acceptance
+      defects are repaired; see `notes/v82_selector_audio_repair.md` for the
+      staged build, native recordings and verification limits.
 
 ### V82-OPEN-024 - Map-by-map renderer fidelity release gate
 
@@ -136,7 +121,7 @@ Preserve accepted widescreen, geometry and texture fixes.
 
 **2026-09-08 status:** The user accepted rigid deployed pontoon placement;
 that repair is closed. Remaining visual follow-up includes the unreproduced
-Dreamland flicker and Oilfield sky sliver, residual faceted shoreline
+Oilfield sky sliver, residual faceted shoreline
 intersections, and broader arena/edge-view acceptance. Current repair evidence
 and limits are in `notes/v82_visual_issue_fixes.md` and
 `notes/v82_rigid_water_attachments.md`. Older build reports below are historical
@@ -144,10 +129,9 @@ and do not describe the current executable. Do not start performance runs
 without a new user request; other-level efficiency work remains deferred.
 
 **Current acceptance focus:** visual correctness and complete HD-texture-pack
-use. Frame-rate optimization is a separate later run under the repeated-match
-performance and deferred efficiency items; record FPS with proofs, but do not
-hold back visually correct evidence for a performance score unless the build
-is genuinely unplayable.
+use. Record FPS with proofs, but do not hold back visually correct evidence
+for a performance score unless the build is unplayable. Further performance
+work requires a new user request.
 
 **Current review build (2026-09-07):** `V8_2_LOOSE/Vigilante82PC.exe`
 SHA-256 `D8065C9E4C9B0F931A8D604C95BB9C5D275A8F304D73477F03E7F70591317F0E`.
@@ -197,6 +181,9 @@ approval remains open.
 - [ ] Correct land/water boundaries so shorelines meet cleanly without hard
       rectangular bands, gaps, overdraw across drivable land, or incompatible
       near/far representations.
+- [ ] Verify whether the crate
+      appearing beside the damaged tree is its authored destruction reward or
+      an incorrect object substitution; do not assume either from a still image.
 - [ ] Eliminate Florida buildings changing textures or material appearance as
       the camera approaches. Prove the underlying shared texture/material/LOD
       rule and check representative buildings on other maps; do not patch the
@@ -365,26 +352,7 @@ water edge remains visibly jagged;
       Subsequent source inspection found that the test's forced type bypassed
       carousel registry selection and therefore guest reservations. Correct
       that fixture before treating this run as evidence of a normal-launch
-      failure; #14 remains open pending valid reproduction.
-- [x] Fix the repeated-match lifecycle regression reported on 2026-08-29:
-      during the third match setup, vehicle textures dropped out and framerate
-      became atrocious; textures recovered when the third match entered
-      gameplay, and the fourth setup appeared normal. Verify at least four
-      consecutive setup/gameplay/return cycles without texture loss or
-      progressive frame-time degradation. Exact `F881E249...AB418` completed
-      that sequence twice; relocated overlays are retired when their live RAM
-      region is reused, so a prior level can no longer pollute the shell or the
-      next level's dispatch table.
-- [x] Retain the first-release performance gate: sustained median and tail
-      windows must remain at or above 40 FPS, and any measured 60-frame window
-      below 30 FPS is an automatic failure. Two exact four-cycle runs passed;
-      their worst windows were 44.74/40.24 FPS in the first/repeat runs, with
-      all per-map median and tail values above 40 FPS. User visual/play review
-      is still required. The current `A0470F59...C15B` focused runs pass
-      individually (Bayou 42.07/31.75 FPS median/minimum; Hoover 46.34/30.98),
-      but both two-map orderings fail the gate, reaching 27.40 and 27.90 FPS.
-      Do not promote this exact build to a release candidate until the shared
-      repeated-map performance failure is resolved; do not weaken the gate.
+      failure; this allocation issue remains open pending valid reproduction.
 - [ ] Visually re-review close-range scenery clipping on the current exact
       candidate. Exact F7D2 preserves every native-admitted NCLIP face while
       retaining precise false-negative rescue, and its image-free Utah ->
@@ -422,69 +390,6 @@ water edge remains visibly jagged;
 - [ ] Keep each map open until automated diagnostics and sequential visual
       comparison both pass; retain compact evidence and verbose logs without
       accumulating disposable captures.
-
-## Additional V8:2 work
-
-- [ ] Move player-facing features currently accessed through the Windows menu
-      bar above the game (including Mods, Cheats, and Guest Vehicles) into the
-      game's own controller-friendly menus. Once those features are reachable
-      in-game, remove the external menu bar. This is functional integration,
-      separate from #7's visual redesign; developer-only diagnostics need not
-      become player-facing menu entries.
-- [ ] Add fully customizable keyboard/controller bindings plus Modern, Classic,
-      and Southpaw presets in the native Options/Controls UI at stock visual and
-      interaction parity.
-- [ ] Fix Enhanced-renderer close-range object clipping where polygons
-      disappear or corrupt as the camera approaches. Begin from a deterministic
-      same-camera reproduction; the rejected selective-NCLIP experiment is not
-      an accepted basis. The current exact candidate passes the image-free
-      Route 66 edge-crossing fixture, but user visual acceptance remains open.
-      User reconfirmed side clipping on 2026-09-04: the orange safety fence in
-      original V8 Ski Resort loses triangular sections along the left view
-      edge. Reference: `C:/Users/smmel/AppData/Local/Temp/codex-clipboard-e44f8f48-ea70-46b1-b88f-05c1adc8587f.png`;
-      reproducible full-size capture on executable `71618E6B...FA8DD` is
-      `artifacts/v82-shared-sheila-distance-goal/subdivision-final-20260904/utah/recompone_present_gameplay_0601_1920x1080_fxaa.png`
-      (this directory contains Ski Resort slot 17, not Winter Games).
-      Revisit the shared object clipping/projection contract, not a fence-,
-      map-, or authored-polygon exception. The roof/distance proof goal was
-      paused by the user to prioritize this shared defect. This issue remains
-      open and is not passed by image-free technical checks.
-      User clarification: this affects ANY nearby object at the viewport
-      edges, including other vehicles, not only fences/static scenery.
-      Current focus is the shared defect; validate near-edge buildings,
-      fences and other vehicles, preserving roof/body opacity and normal
-      offscreen rejection. The fence is a reproduction, not the fix's scope.
-      2026-09-04: shared exact-mesh submission bypasses the native PS1
-      screen-space subdivider for all four triangle packet forms. The
-      same-camera full-size fence proof is corrected without shifting the
-      cables or reopening Sheila's roof; 159 packet/provenance tests pass.
-      A full-size native AI proof now includes a bus at the left edge and
-      another vehicle at the right edge without missing edge wedges;
-      59.94 FPS median / 51.04 minimum, executable `523CC0F9...493AEB`.
-      Dedicated building-edge proof and user approval are still pending.
-      Evidence and rejected isolations: `notes/v82_near_object_side_clipping.md`.
-- [ ] Correct Houston's converted special weapon so its projectiles acquire and
-      track enemy targets with original-V8 behavior. Fix conversion metadata or
-      the shared imported-weapon contract; do not branch on Houston's name,
-      vehicle ID, or weapon ID in runtime code.
-
-### V82-OPEN-026 - Deferred Enhanced-renderer efficiency polish
-
-- [ ] Before making any implementation change for this goal, review all six
-      candidates below with the user and confirm which are still appropriate.
-      Do not treat the saved ranking as authorization to begin work.
-- [ ] Reduce renderer flushes and compatible state changes.
-- [ ] Reuse GPU vertex/index upload buffers safely.
-- [ ] Cache texture-replacement lookup results.
-- [ ] Reuse unchanged duplicate presentations without rerunning composition.
-- [ ] Coalesce changed PS1 VRAM uploads.
-- [ ] Remove disabled diagnostic and tracing overhead from ordinary play.
-- [ ] Preserve native 30 FPS drawing on the 60 Hz game clock. True 60 FPS,
-      interpolation, static-terrain geometry caching, culling changes, and all
-      other high-risk renderer architecture work are explicitly out of scope.
-- [ ] Preserve every existing renderer-fidelity contract and the release gate:
-      sustained median/tail windows at least 40 FPS and no 60-frame window
-      below 30 FPS.
 
 ## User review and signoff
 

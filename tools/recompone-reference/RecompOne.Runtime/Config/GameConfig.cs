@@ -129,6 +129,27 @@ public static class InputProfiles
         game.Pad = CreatePad(profile);
         game.Pad2 = CreatePad(profile);
         game.InputProfile = profile;
+        game.InputProfile2 = profile;
+    }
+
+    public static string ForPlayer(GameConfig game, int player) =>
+        player == 0 ? game.InputProfile : game.InputProfile2 ?? game.InputProfile;
+
+    public static void SetPlayerProfile(GameConfig game, int player, string profile)
+    {
+        // Materialize the legacy shared label before changing player one's.
+        game.InputProfile2 ??= game.InputProfile;
+        if (player == 0) game.InputProfile = profile;
+        else game.InputProfile2 = profile;
+    }
+
+    public static void ApplyPlayer(GameConfig game, string profile, int player)
+    {
+        if (!Names.Contains(profile, StringComparer.Ordinal))
+            throw new ArgumentOutOfRangeException(nameof(profile));
+        if (player == 0) game.Pad = CreatePad(profile);
+        else game.Pad2 = CreatePad(profile);
+        SetPlayerProfile(game, player, profile);
     }
 
     public static bool IsClassicDefaults(GamepadBindings pad) =>
@@ -163,21 +184,21 @@ public static class InputProfiles
 public static class InputBindingResolver
 {
     static readonly GamepadBindings MenuPad = new();
+    static readonly KeyBindings MenuKeys = new();
 
-    // Trigger Drive's gameplay layout deliberately moves Cross and the two
-    // weapon triggers. The retail shell and gameplay overlays still need the
-    // familiar face-button navigation, so those contexts resolve through the
-    // stock DualShock layout without modifying the saved preset.
+    public static KeyBindings ResolveKeys(KeyBindings configured, int player,
+        bool gameplayActive, bool nativeGameplayMenuActive) =>
+        player != 0 || (gameplayActive && !nativeGameplayMenuActive) ? configured : MenuKeys;
+
+    // Presets and custom gamepad layouts describe driving actions. Shell and
+    // pause navigation keep the standard physical face buttons, independent
+    // of the preset label or a remap that changes that label to Custom.
     public static GamepadBindings ResolvePad(
         string profile,
         GamepadBindings configured,
         bool gameplayActive,
         bool nativeGameplayMenuActive)
     {
-        if (!string.Equals(
-                profile, InputProfiles.TriggerDrive,
-                StringComparison.Ordinal))
-            return configured;
         return gameplayActive && !nativeGameplayMenuActive
             ? configured
             : MenuPad;
@@ -195,6 +216,7 @@ public class GameConfig
     public string V82VehiclePackagePath { get; set; } = "";
     public int InputBindingsVersion { get; set; }
     public string InputProfile { get; set; } = InputProfiles.Modern;
+    public string? InputProfile2 { get; set; }
     public string CdPath { get; set; } = "";
     public float MasterVolume { get; set; } = 1.0f;
     public bool Muted { get; set; } = false;

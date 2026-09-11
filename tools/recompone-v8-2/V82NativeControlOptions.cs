@@ -39,10 +39,10 @@ public static partial class Vigilante82PC
 
         static readonly string[] ActionNames =
         [
-            "Gas / Accept",
-            "Hand Brake / Cancel",
+            "Gas",
+            "Hand Brake",
             "Brake",
-            "Select Target / Back",
+            "Select Target",
             "Previous Weapon",
             "Next Weapon",
             "Fire Selected Weapon",
@@ -63,6 +63,7 @@ public static partial class Vigilante82PC
         static bool _capturing;
         static bool _captureAdd;
         static bool _captureArmed;
+        static int _capturePolls;
         static int _player;
         static int _row;
         static int _action;
@@ -165,6 +166,7 @@ public static partial class Vigilante82PC
                     _capturing = true;
                     _captureAdd = (pressed & Circle) != 0u && _gamepad;
                     _captureArmed = false;
+                    _capturePolls = 0;
                 }
                 if (_row == 4 && (pressed & Square) != 0u)
                     ClearCurrentBinding();
@@ -209,17 +211,22 @@ public static partial class Vigilante82PC
         static void CycleProfile(int direction)
         {
             int index = Array.IndexOf(
-                InputProfiles.Names, ConfigManager.Game.InputProfile);
+                InputProfiles.Names, InputProfiles.ForPlayer(ConfigManager.Game, _player));
             if (index < 0)
                 index = 0;
             index = (index + InputProfiles.Names.Length + direction) %
                 InputProfiles.Names.Length;
-            InputProfiles.Apply(ConfigManager.Game, InputProfiles.Names[index]);
+            InputProfiles.ApplyPlayer(ConfigManager.Game, InputProfiles.Names[index], _player);
             ConfigManager.SaveGame();
         }
 
         static void PollBindingCapture()
         {
+            if (++_capturePolls > 600 || V82Compat.GetFirstPressedNativeControlKey() == "Escape")
+            {
+                _capturing = false;
+                return;
+            }
             if (_gamepad)
             {
                 int? pressed =
@@ -233,8 +240,8 @@ public static partial class Vigilante82PC
                     return;
 
                 int[] current = GetPadBinding();
-                SetPadBinding(_captureAdd && !current.Contains(pressed.Value)
-                    ? [.. current, pressed.Value]
+                SetPadBinding(_captureAdd
+                    ? current.Append(pressed.Value).Distinct().ToArray()
                     : [pressed.Value]);
             }
             else
@@ -250,7 +257,7 @@ public static partial class Vigilante82PC
                 SetKeyBinding(pressed);
             }
 
-            ConfigManager.Game.InputProfile = InputProfiles.Custom;
+            InputProfiles.SetPlayerProfile(ConfigManager.Game, _player, InputProfiles.Custom);
             ConfigManager.SaveGame();
             _capturing = false;
         }
@@ -261,7 +268,7 @@ public static partial class Vigilante82PC
                 SetPadBinding([]);
             else
                 SetKeyBinding("");
-            ConfigManager.Game.InputProfile = InputProfiles.Custom;
+            InputProfiles.SetPlayerProfile(ConfigManager.Game, _player, InputProfiles.Custom);
             ConfigManager.SaveGame();
         }
 
@@ -299,7 +306,7 @@ public static partial class Vigilante82PC
                 DrawRow(c, m, textObject, normalColor, 0, 0x0080,
                     $"Controller {_player + 1}");
                 DrawRow(c, m, textObject, normalColor, 1, 0x00AC,
-                    $"Preset: {ConfigManager.Game.InputProfile}");
+                    $"Preset: {InputProfiles.ForPlayer(ConfigManager.Game, _player)}");
                 DrawRow(c, m, textObject, normalColor, 2, 0x00D8,
                     $"Device: {(_gamepad ? "Gamepad" : "Keyboard")}");
                 DrawRow(c, m, textObject, normalColor, 3, 0x0104,
@@ -314,7 +321,12 @@ public static partial class Vigilante82PC
                         _captureAdd ? "Press another button..." :
                         _gamepad ? "Press a button..." : "Press a key...",
                         0x0160, 0x0000000Au);
+                    DrawText(c, m, textObject, "Esc cancels",
+                        0x0180, 0x0000000Au);
                 }
+                else
+                    DrawText(c, m, textObject, "Presets change this pad only",
+                        0x0160, 0x0000000Au);
 
                 c.A0 = textObject;
                 c.RA = 0x8010A8ECu;
@@ -404,18 +416,7 @@ public static partial class Vigilante82PC
                 : string.Join(" / ", binding.Select(PadLabel));
         }
 
-        static string PadLabel(int value) => value switch
-        {
-            0 => "A", 1 => "B", 2 => "X", 3 => "Y",
-            4 => "View", 6 => "Menu", 7 => "LS", 8 => "RS",
-            9 => "LB", 10 => "RB", 11 => "D-Pad Up", 12 => "D-Pad Down",
-            13 => "D-Pad Left", 14 => "D-Pad Right", 100 => "LT", 101 => "RT",
-            102 => "L-Stick Left", 103 => "L-Stick Right",
-            104 => "L-Stick Up", 105 => "L-Stick Down",
-            106 => "R-Stick Left", 107 => "R-Stick Right",
-            108 => "R-Stick Up", 109 => "R-Stick Down",
-            _ => $"Button {value}",
-        };
+        static string PadLabel(int value) => InputPromptLabels.PadButton(value);
 
         static KeyBindings Keys =>
             _player == 0 ? ConfigManager.Game.Keys : ConfigManager.Game.Keys2;

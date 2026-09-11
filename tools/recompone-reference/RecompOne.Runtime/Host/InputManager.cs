@@ -82,6 +82,13 @@ internal static unsafe class InputManager
     static readonly Dictionary<string, int> _scriptStageStartPolls =
         new(StringComparer.OrdinalIgnoreCase);
     static int _nativeGameplayMenuPolls;
+    static bool _readyPromptActive;
+    static readonly bool[] _promptKeyboard = new bool[2];
+    internal static bool NativeMenuActive => _nativeGameplayMenuPolls > 0 && !_readyPromptActive;
+    internal static void SignalReadyPrompt() => _readyPromptActive = true;
+    internal static void EndReadyPrompt() => _readyPromptActive = false;
+    internal static bool PromptUsesGamepad(int player) =>
+        _fakePadActive || (IsPadConnected(player) && !_promptKeyboard[player]);
     static readonly (byte Large, byte Small)[] _lastRumble =
         [(byte.MaxValue, byte.MaxValue), (byte.MaxValue, byte.MaxValue)];
 
@@ -194,7 +201,7 @@ internal static unsafe class InputManager
 
     public static bool IsPadConnected(int pad) => pad == 0 ? _pad0 != null : _pad1 != null;
 
-    public static bool IsKeyDown(Key k) => _keyboard?.IsKeyPressed(k) ?? false;
+    public static bool IsKeyDown(Key k) => !_disableLiveInput && (_keyboard?.IsKeyPressed(k) ?? false);
 
     // Refreshed by the retail PAUSED / QUEST OBJECTIVES text path. Keeping the
     // context pulse at the native UI seam lets Trigger Drive retain ordinary
@@ -505,6 +512,8 @@ internal static unsafe class InputManager
 
     public static int? GetFirstPressedPadButton(int pad = 0)
     {
+        if (_fakePadActive)
+            return _fakePressed[pad].Count == 0 ? null : _fakePressed[pad].Min();
         var ctrl = pad == 0 ? _pad0 : _pad1;
         if (_sdl == null || ctrl == null) return null;
         for (int b = 0; b < (int)GameControllerButton.Max; b++)
@@ -592,8 +601,10 @@ internal static unsafe class InputManager
             Controller.State2 = 0xFFFF;
             return;
         }
-        Controller.State = KeyState(kb, ConfigManager.Game.Keys);
-        Controller.State2 = KeyState(kb, ConfigManager.Game.Keys2);
+        Controller.State = KeyState(kb, InputBindingResolver.ResolveKeys(ConfigManager.Game.Keys,
+            0, GpuHle.GameplayActive || _readyPromptActive, NativeMenuActive));
+        Controller.State2 = KeyState(kb, InputBindingResolver.ResolveKeys(ConfigManager.Game.Keys2,
+            1, GpuHle.GameplayActive || _readyPromptActive, NativeMenuActive));
     }
 
     static ushort KeyState(IKeyboard kb, KeyBindings cfg)
@@ -641,8 +652,8 @@ internal static unsafe class InputManager
             GamepadBindings bindings = InputBindingResolver.ResolvePad(
                 ConfigManager.Game.InputProfile,
                 pad == 0 ? ConfigManager.Game.Pad : ConfigManager.Game.Pad2,
-                GpuHle.GameplayActive,
-                _nativeGameplayMenuPolls > 0);
+                GpuHle.GameplayActive || _readyPromptActive,
+                NativeMenuActive);
             ushort s = pad == 0 ? Controller.State : Controller.State2;
             s = FakeApply(bindings.Cross,    Controller.Cross,    s, pad);
             s = FakeApply(bindings.Circle,   Controller.Circle,   s, pad);
@@ -711,11 +722,12 @@ internal static unsafe class InputManager
 
         if (_pad0 != null)
         {
+            if (GetFirstPressedPadButton(0).HasValue) _promptKeyboard[0] = false;
             GamepadBindings pad = InputBindingResolver.ResolvePad(
                 ConfigManager.Game.InputProfile,
                 ConfigManager.Game.Pad,
-                GpuHle.GameplayActive,
-                _nativeGameplayMenuPolls > 0);
+                GpuHle.GameplayActive || _readyPromptActive,
+                NativeMenuActive);
             Controller.State = PadState(_pad0, pad, Controller.State, 0);
             Controller.LeftX = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Leftx));
             Controller.LeftY = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Lefty));
@@ -725,11 +737,12 @@ internal static unsafe class InputManager
 
         if (_pad1 != null)
         {
+            if (GetFirstPressedPadButton(1).HasValue) _promptKeyboard[1] = false;
             GamepadBindings pad = InputBindingResolver.ResolvePad(
                 ConfigManager.Game.InputProfile,
                 ConfigManager.Game.Pad2,
-                GpuHle.GameplayActive,
-                _nativeGameplayMenuPolls > 0);
+                GpuHle.GameplayActive || _readyPromptActive,
+                NativeMenuActive);
             Controller.State2 = PadState(_pad1, pad, Controller.State2, 1);
             Controller.LeftX2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Leftx));
             Controller.LeftY2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Lefty));
@@ -848,6 +861,7 @@ internal static unsafe class InputManager
 
     static void OnKeyDown(IKeyboard kb, Key key, int _)
     {
+        _promptKeyboard[0] = true;
         if (key == Key.F1)  _topBarToggle = true;
         if (key == Key.F11) _fullscreenToggle = true;
     }

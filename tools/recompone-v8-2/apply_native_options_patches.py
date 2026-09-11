@@ -103,6 +103,33 @@ def main() -> int:
     parser.add_argument("--main-source", type=Path, default=DEFAULT_MAIN)
     args = parser.parse_args()
 
+    old = "    public static void func_80102F70(CpuContext c, IMemory m)\n    {\n"
+    new = old + "        using var controlFooter = RecompOne.Runtime.Sdk.V82ControlPrompts.RewriteFooter(c, m);\n"
+    patch_once(args.shell_source.resolve(), old, new, "contextual menu footer")
+
+    old = "        c.RA = 0x801045CCu;\n        Vigilante82PC.func_8001A2B8(c, m);\n"
+    new = "        c.RA = 0x801045CCu;\n        using (RecompOne.Runtime.Sdk.V82ControlPrompts.Rewrite(c, m, gameplayPrompt: true))\n            Vigilante82PC.func_8001A2B8(c, m);\n"
+    patch_once(args.shell_source.resolve().with_name("SHELL_LOAD.cs"), old, new, "loading tip bindings")
+
+    old = "        L80013A00: ;\n"
+    new = old + "        RecompOne.Runtime.Sdk.V82ControlPrompts.EndReadyPrompt();\n"
+    patch_once(args.main_source.resolve(), old, new, "ready-prompt input context exit")
+
+    for address in ("8001A3B0", "8001A6BC"):
+        # Insert after the existing pre-hooks so stage/context discovery sees
+        # original text before physical button labels replace native glyphs.
+        path = args.main_source.resolve()
+        text = path.read_text(encoding="utf-8")
+        start = text.index(f"    public static void func_{address}(CpuContext c, IMemory m)")
+        end = text.index("\n    }", start)
+        body = text[start:end]
+        hook = "        using var controlPrompt = RecompOne.Runtime.Sdk.V82ControlPrompts.Rewrite(c, m);\n"
+        if hook not in body:
+            marker = "        c.SP = c.SP - "
+            offset = body.index(marker)
+            updated = body[:offset] + hook + body[offset:]
+            path.write_text(text[:start] + updated + text[end:], encoding="utf-8")
+
     changed = patch_once(
         args.main_source.resolve(), MAIN_OLD, MAIN_NEW,
         "native options text trace",
