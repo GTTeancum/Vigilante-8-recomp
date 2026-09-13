@@ -21,6 +21,10 @@ comfortable to play, test, and extend on current hardware.
 
 ![Enhanced Route 66 gameplay in Vigilante 8: 2nd Offense](docs/screenshots/v82_route66_enhanced.png)
 
+![Houston's original Vigilante 8 Palomino with custom blue paint](docs/screenshots/v82_houston_custom_color.png)
+
+![Dallas's Palomino XIII with custom purple paint](docs/screenshots/v82_dallas_custom_color.png)
+
 ## Current Status
 
 | Game | State | Current scope |
