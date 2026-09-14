@@ -7,6 +7,7 @@ using RecompOne.Runtime.Enhanced;
 using RecompOne.Runtime.Hle;
 
 // Real runtime memory/provenance and GTE, no game, graphics or audio launch.
+Environment.SetEnvironmentVariable("RECOMPONE_V82_JUNCTION_ATTACHMENTS", "1");
 var submit = typeof(V82MeshClipCompat).GetMethod("SubmitExactTriangle",
     BindingFlags.NonPublic | BindingFlags.Static)!;
 const uint scratch = 0x1F800000, packet = 0x10000, table = 0x20000;
@@ -40,6 +41,29 @@ void Check(bool value, string message)
         m.WriteU32(source + 0xC, 0x445566u + (uint)i);
     }
     return (m, c, vertices);
+}
+Check(Math.Abs(EnhancedGlBackend.NativeRoadPriorityDepth(1000f / 65535f) * 65535f - 616f) < 0.001f,
+    "road versus terrain priority is the native 48 eight-SZ buckets");
+Check(EnhancedGlBackend.NativeRoadPriorityDepth(100f / 65535f) == 1f / 65535f,
+    "native priority does not cross the raster near limit");
+// Road provenance must follow packet reuse, including cached/aliased RAM.
+{
+    const uint roadPacket = 0x001F0100;
+    GpuHle.BeginNativeRoadPacketWrites();
+    GpuHle.BeginNativeRoadPacketWrites(512);
+    GpuHle.ObservePacketWrite(roadPacket);
+    GpuHle.EndNativeRoadPacketWrites();
+    GpuHle.ObservePacketWrite(roadPacket + 4);
+    Check(GpuHle.IsNativeRoadPacket(0x801F0100), "road ownership normalizes RAM aliases");
+    Check(GpuHle.IsNativeRoadPacket(roadPacket + 4), "nested road emission retains ownership");
+    Check(GpuHle.NativeRoadPriority(0x801F0100) == 512, "junction packet retains authored priority through RAM alias");
+    Check(GpuHle.NativeRoadPriority(roadPacket + 4) == 384, "leaving junction restores outer road priority");
+    GpuHle.EndNativeRoadPacketWrites();
+    GpuHle.ObservePacketWrite(roadPacket);
+    Check(!GpuHle.IsNativeRoadPacket(roadPacket), "reused non-road packet retires road ownership");
+    Check(GpuHle.NativeRoadPriority(roadPacket) == 0, "packet reuse also retires authored priority");
+    GpuHle.ObservePacketWrite(roadPacket + 4);
+    Check(!GpuHle.IsNativeRoadPacket(roadPacket + 4), "road scope ends after matching exits");
 }
 bool Submit(CpuContext c, IMemory m) => (bool)submit.Invoke(null, [c, m])!;
 foreach (uint kind in new uint[] {0x20, 0x24, 0x30, 0x34})
@@ -541,9 +565,31 @@ foreach (float[] depths in new[] {new float[] {40, 90, 260}, new float[] {180, 2
     GpuHle.WideAspect=oldAspect; GpuHle.GameplayActive=false;
     view.HighResolution3D=oldHigh; view.Widescreen=oldWide;
 }
+// Reconstructed terrain must follow the same GP0(E5h) origin as native
+// packet vertices, including lower split viewports and both framebuffers.
+{
+    var make = typeof(EnhancedGlBackend).GetMethod("MakeDreamcastTerrainVertex",
+        BindingFlags.NonPublic | BindingFlags.Static)!;
+    var source = new DreamcastTerrainGeometry.Vertex(new(32, 16, 256), 0, 256,
+        new(128, 128, 128), default, 0);
+    var patch = new GpuHle.TerrainPatchGeometry([], default, 80, 60, 128);
+    foreach (int bufferY in new[] { 0, 240 })
+    foreach (int viewY in new[] { 0, 120 })
+    foreach (int viewX in new[] { 0, 160 })
+    {
+        var env = new HleDrawEnv { DrawOffsetX = viewX, DrawOffsetY = bufferY + viewY };
+        var vertex = (HleVertex)make.Invoke(null, [default(HleVertex), source, patch, true, env])!;
+        Check(vertex.X == 96 + viewX && vertex.Y == 68 + bufferY + viewY,
+            "terrain follows native drawing origin for every split viewport/buffer");
+        Check(vertex.ProjectionCenterX == 80 + viewX && vertex.ProjectionCenterY == 60 + bufferY + viewY,
+            "terrain clipping and raster projection retain the same drawing origin");
+    }
+}
 checks += QuadStripChecks.Run();
 checks += NclipScopeChecks.Run();
 checks += SceneDepthChecks.Run();
+checks += VehicleMaterialChecks.Run();
 checks += MeshDepthScaleChecks.Run();
+checks += JunctionAttachmentChecks.Run();
 checks += DisplayCallbackChecks.Run();
 Console.WriteLine($"PASS: {checks} mesh clipping packet/provenance assertions");

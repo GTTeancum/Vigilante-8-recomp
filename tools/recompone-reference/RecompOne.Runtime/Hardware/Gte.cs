@@ -797,7 +797,15 @@ public static class Gte
         SxyDepth[2] = (ushort)sz;
         SxyPerspectiveW[0] = SxyPerspectiveW[1];
         SxyPerspectiveW[1] = SxyPerspectiveW[2];
-        float rawViewZ = (float)(m3 / 4096.0);
+        double viewM1=m1, viewM2=m2, viewM3=m3;
+        if (Sdk.V82JunctionAttachments.ActiveOffsets is { } offsets &&
+            offsets.TryGetValue((vx,vy,vz), out var offset))
+        {
+            viewM1 += RT[0]*offset.X + RT[1]*offset.Y + RT[2]*offset.Z;
+            viewM2 += RT[3]*offset.X + RT[4]*offset.Y + RT[5]*offset.Z;
+            viewM3 += RT[6]*offset.X + RT[7]*offset.Y + RT[8]*offset.Z;
+        }
+        float rawViewZ = (float)(viewM3 / 4096.0);
         float preciseZ = MathF.Max(H * 0.5f, rawViewZ);
         SxyPerspectiveW[2] = preciseZ;
         SxyPreciseX[0] = SxyPreciseX[1];
@@ -822,8 +830,8 @@ public static class Gte
         SxyProjectionScale[1] = SxyProjectionScale[2];
         SxyHasPrecisePosition[0] = SxyHasPrecisePosition[1];
         SxyHasPrecisePosition[1] = SxyHasPrecisePosition[2];
-        SxyViewX[2] = (float)(m1 / 4096.0);
-        SxyViewY[2] = (float)(m2 / 4096.0);
+        SxyViewX[2] = (float)(viewM1 / 4096.0);
+        SxyViewY[2] = (float)(viewM2 / 4096.0);
         SxyViewZ[2] = rawViewZ;
         SxyProjectionCenterX[2] = OFX / 65536.0f;
         SxyProjectionCenterY[2] = OFY / 65536.0f;

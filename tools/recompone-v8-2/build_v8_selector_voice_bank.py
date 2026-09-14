@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Append V8's original driver-selection voices to V8:2's shell SND bank.
+"""Build a resident selector bank and nonresident original-V8 voice source.
 
 The V8 selector's roster table at SHELL.DLL virtual/file offset 0x11C68
 contains a 20-byte record per driver.  Byte +0x0C is passed directly to the
 native SND player when that driver is accepted.  This tool validates that
 retail mapping, copies the referenced SPU-ADPCM samples byte-for-byte, and
-appends them in roster order to V8:2's existing shell bank.
+stores them in roster order in V8VOICES.SND. SOUNDS.SND retains the retail
+effects plus two reusable per-player slots, instead of keeping all thirteen
+voices in the PS1's limited SPU RAM. build() produces the intermediate expanded
+bank for existing conversion callers; split_resident_bank() makes the runtime
+pair and main() always deploys that pair.
 """
 
 from __future__ import annotations
@@ -99,6 +103,9 @@ def build(
     voices = selection_voice_ids(v8_shell_dll)
     v8_entries, v8_payload = parse_bank(v8_snd)
     v82_entries, v82_payload = parse_bank(v82_snd)
+    if len(v82_entries) == 16 and all(pitch == 0 for _, pitch in v82_entries[14:]):
+        v82_payload = v82_payload[:v82_entries[14][0] * 8]
+        v82_entries = v82_entries[:14]
     original_v82_count = len(v82_entries)
     appended_count = original_v82_count - V82_RETAIL_SHELL_ENTRY_COUNT
     if appended_count < 0 or appended_count > V8_ROSTER_COUNT:
@@ -188,12 +195,47 @@ def build(
     }
 
 
+def split_resident_bank(expanded: bytes) -> tuple[bytes, bytes]:
+    """Keep retail effects and two reusable voice slots in SPU RAM.
+
+    All imported samples remain byte-exact in a separate SND source bank.
+    Loading every imported voice alongside the native character bank exceeds
+    the PS1's 512 KiB RAM and used to trigger destructive allocator recovery.
+    """
+    entries, payload = parse_bank(expanded)
+    if len(entries) != V82_RETAIL_SHELL_ENTRY_COUNT + V8_ROSTER_COUNT:
+        raise ValueError("expected the complete expanded selector bank")
+    samples = [sample_bytes(entries, payload, i) for i in range(14, 27)]
+    slot_size = max(map(len, samples))
+    retail_payload = payload[:entries[14][0] * 8]
+    resident_entries = entries[:14] + [
+        ((len(retail_payload) + slot * slot_size) // 8, 0)
+        for slot in range(2)
+    ]
+    # End-marked silence is safe even before a slot is populated.
+    silence = bytes([12, 1]) + bytes(14)
+    resident_payload = retail_payload + silence * (slot_size * 2 // 16)
+    voice_entries = []
+    voice_payload = bytearray()
+    for i, sample in enumerate(samples):
+        voice_entries.append((len(voice_payload) // 8, entries[14 + i][1]))
+        voice_payload.extend(sample)
+
+    def pack(table, data):
+        return (struct.pack('<HH', len(table), len(data) // 8)
+                + b''.join(struct.pack('<HH', *e) for e in table) + data)
+
+    return pack(resident_entries, resident_payload), pack(voice_entries, voice_payload)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--v8-shell-dll", type=Path, required=True)
     parser.add_argument("--v8-snd", type=Path, required=True)
     parser.add_argument("--v82-snd", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--voice-output", type=Path,
+                        help="nonresident source bank; defaults to V8VOICES.SND beside output")
     args = parser.parse_args()
 
     output, report = build(
@@ -202,11 +244,14 @@ def main() -> int:
         args.v82_snd.read_bytes(),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_bytes(output)
+    resident, voices = split_resident_bank(output)
+    args.output.write_bytes(resident)
+    voice_output = args.voice_output or args.output.with_name('V8VOICES.SND')
+    voice_output.parent.mkdir(parents=True, exist_ok=True)
+    voice_output.write_bytes(voices)
     print(
-        f"{args.output}: {report['original_v82_entries']} -> "
-        f"{report['extended_v82_entries']} entries, "
-        f"+{report['appended_payload_bytes']} byte-exact SPU-ADPCM bytes"
+        f"{args.output}: 14 retail entries + 2 reusable resident slots; "
+        f"{voice_output}: 13 byte-exact nonresident voices"
     )
     return 0
 

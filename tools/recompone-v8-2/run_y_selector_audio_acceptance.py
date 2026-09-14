@@ -83,9 +83,9 @@ def main() -> int:
     if len(sound) < 4:
         raise ValueError("selector sound bank is truncated")
     sound_entries = struct.unpack_from("<H", sound)[0]
-    if sound_entries != 27:
+    if sound_entries != 16:
         raise ValueError(
-            f"selector sound bank has {sound_entries} entries, expected 27"
+            f"selector sound bank has {sound_entries} entries, expected 16"
         )
 
     stdout_path = output / "stdout.log"
@@ -179,8 +179,8 @@ def main() -> int:
     )
     voice = re.findall(
         r"\[V82SelectionVoice\] guest=12 "
-        r"stable=guest\.v8\.y_the_alien sample=26 "
-        r"native_voice=3 .* entries=27 ",
+        r"stable=guest\.v8\.y_the_alien sample=15 "
+        r"native_voice=2 .* entries=16 ",
         text,
     )
     built = "created guest.v8.y_the_alien native-selector object=" in text

@@ -884,6 +884,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     static readonly bool TrueVertexDepth =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_V82_TRUE_DEPTH") != "0";
+
     static readonly bool TraceDreamcastWaterBase =
         Environment.GetEnvironmentVariable(
             "RECOMPONE_TRACE_V82_NATIVE_WATER") == "1";
@@ -1167,7 +1168,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         int ClipY0,
         int ClipX1,
         int ClipY1,
-        int TextureSmoothing);
+        int TextureSmoothing,
+        int NativeRoadPrioritySz = 0);
     readonly List<DeferredBatch> _deferredLoadingPrompt = [];
     readonly List<DeferredBatch> _deferredScreenEffects = [];
     sealed class BufferedDeferredBatch(DeferredBatch state)
@@ -1181,6 +1183,26 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     // packets and replay them as that pair. This is a material/state staging
     // rule, not a map or texture exception.
     readonly List<BufferedDeferredBatch> _deferredWater = [];
+    readonly List<BufferedDeferredBatch> _deferredRoads = [];
+    readonly List<BufferedDeferredBatch> _deferredVehicleSubtractive = [];
+    bool _replayingNativeRoads;
+    static readonly bool DiagnosticRoadTriangleBatches =
+        Environment.GetEnvironmentVariable("RECOMPONE_DIAGNOSTIC_ROAD_TRIANGLE_BATCHES") == "1";
+    int _kNativeRoadPrioritySz;
+    readonly float[] _roadDepthScratch = new float[MaxVerts];
+
+    // Native XRTP OT+0x40 versus terrain OT+0x100: 48 slots * 8 SZ.
+    public static float NativeRoadPriorityDepth(float normalizedDepth, int prioritySz = 384) =>
+        Math.Clamp(normalizedDepth * 65535f - prioritySz, 1f, 65535f) / 65535f;
+
+    void ReplayNativeRoads()
+    {
+        if (_deferredRoads.Count == 0) return;
+        Flush();
+        _replayingNativeRoads = true;
+        try { ReplayBufferedBatches(_deferredRoads); Flush(); }
+        finally { _replayingNativeRoads = false; }
+    }
     readonly HashSet<uint> _emittedWaterBaseGroups = [];
     readonly HashSet<uint> _emittedWaterSurfaceGroups = [];
     long _emittedWaterBaseGroupFrame = -1;
@@ -1247,6 +1269,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
     public void ResetTransientState()
     {
+        _textureReplacements?.ReleaseSceneCache();
         _count = 0;
         _kTarget = null;
         _backdropPending.Clear();
@@ -1257,6 +1280,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _deferredLoadingPrompt.Clear();
         _deferredScreenEffects.Clear();
         _deferredWater.Clear();
+        _deferredRoads.Clear();
+        _deferredVehicleSubtractive.Clear();
         _deferredSky.Clear();
         ResetAtmosphereState();
     }
@@ -1896,10 +1921,12 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         // the far OT background; it must not finish the world layer early.
         if (material == HleMaterialKind.Ui &&
             !GpuHle.IsSkyPacket(f.PacketAddress) &&
-            (_deferredWater.Count != 0 ||
+            (_deferredRoads.Count != 0 || _deferredVehicleSubtractive.Count != 0 || _deferredWater.Count != 0 ||
              _deferredScreenEffects.Count != 0))
         {
             Flush();
+            ReplayNativeRoads();
+            ReplayBufferedBatches(_deferredVehicleSubtractive);
             ReplayBufferedBatches(_deferredWater);
             ReplayDeferredBatches(_deferredScreenEffects);
         }
@@ -2820,13 +2847,13 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             if (FinalOwnerActive)
                 _finalOwnerLeaf = $"cell={cellX},{cellZ} leaf={leaf.X},{leaf.Z}/{leaf.Size} descriptor={textures.Get(leaf.X, leaf.Z)}";
             HleVertex a = MakeDreamcastTerrainVertex(
-                template, leaf.TopLeft, patch, leaf.Textured, _kTarget);
+                template, leaf.TopLeft, patch, leaf.Textured, _env);
             HleVertex b = MakeDreamcastTerrainVertex(
-                template, leaf.TopRight, patch, leaf.Textured, _kTarget);
+                template, leaf.TopRight, patch, leaf.Textured, _env);
             HleVertex c = MakeDreamcastTerrainVertex(
-                template, leaf.BottomLeft, patch, leaf.Textured, _kTarget);
+                template, leaf.BottomLeft, patch, leaf.Textured, _env);
             HleVertex d = MakeDreamcastTerrainVertex(
-                template, leaf.BottomRight, patch, leaf.Textured, _kTarget);
+                template, leaf.BottomRight, patch, leaf.Textured, _env);
             if (TraceTerrainScanlines.Length != 0 &&
                 (TraceTerrainCellTicks is not { } leafTicks ||
                  (GpuHle.DebugGameplayTick >= leafTicks.Start &&
@@ -2894,10 +2921,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     {
         var target = Classify();
         if (target == null) return false;
-        float left = _env.ClipX0 - target.X, right = _env.ClipX1 - target.X + 1;
+        float left = _env.ClipX0 - _env.DrawOffsetX, right = _env.ClipX1 - _env.DrawOffsetX + 1;
         if (_env.ClipX0 <= target.X && _env.ClipX1 >= target.X + target.W - 1)
-        { left = -target.Margin; right = target.W + target.Margin; }
-        float top = _env.ClipY0 - target.Y, bottom = _env.ClipY1 - target.Y + 1;
+        { left = target.X - _env.DrawOffsetX - target.Margin; right = target.X - _env.DrawOffsetX + target.W + target.Margin; }
+        float top = _env.ClipY0 - _env.DrawOffsetY, bottom = _env.ClipY1 - _env.DrawOffsetY + 1;
         return DreamcastTerrainGeometry.OutsideViewport(patch.Samples, patch.HeightAxis,
             patch.ProjectionCenterX, patch.ProjectionCenterY, patch.ProjectionScale,
             left, right, top, bottom);
@@ -2906,17 +2933,14 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     static HleVertex MakeDreamcastTerrainVertex(
         in HleVertex template, in DreamcastTerrainGeometry.Vertex source,
         GpuHle.TerrainPatchGeometry patch, bool textured,
-        GlDisplayRt? target)
+        HleDrawEnv env)
     {
         HleVertex result = template;
-        // The GTE projects into the display-local 320x240 viewport. Native
-        // packet vertices subsequently receive the GPU draw-environment
-        // origin, but these reconstructed vertices bypass that packet path.
-        // Restore the target origin here so both halves of a vertically
-        // double-buffered display project into the same local render-target
-        // coordinates after the backend applies its target bias.
-        float targetX = target?.X ?? 0f;
-        float targetY = target?.Y ?? 0f;
+        // Match the native GPU's GP0(E5h) drawing offset. A viewport may
+        // start inside the framebuffer (the lower half in four-player), so
+        // the framebuffer origin is not a substitute for this offset.
+        float targetX = env.DrawOffsetX;
+        float targetY = env.DrawOffsetY;
         result.SourceAddress = 0;
         result.ViewX = source.View.X;
         result.ViewY = source.View.Y;
@@ -3601,12 +3625,16 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             (_viewHighResolution3D ||
              _viewPerspectiveCorrectTextures) &&
             (modernGeometry || f.OtIndex > 0);
-        // Preserve the PS1 ordering table for ordinary world and vehicle
-        // materials. In particular, vehicle reflection/gloss polygons are
+        // Preserve the PS1 ordering table for vehicle materials. In
+        // particular, vehicle reflection/gloss polygons are
         // coplanar and interleaved with opaque body polygons; depth-testing
         // those packets against a partially reconstructed depth image rejects
-        // valid body coverage and makes the vehicle look hollow. Only terrain
-        // and route surfaces with an explicit compare/update contract, the
+        // valid body coverage and makes the vehicle look hollow. Opaque
+        // scenery needs a coherent depth compare: regenerated terrain leaves
+        // share their parent packet's OT position, so a nearer leaf can arrive
+        // before a farther scenery face. Painter-only scenery then draws
+        // buried supports through that foreground land. Terrain and route
+        // surfaces with an explicit compare/update contract, the
         // recovered Dreamcast water passes, and deferred screen effects use
         // the enhanced depth image. The latter are replayed after the world is
         // complete so their authored OT depth can mask the weather/fog strip
@@ -3618,6 +3646,16 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         bool dreamcastWater = f.Material is
             HleMaterialKind.WaterBase or HleMaterialKind.WaterSurface;
         bool deferWater = GpuHle.GameplayActive && dreamcastWater;
+        // Native vehicle subtractive packets include projected ground shadows.
+        // They shade the completed road/terrain surface; their transparent
+        // footprint must not become a depth occluder for a deferred road.
+        bool deferVehicleSubtractive = GpuHle.GameplayActive && f.Vehicle &&
+            f.Textured && f.SemiTrans && f.Material == HleMaterialKind.Subtractive &&
+            coherentRasterDepth;
+        // XRTP STP pixels must blend over completed terrain, not sky. The
+        // original OT gives roads priority over terrain; regenerated terrain
+        // can arrive later than the packet that owns the road's background.
+        bool deferRoad = GpuHle.GameplayActive && f.NativeRoad && coherentRasterDepth;
         bool skyPacket =
             BackdropFill &&
             GpuHle.GameplayActive &&
@@ -3642,10 +3680,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         bool depthWrite =
             depthEligible &&
             !skyPacket &&
+            !deferVehicleSubtractive &&
             f.Material != HleMaterialKind.ScreenEffect &&
             (f.Material != HleMaterialKind.WaterBase || DiagnosticWaterBaseDepthWrite);
         bool sourceOpaqueDepthTest =
-            f.N64RouteDepthCompare &&
+            (f.N64RouteDepthCompare || SceneryDepthCompare && UsesSceneryDepthCompare(f, coherentRasterDepth)) &&
             !f.SemiTrans &&
             coherentRasterDepth;
         bool dreamcastTerrainDepth =
@@ -3656,9 +3695,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         bool depthTest =
             depthEligible &&
             (sourceOpaqueDepthTest || dreamcastTerrainDepth ||
-             deferScreenEffect || dreamcastWater);
+             deferRoad || deferVehicleSubtractive || deferScreenEffect || dreamcastWater);
         bool sourceDepthCompareWrite =
-            (sourceOpaqueDepthTest || dreamcastTerrainDepth) &&
+            (sourceOpaqueDepthTest || dreamcastTerrainDepth || deferRoad) &&
             depthTest && depthWrite;
         if (TracePerformance && f.Material == HleMaterialKind.ScreenEffect)
         {
@@ -3667,7 +3706,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 _traceDepthTestedScreenEffectTriangles++;
         }
         GlDisplayRt? deferredTarget =
-            (deferScreenEffect || deferWater) ? Classify() : null;
+            (deferScreenEffect || deferWater || deferRoad || deferVehicleSubtractive) ? Classify() : null;
         GlDisplayRt? backdropTarget =
             skyTarget is { Margin: > 0 } deferredBackdrop
                 ? deferredBackdrop
@@ -3695,7 +3734,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         // its material breaks cannot split widescreen edge reconstruction.
         if (!deferSky && _deferredSky.Count != 0)
             ReplayDeferredSky();
-        if (!deferScreenEffect && !deferWater && !deferSky)
+        if (!deferScreenEffect && !deferWater && !deferRoad && !deferVehicleSubtractive && !deferSky)
             Begin(
                 f,
                 3,
@@ -4404,6 +4443,16 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 sourceDepthCompareWrite,
                 dreamcastTerrainDepth);
         }
+        else if (deferRoad)
+        {
+            AppendBufferedBatch(_deferredRoads, va, vb, vc, deferredTarget,
+                f, depthTest, depthWrite, sourceDepthCompareWrite, dreamcastTerrainDepth);
+        }
+        else if (deferVehicleSubtractive)
+        {
+            AppendBufferedBatch(_deferredVehicleSubtractive, va, vb, vc, deferredTarget,
+                f, depthTest, depthWrite, sourceDepthCompareWrite, dreamcastTerrainDepth);
+        }
         else if (deferWater)
         {
             if (TracePerformance)
@@ -4694,8 +4743,34 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             !a.HasViewSpace || !b.HasViewSpace || !c.HasViewSpace)
             return false;
 
-        return Ps1CullBackFace(a, b, c);
+        bool culled = Ps1CullBackFace(a, b, c);
+        if (TraceWorldObjectCull && culled && FinalOwnerActive &&
+            _worldObjectCullTraceCount++ < 256)
+        {
+            bool hasNclip = GpuHle.TryGetTriangleNclipPacket(
+                flags.PacketAddress, out GpuHle.TriangleNclipPacket nclip);
+            Console.Error.WriteLine($"[WorldObjectCull] frame={_frame} tick={GpuHle.DebugGameplayTick} " +
+                $"packet=0x{flags.PacketAddress:X8} owner={GpuHle.DescribePacketOwner(flags.PacketAddress)} " +
+                $"nclip={hasNclip}:{nclip} " +
+                $"a={a.X},{a.Y}/{a.ViewX},{a.ViewY},{a.ViewZ} " +
+                $"b={b.X},{b.Y}/{b.ViewX},{b.ViewY},{b.ViewZ} " +
+                $"c={c.X},{c.Y}/{c.ViewX},{c.ViewY},{c.ViewZ}");
+        }
+        return culled;
     }
+
+    static readonly bool TraceWorldObjectCull =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_WORLD_OBJECT_CULL") == "1";
+    static readonly bool SceneryDepthCompare =
+        Environment.GetEnvironmentVariable("RECOMPONE_SCENERY_DEPTH_COMPARE") != "0";
+    int _worldObjectCullTraceCount;
+
+    // Only exact, opaque scenery participates. Vehicle reflection layers,
+    // authored translucent effects and uncorrelated packet-depth fallbacks
+    // retain their existing native ordering contracts.
+    public static bool UsesSceneryDepthCompare(in PrimFlags flags, bool coherentDepth) =>
+        coherentDepth && flags.WorldObject && !flags.Vehicle && !flags.SemiTrans &&
+        flags.Material is HleMaterialKind.Opaque or HleMaterialKind.AlphaTest;
 
     /// <summary>
     /// Rejects the back winding of PS1 scenery packets using the exact
@@ -5107,7 +5182,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             // top-HUD tile in one left-anchored group. Lower HUD art is moved
             // only when it was already authored in the left third; projected
             // names and central prompts retain their world/screen position.
-            bool topHud = localTop < target.H * 0.42f;
+            // A display-height strip (for example the native split divider)
+            // starts at the top too, but owns display coordinates, not HUD
+            // margin placement. Moving it left draws a second false boundary.
+            bool topHud = localTop < target.H * 0.42f && r.H < target.H;
             bool locationCaption =
                 localTop >= target.H * 0.52f &&
                 localTop < target.H * 0.9f;
@@ -5745,9 +5823,81 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, firstVertex * sizeof(GlVertex), _verts.AsSpan(0, _count));
         _streamVertex = firstVertex + _count;
 
+        // Stencil bit0 identifies generated terrain in the completed depth
+        // image. Other depth-writing scenery clears it; UI leaves it alone.
+        if (rt != null)
+        {
+            _gl.Enable(EnableCap.StencilTest);
+            _gl.StencilMask(_kDepthWrite ? 3u : 0u);
+            _gl.StencilFunc(StencilFunction.Always, _kDreamcastTerrainDepth ? 1 : 0, 3);
+            _gl.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Replace);
+        }
+        else _gl.Disable(EnableCap.StencilTest);
+
         void DrawBatch()
         {
-            _gl.DrawArrays(PrimitiveType.Triangles, firstVertex, (uint)_count);
+            if (!_replayingNativeRoads || rt == null)
+            {
+                _gl.DrawArrays(PrimitiveType.Triangles, firstVertex, (uint)_count);
+                return;
+            }
+            if (DiagnosticRoadTriangleBatches)
+            {
+                for (int start = 0; start < _count; start += 3) DrawRoadRange(start, 3);
+            }
+            else DrawRoadRange(0, _count);
+        }
+
+        void DrawRoadRange(int start, int count)
+        {
+            // Cars/buildings use exact scene depth. Road priority must never
+            // turn a ground decal into a foreground occluder of vehicles.
+            _gl.StencilMask(3);
+            _gl.StencilFunc(StencilFunction.Notequal, 1, 1);
+            _gl.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Zero);
+            _gl.DrawArrays(PrimitiveType.Triangles, firstVertex + start, (uint)count);
+
+            // Test native relative OT priority only against terrain. Mark
+            // eligible samples without changing either colour or real depth.
+            for (int i = start; i < start + count; i++)
+            {
+                _roadDepthScratch[i] = _verts[i].RasterDepth;
+                _verts[i].RasterDepth = NativeRoadPriorityDepth(_roadDepthScratch[i], _kNativeRoadPrioritySz);
+            }
+            _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer,
+                (firstVertex + start) * sizeof(GlVertex), _verts.AsSpan(start, count));
+            _gl.ColorMask(false, false, false, false);
+            SetDepthWrite(false);
+            _gl.StencilMask(2);
+            _gl.StencilFunc(StencilFunction.Equal, 3, 1);
+            _gl.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Replace);
+            _gl.DrawArrays(PrimitiveType.Triangles, firstVertex + start, (uint)count);
+
+            // Blend the original road into those samples and write its real
+            // depth, so later water/effects still see the actual surface.
+            for (int i = start; i < start + count; i++) _verts[i].RasterDepth = _roadDepthScratch[i];
+            _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer,
+                (firstVertex + start) * sizeof(GlVertex), _verts.AsSpan(start, count));
+            _gl.ColorMask(true, true, true, true);
+            SetDepthWrite(_kDepthWrite);
+            SetDepthFunction(DepthFunction.Always);
+            _gl.StencilMask(0);
+            _gl.StencilFunc(StencilFunction.Equal, 3, 3);
+            _gl.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Keep);
+            _gl.DrawArrays(PrimitiveType.Triangles, firstVertex + start, (uint)count);
+
+            // Eligibility belongs to the whole native-ordered batch. Clearing
+            // it on the first road fragment makes overlapping later junctions
+            // disappear behind that fragment. Finish every painter-order draw
+            // before retiring these samples from the terrain stencil.
+            _gl.ColorMask(false, false, false, false);
+            SetDepthWrite(false);
+            _gl.StencilMask(3);
+            _gl.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Zero);
+            _gl.DrawArrays(PrimitiveType.Triangles, firstVertex + start, (uint)count);
+            _gl.ColorMask(true, true, true, true);
+            SetDepthWrite(_kDepthWrite);
+            SetDepthFunction(DepthFunction.Less);
         }
 
         int blendState = BlendStateOf(_kTransparent, _kBlend, _kMaterial);
@@ -5813,6 +5963,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             }
             }
         }
+        _gl.Disable(EnableCap.StencilTest);
         _gl.Disable(EnableCap.ScissorTest);
         SetDepthWrite(true);
         if (rt != null)
@@ -5903,7 +6054,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _env.ClipY0,
             _env.ClipX1,
             _env.ClipY1,
-            ConfigManager.View.TextureSmoothing ? 1 : 0);
+            ConfigManager.View.TextureSmoothing ? 1 : 0, f.NativeRoadPrioritySz);
     }
 
     static bool SameDeferredState(
@@ -5916,6 +6067,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         a.DepthWrite == b.DepthWrite &&
         a.SourceDepthCompareWrite == b.SourceDepthCompareWrite &&
         a.DreamcastTerrainDepth == b.DreamcastTerrainDepth &&
+        a.NativeRoadPrioritySz == b.NativeRoadPrioritySz &&
         a.Material == b.Material &&
         a.PrimitiveGroup == b.PrimitiveGroup &&
         a.SetMask == b.SetMask &&
@@ -6246,6 +6398,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             batch.DepthWrite == _kDepthWrite &&
             batch.SourceDepthCompareWrite == _kSourceDepthCompareWrite &&
             batch.DreamcastTerrainDepth == _kDreamcastTerrainDepth &&
+            batch.NativeRoadPrioritySz == _kNativeRoadPrioritySz &&
             batch.SetMask == _kSetMask &&
             batch.CheckMask == _kCheckMask &&
             batch.TwAndX == _kTwAndX &&
@@ -6266,6 +6419,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _kDepthWrite = batch.DepthWrite;
             _kSourceDepthCompareWrite = batch.SourceDepthCompareWrite;
             _kDreamcastTerrainDepth = batch.DreamcastTerrainDepth;
+            _kNativeRoadPrioritySz = batch.NativeRoadPrioritySz;
             _kMaterial = batch.Material;
             _kBlend = batch.Blend;
             _kSetMask = batch.SetMask;
@@ -6313,6 +6467,33 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             else
                 batch.Vertices.CopyTo(_verts, _count);
             _count += vertexCount;
+            // Junction meshes previously used the ordinary world-object path.
+            // Moving their draw after terrain must retain its planar mapping.
+            // The helpers require exact object view-space vertices (tag 2),
+            // so native XRTP strip packets do not acquire object UV corrections.
+            if (_replayingNativeRoads && !DisablePlanarQuadMapping &&
+                _viewPerspectiveCorrectTextures)
+            {
+                for (int i = _count - vertexCount; i + 2 < _count; i += 3)
+                {
+                    if (!DisableStraightEdgeMapping) CorrectSplitTextureEdge(i);
+                    CorrectWorldQuad(i);
+                }
+            }
+            if (_replayingNativeRoads && FinalOwnerActive && batch.State.Target is { } roadTarget)
+            {
+                _finalOwnerLeaf = $"native-road priority-sz={batch.State.NativeRoadPrioritySz}";
+                for (int i = 0; i + 2 < batch.Vertices.Count; i += 3)
+                {
+                    var a = batch.Vertices[i];
+                    var flags = new PrimFlags { Material = batch.State.Material,
+                        PacketAddress = _finalOwnerPackets.GetValueOrDefault(a) };
+                    foreach (var point in FinalOwnerPoints)
+                        TraceFinalOwnerTriangleAt(a, batch.Vertices[i + 1], batch.Vertices[i + 2],
+                            flags, point.X, point.Y, roadTarget);
+                }
+                _finalOwnerLeaf = "none";
+            }
         }
 
         foreach (BufferedDeferredBatch batch in batches)
@@ -6409,6 +6590,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             batch.DepthWrite == _kDepthWrite &&
             batch.SourceDepthCompareWrite == _kSourceDepthCompareWrite &&
             batch.DreamcastTerrainDepth == _kDreamcastTerrainDepth &&
+            batch.NativeRoadPrioritySz == _kNativeRoadPrioritySz &&
             batch.SetMask == _kSetMask &&
             batch.CheckMask == _kCheckMask &&
             batch.TwAndX == _kTwAndX &&
@@ -6429,6 +6611,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _kDepthWrite = batch.DepthWrite;
             _kSourceDepthCompareWrite = batch.SourceDepthCompareWrite;
             _kDreamcastTerrainDepth = batch.DreamcastTerrainDepth;
+            _kNativeRoadPrioritySz = batch.NativeRoadPrioritySz;
             _kMaterial = batch.Material;
             _kBlend = batch.Blend;
             _kSetMask = batch.SetMask;
@@ -6737,6 +6920,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _pendingProbeTriangles.Clear();
         ReplayDeferredSky();
         Flush();
+        ReplayNativeRoads();
+        ReplayBufferedBatches(_deferredVehicleSubtractive);
         ReplayBufferedBatches(_deferredWater);
         ReplayDeferredBatches(_deferredScreenEffects);
         ReplayDeferredBatches(_deferredLoadingPrompt);

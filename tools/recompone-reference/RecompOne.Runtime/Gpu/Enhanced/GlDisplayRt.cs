@@ -46,15 +46,17 @@ public sealed class GlDisplayRt
         Depth = gl.GenRenderbuffer();
         gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, Depth);
         gl.RenderbufferStorage(
-            RenderbufferTarget.Renderbuffer, InternalFormat.DepthComponent24,
+            RenderbufferTarget.Renderbuffer, InternalFormat.Depth24Stencil8,
             (uint)TexW, (uint)TexH);
         gl.FramebufferRenderbuffer(
-            FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
+            FramebufferTarget.Framebuffer, FramebufferAttachment.DepthStencilAttachment,
             RenderbufferTarget.Renderbuffer, Depth);
         gl.ClearColor(0f, 0f, 0f, 0f);
         gl.ClearDepth(1.0);
+        gl.ClearStencil(0);
+        gl.StencilMask(0xFF);
         gl.Disable(EnableCap.ScissorTest);
-        gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit | ClearBufferMask.StencilBufferBit);
 
         if (Samples > 1)
         {
@@ -70,12 +72,12 @@ public sealed class GlDisplayRt
             gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, MsaaDepth);
             gl.RenderbufferStorageMultisample(
                 RenderbufferTarget.Renderbuffer, (uint)Samples,
-                InternalFormat.DepthComponent24, (uint)TexW, (uint)TexH);
+                InternalFormat.Depth24Stencil8, (uint)TexW, (uint)TexH);
             gl.FramebufferRenderbuffer(
                 FramebufferTarget.Framebuffer,
-                FramebufferAttachment.DepthAttachment,
+                FramebufferAttachment.DepthStencilAttachment,
                 RenderbufferTarget.Renderbuffer, MsaaDepth);
-            gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+            gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit | ClearBufferMask.StencilBufferBit);
         }
     }
 
@@ -144,7 +146,9 @@ public sealed class GlDisplayRt
         gl.Disable(EnableCap.ScissorTest);
         gl.DepthMask(true);
         gl.ClearDepth(1.0);
-        gl.Clear(ClearBufferMask.DepthBufferBit);
+        gl.ClearStencil(0);
+        gl.StencilMask(0xFF);
+        gl.Clear(ClearBufferMask.DepthBufferBit | ClearBufferMask.StencilBufferBit);
     }
 
     public void Destroy(GL gl)

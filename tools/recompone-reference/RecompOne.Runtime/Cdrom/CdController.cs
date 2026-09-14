@@ -378,6 +378,9 @@ public sealed class CdController
     }
 
     public int FirstTrackNumber => _fs.FirstTrackNumber;
+    public bool HasSoundtrackSelection => _fs.HasSoundtrackSelection;
+    public void ApplySoundtrack(Config.SoundtrackMode mode) => _fs.ApplySoundtrack(mode);
+    public string? SoundtrackSource(int index) => _fs.SoundtrackSource(index);
     public int LastTrackNumber => _fs.LastTrackNumber;
     public int LeadOutLba => _fs.LeadOutLba;
     public bool TryGetTrackStartLba(int trackNumber, out int lba) =>

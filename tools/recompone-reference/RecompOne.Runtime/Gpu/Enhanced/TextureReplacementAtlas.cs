@@ -1352,6 +1352,16 @@ internal sealed class TextureReplacementAtlas : IDisposable
         _cache.Clear();
     }
 
+    public void ReleaseSceneCache()
+    {
+        int entries = _cache.Count;
+        _cache.Clear();
+        _cache.TrimExcess();
+        _activeTerrainAtlas = null;
+        foreach (TerrainAtlas atlas in _terrainAtlases) atlas.Anchors.Clear();
+        Console.Error.WriteLine($"[TexturePack] released scene lookups={entries}");
+    }
+
     public void Write(int x, int y, int width, int height, ReadOnlySpan<ushort> pixels)
     {
         if (width <= 0 || height <= 0) return;

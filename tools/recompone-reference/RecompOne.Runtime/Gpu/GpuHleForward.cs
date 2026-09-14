@@ -237,17 +237,10 @@ public sealed partial class Gpu
     int CurTPage() => ((_texPageX / 64) & 0xf) | (((_texPageY / 256) & 1) << 4)
                     | ((_blendMode & 3) << 5) | ((_texDepth & 3) << 7);
 
-    static bool IsNativeVehicleGlassClut(int clut)
-    {
-        // Native V8:2 vehicle panes use a dedicated authored CLUT row. Keep
-        // this as material provenance; do not infer glass from sampled colour.
-        int row = clut >> 6;
-        return row == 509;
-    }
-
     HleDrawEnv CurEnv() => new()
     {
         ClipX0 = _drawAreaLeft, ClipY0 = _drawAreaTop, ClipX1 = _drawAreaRight, ClipY1 = _drawAreaBottom,
+        DrawOffsetX = _drawOffsetX, DrawOffsetY = _drawOffsetY,
         TwMaskX = _texWinMaskX, TwMaskY = _texWinMaskY, TwOffX = _texWinOffX, TwOffY = _texWinOffY,
         SetMask = _setMask, CheckMask = _checkMask, Dither = DitherEnabled,
     };
@@ -323,26 +316,21 @@ public sealed partial class Gpu
         bool gouraud = false)
     {
         HleMaterialKind material;
-        // Only authored semitransparent packets qualify as vehicle glass.
-        // Opaque packets can share the same CLUT row, but must retain the
-        // ordinary PS1 keyed/STP material contract used by every vehicle.
-        bool nativeVehicleGlass = semi && tex && IsNativeVehicleGlassClut(clut);
         if (_currentOtPacketWaterBase)
             material = HleMaterialKind.WaterBase;
         else if (_currentOtPacketWaterSurface)
             material = HleMaterialKind.WaterSurface;
-        else if (_currentOtPacketTerrainRoute)
+        else if (_currentOtPacketTerrainRoute || GpuHle.IsNativeRoadPacket(_currentOtPacketAddress))
             material = HleMaterialKind.TerrainRoute;
         else if (_currentOtPacketVehicle)
             material = _currentOtPacketVehicleReflection && tex
                 ? HleMaterialKind.VehicleReflection
-                : nativeVehicleGlass
-                    ? HleMaterialKind.Glass
                 : semi && tex
                 ? _blendMode switch
                 {
                     // Vehicle render scopes also emit stock projected
-                    // shadows and emissive effects. Their tpage blend mode is
+                    // shadows and emissive effects, including packets sharing
+                    // the same CLUT row as panes. Their tpage blend mode is
                     // the native material contract; treating every
                     // semitransparent vehicle packet as glass made the
                     // subtractive 0x04A shadow atlas into an opaque floor
@@ -383,6 +371,8 @@ public sealed partial class Gpu
             Vehicle = _currentOtPacketVehicle,
             WorldObject = _currentOtPacketWorldObject && !_currentOtPacketVehicle,
             TerrainRoute = _currentOtPacketTerrainRoute,
+            NativeRoad = GpuHle.IsNativeRoadPacket(_currentOtPacketAddress),
+            NativeRoadPrioritySz = GpuHle.NativeRoadPriority(_currentOtPacketAddress),
             N64RouteColor =
                 _currentOtPacketTerrainRoute &&
                 GpuHle.TerrainRouteColorRampActive,

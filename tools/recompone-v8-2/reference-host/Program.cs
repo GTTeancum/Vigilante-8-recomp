@@ -342,18 +342,16 @@ if (args.Length == 2 &&
         };
 
         const uint probeVehicle = 0x80110000u;
-        const uint houstonBehavior = 0x80123458u;
-        memory.WriteU32(0x800C6130u + 3u * 4u, houstonBehavior);
         memory.WriteU8(probeVehicle + 0xDCu, (byte)71);
-        if (V82VehicleRegistry.SpecialBehaviorForObject(
-                memory, probeVehicle, 0x80BAD000u) != houstonBehavior)
+        if (V82VehicleRegistry.SpecialCallbackForObject(
+                memory, probeVehicle, 0x80049880u) != V8OriginalSpecials.HoustonCallback)
             throw new InvalidDataException(
-                "Houston registry behavior did not resolve V8:2 type 3");
+                "Houston did not resolve the original V8 source callback");
         memory.WriteU8(probeVehicle + 0xDCu, (byte)76);
-        if (V82VehicleRegistry.SpecialBehaviorForObject(
-                memory, probeVehicle, 0x80BAD000u) != 0u)
+        if (V82VehicleRegistry.SpecialCallbackForObject(
+                memory, probeVehicle, 0x80049880u) != V8OriginalSpecials.AlienCallback)
             throw new InvalidDataException(
-                "unmapped guest special did not select the generic fallback");
+                "Y did not resolve the original V8 source callback");
 
         V82VehicleRegistry.BeginNativeSelector(context, memory);
         uint initial = V82VehicleRegistry.ResolveNativeSelectorSlot(
@@ -432,7 +430,7 @@ if (args.Length == 2 &&
             $"[SelectorLifecycle] {validation} left_wrap=Y " +
             $"type=76 enemy_portrait=native player_selection=preserved " +
             $"npc_type=76 npc_proxy={npcProxy} stock_proxy=17_preserved " +
-            $"houston_special=native_type_3");
+            $"houston_special=original_v8 y_special=original_v8");
         return 0;
     }
     catch (Exception exception)

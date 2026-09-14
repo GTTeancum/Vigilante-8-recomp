@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 SECTOR_SIZE = 2336
-DRIVER_SOURCE_CHANNELS = (*range(1, 13), 0)
+DRIVER_SOURCE_CHANNELS = tuple(range(13))
 NATIVE_INTERLEAVE = 8
 
 
@@ -135,7 +135,7 @@ def main() -> int:
         "[ResultVoiceContent] PASS "
         f"voices={report['voices']} "
         f"payload-bytes={report['payload_bytes_verified']} "
-        "mapping=retail-channels-1..12-plus-y-channel-0"
+        "mapping=retail-driver-index-channels-0..12"
     )
     for result in results:
         print(

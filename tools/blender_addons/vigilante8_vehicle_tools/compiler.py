@@ -455,7 +455,10 @@ def compile_model(
     _align(output)
 
     group_table = len(output)
-    output += b"\0" * (len(source.groups) * 4)
+    # Both retail dialects store an extra, unrelocated byte-count word after
+    # the group offsets. The native color editor copies this whole block;
+    # without the terminal word it mistakes the first group's flags for size.
+    output += b"\0" * ((len(source.groups) + 1) * 4)
     for index, group in enumerate(source.groups):
         _align(output)
         target = len(output)
@@ -463,6 +466,9 @@ def compile_model(
         output += _compile_group(vehicle.game, group)
 
     _align(output)
+    struct.pack_into(
+        "<I", output, group_table + len(source.groups) * 4, len(output) - group_table
+    )
     collision_table = len(output)
     output += b"\0" * (len(source.collisions) * 4)
     for index, stream in enumerate(source.collisions):

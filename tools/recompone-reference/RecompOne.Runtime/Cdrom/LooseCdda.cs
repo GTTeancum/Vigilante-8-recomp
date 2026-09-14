@@ -10,6 +10,7 @@ internal sealed class LooseCdda : IDisposable
     private V8LooseTrack? _openTrack;
     private VorbisReader? _reader;
     private float[] _decodeBuffer = [];
+    private long _nextSourceFrame;
 
     public LooseCdda(string root, IReadOnlyList<V8LooseTrack> tracks)
     {
@@ -48,10 +49,13 @@ internal sealed class LooseCdda : IDisposable
 
         EnsureOpen(track);
         long sourceFrame = checked((long)(lba - track.StartLba) * FramesPerSector);
-        if (_reader!.SamplePosition != sourceFrame)
+        // Some disc conversions have discontinuous OGG granule positions.
+        // A sequential CD read must keep decoding sequentially rather than
+        // treating that metadata jump as a request to seek/replay samples.
+        if (_nextSourceFrame != sourceFrame)
             Seek(sourceFrame, track);
 
-        int channels = _reader.Channels;
+        int channels = _reader!.Channels;
         int wantedSamples = FramesPerSector * channels;
         int decodedSamples = 0;
         while (decodedSamples < wantedSamples)
@@ -63,6 +67,7 @@ internal sealed class LooseCdda : IDisposable
         }
 
         int decodedFrames = decodedSamples / channels;
+        _nextSourceFrame = sourceFrame + FramesPerSector;
         for (int frame = 0; frame < decodedFrames; frame++)
         {
             float left = _decodeBuffer[frame * channels];
@@ -93,6 +98,7 @@ internal sealed class LooseCdda : IDisposable
 
         _decodeBuffer = new float[FramesPerSector * _reader.Channels];
         _openTrack = track;
+        _nextSourceFrame = 0;
         Console.WriteLine(
             $"[CDDA] loose track={track.Number} source={track.Source} streaming");
     }

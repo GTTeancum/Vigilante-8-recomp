@@ -188,6 +188,8 @@ public static partial class V82Compat
 
     public static void TraceNativeMainMenuEntry(CpuContext c, IMemory m)
     {
+        _nativeOptionsActive = false;
+        InputManager.SignalScriptStage("v82_main_menu");
         V82VehicleRegistry.ResetSelectionsAtMainMenu();
         if (!TraceNativeOptions)
             return;
@@ -273,7 +275,7 @@ public static partial class V82Compat
         }
 
         string? stage = null;
-        if (text == "OPTIONS")
+        if (text == "OPTIONS" && c.RA != 0x80104284u)
         {
             _nativeOptionsActive = true;
             stage = "v82_options";
@@ -376,6 +378,10 @@ public static partial class V82Compat
     static bool _extendedHeapInstalled;
     static readonly List<(uint Start, uint Size)> PcFreeBlocks = new();
     static readonly Dictionary<uint, (uint Header, uint Size)> PcAllocations = new();
+    static readonly bool TraceResourceLifetimes =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_RESOURCE_LIFETIMES") == "1";
+    static readonly Dictionary<uint, (uint Caller, int Generation)> PcAllocationOrigins = new();
+    static int ResourceGeneration;
     static bool _spuMallocRetrying;
     static readonly Stack<uint> SpuMallocRequests = new();
     static readonly Stack<uint[]> ShellDecodeCallers = new();
@@ -383,7 +389,11 @@ public static partial class V82Compat
     static readonly Stack<(uint Width, uint Height, uint AlignWidth, uint AlignHeight, uint LimitWidth, uint LimitHeight)> VramRequests = new();
     static readonly Stack<bool> SelectorOwnedVramRequests = new();
     static readonly List<GuestVramReservation> GuestVramReservations = [];
+    static readonly Dictionary<string, GuestVramReservation> SharedGuestTextures = [];
+    static readonly HashSet<(uint X, uint Y)> SharedGuestCoordinates = [];
+    static bool _releasingGuestTextures;
     static readonly List<GuestVramReservation> SelectorVramReservations = [];
+    static readonly Dictionary<int, List<GuestVramReservation>> LocalSelectorVramReservations = [];
     static readonly HashSet<int> ClaimedGuestVramReservations = [];
     static readonly HashSet<uint> SyntheticVramDescriptors = [];
     static readonly HashSet<uint> SyntheticVramBackingLive = [];
@@ -398,6 +408,8 @@ public static partial class V82Compat
     static int _matchVramFailures;
     static readonly bool _traceVram =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VRAM") == "1";
+    static readonly bool _traceVramPacking =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_VRAM_PACKING") == "1";
     static readonly bool _traceSelector =
         Environment.GetEnvironmentVariable("RECOMPONE_TRACE_V82_SELECTOR") == "1";
     static int _selectorDepth;
@@ -1544,6 +1556,8 @@ public static partial class V82Compat
     static bool _testDefeatInjected;
     static readonly int _proofHoldPlayerFrame = Math.Max(
         0, ReadOptionalInt("RECOMPONE_V82_PROOF_HOLD_PLAYER_FRAME") ?? 0);
+    static readonly int ProofReleasePlayerFrame = Math.Max(
+        0, ReadOptionalInt("RECOMPONE_V82_PROOF_RELEASE_PLAYER_FRAME") ?? 0);
     static readonly int ProofApproachStepFrames = Math.Max(0,
         ReadOptionalInt("RECOMPONE_V82_PROOF_APPROACH_STEP_FRAMES") ?? 0);
     static readonly int ProofApproachLateral = Math.Clamp(
@@ -1567,6 +1581,8 @@ public static partial class V82Compat
         Environment.GetEnvironmentVariable("RECOMPONE_V82_PROOF_EDGE_VEHICLES") == "1";
     static readonly int ProofEdgeVehicleOffset =
         ReadOptionalInt("RECOMPONE_V82_PROOF_EDGE_VEHICLE_OFFSET") ?? 140;
+    static readonly int ProofEdgeVehicleForward =
+        ReadOptionalInt("RECOMPONE_V82_PROOF_EDGE_VEHICLE_FORWARD") ?? 0;
     static readonly Dictionary<uint, int> ProofEdgeVehicleSlots = [];
     static readonly int? _testLoadingTipTableIndex =
         ReadOptionalInt("RECOMPONE_V82_TEST_LOADING_TIP_INDEX");
@@ -1808,6 +1824,8 @@ public static partial class V82Compat
         }
         PcFreeBlocks.Clear();
         PcAllocations.Clear();
+        PcAllocationOrigins.Clear();
+        ResourceGeneration = 0;
         PcFreeBlocks.Add((PcHeapBase, PcHeapEnd - PcHeapBase));
         _extendedHeapInstalled = true;
         V82VehicleRegistry.Initialize(c, m);
@@ -1863,6 +1881,8 @@ public static partial class V82Compat
                 PcFreeBlocks[i] = (free.Start, free.Size - total);
 
             PcAllocations[payload] = (header, total);
+            if (TraceResourceLifetimes)
+                PcAllocationOrigins[payload] = (c.RA, ResourceGeneration);
             m.WriteU32(header, 0u);
             m.WriteU32(header + 4u, total >> 3);
             c.V0 = payload;
@@ -1906,6 +1926,7 @@ public static partial class V82Compat
         // object; the later global event-4 teardown still dispatches through
         // the vehicle callback.
         V82VehicleRegistry.ReleaseFreedObjectMapping(pointer, c, m);
+        if (TraceResourceLifetimes) PcAllocationOrigins.Remove(pointer);
         InsertFreeBlock(allocation.Header, allocation.Size);
     }
 
@@ -2367,8 +2388,6 @@ public static partial class V82Compat
         TraceObjectRenderBegin(c, m);
         m = Dispatcher.UnwrapMemory(m);
         uint objectAddress = c.A0;
-        if (ProofEdgeVehicles && objectAddress != _playerVehicle)
-            UpdateProofVehicleHold(m, objectAddress);
         uint packetStart = m.ReadU32(c.GP + 0x610u);
         if (objectAddress == TraceObjectAddress && _traceObjectCount++ < 256)
         {
@@ -2394,6 +2413,8 @@ public static partial class V82Compat
         bool isVehicle =
             VehicleObjects.Contains(objectAddress) ||
             V82VehicleRegistry.IsVehicleObject(objectAddress);
+        if (ProofEdgeVehicles && isVehicle && objectAddress != _playerVehicle)
+            UpdateProofVehicleHold(m, objectAddress);
         ObjectRenderScopes.Push(
             new ObjectRenderScope(
                 objectAddress,
@@ -4833,6 +4854,30 @@ public static partial class V82Compat
         }
     }
 
+    // Native XRTP emitter: 0x100 selects semitransparent road packets.
+    public static bool BeginNativeRoadPacketWrites(CpuContext c, IMemory m)
+    {
+        V82JunctionAttachments.Enter(m, 0);
+        GpuHle.BeginNativeRoadPacketWrites();
+        return false;
+    }
+    public static bool BeginNativeJunctionPacketWrites(CpuContext c, IMemory m)
+    {
+        V82JunctionAttachments.Enter(m, c.A0);
+        // 800507DC passes JUNC+18 to 80021F70. That renderer adds the
+        // signed model sort offset (+2) to the common OT base; terrain adds
+        // 64 slots. Preserve the authored difference in eight-SZ units.
+        uint group = m.ReadU32(c.A0 + 0x18u);
+        int sortOffset = (short)m.ReadU16(group + 2u);
+        GpuHle.BeginNativeRoadPacketWrites((64 - sortOffset) * 8);
+        return false;
+    }
+    public static void EndNativeRoadPacketWrites(CpuContext c, IMemory m)
+    {
+        GpuHle.EndNativeRoadPacketWrites();
+        V82JunctionAttachments.Exit();
+    }
+
     public static bool BeginTerrainRoutePacketWrites(
         CpuContext c,
         IMemory m)
@@ -4892,7 +4937,7 @@ public static partial class V82Compat
         if (!DirectTerrain || !EarlyTerrainCull || !GpuHle.GameplayActive ||
             !GpuHle.Active || GpuHle.Backend is not Enhanced.EnhancedGlBackend { Ready: true } ||
             !ConfigManager.View.HighResolution3D || !IsMaximumLevelOfDetail() ||
-            Runtime.Gpu is not { } gpu || !gpu.TryGetProjectionViewport(out float left, out float right, out float top, out float bottom))
+            Runtime.Gpu is not { } gpu || !gpu.TryGetProjectionViewport(out float left, out float right, out float top, out float bottom, packetCoordinates: true))
             return false;
         uint x = c.A0, z = c.A1;
         if (x >= 2048 || z >= 2048) return false;
@@ -6192,6 +6237,45 @@ public static partial class V82Compat
         return V82VehicleRegistry.CreateVehicle(c, m);
     }
 
+    public static void CompleteMatchTeardown()
+    {
+        // Retail has stopped sound and retired all objects/banks. Clear the
+        // host's references now, before either the shell or next arena loads.
+        ResetRendererObjectTracking();
+        V82ArenaRegistry.EndLevelLoad();
+        ImportedWaterDwell.Clear();
+        ProofHeldVehicleTransforms.Clear();
+        ProofEdgeVehicleSlots.Clear();
+        _playerVehicle = 0u;
+        _matchVramActive = false;
+        GpuHle.ResetSceneTracking();
+        GpuHle.GameplayActive = false;
+        TraceResourceBoundary();
+        Console.Error.WriteLine("[V82MatchResources] cleared scene tracking before next load");
+    }
+
+    static void TraceResourceBoundary()
+    {
+        if (!TraceResourceLifetimes) return;
+        // Diagnostic only: allocations are never freed based on age or caller.
+        long bytes = PcAllocations.Values.Sum(value => (long)value.Size);
+        long free = PcFreeBlocks.Sum(value => (long)value.Size);
+        uint largest = PcFreeBlocks.Count == 0 ? 0u : PcFreeBlocks.Max(value => value.Size);
+        Console.Error.WriteLine($"[ResourceLifetime] boundary={ResourceGeneration} " +
+            $"allocations={PcAllocations.Count} bytes={bytes} free={free} largest={largest} " +
+            $"managed={GC.GetTotalMemory(false)}");
+        foreach (var group in PcAllocationOrigins.GroupBy(pair => pair.Value.Caller).OrderBy(group => group.Key))
+        {
+            long owned = group.Sum(pair => (long)PcAllocations[pair.Key].Size);
+            int old = group.Count(pair => pair.Value.Generation < ResourceGeneration);
+            string sizes = string.Join(',', group.GroupBy(pair => PcAllocations[pair.Key].Size)
+                .OrderBy(part => part.Key).Select(part => $"{part.Key}:{part.Count()}"));
+            Console.Error.WriteLine($"[ResourceOwner] boundary={ResourceGeneration} caller=0x{group.Key:X8} " +
+                $"count={group.Count()} bytes={owned} older={old} sizes={sizes}");
+        }
+        ResourceGeneration++;
+    }
+
     static void ResetRendererObjectTracking()
     {
         VehicleFactorySources.Clear();
@@ -6199,6 +6283,7 @@ public static partial class V82Compat
         V82AutoWaterski.Reset();
         V82TransformationProbe.Reset();
         ObjectRenderScopes.Clear();
+        V82JunctionAttachments.Reset();
         NativeSkyRenderScopes.Clear();
         NativeWaterBaseRenderScopes.Clear();
         NativeWaterSurfaceRenderScopes.Clear();
@@ -6538,6 +6623,24 @@ public static partial class V82Compat
         }
     }
 
+    internal static void CompleteQuestCombatFixture(CpuContext c, IMemory m)
+    {
+        // Only called by the explicit Quest win fixture. A combat win cannot
+        // leave live opponents firing control effects behind the result UI.
+        uint player = m.ReadU32(0x8006B7E8u);
+        foreach (uint vehicle in VehicleObjects.ToArray())
+        {
+            if (vehicle == player || !IsPcAllocationLive(vehicle) ||
+                m.ReadU8(vehicle + 8u) != 2 ||
+                (short)m.ReadU16(vehicle + 0xAu) < 0 ||
+                m.ReadU32(vehicle) == 0x800384A4u ||
+                m.ReadU16(vehicle + 0x1Cu) == 0) continue;
+            CallGameFunction(c, m, 0x80039DCCu, vehicle,
+                unchecked((uint)-0x7FFF), vehicle + 0x34u, 1u);
+            Console.Error.WriteLine($"[QuestFixtureCombat] native lethal damage vehicle=0x{vehicle:X8}");
+        }
+    }
+
     static void UpdateDefeatRegression(CpuContext c, IMemory m, int frame)
     {
         if (_testDefeatFrame == 0 || _testDefeatInjected ||
@@ -6602,7 +6705,8 @@ public static partial class V82Compat
     // identity and is a strict no-op in ordinary builds and user sessions.
     static void UpdateProofVehicleHold(IMemory m, uint vehicle)
     {
-        if (_proofHoldPlayerFrame == 0 ||
+        if (_proofHoldPlayerFrame == 0 || _testDefeatInjected ||
+            (ProofReleasePlayerFrame > 0 && _gameplayFrameCount >= ProofReleasePlayerFrame) ||
             _gameplayFrameCount < _proofHoldPlayerFrame ||
             vehicle < PcHeapBase || vehicle >= PcHeapEnd - 0xA0u ||
             m.ReadU8(vehicle + 8u) != 2u)
@@ -6677,12 +6781,13 @@ public static partial class V82Compat
             {
                 int lateral = (slot == 0 ? -1 : 1) * ProofEdgeVehicleOffset;
                 Span<int> axis = [(short)playerTransform[0], (short)(playerTransform[1] >> 16), (short)playerTransform[3]];
+                Span<int> forward = [(short)playerTransform[1], (short)(playerTransform[2] >> 16), (short)playerTransform[4]];
                 for (int i = 0; i < ProofHoldTransformOffsets.Length; i++)
                 {
                     uint value = playerTransform[i];
                     int coordinate = i is >= 5 and <= 7 ? i - 5 : i is >= 8 and <= 10 ? i - 8 : -1;
                     if (coordinate >= 0)
-                        value = unchecked(value + (uint)(axis[coordinate] * lateral * 16));
+                        value = unchecked(value + (uint)((axis[coordinate] * lateral + forward[coordinate] * ProofEdgeVehicleForward) * 16));
                     m.WriteU32(vehicle + ProofHoldTransformOffsets[i], value);
                 }
             }
@@ -7784,12 +7889,16 @@ public static partial class V82Compat
 
     static void ReserveGuestVramForMatch(CpuContext c, IMemory m)
     {
+        if (GuestVramReservations.Count != 0)
+            throw new InvalidOperationException("Imported texture reservations survived match teardown");
         GuestVramReservations.Clear();
+        SharedGuestTextures.Clear();
+        SharedGuestCoordinates.Clear();
         if (!V82VehicleRegistry.HasAnySelection &&
             !V82VehicleRegistry.HasDefaultReplacement)
             return;
 
-        V82VehicleRegistry.ResetRuntimeForMatch();
+        V82VehicleRegistry.ResetRuntimeForMatch(m);
         IReadOnlyList<NativeVramAllocation> requests =
             V82VehicleRegistry.SelectedVramAllocations();
         if (requests.Count == 0)
@@ -7834,8 +7943,13 @@ public static partial class V82Compat
                 m.WriteU32(descriptor + 0x14u, 0u);
                 SyntheticVramDescriptors.Add(descriptor);
                 SyntheticVramBackingLive.Add(descriptor);
-                GuestVramReservations.Add(new GuestVramReservation(
-                    request, x, y, descriptor));
+                var reservation = new GuestVramReservation(request, x, y, descriptor);
+                GuestVramReservations.Add(reservation);
+                if (request.ContentKey != null)
+                {
+                    SharedGuestTextures.Add(request.ContentKey, reservation);
+                    SharedGuestCoordinates.Add((x, y));
+                }
             }
             Console.Error.WriteLine(
                 $"[V82Vehicles] reserved {GuestVramReservations.Count} " +
@@ -7863,9 +7977,11 @@ public static partial class V82Compat
     }
 
     public static void ReleaseSelectorVramReservation(
-        CpuContext c, IMemory m)
+        CpuContext c, IMemory m, int selectorOwner = -1)
     {
-        if (SelectorVramReservations.Count == 0)
+        List<GuestVramReservation> reservations = selectorOwner < 0 ? SelectorVramReservations
+            : LocalSelectorVramReservations.GetValueOrDefault(selectorOwner) ?? [];
+        if (reservations.Count == 0)
             return;
 
         m = Dispatcher.UnwrapMemory(m);
@@ -7875,12 +7991,12 @@ public static partial class V82Compat
         int alreadyReleasedBacking = 0;
         try
         {
-            for (int index = SelectorVramReservations.Count - 1;
+            for (int index = reservations.Count - 1;
                  index >= 0;
                  index--)
             {
                 GuestVramReservation reservation =
-                    SelectorVramReservations[index];
+                    reservations[index];
                 bool descriptorLive =
                     SyntheticVramDescriptors.Remove(reservation.Descriptor);
                 if (descriptorLive)
@@ -7914,7 +8030,8 @@ public static partial class V82Compat
                 $"{retiredDescriptors} host descriptors, released " +
                 $"{releasedBacking} independent native VRAM rectangles, " +
                 $"observed {alreadyReleasedBacking} retail-owned releases");
-            SelectorVramReservations.Clear();
+            reservations.Clear();
+            if (selectorOwner >= 0) LocalSelectorVramReservations.Remove(selectorOwner);
         }
         finally
         {
@@ -7923,7 +8040,14 @@ public static partial class V82Compat
     }
 
     public static int SelectorVramReservationCount =>
-        SelectorVramReservations.Count;
+        SelectorVramReservations.Count + LocalSelectorVramReservations.Values.Sum(v => v.Count);
+
+    public static void ReleaseLocalSelectorVram(CpuContext c, IMemory m)
+    {
+        foreach (int owner in LocalSelectorVramReservations.Keys.ToArray())
+            ReleaseSelectorVramReservation(c, m, owner);
+        LocalSelectorVramReservations.Clear();
+    }
 
     /// <summary>
     /// Retires a stale host-side view after an external allocator reset. Normal
@@ -7973,7 +8097,7 @@ public static partial class V82Compat
         if (c.RA == 0x80013268u)
         {
             int player = checked((int)c.S2);
-            if ((uint)player < 2u)
+            if ((uint)player < (uint)Math.Max(2, LocalInputSession.PlayerCount))
             {
                 int type = (sbyte)m.ReadU8(c.GP + 0x1104u + (uint)player);
                 // The retail result player adds this byte to its XA-channel
@@ -8054,6 +8178,7 @@ public static partial class V82Compat
 
         m = Dispatcher.UnwrapMemory(m);
         var snapshot = c.Snapshot();
+        _releasingGuestTextures = true;
         try
         {
             for (int index = GuestVramReservations.Count - 1;
@@ -8062,26 +8187,26 @@ public static partial class V82Compat
             {
                 GuestVramReservation reservation =
                     GuestVramReservations[index];
-                c.A0 = reservation.X;
-                c.A1 = reservation.Y;
-                Dispatcher.Call(c, m, 0x80020F5Cu);
-                if (c.V0 == 0u)
-                    Console.Error.WriteLine(
-                        $"[V82Vehicles] match VRAM rectangle at " +
-                        $"({reservation.X},{reservation.Y}) was already released");
+                // Pending late-load reservations have no native texture owner.
+                // Retire the synthetic descriptor and its allocator rectangle.
+                c.A0 = reservation.Descriptor;
+                IgnoreSyntheticVramFree(c, m);
             }
             Console.Error.WriteLine(
                 $"[V82Vehicles] released {GuestVramReservations.Count} " +
                 "reserved native VRAM rectangles");
             GuestVramReservations.Clear();
+            SharedGuestTextures.Clear();
+            SharedGuestCoordinates.Clear();
         }
         finally
         {
+            _releasingGuestTextures = false;
             c.Restore(snapshot);
         }
     }
 
-    public static void BeginGuestVramClaim(bool reusable = false)
+    public static void BeginGuestVramClaim(bool reusable = false, int selectorOwner = -1)
     {
         _guestVramClaimIndex = 0;
         _guestVramClaimMisses = 0;
@@ -8089,6 +8214,12 @@ public static partial class V82Compat
         _guestVramClaimReusable = reusable;
         _activeGuestVramReservations =
             reusable ? SelectorVramReservations : GuestVramReservations;
+        if (reusable && selectorOwner >= 0)
+        {
+            if (!LocalSelectorVramReservations.TryGetValue(selectorOwner, out var owned))
+                LocalSelectorVramReservations[selectorOwner] = owned = [];
+            _activeGuestVramReservations = owned;
+        }
         _guestVramClaimActive =
             reusable || _activeGuestVramReservations.Count != 0;
     }
@@ -8106,6 +8237,17 @@ public static partial class V82Compat
             Console.Error.WriteLine(
                 $"[V82Vehicles] claimed {reusableClaimed} reusable " +
                 "selector VRAM rectangles");
+            return;
+        }
+
+        if (SharedGuestTextures.Count != 0)
+        {
+            // Shared rectangles belong to the whole match, including banks
+            // loaded later for a boss or transformation. Individual bank
+            // destruction cannot invalidate another bank's identical data.
+            ClaimedGuestVramReservations.Clear();
+            _guestVramClaimActive = true;
+            _activeGuestVramReservations = null;
             return;
         }
 
@@ -8208,6 +8350,8 @@ public static partial class V82Compat
             c.A0, c.A1, c.A2, c.A3,
             m.ReadU32(c.SP + 0x10u), m.ReadU32(c.SP + 0x14u));
         VramRequests.Push(request);
+        if (_traceVramPacking && _matchVramActive && m.ReadU32(c.GP + 0xE80u) != 0u)
+            Console.Error.WriteLine($"[V82PackingRequest] {request.Item1},{request.Item2},{request.Item3},{request.Item4},{request.Item5},{request.Item6}");
         bool palette = request.Item3 == 16u && request.Item4 == 1u;
         bool image = request.Item3 == 64u && request.Item4 == 256u;
         bool selectorOwned =
@@ -8229,6 +8373,26 @@ public static partial class V82Compat
                 !V82VehicleRegistry.OwnsCurrentTextureLoad(
                     c, m, palette))
                 return true;
+
+            if (!_guestVramClaimReusable && SharedGuestTextures.Count != 0)
+            {
+                uint data = m.ReadU32(c.GP + (palette ? 0xE70u : 0xE78u));
+                uint sourceRect = m.ReadU32(c.GP + (palette ? 0xE6Cu : 0xE74u));
+                uint bytes = palette ? checked(c.A0 * c.A1 * 2u)
+                    : checked(m.ReadU32(sourceRect - 4u) - 12u);
+                if (bytes > NativeVehicleBankSource.MaximumSourceBytes)
+                    throw new InvalidDataException("Imported texture payload exceeds its bank bounds");
+                var payload = new byte[checked((int)bytes)];
+                for (uint offset = 0; offset < bytes; offset++) payload[offset] = m.ReadU8(data + offset);
+                var dimensions = new NativeVramAllocation(request.Item1, request.Item2,
+                    request.Item3, request.Item4, request.Item5, request.Item6);
+                string key = NativeVehicleBankSource.TextureContentKey(dimensions,
+                    !palette && (m.ReadU32(c.GP + 0xE68u) & 16u) != 0u, payload);
+                if (!SharedGuestTextures.TryGetValue(key, out var shared))
+                    throw new InvalidDataException($"Imported texture does not match its source reservation: {key}");
+                c.V0 = shared.Descriptor;
+                return false;
+            }
 
             for (int index = 0; index < reservations.Count; index++)
             {
@@ -8302,9 +8466,34 @@ public static partial class V82Compat
         return true;
     }
 
+    public static uint SelectMatchVramFreeLeaf(CpuContext c, IMemory m, uint root) =>
+        _matchVramActive && SharedGuestTextures.Count != 0
+            ? NativeVramPlacement.FindFreeLeaf(c, m, root) : root;
+
+    public static void RetireVramBackingTree(CpuContext c, IMemory m)
+    {
+        // The retail full-tree destructor frees every backing node itself.
+        // Coordinates may immediately be reused by a different scene/menu;
+        // retain only our CPU descriptors until their own owners retire them.
+        if (SyntheticVramBackingLive.Count != 0)
+            Console.Error.WriteLine($"[V82TextureOwnership] native tree retiring backing={SyntheticVramBackingLive.Count} shared={SharedGuestCoordinates.Count}");
+        SyntheticVramBackingLive.Clear();
+        SharedGuestCoordinates.Clear();
+    }
+
+    public static bool RetainSharedGuestTexture(CpuContext c, IMemory m)
+    {
+        if (_releasingGuestTextures || !SharedGuestCoordinates.Contains((c.A0, c.A1))) return true;
+        c.V0 = 1u;
+        return false;
+    }
+
     public static bool IgnoreSyntheticVramFree(CpuContext c, IMemory m)
     {
         uint descriptor = c.A0;
+        if (!_releasingGuestTextures && SyntheticVramDescriptors.Contains(descriptor) &&
+            SharedGuestCoordinates.Contains(((uint)m.ReadU16(descriptor), (uint)m.ReadU16(descriptor + 2u))))
+            return false;
         if (!SyntheticVramDescriptors.Remove(descriptor))
             return true;
 
@@ -8379,7 +8568,8 @@ public static partial class V82Compat
             m.WriteU32(descriptor + 0x14u, 0u);
             SyntheticVramDescriptors.Add(descriptor);
             SyntheticVramBackingLive.Add(descriptor);
-            SelectorVramReservations.Add(new GuestVramReservation(
+            var reservations = _activeGuestVramReservations ?? SelectorVramReservations;
+            reservations.Add(new GuestVramReservation(
                 new NativeVramAllocation(
                     request.Width,
                     request.Height,
@@ -8391,7 +8581,7 @@ public static partial class V82Compat
                 y,
                 descriptor));
             ClaimedGuestVramReservations.Add(
-                SelectorVramReservations.Count - 1);
+                reservations.Count - 1);
             c.V0 = descriptor;
         }
         if (!_matchVramActive) return;
@@ -8463,6 +8653,15 @@ public static partial class V82Compat
             ? SpuMallocRequests.Pop()
             : 0u;
         if (c.V0 != 0xFFFFFFFFu || _spuMallocRetrying) return;
+
+        // Selector effects and the character bank are both live here. An
+        // allocation failure must not invalidate their existing addresses.
+        if (V82VehicleRegistry.NativeSelectorAudioActive)
+        {
+            Console.Error.WriteLine(
+                $"[V82Audio] selector SPU allocation failed for {requestedBytes} bytes; preserving live banks");
+            return;
+        }
 
         const uint table = 0x800BDD78u;
         uint shift = m.ReadU32(0x800641A8u);

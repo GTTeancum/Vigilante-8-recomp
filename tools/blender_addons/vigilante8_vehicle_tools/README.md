@@ -324,6 +324,16 @@ depending on spare fragmented VRAM.
 
 ## Validation
 
+Original V8 special capabilities use `original_special_type` (currently source
+callback-table entries 7 and 12) and `original_impact_kind` (the imported common
+hit-effect root; its preceding root is the spark). They are mutually exclusive
+with `special_behavior_type`, which selects a V8:2 retail behavior. The registry
+uses flag bit 23 with the original index in bits 17–21; the extension word at
+entry offset 38 stores the impact root only when bit 23 is set. Old records keep
+that word zero. Blender stores these as editable collection properties and
+preserves them through save/reopen/export. See `notes/v8_original_houston_y_port.md`
+for the source mapping and focused native proof commands.
+
 From the repository root:
 
 ```powershell

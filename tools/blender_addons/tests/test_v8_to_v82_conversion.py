@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import struct
 from pathlib import Path
 import sys
 import unittest
@@ -16,7 +17,6 @@ for path in (TESTS, ADDONS):
 from build_v8_to_v82_guest_roster import (  # noqa: E402
     VEHICLES,
     V8_COMMON,
-    V8_EXECUTABLE_CONTACT_ANCHORS,
     V8_SELECTOR_VEHICLES,
     build_projects,
     decode_bank,
@@ -50,6 +50,30 @@ EXPECTED_IDS = (
 
 
 class V8ToV82GuestConversionTests(unittest.TestCase):
+    def test_native_color_editor_can_copy_complete_group_block(self) -> None:
+        package = registry.compile_package(self.vehicles)
+        for form in iff.parse(package.archive).forms(b"XOBF"):
+            data = next(child.payload for child in form.children if child.tag == b"BIN ")
+            count, table = struct.unpack_from("<II", data)
+            size = struct.unpack_from("<I", data, table + count * 4)[0]
+            collision_table = struct.unpack_from("<I", data, 12)[0]
+            self.assertEqual(size, collision_table - table)
+            copied = data[table:table + size]
+            self.assertEqual(len(copied), size)
+            for index in range(count):
+                relative = struct.unpack_from("<I", copied, index * 4)[0]
+                self.assertGreaterEqual(relative, (count + 1) * 4)
+                self.assertLess(relative + 0x1C, size + 1)
+
+    def test_source_special_model_indices_and_geometry_are_preserved(self) -> None:
+        for source_index, kinds in ((7,(58,60)),(12,(40,42))):
+            source=conversion.v8_bank_to_v82(decode_bank(V8_COMMON,"V8",source_index))
+            vehicle=self.vehicles[source_index]
+            for kind in kinds:
+                self.assertEqual(source.slots[kind],vehicle.slots[kind])
+                self.assertEqual(source.groups[source.slots[kind].render_group],
+                    vehicle.groups[vehicle.slots[kind].render_group])
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.vehicles = build_projects()
@@ -116,14 +140,9 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
             entry.stable_id: entry.special_behavior_type
             for entry in entries
         }
-        self.assertEqual(3, behavior_types["guest.v8.houston_3"])
-        self.assertTrue(
-            all(
-                value is None
-                for stable_id, value in behavior_types.items()
-                if stable_id != "guest.v8.houston_3"
-            )
-        )
+        self.assertTrue(all(value is None for value in behavior_types.values()))
+        self.assertEqual({"guest.v8.houston_3":7,"guest.v8.y_the_alien":12},
+            {e.stable_id:e.original_special_type for e in entries if e.original_special_type is not None})
 
         decoded = registry.decompile_package(package.archive, package.registry)
         rebuilt = registry.compile_package(decoded)
@@ -137,9 +156,16 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
         source_forms = tuple(iff.parse(V8_COMMON.read_bytes()).forms(b"XOBF"))
         for source_index, vehicle in enumerate(self.vehicles):
             expected = decode_sounds(V8_COMMON, source_index)
-            self.assertEqual(expected, vehicle.sounds, vehicle.stable_id)
+            self.assertEqual(expected, vehicle.sounds[:len(expected)], vehicle.stable_id)
+            if vehicle.original_special_type is not None:
+                common=registry._decode_sounds(iff.IffChunk(tag=b"FORM",form_type=b"XOBF",children=[
+                    iff.IffChunk(tag=b"SND ",payload=(ROOT/"PS1 game/SOUNDS/MAIN.SND").read_bytes())]))
+                self.assertEqual((common[0x41],common[0x2B]),vehicle.sounds[len(expected):])
+                expected=vehicle.sounds
             body = forms[entries[source_index].archive_index]
             self.assertEqual(expected, registry._decode_sounds(body))
+            if vehicle.original_special_type is not None:
+                continue  # Extended table is checked sample-for-sample above.
             self.assertEqual(
                 next(
                     child.payload
@@ -165,16 +191,7 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
         y = self.vehicles[12]
         self.assertEqual(
             (743, 743, 1024),
-            tuple(int(sound["pitch"]) for sound in y.sounds),
-        )
-        y_sound_chunk = next(
-            child.payload
-            for child in forms[entries[12].archive_index].children
-            if child.tag == b"SND "
-        )
-        self.assertEqual(
-            "0BD82A7D7D7684BB23DC39CF8636B2AFDDB4CBF8491B3FDE5F6A59DB84B79CF8",
-            hashlib.sha256(y_sound_chunk).hexdigest().upper(),
+            tuple(int(sound["pitch"]) for sound in y.sounds[:3]),
         )
 
     def test_v8_minus_two_arena_sentinel_preserves_native_class_f(self) -> None:
@@ -203,7 +220,7 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
                 for slot in vehicle.slots
                 if slot.parent == vehicle.body_kind and slot.key is not None
             }
-            expected_wheels = {0x8000, 0x8001, 0x8002, 0x8003}
+            expected_wheels = set() if vehicle.controller_class == "flying" else {0x8000, 0x8001, 0x8002, 0x8003}
             self.assertEqual(
                 expected_wheels,
                 direct_keys & set(range(0x8000, 0x8006)),
@@ -215,33 +232,12 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
                 vehicle.stable_id,
             )
 
-    def test_y_executable_contact_topology_is_materialized_in_both_banks(self) -> None:
+    def test_y_retains_original_wheelless_construction(self) -> None:
         y = self.vehicles[12]
-        expected = V8_EXECUTABLE_CONTACT_ANCHORS[12]
-        for bank in (
-            project.ObjectBank(
-                groups=y.groups,
-                slots=y.slots,
-                collisions=y.collisions,
-                textures=y.textures,
-                animations=y.animations,
-            ),
-            y.selector_preview_bank,
-        ):
-            self.assertIsNotNone(bank)
-            anchors = tuple(
-                slot.position
-                for slot in sorted(
-                    (
-                        slot
-                        for slot in bank.slots
-                        if slot.parent == y.body_kind
-                        and slot.key in range(0x8000, 0x8004)
-                    ),
-                    key=lambda slot: slot.key,
-                )
-            )
-            self.assertEqual(expected, anchors)
+        self.assertIsNone(y.transformation_bank)
+        for slots in (y.slots, y.selector_preview_bank.slots):
+            self.assertFalse(any(slot.key in range(0x8000,0x8004)
+                for slot in slots if slot.key is not None and slot.parent == 0))
 
     def test_clyde_suspension_travel_markers_use_native_v82_key(self) -> None:
         clyde = self.vehicles[1]
@@ -276,23 +272,8 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
         for vehicle in self.vehicles:
             bank = vehicle.transformation_bank
             if not vehicle.supports_transformations:
-                self.assertIsNotNone(bank)
-                self.assertEqual((), vehicle.transform_modes)
-                self.assertEqual(1, len(bank.groups))
-                self.assertEqual((), bank.groups[0].faces)
-                self.assertEqual((), bank.groups[0].controls)
-                self.assertEqual((), bank.textures)
-                self.assertEqual((), bank.animations)
-                roots = {
-                    index
-                    for index, slot in enumerate(bank.slots)
-                    if slot.parent is None
-                }
-                self.assertIn(vehicle.stats["wheel_kind_front"], roots)
-                self.assertIn(vehicle.stats["wheel_kind_rear"], roots)
-                for root in roots:
-                    self.assertEqual(0, bank.slots[root].render_group)
-                    self.assertIsNotNone(bank.slots[root].collision)
+                self.assertIsNone(bank)
+                self.assertEqual((),vehicle.transform_modes)
                 vehicle.validate()
                 continue
             self.assertIsNotNone(bank)

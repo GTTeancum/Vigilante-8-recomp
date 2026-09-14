@@ -18,10 +18,10 @@ static class MeshDepthScaleChecks
             Gte.WriteControl(24, 160u << 16);
             Gte.WriteControl(25, 120u << 16);
             Gte.WriteControl(26, 256);
-            // The same point (0.25, 0, 4) encoded at three native mesh scales.
+            // The same point (0.25, 0, 4), including the junction mesh scale.
             uint? screen = null;
             int checks = 0;
-            foreach (int shift in new[] { 8, 9, 10 })
+            foreach (int shift in new[] { 7, 8, 9, 10 })
             {
                 memory.WriteU8(mesh + 1, (byte)shift);
                 float previous = V82MeshClipCompat.BeginMeshDepth(memory, mesh);

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using System.Security.Cryptography;
 
 namespace RecompOne.Runtime.Sdk;
 
@@ -9,7 +10,8 @@ readonly record struct NativeVramAllocation(
     uint AlignWidth,
     uint AlignHeight,
     uint LimitWidth,
-    uint LimitHeight);
+    uint LimitHeight,
+    string? ContentKey = null);
 
 /// <summary>
 /// File-backed slice of one strict native XOBF bank. Package discovery keeps
@@ -78,9 +80,13 @@ sealed class NativeVehicleBankSource(
                 paletteWidth * paletteHeight > 256u)
                 throw new InvalidDataException(
                     $"texture {index} has an invalid native CLUT rectangle");
-            palettes.Add(new NativeVramAllocation(
+            var paletteRequest = new NativeVramAllocation(
                 paletteWidth, paletteHeight,
-                16u, 1u, paletteWidth, 1u));
+                16u, 1u, paletteWidth, 1u);
+            RequireRange(data, descriptor + 20u, paletteWidth * paletteHeight * 2u, "CLUT payload");
+            palettes.Add(paletteRequest with { ContentKey = TextureContentKey(
+                paletteRequest, false, data.AsSpan(checked((int)descriptor + 20),
+                    checked((int)(paletteWidth * paletteHeight * 2u)))) });
 
             uint image = checked(descriptor + U32(data, descriptor + 8u));
             RequireRange(data, image, 0x14, "XOBF texture image descriptor");
@@ -89,11 +95,14 @@ sealed class NativeVehicleBankSource(
             if (widthWords == 0u || height == 0u)
                 throw new InvalidDataException(
                     $"texture {index} has an invalid native image rectangle");
+            uint imageBytes = checked(U32(data, image + 8u) - 12u);
+            RequireRange(data, image + 20u, imageBytes, "image payload");
+            var imageRequest = new NativeVramAllocation(
+                widthWords, height, 64u, 256u, 64u << checked((int)depth), 256u);
             images.Add((
                 checked((int)index),
-                new NativeVramAllocation(
-                    widthWords, height,
-                    64u, 256u, 64u << checked((int)depth), 256u)));
+                imageRequest with { ContentKey = TextureContentKey(imageRequest,
+                    (flags & 16u) != 0u, data.AsSpan(checked((int)image + 20), checked((int)imageBytes))) }));
         }
 
         var result = new List<NativeVramAllocation>(
@@ -118,6 +127,10 @@ sealed class NativeVehicleBankSource(
     }
 
     public int SourceBytes => checked(binLength + animationLength + soundLength);
+
+    internal static string TextureContentKey(NativeVramAllocation request, bool compressed, ReadOnlySpan<byte> payload)
+        => $"{request.Width},{request.Height},{request.AlignWidth},{request.AlignHeight}," +
+           $"{request.LimitWidth},{request.LimitHeight},{compressed}:" + Convert.ToHexString(SHA256.HashData(payload));
     public int BinLength => binLength;
     public int SoundLength => soundOffset < 0 ? 0 : soundLength;
 

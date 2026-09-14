@@ -24,6 +24,9 @@ public static class InputPromptLabels
     public static string Button(GameConfig game, int player, ushort action,
         bool gamepad, bool gameplay, bool menu)
     {
+        player = LocalInputSession.DeviceForPlayer(player);
+        if (player < 0) return "Unbound";
+        if (player == LocalInputSession.KeyboardDevice) { player = 0; gamepad = false; }
         if (!gamepad)
         {
             var keys = InputBindingResolver.ResolveKeys(player == 0 ? game.Keys : game.Keys2,
@@ -36,7 +39,7 @@ public static class InputPromptLabels
             return key.Length == 0 ? "Unbound" : key;
         }
         var pad = InputBindingResolver.ResolvePad(InputProfiles.ForPlayer(game, player),
-            player == 0 ? game.Pad : game.Pad2, gameplay, menu);
+            InputProfiles.PadForPlayer(game, player), gameplay, menu);
         var binding = action switch {
             Controller.Cross => pad.Cross, Controller.Circle => pad.Circle,
             Controller.Square => pad.Square, Controller.Triangle => pad.Triangle,
@@ -51,7 +54,10 @@ public static class InputPromptLabels
         bool ready = IsReadyPrompt(text);
         string Label(ushort action) => Button(game, player, action, gamepad,
             gameplay || ready, menu && !ready);
-        if (text == "PRESS START") return "PRESS " + Label(Controller.Start);
+        // The title's native display font has uppercase glyphs only.
+        if (text == "PRESS START") return gamepad
+            ? "PRESS START"
+            : "PRESS " + Label(Controller.Start).ToUpperInvariant();
         if (text == "Press X to configure") return "Press " + Label(Controller.Cross) + " to configure";
         var result = new StringBuilder(text.Length);
         for (int i = 0; i < text.Length; i++)

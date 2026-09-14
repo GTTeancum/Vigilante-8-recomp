@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 SECTOR_SIZE = 2336
-DRIVER_SOURCE_CHANNELS = (*range(1, 13), 0)
+DRIVER_SOURCE_CHANNELS = tuple(range(13))
 NATIVE_MONO_INTERLEAVE = 8
 
 
@@ -68,10 +68,11 @@ def extract(bank: Path, output: Path, prefix: str) -> None:
         data[offset : offset + SECTOR_SIZE]
         for offset in range(0, len(data), SECTOR_SIZE)
     ]
-    # The twelve ordinary drivers occupy XA filter channels 1..12 in roster
-    # order. Secret driver Y uses the remaining audio-bearing channel zero.
-    # Treating channel zero as Chassey shifts every ordinary imported voice;
-    # omitting it drops Y's canonical result lines entirely.
+    # Original main loop 0x80013CAC passes the selected vehicle index at
+    # 0x80065674 unchanged to XA player 0x80043DF8. That player writes its
+    # second argument directly into the CdSetfilter channel byte. Therefore
+    # the source channel equals the zero-based driver index, including Y=12.
+    # Do not rotate the audio channels independently of the original roster.
     for output_channel, source_channel in enumerate(DRIVER_SOURCE_CHANNELS):
         selected: list[bytes] = []
         for source in sectors:

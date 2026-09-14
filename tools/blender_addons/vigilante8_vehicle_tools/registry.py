@@ -28,6 +28,7 @@ FLAG_NON_TRANSFORMABLE = 1 << 0
 CONTROLLER_CLASS_SHIFT = 8
 CONTROLLER_CLASS_MASK = 0xF << CONTROLLER_CLASS_SHIFT
 FLAG_SPECIAL_BEHAVIOR = 1 << 16
+FLAG_ORIGINAL_SPECIAL = 1 << 23
 SPECIAL_BEHAVIOR_SHIFT = 17
 SPECIAL_BEHAVIOR_MASK = 0x1F << SPECIAL_BEHAVIOR_SHIFT
 CONTROLLER_CLASS_IDS = {"ground": 0, "flying": 1}
@@ -36,6 +37,7 @@ SUPPORTED_FLAGS = (
     | CONTROLLER_CLASS_MASK
     | FLAG_SPECIAL_BEHAVIOR
     | SPECIAL_BEHAVIOR_MASK
+    | FLAG_ORIGINAL_SPECIAL
 )
 
 
@@ -48,6 +50,8 @@ def vehicle_flags(vehicle: project.VehicleProject) -> int:
     if vehicle.special_behavior_type is not None:
         flags |= FLAG_SPECIAL_BEHAVIOR
         flags |= vehicle.special_behavior_type << SPECIAL_BEHAVIOR_SHIFT
+    if vehicle.original_special_type is not None:
+        flags |= FLAG_ORIGINAL_SPECIAL | (vehicle.original_special_type << SPECIAL_BEHAVIOR_SHIFT)
     return flags
 
 
@@ -79,6 +83,8 @@ class RegistryEntry:
     controller_class: str
     supports_transformations: bool
     special_behavior_type: int | None
+    original_special_type: int | None
+    original_impact_kind: int
 
 
 @dataclass(frozen=True)
@@ -212,7 +218,7 @@ def compile_registry(vehicles: Iterable[project.VehicleProject]) -> bytes:
                     if game == "V8_2"
                     else 0
                 ),
-                0,
+                vehicle.original_impact_kind,
                 selector_preview_archive_index,
                 vehicle.selector_preview_body_kind,
             )
@@ -315,7 +321,7 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
         )
         if entry_reserved != 0:
             raise ValueError("vehicle registry entry reserved field is nonzero")
-        if extension_reserved != 0:
+        if extension_reserved != 0 and not flags & FLAG_ORIGINAL_SPECIAL:
             raise ValueError("vehicle registry extension reserved field is nonzero")
         if stat_offset + stat_size > len(data):
             raise ValueError("vehicle registry entry is invalid")
@@ -326,6 +332,9 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
             if flags & FLAG_SPECIAL_BEHAVIOR
             else None
         )
+        original_special_type = ((flags & SPECIAL_BEHAVIOR_MASK) >> SPECIAL_BEHAVIOR_SHIFT) if flags & FLAG_ORIGINAL_SPECIAL else None
+        if original_special_type is not None and (original_special_type not in (7, 12) or special_behavior_type is not None):
+            raise ValueError("invalid original special capability")
         if special_behavior_type is not None and special_behavior_type >= 18:
             raise ValueError(
                 "vehicle registry special behavior type is outside 0..17"
@@ -406,6 +415,8 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
                 controller_class=controller_class,
                 supports_transformations=supports_transformations,
                 special_behavior_type=special_behavior_type,
+                original_special_type=original_special_type,
+                original_impact_kind=extension_reserved,
             )
         )
     return games[game_id], tuple(entries)
@@ -865,6 +876,8 @@ def decompile_package(
             controller_class=entry.controller_class,
             supports_transformations=entry.supports_transformations,
             special_behavior_type=entry.special_behavior_type,
+            original_special_type=entry.original_special_type,
+            original_impact_kind=entry.original_impact_kind,
         )
         vehicle.validate()
         vehicles.append(vehicle)

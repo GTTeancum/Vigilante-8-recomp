@@ -352,6 +352,7 @@ internal sealed class PresentationRenderer : IDisposable
         _gl.Uniform1(_upscaleLinearFilter, 0);
         _gl.Uniform1(_upscaleLoadingUiRestore, loadingUiSource ? 1 : 0);
         string? importedArena =
+            RecompOne.Runtime.Sdk.V82ArenaRegistry.LoadingOverlayName ??
             RecompOne.Runtime.Sdk.V82ArenaRegistry.SelectedOverlayName;
         string? latestRetailArena = Dispatcher.LatestLevelName;
         string? loadingCardArena =

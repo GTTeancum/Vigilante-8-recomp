@@ -208,7 +208,6 @@ def main() -> None:
         rebuilt = replace(
             rebuilt,
             sounds=original.sounds,
-            special_behavior_type=original.special_behavior_type,
         )
         original_dict = project.to_dict(original)
         rebuilt_dict = project.to_dict(rebuilt)

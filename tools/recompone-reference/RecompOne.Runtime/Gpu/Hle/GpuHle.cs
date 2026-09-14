@@ -97,6 +97,8 @@ public static class GpuHle
     static readonly HashSet<uint> VehiclePackets = [];
     static readonly HashSet<uint> VehicleReflectionPackets = [];
     static readonly HashSet<uint> TerrainRoutePackets = [];
+    static readonly Dictionary<uint, int> NativeRoadPackets = [];
+    static readonly Stack<int> NativeRoadWritePriorities = [];
     static readonly Dictionary<uint, CoarseTerrainPacket>
         CoarseTerrainPackets = [];
     static readonly Dictionary<uint, TerrainTransitionPacket>
@@ -648,12 +650,24 @@ public static class GpuHle
             _terrainRouteWriteScopeDepth--;
     }
 
+    public static void BeginNativeRoadPacketWrites(int priority = 384) => NativeRoadWritePriorities.Push(priority);
+    public static void EndNativeRoadPacketWrites()
+    {
+        if (NativeRoadWritePriorities.Count > 0) NativeRoadWritePriorities.Pop();
+    }
+    public static bool IsNativeRoadPacket(uint address) =>
+        NativeRoadPackets.ContainsKey(NormalizePacketAddress(address));
+    public static int NativeRoadPriority(uint address) =>
+        NativeRoadPackets.GetValueOrDefault(NormalizePacketAddress(address));
+
     public static void ObservePacketWrite(uint physicalAddress)
     {
         if (physicalAddress >= Memory.MemoryMap.RamWindow)
             return;
 
         uint address = NormalizePacketAddress(physicalAddress);
+        if (NativeRoadWritePriorities.Count > 0) NativeRoadPackets[address] = NativeRoadWritePriorities.Peek();
+        else NativeRoadPackets.Remove(address);
         // Coarse reconstruction metadata is attached after a complete packet
         // is emitted. Any later write to that packet address starts new
         // ownership, even when the replacement also belongs to terrain.
@@ -843,6 +857,8 @@ public static class GpuHle
         VehiclePackets.Clear();
         VehicleReflectionPackets.Clear();
         TerrainRoutePackets.Clear();
+        NativeRoadPackets.Clear();
+        NativeRoadWritePriorities.Clear();
         CoarseTerrainPackets.Clear();
         TerrainTransitionPackets.Clear();
         TriangleNclipPackets.Clear();

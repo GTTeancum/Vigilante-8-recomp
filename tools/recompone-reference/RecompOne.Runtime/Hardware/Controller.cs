@@ -31,4 +31,40 @@ public static class Controller
     public static byte   RightY2 = 0x80;
     public static byte   LeftX2 = 0x80;
     public static byte   LeftY2 = 0x80;
+
+    // Preserve the two retail pad images while exposing independent extension
+    // ports to local multiplayer. No extra state occupies native PS1 globals.
+    static readonly ushort[] _extraState = [0xFFFF, 0xFFFF];
+    static readonly uint[] _extraAxes = [0x80808080, 0x80808080];
+    public static readonly bool[] LocalConnected = new bool[4];
+
+    public static ushort GetState(int player) => player switch
+    {
+        0 => State, 1 => State2, 2 or 3 => _extraState[player - 2],
+        _ => throw new ArgumentOutOfRangeException(nameof(player)),
+    };
+
+    public static void SetState(int player, ushort state)
+    {
+        if (player == 0) State = state;
+        else if (player == 1) State2 = state;
+        else if (player is 2 or 3) _extraState[player - 2] = state;
+        else throw new ArgumentOutOfRangeException(nameof(player));
+    }
+
+    public static uint GetAxes(int player) => player switch
+    {
+        0 => (uint)(RightX | RightY << 8 | LeftX << 16 | LeftY << 24),
+        1 => (uint)(RightX2 | RightY2 << 8 | LeftX2 << 16 | LeftY2 << 24),
+        2 or 3 => _extraAxes[player - 2],
+        _ => throw new ArgumentOutOfRangeException(nameof(player)),
+    };
+
+    public static void SetAxes(int player, byte lx, byte ly, byte rx, byte ry)
+    {
+        if (player == 0) { LeftX = lx; LeftY = ly; RightX = rx; RightY = ry; }
+        else if (player == 1) { LeftX2 = lx; LeftY2 = ly; RightX2 = rx; RightY2 = ry; }
+        else if (player is 2 or 3) _extraAxes[player - 2] = (uint)(rx | ry << 8 | lx << 16 | ly << 24);
+        else throw new ArgumentOutOfRangeException(nameof(player));
+    }
 }

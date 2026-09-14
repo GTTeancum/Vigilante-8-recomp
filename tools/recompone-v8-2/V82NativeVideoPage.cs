@@ -101,6 +101,9 @@ public static partial class Vigilante82PC
         static uint _previousInput;
         static int _pageIndex;
         static bool IsGameplay => _pageIndex == V82NativeVideoOption.GameplayRowIndex;
+        static bool IsAudio => _pageIndex == 4;
+        static CpuContext AudioCpu => RecompOne.Runtime.Runtime.Cpu!;
+        static IMemory AudioMemory => RecompOne.Runtime.Runtime.Mem!;
 
         /// <summary>
         /// Inline hook on the jump-table bound check at 0x8010EC58. Returns
@@ -109,7 +112,8 @@ public static partial class Vigilante82PC
         public static bool Dispatch(CpuContext c, IMemory m)
         {
             if ((int)c.S1 != V82NativeVideoOption.VideoRowIndex &&
-                (int)c.S1 != V82NativeVideoOption.GameplayRowIndex)
+                (int)c.S1 != V82NativeVideoOption.GameplayRowIndex &&
+                ((int)c.S1 != 4 || RecompOne.Runtime.Runtime.Cd?.HasSoundtrackSelection != true))
                 return false;
 
             _pageIndex = (int)c.S1;
@@ -277,18 +281,19 @@ public static partial class Vigilante82PC
                 {
                     Row row = Rows[index];
                     bool selected = _editing && index == _row;
-                    ushort y = (ushort)(
-                        FirstRowY + (index - _top) * RowSpacing);
+                    ushort y = (ushort)(IsAudio
+                        ? FirstRowY + (index - _top) * 36 + (index > 0 ? 36 : 0)
+                        : FirstRowY + (index - _top) * RowSpacing);
                     string prefix = selected ? Cursor : "  ";
                     SetObjectColor(m, textObject, normalColor, selected);
-                    if (IsGameplay)
+                    if (IsGameplay || (IsAudio && index == 0))
                     {
                         // Keep the full mode names readable, without squeezing
                         // the label and value onto a single narrow line.
                         DrawText(c, m, textObject, prefix + row.Label,
                             y, 0x00000008u);
                         DrawText(c, m, textObject, row.Value(),
-                            (ushort)(y + RowSpacing), 0x0000000Au);
+                            (ushort)(y + (IsAudio ? 36 : RowSpacing)), 0x0000000Au);
                     }
                     else
                         DrawText(c, m, textObject,
@@ -388,7 +393,27 @@ public static partial class Vigilante82PC
 
         static ViewConfig View => ConfigManager.View;
 
-        static Row[] Rows => IsGameplay ? GameplayRows : VideoRows;
+        static Row[] Rows => IsAudio ? AudioRows : IsGameplay ? GameplayRows : VideoRows;
+
+        static readonly Row[] AudioRows =
+        [
+            new("Soundtrack", () => SoundtrackSettings.Label(ConfigManager.Game.Soundtrack),
+                d => V82NativeAudio.ChangeSoundtrack(AudioCpu, AudioMemory, d)),
+            new("Music", () => $"{(AudioMemory.ReadU16(0x8006B60Eu) * 100 + 8191) / 16383}%",
+                d => V82NativeAudio.Volume(AudioCpu, AudioMemory, 0x8006B60Eu, d)),
+            new("Sound FX", () => $"{(AudioMemory.ReadU16(0x8006B60Cu) * 100 + 8191) / 16383}%",
+                d => V82NativeAudio.Volume(AudioCpu, AudioMemory, 0x8006B60Cu, d)),
+            new("Output", () => AudioMemory.ReadU8(0x8006B02Bu) == 0 ? "Stereo" : "Mono", _ =>
+            {
+                AudioMemory.WriteU8(0x8006B02Bu, (byte)(AudioMemory.ReadU8(0x8006B02Bu) == 0 ? 1 : 0));
+                V82NativeAudio.ApplyMix(AudioCpu, AudioMemory);
+            }),
+            new("Track", () => $"{AudioMemory.ReadU8(0x8006B02Au) + 1} / {AudioMemory.ReadU8(0x8006B029u)}",
+                d => V82NativeAudio.Track(AudioCpu, AudioMemory, d)),
+            new("Playback", () => (sbyte)AudioMemory.ReadU8(0x8006A822u) switch
+                { < 0 => "Sequential", > 0 => "Loop", _ => "Random" },
+                d => V82NativeAudio.Playback(AudioCpu, AudioMemory, d)),
+        ];
 
         static readonly Row[] GameplayRows =
         [

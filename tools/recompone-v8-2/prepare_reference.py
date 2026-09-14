@@ -789,6 +789,22 @@ PROVEN_PATCHES = [
         "mode": "pre",
     },
     {
+        "overlay": "main", "address": "800507DC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginNativeJunctionPacketWrites", "mode": "pre",
+    },
+    {
+        "overlay": "main", "address": "800507DC",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndNativeRoadPacketWrites", "mode": "post",
+    },
+    {
+        "overlay": "main", "address": "8004F804",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginNativeRoadPacketWrites", "mode": "pre",
+    },
+    {
+        "overlay": "main", "address": "8004F804",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndNativeRoadPacketWrites", "mode": "post",
+    },
+    {
         "overlay": "main",
         "address": "800288E0",
         "target": (
@@ -1269,6 +1285,12 @@ PROVEN_PATCHES = [
             "RecompOne.Runtime.Sdk.V82VehicleRegistry."
             "AllowNativeSelectorSuspensionSound"
         ),
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "8001E188",
+        "target": "RecompOne.Runtime.Sdk.V82VehicleRegistry.PlayNativeSelectorAcceptance",
         "mode": "pre",
     },
     # The retail SHELL text renderer is observed too, rather than introducing a

@@ -261,21 +261,63 @@ public static class LibCd
         StartCdda(lba, "menu recovery");
     }
 
-    static void StartCdda(int lba, string source)
+    static int _cddaLoopStart = -1;
+    static int _cddaLoopEnd = -1;
+
+    public static void ChangeSoundtrack(Config.SoundtrackMode mode)
     {
-        _readActive = false;
-        _xaActive = false;
-        _xaReportLba = -1;
-        _xaPendingReportLba = -1;
-        _xaLastTraceSecond = -1;
-        _cddaLba = lba;
-        _cddaActive = true;
-        _cddaPendingReportLba = -1;
-        _cddaLastReportSecond = -1;
-        XaAudio.Reset();
-        CddaAudio.Reset();
-        EnsureXaThread();
-        Console.Error.WriteLine($"[CDDA] play LBA={_cddaLba} mode=0x{_mode:X2} source={source}");
+        lock (DiscLock)
+        {
+            _cddaActive = false;
+            _cddaPendingReportLba = -1;
+            CddaAudio.Reset();
+            Runtime.Cd?.ApplySoundtrack(mode);
+        }
+    }
+
+    public static void PlaySoundtrack(int index, bool repeatTrack)
+    {
+        lock (DiscLock)
+        {
+            var cd = Runtime.Cd!;
+            int count = cd.LastTrackNumber - 1;
+            index = ((index % count) + count) % count;
+            cd.TryGetTrackStartLba(index + 2, out int start);
+            cd.TryGetTrackStartLba(2, out int first);
+            int end = cd.TryGetTrackStartLba(index + 3, out int next) ? next : cd.LeadOutLba;
+            _mode = 5;
+            lock (_posGate)
+                IntToPos(start, out _pos[0], out _pos[1], out _pos[2]);
+            StartCdda(start, "soundtrack selection",
+                repeatTrack ? start : first, repeatTrack ? end : cd.LeadOutLba);
+        }
+    }
+
+    static void StartCdda(int lba, string source, int loopStart = -1, int loopEnd = -1)
+    {
+        lock (DiscLock)
+        {
+            if (loopEnd < 0 && Runtime.Cd?.HasSoundtrackSelection == true)
+            {
+                Runtime.Cd.TryGetTrackStartLba(2, out loopStart);
+                loopEnd = Runtime.Cd.LeadOutLba;
+            }
+            _readActive = false;
+            _xaActive = false;
+            _xaReportLba = -1;
+            _xaPendingReportLba = -1;
+            _xaLastTraceSecond = -1;
+            _cddaLba = lba;
+            _cddaLoopStart = loopStart;
+            _cddaLoopEnd = loopEnd;
+            _cddaActive = true;
+            _cddaPendingReportLba = -1;
+            _cddaLastReportSecond = -1;
+            XaAudio.Reset();
+            CddaAudio.Reset();
+            EnsureXaThread();
+            Console.Error.WriteLine($"[CDDA] play LBA={_cddaLba} mode=0x{_mode:X2} source={source}");
+        }
     }
 
     public static void ServiceReadOnce()
@@ -327,30 +369,36 @@ public static class LibCd
 
         while (_cddaActive && CddaAudio.BufferedFrames < MinBufferFrames && scanned++ < MaxScan)
         {
-            int lba = _cddaLba;
-            byte[] sector;
-            int trackNumber;
-            int trackEndLba;
             lock (DiscLock)
             {
-                if (!cd.TryReadAudioSector(lba, out sector, out trackNumber, out trackEndLba))
+                if (!_cddaActive) return;
+                int lba = _cddaLba;
+                byte[] sector;
+                int trackNumber;
+                int trackEndLba;
+                lock (DiscLock)
                 {
-                    _cddaActive = false;
-                    Console.Error.WriteLine($"[CDDA] stopped at unmapped audio LBA {lba}");
-                    return;
+                    if (!cd.TryReadAudioSector(lba, out sector, out trackNumber, out trackEndLba))
+                    {
+                        _cddaActive = false;
+                        Console.Error.WriteLine($"[CDDA] stopped at unmapped audio LBA {lba}");
+                        return;
+                    }
                 }
-            }
 
-            _cddaTrackNumber = trackNumber;
-            CddaAudio.QueueSector(sector, trackNumber, lba);
-            _cddaLba = lba + 1;
-            int reportSecond = lba / 75;
-            if (reportSecond != _cddaLastReportSecond)
-            {
-                _cddaLastReportSecond = reportSecond;
-                Interlocked.Exchange(ref _cddaPendingReportLba, lba);
+                _cddaTrackNumber = trackNumber;
+                CddaAudio.QueueSector(sector, trackNumber, lba);
+                _cddaLba = lba + 1;
+                if (_cddaLoopEnd > 0 && _cddaLba >= _cddaLoopEnd)
+                    _cddaLba = _cddaLoopStart;
+                int reportSecond = lba / 75;
+                if (reportSecond != _cddaLastReportSecond)
+                {
+                    _cddaLastReportSecond = reportSecond;
+                    Interlocked.Exchange(ref _cddaPendingReportLba, lba);
+                }
+                if (lba + 1 >= trackEndLba) return;
             }
-            if (lba + 1 >= trackEndLba) return;
         }
     }
 

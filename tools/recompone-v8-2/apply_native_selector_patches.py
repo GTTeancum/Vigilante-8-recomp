@@ -23,6 +23,33 @@ DEFAULT_MAIN_SOURCE = (
 
 REPLACEMENTS = (
     (
+        """        c.A0 = c.A0 + c.V0;
+        c.V1 = m.ReadU8((c.A0 + 0x2u));
+""",
+        """        c.A0 = c.A0 + c.V0;
+        c.A0 = RecompOne.Runtime.Sdk.V82VehicleRegistry.NativeSelectorColorRecord(c, m, c.A0);
+        c.V1 = m.ReadU8((c.A0 + 0x2u));
+""",
+    ),
+    (
+        """        c.T2 = 0x80110000u;
+        m.WriteU8((c.V0 + 0x2u), (byte)c.S5);
+""",
+        """        c.V0 = RecompOne.Runtime.Sdk.V82VehicleRegistry.NativeSelectorColorRecord(c, m, c.V0);
+        c.T2 = 0x80110000u;
+        m.WriteU8((c.V0 + 0x2u), (byte)c.S5);
+""",
+    ),
+    (
+        """        c.StoreWord(0, m, (c.SP + 0x1E0u));
+        c.A2 = m.ReadU8((c.V0 + 0x3u));
+""",
+        """        c.StoreWord(0, m, (c.SP + 0x1E0u));
+        c.V0 = RecompOne.Runtime.Sdk.V82VehicleRegistry.NativeSelectorColorRecord(c, m, c.V0);
+        c.A2 = m.ReadU8((c.V0 + 0x3u));
+""",
+    ),
+    (
         """        c.S3 = 0x00000012u;
         L801045E0: ;
         c.LoadWord(8, m, (c.SP + 0xB0u));
@@ -272,7 +299,21 @@ OBSOLETE_MAIN_DIAGNOSTICS = (
 # are intentionally absent from production builds now that the converter emits
 # native links. Keep only the cleanup patterns so an already-instrumented
 # generated tree is normalized on the next patch pass.
-MAIN_DIAGNOSTICS: tuple[tuple[str, str], ...] = ()
+MAIN_DIAGNOSTICS: tuple[tuple[str, str], ...] = (
+    (
+        "        L8001F0EC: ;\n        c.V0 = (uint)(short)m.ReadU16((c.SP + 0x34u));",
+        "        L8001F0EC: ;\n        RecompOne.Runtime.Sdk.V82VehiclePaint.PreparePalette(c, m);\n        c.V0 = (uint)(short)m.ReadU16((c.SP + 0x34u));",
+    ),
+    (
+        "        Vigilante82PC.func_8001EEF8(c, m);\n        m.WriteU16(c.S0, (ushort)c.V0);",
+        "        Vigilante82PC.func_8001EEF8(c, m);\n        RecompOne.Runtime.Sdk.V82VehiclePaint.PreserveLightEntry(c, m);\n        m.WriteU16(c.S0, (ushort)c.V0);",
+    ),
+    (
+        "    public static void func_8001E188(CpuContext c, IMemory m)\n    {\n",
+        "    public static void func_8001E188(CpuContext c, IMemory m)\n    {\n"
+        "        if (!RecompOne.Runtime.Context.PreHook.Run(RecompOne.Runtime.Sdk.V82VehicleRegistry.PlayNativeSelectorAcceptance, c, m)) return;\n",
+    ),
+)
 
 SOURCE_MIGRATIONS = (
     (

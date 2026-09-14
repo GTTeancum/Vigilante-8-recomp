@@ -24,6 +24,28 @@ static class SceneDepthChecks
         road.HasViewSpace = true;
         road.ViewZ = float.NaN;
         if (Depth(road) != fallback) throw new Exception("Invalid source depth fallback");
-        return 6;
+        // Source-matched Canyonlands approach: a support at Z3890.9504 was
+        // painting over foreground sand at Z1875.962. Scenery must use the
+        // same coherent depth domain, while vehicle/effect ordering stays out.
+        var support = new HleVertex { HasViewSpace = true, ViewZ = 3890.9504f };
+        var sand = new HleVertex { HasViewSpace = true, ViewZ = 1875.962f };
+        if (Depth(support) <= Depth(sand)) throw new Exception("Buried support must be behind foreground terrain");
+        var scenery = new PrimFlags { WorldObject = true, Material = HleMaterialKind.AlphaTest };
+        if (!EnhancedGlBackend.UsesSceneryDepthCompare(scenery, true)) throw new Exception("Textured scenery must compare coherent depth");
+        scenery.Material = HleMaterialKind.Opaque;
+        if (!EnhancedGlBackend.UsesSceneryDepthCompare(scenery, true)) throw new Exception("Untextured scenery must compare coherent depth");
+        if (EnhancedGlBackend.UsesSceneryDepthCompare(scenery, false)) throw new Exception("Uncorrelated fallback must preserve native ordering");
+        scenery.Vehicle = true;
+        if (EnhancedGlBackend.UsesSceneryDepthCompare(scenery, true)) throw new Exception("Vehicle layers must preserve native ordering");
+        scenery.Vehicle = false;
+        scenery.SemiTrans = true;
+        if (EnhancedGlBackend.UsesSceneryDepthCompare(scenery, true)) throw new Exception("Translucent scenery must preserve its pass contract");
+        scenery.SemiTrans = false;
+        scenery.WorldObject = false;
+        if (EnhancedGlBackend.UsesSceneryDepthCompare(scenery, true)) throw new Exception("Unowned packets must not acquire scenery semantics");
+        scenery.WorldObject = true;
+        scenery.Material = HleMaterialKind.WaterSurface;
+        if (EnhancedGlBackend.UsesSceneryDepthCompare(scenery, true)) throw new Exception("Water must retain its recovered depth contract");
+        return 14;
     }
 }

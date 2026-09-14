@@ -18,6 +18,23 @@ DEFAULT_SOURCE = REPO / "reference-v8-2" / "generated" / "recompiled" / "main.cs
 
 MIGRATIONS = (
     (
+        "        c.S0 = RecompOne.Runtime.Sdk.V82Compat.SelectVramFreeLeaf(c, m, c.S0);\n",
+        "",
+    ),
+    (
+        "        RecompOne.Runtime.Sdk.V82VehicleRegistry.UpdateSpecialTurretAim(c, m, c.A0);\n",
+        "",
+    ),
+    (
+        """        c.A0 = c.S3 | c.S2;
+        c.RA = 0x80013770u;
+""",
+        """        c.A0 = c.S3 | c.S2;
+        c.A0 = RecompOne.Runtime.Sdk.V82VehicleRegistry.SpecialResourceMask(m, c.A0);
+        c.RA = 0x80013770u;
+""",
+    ),
+    (
         """        func_8003AC84_Impl(c, m);
         RecompOne.Runtime.Sdk.V82VehicleRegistry.ApplyControllerPhysics(c, m);
 """,
@@ -37,6 +54,77 @@ MIGRATIONS = (
 
 REPLACEMENTS = (
     (
+        "    public static void func_80033550(CpuContext c, IMemory m)\n    {\n",
+        "    public static void func_80033550(CpuContext c, IMemory m)\n    {\n"
+        "        RecompOne.Runtime.Sdk.V82ArenaRegistry.CaptureLevelLoad(c, m);\n",
+    ),
+    (
+        """        c.LoadWord(16, m, (c.GP + 0xE80u));
+        c.StoreWord(20, m, (c.SP + 0x20u));
+""",
+        """        c.LoadWord(16, m, (c.GP + 0xE80u));
+        c.S0 = RecompOne.Runtime.Sdk.V82Compat.SelectMatchVramFreeLeaf(c, m, c.S0);
+        c.StoreWord(20, m, (c.SP + 0x20u));
+""",
+    ),
+    (
+        """    public static void func_80020754(CpuContext c, IMemory m)
+    {
+""",
+        """    public static void func_80020754(CpuContext c, IMemory m)
+    {
+        RecompOne.Runtime.Sdk.V82Compat.RetireVramBackingTree(c, m);
+""",
+    ),
+    (
+        """    public static void func_80020F5C(CpuContext c, IMemory m)
+    {
+""",
+        """    public static void func_80020F5C(CpuContext c, IMemory m)
+    {
+        if (!RecompOne.Runtime.Context.PreHook.Run(RecompOne.Runtime.Sdk.V82Compat.RetainSharedGuestTexture, c, m)) return;
+""",
+    ),
+    (
+        """        Vigilante82PC.func_800333D0(c, m);
+        c.RA = 0x800147D0u;
+""",
+        """        Vigilante82PC.func_800333D0(c, m);
+        RecompOne.Runtime.Sdk.V82VehicleRegistry.ReleaseMatchRuntimes(c, m);
+        c.RA = 0x800147D0u;
+""",
+    ),
+    (
+        """        L80041D5C: ;
+        c.V1 = m.ReadU16((c.S4 + 0xB4u));
+""",
+        """        L80041D5C: ;
+        if (RecompOne.Runtime.Sdk.V82VehicleRegistry.ApplyOriginalControllerPhysics(c, m, c.S4)) {
+            c.S1 = 0u;
+            goto L80041E04;
+        }
+        c.V1 = m.ReadU16((c.S4 + 0xB4u));
+""",
+    ),
+    (
+        """        L80041EF8: ;
+        c.V0 = (uint)(short)m.ReadU16((c.S4 + 0xAu));
+""",
+        """        L80041EF8: ;
+        if (RecompOne.Runtime.Sdk.V82VehicleRegistry.UsesFlyingController(m, c.S4)) goto L80041FB0;
+        c.V0 = (uint)(short)m.ReadU16((c.S4 + 0xAu));
+""",
+    ),
+    (
+        """        L8004AF0C: ;
+        if (c.S0 != 0u) {
+""",
+        """        L8004AF0C: ;
+        c.S1 = RecompOne.Runtime.Sdk.V82VehicleRegistry.SpecialCallbackForObject(m, c.S2, c.S1);
+        if (c.S0 != 0u) {
+""",
+    ),
+    (
         '    public static void func_80054EEC(CpuContext c, IMemory m)\n    {\n',
         '''    public static void func_80054EEC(CpuContext c, IMemory m)
     {
@@ -54,10 +142,11 @@ REPLACEMENTS = (
         RecompOne.Runtime.Sdk.V82Compat.EndImportedRenderGroup(c, m);
 ''',
         '''        float previousScale = RecompOne.Runtime.Sdk.V82MeshClipCompat.BeginMeshDepth(m, c.A0);
+        var previousOffsets = RecompOne.Runtime.Sdk.V82JunctionAttachments.BeginMesh(c.A0);
         try { func_80021F70_Impl(c, m); }
         finally
         {
-            RecompOne.Runtime.Gte.PreciseViewScale = previousScale;
+            RecompOne.Runtime.Gte.PreciseViewScale = previousScale; RecompOne.Runtime.Sdk.V82JunctionAttachments.EndMesh(previousOffsets);
             RecompOne.Runtime.Sdk.V82Compat.EndImportedRenderGroup(c, m);
         }
 ''',
@@ -67,8 +156,9 @@ REPLACEMENTS = (
         '''    public static void func_80021FA8(CpuContext c, IMemory m)
     {
         float previousScale = RecompOne.Runtime.Sdk.V82MeshClipCompat.BeginMeshDepth(m, c.A0);
+        var previousOffsets = RecompOne.Runtime.Sdk.V82JunctionAttachments.BeginMesh(c.A0);
         try { func_80021FA8_Impl(c, m); }
-        finally { RecompOne.Runtime.Gte.PreciseViewScale = previousScale; }
+        finally { RecompOne.Runtime.Gte.PreciseViewScale = previousScale; RecompOne.Runtime.Sdk.V82JunctionAttachments.EndMesh(previousOffsets); }
     }
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     public static void func_80021FA8_Impl(CpuContext c, IMemory m)
@@ -276,7 +366,7 @@ def main() -> int:
     text = source.read_text(encoding="utf-8")
     changed = 0
     for old, new in MIGRATIONS:
-        if new in text:
+        if new and new in text:
             continue
         count = text.count(old)
         if count > 1:

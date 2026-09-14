@@ -2269,6 +2269,9 @@ def project_to_scene(context, vehicle: project.VehicleProject) -> bpy.types.Coll
     collection["v8_display_name"] = vehicle.display_name
     collection["v8_body_kind"] = vehicle.body_kind
     collection["v8_controller_class"] = vehicle.controller_class
+    collection["v8_special_behavior_type"] = vehicle.special_behavior_type if vehicle.special_behavior_type is not None else -1
+    collection["v8_original_special_type"] = vehicle.original_special_type if vehicle.original_special_type is not None else -1
+    collection["v8_original_impact_kind"] = vehicle.original_impact_kind
     collection["v8_supports_transformations"] = (
         vehicle.supports_transformations
     )
@@ -2949,6 +2952,9 @@ def scene_to_project(
             else {}
         ),
         controller_class=controller_class,
+        special_behavior_type=(int(collection["v8_special_behavior_type"]) if int(collection.get("v8_special_behavior_type", -1)) >= 0 else None),
+        original_special_type=(int(collection["v8_original_special_type"]) if int(collection.get("v8_original_special_type", -1)) >= 0 else None),
+        original_impact_kind=int(collection.get("v8_original_impact_kind", 0)),
         supports_transformations=supports_transformations,
     )
     vehicle.validate()

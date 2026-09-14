@@ -169,6 +169,18 @@ public sealed class Spu
             data.CopyTo(Ram.AsSpan((int)address, data.Length));
     }
 
+    // A reusable sample slot must not be mixed between replacing its bytes
+    // and restarting its owner voice. Register writes take this same lock
+    // reentrantly when startVoice runs on the game thread.
+    public void LoadRamAndStart(uint address, byte[] data, Action startVoice)
+    {
+        lock (_sync)
+        {
+            LoadRam(address, data);
+            startVoice();
+        }
+    }
+
     public ushort ReadReg16(uint phys)
     {
         lock (_sync) return ReadReg(phys);

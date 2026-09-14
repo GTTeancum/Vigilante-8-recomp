@@ -621,67 +621,78 @@ intptr_t LAB_8003846c(intptr_t obj, int event, intptr_t arg)
     }
 }
 
+/* Corrected against original generated LAB_800359c0, 800359C0..80035CF4.
+ * +94 is the remaining beam generations, NOT projectile lifetime. +96
+ * counts down to spawning the next segment. Animation event 5 frees it.
+ */
+extern void FUN_80043408(const void *matrix, const void *offset, void *out);
+extern void *FUN_80040234(const int32_t *xyz);
+extern void *FUN_8003cee0(uint32_t mask, const int32_t *xyz, const int32_t *velocity);
+
 intptr_t LAB_800359c0(intptr_t obj, int event, intptr_t arg)
 {
-    uint8_t *self = (uint8_t *)(uintptr_t)obj;
-
+    uint8_t *s = (uint8_t *)(uintptr_t)obj;
     if (event == 0) {
-        *(int32_t *)(self + 0x48) =
-            mips_addu_i32(*(int32_t *)(self + 0x48), *(int32_t *)(self + 0x88));
-        *(int32_t *)(self + 0x4c) =
-            mips_addu_i32(*(int32_t *)(self + 0x4c), *(int32_t *)(self + 0x8c));
-        *(int32_t *)(self + 0x50) =
-            mips_addu_i32(*(int32_t *)(self + 0x50), *(int32_t *)(self + 0x90));
-        *(int32_t *)(self + 0x24) = *(int32_t *)(self + 0x48);
-        *(int32_t *)(self + 0x28) = *(int32_t *)(self + 0x4c);
-        *(int32_t *)(self + 0x2c) = *(int32_t *)(self + 0x50);
-
-        *(uint16_t *)(self + 0x94) = (uint16_t)(*(uint16_t *)(self + 0x94) - 1u);
-        if ((int16_t)*(uint16_t *)(self + 0x94) == -1 ||
-            FUN_80025400(*(int32_t *)(self + 0x48),
-                         *(int32_t *)(self + 0x50)) < *(int32_t *)(self + 0x4c))
-        {
-            uint32_t *fx = FUN_8003fd24((const int32_t *)(self + 0x48), 0x10);
-            if (fx != NULL) {
-                *(uint16_t *)((uint8_t *)fx + 0x44) = (uint16_t)FUN_8002036c(fx);
-                FUN_8001d708(fx);
+        uint8_t *next;
+        intptr_t socket;
+        unsigned i;
+        for (i = 0; i < 12; i += 4) {
+            *(int32_t *)(s + 0x24 + i) = mips_addu_i32(
+                *(int32_t *)(s + 0x24 + i), *(int32_t *)(s + 0x88 + i));
+            *(int32_t *)(s + 0x48 + i) = *(int32_t *)(s + 0x24 + i);
+        }
+        *(uint16_t *)(s + 0x96) -= 1u;
+        if (*(uint16_t *)(s + 0x96) != 0 || *(int16_t *)(s + 0x94) == 0)
+            return 0;
+        next = (uint8_t *)FUN_8001ac44(
+            (int *)(uintptr_t)*(uint32_t *)(s + 0x58),
+            *(uint16_t *)(s + 0x0a), 0x98, 8);
+        socket = FUN_8001b038((uint32_t *)s, 0x8000);
+        next[4] = 7;
+        *(uint32_t *)next = 0x01800084;
+        *(uint16_t *)(next + 6) = *(uint16_t *)(s + 6);
+        *(uint16_t *)(next + 0x0c) = *(uint16_t *)(s + 0x0c);
+        Object_SetCallbackPsxSlot(next, (uintptr_t)&LAB_800359c0);
+        FUN_8002036c((uint32_t *)next);
+        *(uint16_t *)(next + 0x96) = 3;
+        *(uint16_t *)(next + 0x94) = *(uint16_t *)(s + 0x94) - 1u;
+        for (i = 0; i < 12; i += 4)
+            *(uint32_t *)(next + 0x88 + i) = *(uint32_t *)(s + 0x88 + i);
+        *(uint32_t *)(next + 0x80) = *(uint32_t *)(s + 0x80);
+        for (i = 0; i < 32; i += 4)
+            *(uint32_t *)(next + 0x10 + i) = *(uint32_t *)(s + 0x10 + i);
+        FUN_80043408(s + 0x10, (const void *)(uintptr_t)(socket + 4), next + 0x24);
+        return 0;
+    }
+    if (event == 3) {
+        uint8_t *hit = (uint8_t *)(uintptr_t)*(uint32_t *)(uintptr_t)arg;
+        FUN_80040234((const int32_t *)(s + 0x48));
+        *(uint32_t *)s |= 0x20;
+        FUN_8004483c(FUN_8004410c(), uRam000005f8, 0x41, (int *)(s + 0x24));
+        FUN_8003fea8((int32_t *)(s + 0x24), 0x08c0c000);
+        if (hit[4] == 2) {
+            int i;
+            if (*(int16_t *)(hit + 6) < 0)
+                FUN_80012050(~(int)*(int16_t *)(hit + 6), 20);
+            if (((uint32_t)FUN_80017160() * 10u >> 15) == 0) {
+                for (i = 0; i < 3; i++) {
+                    uint16_t *timer = (uint16_t *)(hit + 0x11c + i * 2);
+                    int32_t velocity[3];
+                    if (*timer == 0) continue;
+                    velocity[0] = (int32_t)((uint32_t)FUN_80017160() * 3051u >> 15) - 1525;
+                    velocity[1] = -4577;
+                    velocity[2] = (int32_t)((uint32_t)FUN_80017160() * 3051u >> 15) - 1525;
+                    FUN_8003cee0(0x80000u << i, (const int32_t *)(hit + 0x24), velocity);
+                    *timer = 0;
+                }
             }
-            FUN_800447e8(FUN_8004410c(), uRam000005f8, 0x39, self + 0x48);
-            FUN_80020620(obj, 1);
         }
         return 0;
     }
-
-    if (event == 3) {
-        uint8_t *hit = arg ? (uint8_t *)(uintptr_t)*(uint32_t *)(uintptr_t)arg : NULL;
-        uint32_t *fx;
-        if (hit != NULL && hit[4] == 3)
-            return -1;
-        fx = FUN_8003fd24((const int32_t *)(self + 0x48), 0x10);
-        if (fx != NULL) {
-            *fx |= 0x400u;
-            *(uint16_t *)((uint8_t *)fx + 0x44) = (uint16_t)FUN_8002036c(fx);
-            FUN_8001d708(fx);
-        }
-        FUN_800447e8(FUN_8004410c(), uRam000005f8, 0x39, self + 0x48);
-        if (hit != NULL && hit[4] == 2) {
-            int32_t impulse[3];
-            impulse[0] = *(int32_t *)(self + 0x88) << 4;
-            impulse[1] = *(int32_t *)(self + 0x8c) << 4;
-            impulse[2] = *(int32_t *)(self + 0x90) << 4;
-            FUN_80017594((uint32_t *)hit, impulse, (const int32_t *)(self + 0x24));
-            if (*(int16_t *)(hit + 6) < 0)
-                FUN_80012050(~(int)*(int16_t *)(hit + 6), 0x0a);
-        }
-        FUN_80020620(obj, 0);
-        return -1;
-    }
-
     if (event == 5) {
         FUN_800205f8(obj);
         return -1;
     }
-
     return 0;
 }
 

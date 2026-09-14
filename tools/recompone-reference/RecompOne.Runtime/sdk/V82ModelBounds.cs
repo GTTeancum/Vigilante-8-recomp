@@ -54,6 +54,15 @@ public static class V82ModelBounds
         if (count <= 0 || count > 8192 || shift > 15 ||
             (ulong)physical + (uint)(count * 8) > (ulong)memory.Ram.Length) return false;
         var bounds = ReadBounds(memory, vertices, count);
+        // Enhanced attachment endpoints can retain fractions discarded by the
+        // native mesh. Include their actual positions in the visibility box.
+        if (V82JunctionAttachments.ActiveOffsets is { } attachments)
+            foreach (var (vertex, delta) in attachments)
+            {
+                var point = new Vector3(vertex.Item1, vertex.Item2, vertex.Item3) + delta;
+                bounds.Min = Vector3.Min(bounds.Min, point);
+                bounds.Max = Vector3.Max(bounds.Max, point);
+            }
         Span<float> r = stackalloc float[9];
         for (int i = 0; i < 9; i++) r[i] = unchecked((short)m.ReadU16(c.A1 + (uint)i*2)) / 4096f;
         int tx = unchecked((int)m.ReadU32(c.A1+20)) >> (16-shift);

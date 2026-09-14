@@ -11,6 +11,16 @@ public static class V82MeshClipCompat
     static readonly bool Enabled =
         Environment.GetEnvironmentVariable("RECOMPONE_V82_MODERN_MESH_CLIP") != "0";
     static int _traceCount;
+    static readonly bool TraceFallback =
+        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_MESH_CLIP_FALLBACK") == "1";
+    static int _fallbackCount;
+
+    static bool NativeFallback(CpuContext c, string reason, int vertex = -1)
+    {
+        if (TraceFallback && _fallbackCount++ < 64)
+            Console.Error.WriteLine($"[MeshClipFallback] tick={GpuHle.DebugGameplayTick} caller={c.RA:X8} scratch={c.A1:X8} packet={c.A0:X8} vertex={vertex} reason={reason}");
+        return true;
+    }
 
     // 80021F70/80021FA8 shift 16.16 camera translation by (16 - mesh[1]).
     // Terrain and water use 256 camera units per world unit, while a mesh
@@ -42,7 +52,7 @@ public static class V82MeshClipCompat
         uint command = m.ReadU32(scratch + 0x10u);
         uint kind = (command >> 24) & 0xFCu;
         if (kind is not (0x20u or 0x24u or 0x30u or 0x34u))
-            return true;
+            return NativeFallback(c, "unsupported-command");
         Span<PreciseGteVertexData> vertices = stackalloc PreciseGteVertexData[3];
         float minZ = float.MaxValue;
         float maxZ = float.MinValue;
@@ -50,13 +60,13 @@ public static class V82MeshClipCompat
         {
             uint xy = scratch + 0x24u + (uint)i * 0x18u;
             if (!m.TryGetPreciseGteVertex(xy, m.ReadU32(xy), out vertices[i]))
-                return true;
+                return NativeFallback(c, "missing-vertex-metadata", i);
             minZ = MathF.Min(minZ, vertices[i].ViewZ);
             maxZ = MathF.Max(maxZ, vertices[i].ViewZ);
             if (i > 0 && (vertices[i].ProjectionScale != vertices[0].ProjectionScale ||
                 vertices[i].ProjectionCenterX != vertices[0].ProjectionCenterX ||
                 vertices[i].ProjectionCenterY != vertices[0].ProjectionCenterY))
-                return true;
+                return NativeFallback(c, "mixed-projection", i);
         }
         if (maxZ < 1f)
         {

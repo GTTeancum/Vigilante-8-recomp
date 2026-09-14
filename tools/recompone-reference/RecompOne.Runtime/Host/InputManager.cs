@@ -12,9 +12,21 @@ namespace RecompOne.Runtime.Host;
 internal static unsafe class InputManager
 {
     static IKeyboard?_keyboard;
+    static readonly ushort[] _joinStates = new ushort[4];
+    static readonly bool[] _joinConnected = new bool[4];
+    internal static ushort JoinDeviceState(int device) => device == LocalInputSession.KeyboardDevice
+        ? LocalInputSession.KeyboardState : _joinStates[device];
+    internal static bool JoinDeviceConnected(int device) => device == LocalInputSession.KeyboardDevice
+        ? LocalInputSession.KeyboardConnected : _joinConnected[device];
+    readonly record struct KeyPulse(string? Stage, int Start, int End, Key Key);
+    static readonly List<KeyPulse> _scriptedKeys = new();
+    static readonly HashSet<Key> _fakeKeys = new();
     static Sdl?_sdl;
-    static GameController* _pad0;
-    static GameController* _pad1;
+    static readonly nint[] _pads = new nint[4];
+    static readonly int[] _padIds = [-1, -1, -1, -1];
+    static GameController* PadHandle(int pad) => (uint)pad < 4 ? (GameController*)_pads[pad] : null;
+    static GameController* _pad0 => PadHandle(0);
+    static GameController* _pad1 => PadHandle(1);
 
     const int AxisThreshold = 8000;
     const int StickThreshold = 16000;
@@ -31,7 +43,7 @@ internal static unsafe class InputManager
     static bool _topBarToggle;
     static bool _fullscreenToggle;
     readonly record struct ScriptedPulse(
-        string? Stage, int Start, int End, ushort Pad1Mask, ushort Pad2Mask);
+        string? Stage, int Start, int End, ushort Pad1Mask, ushort Pad2Mask, ushort Pad3Mask, ushort Pad4Mask);
 
     static readonly List<ScriptedPulse> _scriptedInput = new();
 
@@ -45,12 +57,15 @@ internal static unsafe class InputManager
         string? Stage, int Start, int End, int[] Codes, int Pad);
 
     static readonly List<PhysicalPulse> _scriptedPhysical = new();
-    static readonly HashSet<int>[] _fakePressed = [new(), new()];
+    static readonly HashSet<int>[] _fakePressed = [new(), new(), new(), new()];
+    static readonly bool[] _fakeConnected = new bool[4];
+    static readonly bool[] _fakeDisconnected = new bool[4];
     static bool _fakePadActive;
 
     static readonly Dictionary<string, int> PhysicalNames = new(
         StringComparer.OrdinalIgnoreCase)
     {
+        ["DISCONNECTED"] = -1,
         ["A"] = 0, ["B"] = 1, ["X"] = 2, ["Y"] = 3,
         ["BACK"] = 4, ["START"] = 6, ["LS"] = 7, ["RS"] = 8,
         ["LB"] = 9, ["RB"] = 10,
@@ -83,14 +98,18 @@ internal static unsafe class InputManager
         new(StringComparer.OrdinalIgnoreCase);
     static int _nativeGameplayMenuPolls;
     static bool _readyPromptActive;
-    static readonly bool[] _promptKeyboard = new bool[2];
+    static readonly bool[] _promptKeyboard = new bool[4];
     internal static bool NativeMenuActive => _nativeGameplayMenuPolls > 0 && !_readyPromptActive;
     internal static void SignalReadyPrompt() => _readyPromptActive = true;
     internal static void EndReadyPrompt() => _readyPromptActive = false;
-    internal static bool PromptUsesGamepad(int player) =>
-        _fakePadActive || (IsPadConnected(player) && !_promptKeyboard[player]);
+    internal static bool PromptUsesGamepad(int player)
+    {
+        int device = LocalInputSession.DeviceForPlayer(player);
+        return (uint)device < 4 && (_fakeConnected[device] ||
+            (IsPadConnected(device) && (LocalInputSession.PlayerCount > 0 || !_promptKeyboard[device])));
+    }
     static readonly (byte Large, byte Small)[] _lastRumble =
-        [(byte.MaxValue, byte.MaxValue), (byte.MaxValue, byte.MaxValue)];
+        Enumerable.Repeat((byte.MaxValue, byte.MaxValue), 4).ToArray();
 
     
     public static bool ConsumeTopBarToggle() { var v = _topBarToggle; _topBarToggle = false; return v; }
@@ -199,9 +218,9 @@ internal static unsafe class InputManager
 
     public static bool IsConnected => _pad0 != null;
 
-    public static bool IsPadConnected(int pad) => pad == 0 ? _pad0 != null : _pad1 != null;
+    public static bool IsPadConnected(int pad) => PadHandle(pad) != null;
 
-    public static bool IsKeyDown(Key k) => !_disableLiveInput && (_keyboard?.IsKeyPressed(k) ?? false);
+    public static bool IsKeyDown(Key k) => _fakeKeys.Contains(k) || (!_disableLiveInput && (_keyboard?.IsKeyPressed(k) ?? false));
 
     // Refreshed by the retail PAUSED / QUEST OBJECTIVES text path. Keeping the
     // context pulse at the native UI seam lets Trigger Drive retain ordinary
@@ -211,32 +230,49 @@ internal static unsafe class InputManager
 
     public static void Poll()
     {
-        if (_disableLiveInput)
+        for (int pad = 0; pad < 4; pad++)
         {
-            Controller.State = Controller.State2 = 0xFFFF;
-            Controller.LeftX = Controller.LeftY = Controller.RightX = Controller.RightY = 0x80;
-            Controller.LeftX2 = Controller.LeftY2 = Controller.RightX2 = Controller.RightY2 = 0x80;
+            Controller.SetState(pad, 0xFFFF);
+            Controller.SetAxes(pad, 128, 128, 128, 128);
         }
-        else
+        if (!_disableLiveInput)
         {
             PollGamepadEvents();
-            PollKeyboard();
             PollGamepads();
         }
         ApplyScriptedInput();
         Controller.State &= (ushort)~V8Compat.GetAutomationInputMask();
         Controller.State &= (ushort)~V82Compat.GetAutomationInputMask();
-        Controller.Connected2 = _forcePad2Connected ||
-            (!_disableLiveInput && (_pad1 != null || HasAnyKey(ConfigManager.Game.Keys2)));
+        for (int pad = 0; pad < 4; pad++)
+        {
+            Controller.LocalConnected[pad] = !_fakeDisconnected[pad] && (_fakeConnected[pad] ||
+                (!_disableLiveInput && PadHandle(pad) != null));
+            if (_fakeDisconnected[pad])
+            {
+                Controller.SetState(pad, 0xFFFF);
+                Controller.SetAxes(pad, 128, 128, 128, 128);
+            }
+        }
+        for (int device = 0; device < 4; device++)
+        {
+            _joinStates[device] = Controller.GetState(device);
+            _joinConnected[device] = Controller.LocalConnected[device];
+        }
+        PollKeyboard();
+        Controller.Connected2 = _forcePad2Connected || Controller.LocalConnected[1];
+        LocalInputSession.RoutePolledDevices();
         if (_nativeGameplayMenuPolls > 0)
             _nativeGameplayMenuPolls--;
     }
 
     static void ParseScriptedInput()
     {
+        _scriptedKeys.Clear();
+        _fakeKeys.Clear();
         _scriptedInput.Clear();
         _scriptedPhysical.Clear();
         _fakePadActive = false;
+        Array.Clear(_fakeConnected);
         _inputPoll = 0;
         _scriptStage = null;
         _stagePoll = 0;
@@ -287,9 +323,18 @@ internal static unsafe class InputManager
 
             ushort pad1Mask = 0;
             ushort pad2Mask = 0;
+            ushort pad3Mask = 0;
+            ushort pad4Mask = 0;
             var physical = new List<(int Code, int Pad)>();
             foreach (string token in sides[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
+                if (token.StartsWith("KEY:", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!Enum.TryParse<Key>(token[4..], true, out var key))
+                        throw new InvalidOperationException($"Unknown scripted keyboard key: {token}");
+                    _scriptedKeys.Add(new KeyPulse(stage, start, start + duration, key));
+                    continue;
+                }
                 string button = token;
                 int pad = 1;
                 int colon = token.IndexOf(':');
@@ -302,6 +347,8 @@ internal static unsafe class InputManager
                     {
                         "P1" or "PAD1" => 1,
                         "P2" or "PAD2" => 2,
+                        "P3" or "PAD3" => 3,
+                        "P4" or "PAD4" => 4,
                         "PHYS" => null,
                         _ => throw new InvalidOperationException(
                             $"Unknown scripted controller prefix: {prefix}"),
@@ -320,11 +367,13 @@ internal static unsafe class InputManager
                         throw new InvalidOperationException(
                             $"Unknown scripted physical input: {name}");
                     physical.Add((code, pad));
+                    _fakeConnected[pad - 1] = true;
                     continue;
                 }
 
                 ushort mask = button.ToUpperInvariant() switch
                 {
+                    "NONE" => 0,
                     "CROSS" => Controller.Cross,
                     "CIRCLE" => Controller.Circle,
                     "SQUARE" => Controller.Square,
@@ -341,8 +390,11 @@ internal static unsafe class InputManager
                     "R2" => Controller.R2,
                     _ => throw new InvalidOperationException($"Unknown scripted controller button: {button}"),
                 };
+                if (mask != 0) _fakeConnected[pad - 1] = true;
                 if (pad == 1) pad1Mask |= mask;
-                else pad2Mask |= mask;
+                else if (pad == 2) pad2Mask |= mask;
+                else if (pad == 3) pad3Mask |= mask;
+                else pad4Mask |= mask;
             }
             if (physical.Count > 0)
             {
@@ -354,7 +406,7 @@ internal static unsafe class InputManager
                         group.Key - 1));
             }
             _scriptedInput.Add(new ScriptedPulse(
-                stage, start, start + duration, pad1Mask, pad2Mask));
+                stage, start, start + duration, pad1Mask, pad2Mask, pad3Mask, pad4Mask));
         }
 
         int staged = _scriptedInput.Count(pulse => pulse.Stage != null);
@@ -429,8 +481,16 @@ internal static unsafe class InputManager
 
     static void ApplyScriptedInput()
     {
+        Array.Clear(_fakeDisconnected);
         int poll = _inputPoll++;
         int stagePoll = _stagePoll++;
+        _fakeKeys.Clear();
+        foreach (var pulse in _scriptedKeys)
+        {
+            int current = pulse.Stage == null ? poll : pulse.Stage.StartsWith("after:", StringComparison.OrdinalIgnoreCase)
+                ? GetLatchedStagePoll(pulse.Stage[6..], poll) : pulse.Stage == _scriptStage ? stagePoll : -1;
+            if (current >= pulse.Start && current < pulse.End) _fakeKeys.Add(pulse.Key);
+        }
         if (!_disableScriptStageCaptures &&
             _stageCapturePoll == stagePoll && _stageCaptureLabel != null)
         {
@@ -478,11 +538,12 @@ internal static unsafe class InputManager
             }
             Controller.State &= (ushort)~pulse.Pad1Mask;
             Controller.State2 &= (ushort)~pulse.Pad2Mask;
+            Controller.SetState(2, (ushort)(Controller.GetState(2) & ~pulse.Pad3Mask));
+            Controller.SetState(3, (ushort)(Controller.GetState(3) & ~pulse.Pad4Mask));
         }
         if (_fakePadActive)
         {
-            _fakePressed[0].Clear();
-            _fakePressed[1].Clear();
+            foreach (var pressed in _fakePressed) pressed.Clear();
             foreach (var pulse in _scriptedPhysical)
             {
                 int currentPoll;
@@ -496,8 +557,10 @@ internal static unsafe class InputManager
                 else
                     currentPoll = pulse.Stage == _scriptStage ? stagePoll : -1;
                 if (currentPoll < pulse.Start || currentPoll >= pulse.End) continue;
-                int pad = Math.Clamp(pulse.Pad, 0, 1);
-                foreach (int code in pulse.Codes) _fakePressed[pad].Add(code);
+                int pad = pulse.Pad;
+                foreach (int code in pulse.Codes)
+                    if (code == -1) _fakeDisconnected[pad] = true;
+                    else _fakePressed[pad].Add(code);
             }
             ApplyFakePads();
         }
@@ -514,7 +577,7 @@ internal static unsafe class InputManager
     {
         if (_fakePadActive)
             return _fakePressed[pad].Count == 0 ? null : _fakePressed[pad].Min();
-        var ctrl = pad == 0 ? _pad0 : _pad1;
+        var ctrl = PadHandle(pad);
         if (_sdl == null || ctrl == null) return null;
         for (int b = 0; b < (int)GameControllerButton.Max; b++)
             if (_sdl.GameControllerGetButton(ctrl, (GameControllerButton)b) != 0)
@@ -561,28 +624,46 @@ internal static unsafe class InputManager
         if (changed) Rescan();
     }
 
+    static void CloseController(int pad)
+    {
+        if (PadHandle(pad) != null) _sdl?.GameControllerClose(PadHandle(pad));
+        _pads[pad] = 0;
+        _padIds[pad] = -1;
+        for (int binding = 0; binding < 128; binding++) _analogLatched[pad, binding] = false;
+        Controller.SetState(pad, 0xFFFF);
+        Controller.SetAxes(pad, 128, 128, 128, 128);
+        Controller.LocalConnected[pad] = false;
+        _lastRumble[pad] = (byte.MaxValue, byte.MaxValue);
+    }
+
     static void CloseControllers()
     {
-        if (_pad0 != null) { _sdl?.GameControllerClose(_pad0); _pad0 = null; }
-        if (_pad1 != null) { _sdl?.GameControllerClose(_pad1); _pad1 = null; }
+        for (int pad = 0; pad < 4; pad++) CloseController(pad);
     }
 
     static void Rescan()
     {
         if (_sdl == null) return;
-        CloseControllers();
+        // Keep surviving devices in their slots when another pad is removed.
+        // Reopening every handle would silently transfer player ownership.
+        for (int pad = 0; pad < 4; pad++)
+            if (PadHandle(pad) != null && _sdl.GameControllerGetAttached(PadHandle(pad)) != SdlBool.True)
+                CloseController(pad);
         int n = _sdl.NumJoysticks();
         for (int i = 0; i < n; i++)
         {
             if (_sdl.IsGameController(i) != SdlBool.True) continue;
+            int id = _sdl.JoystickGetDeviceInstanceID(i);
+            if (_padIds.Contains(id)) continue;
+            int slot = Array.IndexOf(_pads, (nint)0);
+            if (slot < 0) break;
             var ctrl = _sdl.GameControllerOpen(i);
             if (ctrl == null) continue;
-            if (_pad0 == null) _pad0 = ctrl;
-            else { _pad1 = ctrl; break; }
+            _pads[slot] = (nint)ctrl;
+            _padIds[slot] = id;
         }
-        Console.WriteLine(
-            $"[Input] SDL controllers: joysticks={n} " +
-            $"p1={ControllerName(_pad0)} p2={ControllerName(_pad1)}");
+        Console.WriteLine($"[Input] SDL controllers: joysticks={n} " +
+            string.Join(" ", Enumerable.Range(0, 4).Select(p => $"p{p + 1}={ControllerName(PadHandle(p))}")));
     }
 
     static string ControllerName(GameController* controller)
@@ -594,25 +675,24 @@ internal static unsafe class InputManager
 
     static void PollKeyboard()
     {
-        var kb = _keyboard;
-        if (kb == null)
-        {
-            Controller.State = 0xFFFF;
-            Controller.State2 = 0xFFFF;
-            return;
-        }
-        Controller.State = KeyState(kb, InputBindingResolver.ResolveKeys(ConfigManager.Game.Keys,
+        LocalInputSession.KeyboardConnected = (!_disableLiveInput && _keyboard != null) || _scriptedKeys.Count > 0;
+        LocalInputSession.KeyboardState = KeyState(InputBindingResolver.ResolveKeys(ConfigManager.Game.Keys,
             0, GpuHle.GameplayActive || _readyPromptActive, NativeMenuActive));
-        Controller.State2 = KeyState(kb, InputBindingResolver.ResolveKeys(ConfigManager.Game.Keys2,
+        if (LocalInputSession.PlayerCount != 0) return;
+        // Preserve the existing solo/legacy two-player bindings outside a joined session.
+        Controller.State &= LocalInputSession.KeyboardState;
+        Controller.State2 &= KeyState(InputBindingResolver.ResolveKeys(ConfigManager.Game.Keys2,
             1, GpuHle.GameplayActive || _readyPromptActive, NativeMenuActive));
+        Controller.LocalConnected[0] |= LocalInputSession.KeyboardConnected;
+        Controller.LocalConnected[1] |= LocalInputSession.KeyboardConnected && HasAnyKey(ConfigManager.Game.Keys2);
     }
 
-    static ushort KeyState(IKeyboard kb, KeyBindings cfg)
+    static ushort KeyState(KeyBindings cfg)
     {
         ushort s = 0xFFFF;
         void B(string keyName, ushort bit)
         {
-            if (Enum.TryParse<Key>(keyName, out var k) && kb.IsKeyPressed(k))
+            if (Enum.TryParse<Key>(keyName, out var k) && IsKeyDown(k))
                 s &= (ushort)~bit;
         }
 
@@ -647,14 +727,14 @@ internal static unsafe class InputManager
     // ResolvePad, the binding arrays and the hysteresis latch.
     static void ApplyFakePads()
     {
-        for (int pad = 0; pad < 2; pad++)
+        for (int pad = 0; pad < 4; pad++)
         {
             GamepadBindings bindings = InputBindingResolver.ResolvePad(
-                ConfigManager.Game.InputProfile,
-                pad == 0 ? ConfigManager.Game.Pad : ConfigManager.Game.Pad2,
+                InputProfiles.ForPlayer(ConfigManager.Game, pad),
+                InputProfiles.PadForPlayer(ConfigManager.Game, pad),
                 GpuHle.GameplayActive || _readyPromptActive,
                 NativeMenuActive);
-            ushort s = pad == 0 ? Controller.State : Controller.State2;
+            ushort s = Controller.GetState(pad);
             s = FakeApply(bindings.Cross,    Controller.Cross,    s, pad);
             s = FakeApply(bindings.Circle,   Controller.Circle,   s, pad);
             s = FakeApply(bindings.Square,   Controller.Square,   s, pad);
@@ -671,7 +751,7 @@ internal static unsafe class InputManager
             s = FakeApply(bindings.Down,     Controller.Down,     s, pad);
             s = FakeApply(bindings.Left,     Controller.Left,     s, pad);
             s = FakeApply(bindings.Right,    Controller.Right,    s, pad);
-            if (pad == 0) Controller.State = s; else Controller.State2 = s;
+            Controller.SetState(pad, s);
 
             // Keep the analog bytes consistent with a stick that is actually
             // deflected, so the pad image the game sees is coherent.
@@ -679,16 +759,7 @@ internal static unsafe class InputManager
             byte ly = FakeAxisByte(pad, LeftStickUp, LeftStickDown);
             byte rx = FakeAxisByte(pad, RightStickLeft, RightStickRight);
             byte ry = FakeAxisByte(pad, RightStickUp, RightStickDown);
-            if (pad == 0)
-            {
-                Controller.LeftX = lx; Controller.LeftY = ly;
-                Controller.RightX = rx; Controller.RightY = ry;
-            }
-            else
-            {
-                Controller.LeftX2 = lx; Controller.LeftY2 = ly;
-                Controller.RightX2 = rx; Controller.RightY2 = ry;
-            }
+            Controller.SetAxes(pad, lx, ly, rx, ry);
         }
     }
 
@@ -719,39 +790,21 @@ internal static unsafe class InputManager
     static void PollGamepads()
     {
         if (_sdl == null) return;
-
-        if (_pad0 != null)
+        for (int player = 0; player < 4; player++)
         {
-            if (GetFirstPressedPadButton(0).HasValue) _promptKeyboard[0] = false;
-            GamepadBindings pad = InputBindingResolver.ResolvePad(
-                ConfigManager.Game.InputProfile,
-                ConfigManager.Game.Pad,
-                GpuHle.GameplayActive || _readyPromptActive,
-                NativeMenuActive);
-            Controller.State = PadState(_pad0, pad, Controller.State, 0);
-            Controller.LeftX = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Leftx));
-            Controller.LeftY = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Lefty));
-            Controller.RightX = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Rightx));
-            Controller.RightY = AxisToByte(_sdl.GameControllerGetAxis(_pad0, GameControllerAxis.Righty));
-        }
-
-        if (_pad1 != null)
-        {
-            if (GetFirstPressedPadButton(1).HasValue) _promptKeyboard[1] = false;
-            GamepadBindings pad = InputBindingResolver.ResolvePad(
-                ConfigManager.Game.InputProfile,
-                ConfigManager.Game.Pad2,
-                GpuHle.GameplayActive || _readyPromptActive,
-                NativeMenuActive);
-            Controller.State2 = PadState(_pad1, pad, Controller.State2, 1);
-            Controller.LeftX2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Leftx));
-            Controller.LeftY2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Lefty));
-            Controller.RightX2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Rightx));
-            Controller.RightY2 = AxisToByte(_sdl.GameControllerGetAxis(_pad1, GameControllerAxis.Righty));
-        }
-        else
-        {
-            Controller.LeftX2 = Controller.LeftY2 = Controller.RightX2 = Controller.RightY2 = 0x80;
+            var ctrl = PadHandle(player);
+            if (ctrl == null) continue;
+            if (GetFirstPressedPadButton(player).HasValue) _promptKeyboard[player] = false;
+            var bindings = InputBindingResolver.ResolvePad(
+                InputProfiles.ForPlayer(ConfigManager.Game, player),
+                InputProfiles.PadForPlayer(ConfigManager.Game, player),
+                GpuHle.GameplayActive || _readyPromptActive, NativeMenuActive);
+            Controller.SetState(player, PadState(ctrl, bindings, Controller.GetState(player), player));
+            Controller.SetAxes(player,
+                AxisToByte(_sdl.GameControllerGetAxis(ctrl, GameControllerAxis.Leftx)),
+                AxisToByte(_sdl.GameControllerGetAxis(ctrl, GameControllerAxis.Lefty)),
+                AxisToByte(_sdl.GameControllerGetAxis(ctrl, GameControllerAxis.Rightx)),
+                AxisToByte(_sdl.GameControllerGetAxis(ctrl, GameControllerAxis.Righty)));
         }
     }
 
@@ -796,7 +849,7 @@ internal static unsafe class InputManager
     // Press at the full threshold, release at three quarters of it.
     const int ReleaseNumerator = 3;
     const int ReleaseDenominator = 4;
-    static readonly bool[,] _analogLatched = new bool[2, 128];
+    static readonly bool[,] _analogLatched = new bool[4, 128];
 
     static bool AnalogLatch(int pad, int binding, int value, int threshold, bool latch)
     {
@@ -839,7 +892,8 @@ internal static unsafe class InputManager
 
     public static void SetRumble(int pad, byte large, byte small)
     {
-        GameController* controller = pad == 0 ? _pad0 : _pad1;
+        pad = LocalInputSession.DeviceForPlayer(pad);
+        GameController* controller = PadHandle(pad);
         if ((uint)pad < (uint)_lastRumble.Length &&
             _lastRumble[pad] != (large, small))
         {

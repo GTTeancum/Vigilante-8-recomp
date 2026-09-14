@@ -434,17 +434,41 @@ internal static class GlShaders
                     local * vTerrainMipRect.zw;
                 vec2 terrainSize = max(
                     uTerrainMipAtlasSize, vec2(1.0));
-                texel = textureGrad(
-                    uTerrainMipAtlas,
-                    terrainPixel / terrainSize,
-                    // Dreamcast terrain-textured uses MIPMAP_D_0_50.  The
-                    // PVR value is a half-level positive LOD adjustment;
-                    // scale both explicit gradients by 2^0.5 so OpenGL's
-                    // textureGrad selects the same footprint.  Omitting it
-                    // leaves one source row visible as a long grazing-angle
-                    // strip even though the tile has an authored mip chain.
-                    dFdx(terrainPixel) * 1.41421356237 / terrainSize,
-                    dFdy(terrainPixel) * 1.41421356237 / terrainSize);
+                // Mip generation is isolated by power-of-two cells, but
+                // bilinear sampling is not: a base-level half-texel inset
+                // can still reach the adjacent cell at a coarser level.
+                // Clamp each level's footprint separately, then interpolate
+                // the two levels to retain trilinear filtering.
+                vec2 dx = dFdx(terrainPixel);
+                vec2 dy = dFdy(terrainPixel);
+                float maxLod = floor(log2(max(max(vTerrainMipRect.z,
+                    vTerrainMipRect.w), 1.0)));
+                // Replacement terrain must honor the same anisotropy
+                // setting as native textures. Using the longest derivative
+                // alone washes grazing ground into separate tile averages.
+                float lx = length(dx), ly = length(dy);
+                vec2 majorAxis = lx >= ly ? dx : dy;
+                float major = max(lx, ly);
+                float footprint = max(max(min(lx, ly), 1.0),
+                    major / float(max(uAnisotropy, 1)));
+                int taps = int(clamp(ceil(major / footprint), 1.0,
+                    float(max(uAnisotropy, 1))));
+                float lod = clamp(log2(footprint) + 0.5, 0.0, maxLod);
+                float lo = floor(lod), hi = min(lo + 1.0, maxLod);
+                vec2 insetLo = min(vec2(0.5 * exp2(lo)), vTerrainMipRect.zw * 0.5);
+                vec2 insetHi = min(vec2(0.5 * exp2(hi)), vTerrainMipRect.zw * 0.5);
+                texel = vec4(0.0);
+                for (int tap = 0; tap < taps; ++tap) {
+                    vec2 point = terrainPixel + majorAxis *
+                        ((float(tap) + 0.5) / float(taps) - 0.5);
+                    vec2 pLo = clamp(point, vTerrainMipRect.xy + insetLo,
+                        vTerrainMipRect.xy + vTerrainMipRect.zw - insetLo);
+                    vec2 pHi = clamp(point, vTerrainMipRect.xy + insetHi,
+                        vTerrainMipRect.xy + vTerrainMipRect.zw - insetHi);
+                    texel += mix(textureLod(uTerrainMipAtlas, pLo / terrainSize, lo),
+                        textureLod(uTerrainMipAtlas, pHi / terrainSize, hi), fract(lod));
+                }
+                texel /= float(taps);
             }
             texel.rgb = clamp(
                 texel.rgb * vReplacementScale + vReplacementBias,

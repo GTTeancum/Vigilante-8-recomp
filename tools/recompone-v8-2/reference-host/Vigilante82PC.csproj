@@ -10,6 +10,7 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>Vigilante82PC</AssemblyName>
+    <ApplicationIcon>$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\reference-host\assets\v8.ico</ApplicationIcon>
     <RuntimeIdentifier Condition="'$(Configuration)' == 'Release'">win-x64</RuntimeIdentifier>
     <SelfContained Condition="'$(Configuration)' == 'Release'">true</SelfContained>
     <PublishSingleFile Condition="'$(Configuration)' == 'Release'">true</PublishSingleFile>
@@ -30,6 +31,7 @@
     <PythonExe Condition="'$(PythonExe)' == ''">python</PythonExe>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\reference-host\assets\window-icon-64.rgba" LogicalName="RecompOne.WindowIcon.64.rgba" />
     <ProjectReference Include="..\..\..\tools\recompone-reference\RecompOne.Runtime\RecompOne.Runtime.csproj" />
     <!-- prepare_reference.py copies this file into
          reference-v8-2/generated/recompiled/, so every path here has to
@@ -38,6 +40,8 @@
          already relies on; the hand-written seams use the same form so a
          regeneration cannot overwrite the staged project with paths that
          only worked from the template's own directory. -->
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82LocalMenu.cs" Link="V82LocalMenu.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82LocalMenuSelect.cs" Link="V82LocalMenuSelect.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82SplitScreenHarness.cs"
              Link="V82SplitScreenHarness.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeControlOptions.cs"
@@ -46,6 +50,8 @@
              Link="V82NativeVideoOption.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeVideoPage.cs"
              Link="V82NativeVideoPage.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeAudio.cs"
+             Link="V82NativeAudio.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\V82NativeTextPageInput.cs"
              Link="V82NativeTextPageInput.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\LEVELS_N64_DREAMLND.cs"
@@ -93,5 +99,15 @@
   <Target Name="EnsureHostNativeOptionsSeams" BeforeTargets="CoreCompile"
           Condition="!Exists('$(MSBuildProjectDirectory)\main.cs')">
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_options_patches.py&quot;" />
+  </Target>
+  <Target Name="GenerateOriginalVehicleMath" BeforeTargets="ResolveProjectReferences">
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\port_v8_vehicle_math.py&quot;" />
+  </Target>
+  <Target Name="EnsureNativeQuestSeams" BeforeTargets="CoreCompile">
+    <Exec Condition="!Exists('$(MSBuildProjectDirectory)\main.cs')" Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_quest_patches.py&quot;" />
+    <Exec Condition="Exists('$(MSBuildProjectDirectory)\main.cs')" Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_quest_patches.py&quot; --source-root &quot;$(MSBuildProjectDirectory)&quot;" />
+  </Target>
+  <Target Name="EnsureLocalMultiplayerSeams" BeforeTargets="CoreCompile" AfterTargets="EnsureNativeQuestSeams">
+    <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_split_screen_patches.py&quot; --source &quot;$(MSBuildThisFileDirectory)..\..\..\reference-v8-2\generated\recompiled\main.cs&quot;" />
   </Target>
 </Project>

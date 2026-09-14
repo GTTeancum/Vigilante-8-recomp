@@ -468,6 +468,19 @@ internal static class HostWindow
 
     static void OnLoad()
     {
+        // Hosts may supply their own icon without coupling the shared runtime
+        // to a game identity. Raw RGBA keeps startup independent of decoders.
+        using (var icon = System.Reflection.Assembly.GetEntryAssembly()?
+                   .GetManifestResourceStream("RecompOne.WindowIcon.64.rgba"))
+        {
+            if (icon != null)
+            {
+                byte[] pixels = new byte[64 * 64 * 4];
+                icon.ReadExactly(pixels);
+                _window!.SetWindowIcon([new Silk.NET.Core.RawImage(64, 64, pixels)]);
+                Console.WriteLine("[Host] application window icon loaded (64x64)");
+            }
+        }
         var input = _window!.CreateInput();
         InputManager.Initialize(input);
 

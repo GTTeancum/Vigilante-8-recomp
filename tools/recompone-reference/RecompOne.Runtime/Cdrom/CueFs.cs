@@ -32,6 +32,7 @@ public sealed class CueFs : IDisposable
         new(StringComparer.OrdinalIgnoreCase);
     private readonly object _looseIoGate = new();
     private readonly LooseCdda? _looseCdda;
+    private readonly SoundtrackDisc? _soundtrack;
 
     private CueFs(CueBin bin, string? looseRoot)
     {
@@ -63,7 +64,14 @@ public sealed class CueFs : IDisposable
         _looseByLba = IndexStandaloneFiles();
         // Nullable and already guarded at every use; tooling has no need for
         // redbook audio and an extracted disc often has none.
-        _looseCdda = codeOnly ? null : new LooseCdda(root, _manifest.Tracks);
+        if (!codeOnly)
+        {
+            if (File.ReadAllText(Path.Combine(root, "SYSTEM.CNF")).Contains(
+                    "SLUS_008.68", StringComparison.OrdinalIgnoreCase))
+                _soundtrack = new SoundtrackDisc(root, _manifest.Tracks);
+            else
+                _looseCdda = new LooseCdda(root, _manifest.Tracks);
+        }
         Console.WriteLine(
             $"[CD] standalone loose files={_looseByLba.Length} " +
             $"volume={_manifest.Volume} root={root}");
@@ -295,15 +303,20 @@ public sealed class CueFs : IDisposable
 
     public int FirstTrackNumber => _manifest?.Tracks.Min(track => track.Number) ??
         _bin!.FirstTrackNumber;
-    public int LastTrackNumber => _manifest?.Tracks.Max(track => track.Number) ??
+    public int LastTrackNumber => _soundtrack?.Tracks.Count ?? _manifest?.Tracks.Max(track => track.Number) ??
         _bin!.LastTrackNumber;
-    public int LeadOutLba => _manifest?.LeadOutLba ?? _bin!.LeadOutLba;
+    public int LeadOutLba => _soundtrack?.LeadOutLba ?? _manifest?.LeadOutLba ?? _bin!.LeadOutLba;
+
+    public bool HasSoundtrackSelection => _soundtrack != null;
+    public void ApplySoundtrack(Config.SoundtrackMode mode) => _soundtrack?.Apply(mode);
+    public string? SoundtrackSource(int index) => _soundtrack?.Source(index);
 
     public bool TryGetTrackStartLba(int trackNumber, out int lba)
     {
         if (_manifest == null)
             return _bin!.TryGetTrackStartLba(trackNumber, out lba);
-        var track = _manifest.Tracks.FirstOrDefault(candidate => candidate.Number == trackNumber);
+        var track = (_soundtrack?.Tracks ?? _manifest.Tracks)
+            .FirstOrDefault(candidate => candidate.Number == trackNumber);
         lba = track?.StartLba ?? 0;
         return track != null;
     }
@@ -314,6 +327,8 @@ public sealed class CueFs : IDisposable
         out int trackNumber,
         out int trackEndLba)
     {
+        if (_soundtrack != null)
+            return _soundtrack.TryReadSector(lba, out sector, out trackNumber, out trackEndLba);
         if (_looseCdda != null)
             return _looseCdda.TryReadSector(
                 lba, out sector, out trackNumber, out trackEndLba);
@@ -404,6 +419,7 @@ public sealed class CueFs : IDisposable
 
     public void Dispose()
     {
+        _soundtrack?.Dispose();
         _looseCdda?.Dispose();
         _bin?.Dispose();
         lock (_looseIoGate)

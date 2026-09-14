@@ -130,6 +130,45 @@ def main() -> int:
             updated = body[:offset] + hook + body[offset:]
             path.write_text(text[:start] + updated + text[end:], encoding="utf-8")
 
+    for address, method in (("8001D580", "Refresh"), ("8001D884", "Play")):
+        old = f"    public static void func_{address}(CpuContext c, IMemory m)\n    {{\n"
+        new = old + f"        if (V82NativeAudio.{method}(c, m)) return;\n"
+        patch_once(args.main_source.resolve(), old, new, f"soundtrack {method}")
+    old = """        c.V1 = 0x80060000u;
+        c.V0 = m.ReadU8((c.GP + 0xC14u));
+        c.V1 = c.V1 + 0x39B0u;
+        c.V0 = c.V0 << 2;
+        c.V0 = c.V0 + c.V1;
+        c.LoadWord(5, m, c.V0);
+"""
+    new = "        if (!V82NativeAudio.TrackTitle(c, m))\n        {\n" + old + "        }\n"
+    patch_once(args.main_source.resolve(), old, new, "soundtrack pause title")
+
+    # Main-menu integration remains durable across regenerated shell code.
+    old = "        c.SP = c.SP - 0x68u;\n        c.StoreWord(31, m, (c.SP + 0x74u));\n"
+    new = "        c.SP = c.SP - 0x68u;\n        using var localMenuScope = V82LocalMenu.Enter(c, m);\n        c.StoreWord(31, m, (c.SP + 0x74u));\n"
+    patch_once(args.shell_source.resolve(), old, new, "local multiplayer main-menu scope")
+    old = "        c.RA = 0x80104284u;\n        Vigilante82PC.func_8001A3B0(c, m);\n"
+    new = "        V82LocalMenu.Label(c, m);\n" + old
+    patch_once(args.shell_source.resolve(), old, new, "multiplayer main-menu label")
+    old = "        L801044A0: ;\n        c.S3 = 0x00000006u;\n        c.CopyRegister(18, 19);\n        c.S7 = 0x00000008u;\n"
+    new = "        L801044A0: ;\n        V82LocalMenu.Join(c, m);\n"
+    patch_once(args.shell_source.resolve(), old, new, "multiplayer join page")
+    old = "    public static void func_80107AD4(CpuContext c, IMemory m)\n    {\n        func_80107AD4_Impl(c, m);"
+    new = "    public static void func_80107AD4(CpuContext c, IMemory m)\n    {\n        if (V82LocalMenu.SelectPlayers(c, m)) return;\n        func_80107AD4_Impl(c, m);"
+    patch_once(args.shell_source.resolve(), old, new, "joined player selection")
+
+    # Keep both the native backing rectangle and cursor aligned with the
+    # shifted menu text; changing only the text leaves stale pixels on return.
+    shell_path = args.shell_source.resolve()
+    shell_text = shell_path.read_text(encoding="utf-8")
+    start = shell_text.index("    public static void func_80103FA0(")
+    end = shell_text.index("    public static void func_8010458C(", start)
+    section = shell_text[start:end]
+    shifted = section.replace("0x0000005Au", "0x0000003Au").replace("0x0000002Au", "0x0000000Au")
+    if shifted != section:
+        shell_path.write_text(shell_text[:start] + shifted + shell_text[end:], encoding="utf-8")
+
     changed = patch_once(
         args.main_source.resolve(), MAIN_OLD, MAIN_NEW,
         "native options text trace",

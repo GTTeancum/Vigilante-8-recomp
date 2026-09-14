@@ -29,11 +29,11 @@ public static class ConfigManager
     // Resolve it next to the executable instead, and migrate a config found
     // beside the launch directory the first time so nothing is lost.
     static readonly string GameConfigPath =
-        Path.Combine(global::RecompOne.Runtime.Runtime.ExecutableDirectory,
+        Path.Combine(global::RecompOne.Runtime.Runtime.UserDataDirectory,
             "settings.json");
     const string LegacyGameConfigPath = "settings.json";
     static readonly string InterfaceFile =
-        Path.Combine(global::RecompOne.Runtime.Runtime.ExecutableDirectory,
+        Path.Combine(global::RecompOne.Runtime.Runtime.UserDataDirectory,
             "interface.ini");
 
     public static GameConfig Game { get; private set; } = new();
@@ -89,6 +89,12 @@ public static class ConfigManager
         if (transformations != Game.V82Transformations)
         {
             Game.V82Transformations = transformations;
+            saveGame = true;
+        }
+        var soundtrack = SoundtrackSettings.Normalize(Game.Soundtrack);
+        if (soundtrack != Game.Soundtrack)
+        {
+            Game.Soundtrack = soundtrack;
             saveGame = true;
         }
         if (saveGame) SaveGame();

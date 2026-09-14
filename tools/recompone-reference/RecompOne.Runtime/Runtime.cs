@@ -45,6 +45,20 @@ public static class Runtime
         }
     }
 
+    // Optional process-local test/profile storage; assets still resolve from
+    // the runnable install. Normal launches retain the existing file paths.
+    public static string UserDataDirectory
+    {
+        get
+        {
+            string? configured = Environment.GetEnvironmentVariable("RECOMPONE_USER_DATA_DIR");
+            if (string.IsNullOrWhiteSpace(configured)) return ExecutableDirectory;
+            string directory = Path.GetFullPath(configured);
+            Directory.CreateDirectory(directory);
+            return directory;
+        }
+    }
+
     public static string ModsDirectory
     {
         get
@@ -86,9 +100,9 @@ public static class Runtime
     public static void SaveView() => Config.ConfigManager.SaveView(Host.Window.PanelManager.Panels);
     
     public static Hardware.MemoryCard CardA = new(
-        Path.Combine(ExecutableDirectory, "carda.sav")) { Enabled = true };
+        Path.Combine(UserDataDirectory, "carda.sav")) { Enabled = true };
     public static Hardware.MemoryCard CardB = new(
-        Path.Combine(ExecutableDirectory, "cardb.sav")) { Enabled = true };
+        Path.Combine(UserDataDirectory, "cardb.sav")) { Enabled = true };
     public static readonly Memory.RamLogger RamLog = new();
     public static readonly Dispatch.OverlayEventLog OverlayLog = new();
 

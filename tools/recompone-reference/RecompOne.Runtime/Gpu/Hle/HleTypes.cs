@@ -43,6 +43,8 @@ public struct PrimFlags
     public bool Textured, SemiTrans, RawTexture, Gouraud, Vehicle;
     public bool WorldObject, TerrainRoute, N64RouteColor;
     public bool N64RouteDepthCompare;
+    public bool NativeRoad;
+    public int NativeRoadPrioritySz;
     public bool DreamcastTerrainDepth;
     public HleMaterialKind Material;
     public ushort TPage; 
@@ -65,5 +67,5 @@ public struct HleRect
     public byte R, G, B;
     public bool FlipX, FlipY;
 }
-public struct HleDrawEnv { public int ClipX0, ClipY0, ClipX1, ClipY1; public int TwMaskX, TwMaskY, TwOffX, TwOffY; public bool SetMask, CheckMask, Dither; }
+public struct HleDrawEnv { public int ClipX0, ClipY0, ClipX1, ClipY1; public int DrawOffsetX, DrawOffsetY; public int TwMaskX, TwMaskY, TwOffX, TwOffY; public bool SetMask, CheckMask, Dither; }
 public struct HleDispEnv { public int X, Y, W, H; public bool Rgb24, Interlace; }

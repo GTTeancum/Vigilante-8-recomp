@@ -22,8 +22,8 @@
  *   offset  type     field           consumer
  *   +0x00   u8       questId         (read elsewhere; quest selector)
  *   +0x01   u8       bannerKind      -> V8_MainLoop bannerKind param
- *   +0x02   u16      configA         -> uRam000006f0 (sky/weather code)
- *   +0x04   u16      configB         -> uRam000007dc (intro / win-cue id)
+ *   +0x02   u16      targetFirst     -> uRam000006f0 (inclusive object ID)
+ *   +0x04   u16      targetLast      -> uRam000007dc (inclusive object ID)
  *   +0x06   u16      pad / reserved
  *   +0x08   void*    fld2            (relocated by Quest_Load)
  *   +0x0c   char*    bannerText      (relocated by Quest_Load)
@@ -37,8 +37,10 @@
  * pointers resolved. V8_MainLoop reads the current quest's record
  * as:
  *   QuestRecord *q = (records for DAT_80065674) + cRam00000600;
- * and uses q->bannerKind/configA/configB/bannerText to drive the
- * loading screen + initial level state.
+ * bannerKind selects the loading-card variant. LAB_80022044 compares each
+ * scenery object's signed ID against targetFirst/targetLast; FUN_800220d4
+ * evaluates the objective's half-of-targets threshold. These are not audio
+ * or weather fields (consumer audit, 2026-09-10).
  *
  * HIGH confidence: loader logic + consumer wiring both confirmed.
  */

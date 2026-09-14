@@ -42,6 +42,26 @@ public static class V82ArenaRegistry
     static int _smokeRequestedSlot = -1;
 
     public static bool IsImportedArenaSelected => _selected != null;
+    public static string? LoadingOverlayName { get; private set; }
+
+    public static void CaptureLevelLoad(CpuContext c, IMemory m)
+    {
+        // The native load request precedes overlay dispatch. The last executed
+        // overlay can still belong to the previous arena while its card draws.
+        var path = new StringBuilder();
+        for (uint i = 0; c.A0 != 0 && i < 128; i++)
+        {
+            byte value = m.ReadU8(c.A0 + i);
+            if (value == 0) break;
+            path.Append((char)value);
+        }
+        string name = Path.ChangeExtension(path.ToString(), null)
+            .Replace('\\', '_').Replace('/', '_').ToUpperInvariant();
+        LoadingOverlayName = name.StartsWith("LEVELS_", StringComparison.Ordinal)
+            ? name : null;
+    }
+
+    public static void EndLevelLoad() => LoadingOverlayName = null;
     public static string? SelectedStableId => _selected?.StableId;
     public static string? SelectedOverlayName =>
         _selected == null
@@ -163,6 +183,7 @@ public static class V82ArenaRegistry
 
     public static uint NativeLocationBackgroundOffset(IMemory m, uint table)
     {
+        EnsureLoaded();
         uint count = m.ReadU32(table);
         if (count == 0u || count > 4096u)
             throw new InvalidDataException(
@@ -410,9 +431,19 @@ public static class V82ArenaRegistry
             return;
 
         byte[] dll = File.ReadAllBytes(dllPath);
+        string export = ArenaExportName(dll);
+        string stem = Path.GetFileNameWithoutExtension(arenaPath);
+        if (!string.Equals(stem, export, StringComparison.Ordinal))
+            throw new InvalidDataException(
+                $"arena {stableId} path stem '{stem}' does not exactly match " +
+                $"primary DLL export '{export}'; V8:2 lookup is case-sensitive");
+    }
+
+    public static string ArenaExportName(byte[] dll, string? requestedName = null)
+    {
         if (dll.Length < 24)
             throw new InvalidDataException(
-                $"arena {stableId} DLL header is truncated: {dllPath}");
+                "arena DLL header is truncated");
         uint imageSize = BinaryPrimitives.ReadUInt32LittleEndian(
             dll.AsSpan(0, 4));
         uint exportTable = BinaryPrimitives.ReadUInt32LittleEndian(
@@ -420,28 +451,29 @@ public static class V82ArenaRegistry
         if (imageSize == 0 || imageSize > dll.Length ||
             exportTable < 8 || exportTable > imageSize - 8)
             throw new InvalidDataException(
-                $"arena {stableId} DLL export table is invalid: {dllPath}");
-        int table = checked((int)exportTable);
-        uint nameOffset = BinaryPrimitives.ReadUInt32LittleEndian(
-            dll.AsSpan(table, 4));
-        uint callbackOffset = BinaryPrimitives.ReadUInt32LittleEndian(
-            dll.AsSpan(table + 4, 4));
-        if (nameOffset >= imageSize || callbackOffset >= imageSize)
-            throw new InvalidDataException(
-                $"arena {stableId} primary DLL export is invalid: {dllPath}");
-        int nameStart = checked((int)nameOffset);
-        int nameEnd = Array.IndexOf(dll, (byte)0, nameStart,
-            checked((int)imageSize) - nameStart);
-        if (nameEnd < 0)
-            throw new InvalidDataException(
-                $"arena {stableId} primary DLL export is unterminated: {dllPath}");
-        string export = Encoding.ASCII.GetString(
-            dll, nameStart, nameEnd - nameStart);
-        string stem = Path.GetFileNameWithoutExtension(arenaPath);
-        if (!string.Equals(stem, export, StringComparison.Ordinal))
-            throw new InvalidDataException(
-                $"arena {stableId} path stem '{stem}' does not exactly match " +
-                $"primary DLL export '{export}'; V8:2 lookup is case-sensitive");
+                "arena DLL export table is invalid");
+        for (int table = checked((int)exportTable); table <= (int)imageSize - 8; table += 8)
+        {
+            uint nameOffset = BinaryPrimitives.ReadUInt32LittleEndian(
+                dll.AsSpan(table, 4));
+            if (nameOffset == 0) break;
+            uint callbackOffset = BinaryPrimitives.ReadUInt32LittleEndian(
+                dll.AsSpan(table + 4, 4));
+            if (nameOffset < exportTable + 8 || nameOffset >= imageSize || callbackOffset >= imageSize)
+                throw new InvalidDataException(
+                    "arena primary DLL export is invalid");
+            int nameStart = checked((int)nameOffset);
+            int nameEnd = Array.IndexOf(dll, (byte)0, nameStart,
+                checked((int)imageSize) - nameStart);
+            if (nameEnd <= nameStart)
+                throw new InvalidDataException(
+                    "arena primary DLL export is empty or unterminated");
+            string export = Encoding.ASCII.GetString(
+                dll, nameStart, nameEnd - nameStart);
+            if (requestedName == null || string.Equals(export, requestedName, StringComparison.OrdinalIgnoreCase))
+                return export;
+        }
+        throw new InvalidDataException($"arena DLL does not export '{requestedName}'");
     }
 
     static void ValidateNativeAsciiField(

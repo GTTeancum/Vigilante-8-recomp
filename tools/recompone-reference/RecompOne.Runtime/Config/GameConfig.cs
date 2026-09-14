@@ -128,19 +128,36 @@ public static class InputProfiles
         game.Keys2 = CreateKeys(profile, playerTwo: true);
         game.Pad = CreatePad(profile);
         game.Pad2 = CreatePad(profile);
+        game.Pad3 = CreatePad(profile);
+        game.Pad4 = CreatePad(profile);
         game.InputProfile = profile;
         game.InputProfile2 = profile;
+        game.InputProfile3 = profile;
+        game.InputProfile4 = profile;
     }
 
-    public static string ForPlayer(GameConfig game, int player) =>
-        player == 0 ? game.InputProfile : game.InputProfile2 ?? game.InputProfile;
+    public static string ForPlayer(GameConfig game, int player) => player switch
+    {
+        0 => game.InputProfile, 1 => game.InputProfile2 ?? game.InputProfile,
+        2 => game.InputProfile3, 3 => game.InputProfile4,
+        _ => throw new ArgumentOutOfRangeException(nameof(player)),
+    };
+
+    public static GamepadBindings PadForPlayer(GameConfig game, int player) => player switch
+    {
+        0 => game.Pad, 1 => game.Pad2, 2 => game.Pad3, 3 => game.Pad4,
+        _ => throw new ArgumentOutOfRangeException(nameof(player)),
+    };
 
     public static void SetPlayerProfile(GameConfig game, int player, string profile)
     {
         // Materialize the legacy shared label before changing player one's.
         game.InputProfile2 ??= game.InputProfile;
         if (player == 0) game.InputProfile = profile;
-        else game.InputProfile2 = profile;
+        else if (player == 1) game.InputProfile2 = profile;
+        else if (player == 2) game.InputProfile3 = profile;
+        else if (player == 3) game.InputProfile4 = profile;
+        else throw new ArgumentOutOfRangeException(nameof(player));
     }
 
     public static void ApplyPlayer(GameConfig game, string profile, int player)
@@ -148,7 +165,10 @@ public static class InputProfiles
         if (!Names.Contains(profile, StringComparer.Ordinal))
             throw new ArgumentOutOfRangeException(nameof(profile));
         if (player == 0) game.Pad = CreatePad(profile);
-        else game.Pad2 = CreatePad(profile);
+        else if (player == 1) game.Pad2 = CreatePad(profile);
+        else if (player == 2) game.Pad3 = CreatePad(profile);
+        else if (player == 3) game.Pad4 = CreatePad(profile);
+        else throw new ArgumentOutOfRangeException(nameof(player));
         SetPlayerProfile(game, player, profile);
     }
 
@@ -214,15 +234,21 @@ public class GameConfig
     // Optional test package selected from the wrapper. An empty value keeps
     // loose-files mods discovery as the source of truth.
     public string V82VehiclePackagePath { get; set; } = "";
+    public Dictionary<string, uint> V82VehicleColors { get; set; } = new();
     public int InputBindingsVersion { get; set; }
     public string InputProfile { get; set; } = InputProfiles.Modern;
     public string? InputProfile2 { get; set; }
+    public string InputProfile3 { get; set; } = InputProfiles.Modern;
+    public string InputProfile4 { get; set; } = InputProfiles.Modern;
     public string CdPath { get; set; } = "";
+    public SoundtrackMode Soundtrack { get; set; } = SoundtrackMode.Vigilante8;
     public float MasterVolume { get; set; } = 1.0f;
     public bool Muted { get; set; } = false;
     public KeyBindings Keys { get; set; } = new();
     public KeyBindings Keys2 { get; set; } = KeyBindings.Empty();
     public GamepadBindings Pad { get; set; } = new();
     public GamepadBindings Pad2 { get; set; } = new();
+    public GamepadBindings Pad3 { get; set; } = InputProfiles.CreatePad(InputProfiles.Modern);
+    public GamepadBindings Pad4 { get; set; } = InputProfiles.CreatePad(InputProfiles.Modern);
     public List<string> ActiveMods { get; set; } = [];
 }

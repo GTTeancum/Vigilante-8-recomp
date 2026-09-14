@@ -31,7 +31,7 @@ V8_SELECTOR_VEHICLES = (
     ROOT / "PS1 game" / "SHELL" / "VEHICLES.EXP"
 )
 V82_COMMON = (
-    ROOT / "V8_2_LOOSE" / "SHARED" / "COMMON.EXP"
+    ROOT / "V8_2_WORK" / "disc" / "SHARED" / "COMMON.EXP"
 )
 V8_EXE = ROOT / "PS1 game" / "SLUS_005.10"
 V82_EXE = ROOT / "V8_2_LOOSE" / "SLUS_008.68"
@@ -53,13 +53,8 @@ VEHICLES = (
     (12, "guest.v8.y_the_alien", '"Y" the Alien', "'64 Luxo Saucer"),
 )
 
-# Imported specials select a sequel-native behavior class through registry
-# metadata. Houston's Samson Tow Hook is behavior-compatible with V8:2's
-# Houston implementation; vehicles without a proven equivalent retain the
-# engine's generic special callback until their conversion is audited.
-V82_SPECIAL_BEHAVIOR_TYPES = {
-    7: 3,
-}
+# Source callback indices in SLUS_005.10 table 8005ECB0.
+V8_ORIGINAL_SPECIAL_TYPES = {7, 12}
 
 SELECTOR_ASSETS = (
     *(
@@ -68,19 +63,7 @@ SELECTOR_ASSETS = (
     ),
 )
 
-# Original V8 normally stores wheel/contact points as 0x8000-series children
-# in each vehicle bank.  Y's type-12 constructor instead sources these four
-# points from executable-owned vehicle data.  The values below are recovered
-# from that native constructor output and are conversion metadata: both target
-# banks receive ordinary V8:2 anchors, and no runtime code recognizes Y.
-V8_EXECUTABLE_CONTACT_ANCHORS = {
-    12: (
-        (-20138, 4343, 47752),
-        (20231, 4343, 47752),
-        (-20138, 4343, -48406),
-        (20231, 4343, -48406),
-    ),
-}
+# Original Y uses Vehicle_RollingTick (80030F34) and has no wheel construction.
 
 
 def digest(data: bytes) -> str:
@@ -130,17 +113,25 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
             decode_bank(V8_COMMON, "V8", source_index)
         )
         body = conversion.add_v82_flamethrower_mount(body, 0)
+        original_impact_kind = 0
+        source_sounds = decode_sounds(V8_COMMON, source_index)
+        if source_index in V8_ORIGINAL_SPECIAL_TYPES:
+            # Original shared effect DAT_800737D8 is COMMON.EXP bank 14.
+            effects = conversion.v8_bank_to_v82(decode_bank(V8_COMMON, "V8", 14))
+            effect_bank, effect_map = conversion.extract_roots(effects, {0x15, 0x16})
+            assert effect_map[0x16] == effect_map[0x15] + 1
+            body, bases = conversion.merge_banks((body, effect_bank))
+            original_impact_kind = bases[1] + effect_map[0x16]
+            # Original global sound bank is Sounds/Main.SND (800655E4).
+            sound_form = iff.IffChunk(tag=b"FORM", form_type=b"XOBF", children=[
+                iff.IffChunk(tag=b"SND ", payload=(ROOT/"PS1 game/SOUNDS/MAIN.SND").read_bytes())])
+            common_sounds = registry._decode_sounds(sound_form)
+            if len(source_sounds) != 3:
+                raise ValueError("source special sound table changed")
+            source_sounds += (common_sounds[0x41], common_sounds[0x2B])
         selector_preview = conversion.v8_bank_to_v82(
             decode_bank(V8_SELECTOR_VEHICLES, "V8", source_index)
         )
-        executable_anchors = V8_EXECUTABLE_CONTACT_ANCHORS.get(source_index)
-        if executable_anchors is not None:
-            body = conversion.add_v82_contact_anchors(
-                body, 0, executable_anchors
-            )
-            selector_preview = conversion.add_v82_contact_anchors(
-                selector_preview, 0, executable_anchors
-            )
 
         wheel_bank, wheel_map = conversion.extract_roots(
             v8_wheel_library,
@@ -150,7 +141,7 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
             },
         )
         if flying:
-            transform = conversion.collision_only_contact_bank(wheel_bank)
+            transform = None  # Original Y constructor has no wheel/contact children.
             front_wheel = wheel_map[source_values["wheel_kind_front"]]
             rear_wheel = wheel_map[source_values["wheel_kind_rear"]]
             mapped_modes = ()
@@ -201,10 +192,11 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
             selector_preview_body_kind=0,
             transform_modes=mapped_modes,
             powerups=v82_stats.powerup_values(),
-            sounds=decode_sounds(V8_COMMON, source_index),
+            sounds=source_sounds,
+            original_impact_kind=original_impact_kind,
             controller_class="flying" if flying else "ground",
             supports_transformations=not flying,
-            special_behavior_type=V82_SPECIAL_BEHAVIOR_TYPES.get(source_index),
+            original_special_type=(source_index if source_index in V8_ORIGINAL_SPECIAL_TYPES else None),
         )
         vehicle.validate()
         result.append(vehicle)

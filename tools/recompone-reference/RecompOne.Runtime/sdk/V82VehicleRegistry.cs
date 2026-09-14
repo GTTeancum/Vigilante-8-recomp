@@ -25,7 +25,6 @@ public static class V82VehicleRegistry
     const uint SpuMallocAddress = 0x80052F9Cu;
     const uint CreateObjectAddress = 0x80031DDCu;
     const uint GenericVehicleDispatchAddress = 0x800367A4u;
-    const uint TerrainHeightAddress = 0x8001B750u;
     const uint MatrixNormalizeAddress = 0x80059A0Cu;
 
     const int HeaderSize = 20;
@@ -45,11 +44,12 @@ public static class V82VehicleRegistry
     const int ControllerClassShift = 8;
     const uint ControllerClassMask = 0xFu << ControllerClassShift;
     const uint FlagSpecialBehavior = 1u << 16;
+    const uint FlagOriginalSpecial = 1u << 23;
     const int SpecialBehaviorShift = 17;
     const uint SpecialBehaviorMask = 0x1Fu << SpecialBehaviorShift;
     const uint SupportedCapabilityFlags =
         FlagNonTransformable | ControllerClassMask |
-        FlagSpecialBehavior | SpecialBehaviorMask;
+        FlagSpecialBehavior | SpecialBehaviorMask | FlagOriginalSpecial;
     const uint SpecialBehaviorTableAddress = 0x800C6130u;
     const uint SelectorInputAddress = 0x8006B508u;
     // Gameplay and SHELL share six participant bytes at 0x8006B8F4. The
@@ -76,9 +76,11 @@ public static class V82VehicleRegistry
     const uint SelectorPlayerSuspensionSoundReturn = 0x80106DE0u;
     const uint SelectorNpcSuspensionSoundReturn = 0x8010838Cu;
     const uint SelectorSoundBankAddress = 0x80116738u;
-    const uint NativeSoundPlayerAddress = 0x8001E28Cu;
+    const uint NativeSoundPlayerAddress = 0x8001E188u;
     const int OriginalV8SelectionVoiceBase = 14;
     const int OriginalV8SelectionVoiceCount = 13;
+    static SelectionVoiceBank? _selectionVoiceSource;
+    internal static bool NativeSelectorAudioActive { get; private set; }
     const int OriginalV8ResultVoiceCount = 13;
     const int SelectorPortraitWidth = 260;
     const int SelectorPortraitHeight = 422;
@@ -106,6 +108,8 @@ public static class V82VehicleRegistry
     static readonly int[] SelectorNpcPreviousSlots = [-1, -1, -1, -1];
     static readonly int[] SelectorNpcProxySlots = [0, 0, 0, 0];
     static string? _requestedStableId;
+    static bool _selectorQuest;
+    static int[] _questParticipantTypes = [];
     static string? _loadedPackageRoot;
     static VehicleEntry? _constructingEntry;
     static bool _constructingSelectorPreview;
@@ -183,6 +187,8 @@ public static class V82VehicleRegistry
             "RECOMPONE_V82_TEST_NPC_GUEST");
 
     public static int Count => Entries.Count;
+    public static int TypeForStableId(string stableId) =>
+        Entries.FirstOrDefault(e => e.StableId == stableId)?.Type ?? -1;
     public static int TotalVehicleCount => RetailVehicleCount + Entries.Count;
     public static bool HasPackage => Entries.Count != 0;
     public static bool HasDefaultReplacement =>
@@ -455,8 +461,127 @@ public static class V82VehicleRegistry
         }
     }
 
+    static bool _localMenuScene;
+    public static void LocalMenuScene(bool active, CpuContext c, IMemory m)
+    {
+        _localMenuScene = active;
+        NativeSelectorAudioActive = active;
+        ReleaseAllSelectorRuntimes(c, m, active ? "local-menu-begin" : "local-menu-end");
+        V82Compat.ReleaseLocalSelectorVram(c, m);
+        _selectorPreviewObject = 0;
+        _selectorGuestIndex = -1;
+    }
+
+    public readonly record struct LocalMenuPreview(int Type, uint Vehicle, uint Bank, bool Imported);
+
+    public static uint LocalMenuColor(IMemory m, int type, int player)
+    {
+        if (TryEntryForType((uint)type, out VehicleEntry? entry) && entry != null)
+            return ConfigManager.Game.V82VehicleColors.GetValueOrDefault(entry.StableId);
+        if (player >= 2) return 0;
+        uint row = 0x8006B9E8u + (uint)player * 180 + (uint)type * 10;
+        return m.ReadU8(row + 2) | (uint)m.ReadU8(row + 3) << 16 | (uint)m.ReadU8(row + 4) << 8;
+    }
+
+    public static void SaveLocalMenuColor(IMemory m, int type, uint color, int player)
+    {
+        if (TryEntryForType((uint)type, out VehicleEntry? entry) && entry != null)
+        {
+            ConfigManager.Game.V82VehicleColors[entry.StableId] = color;
+            ConfigManager.SaveGame();
+        }
+        else
+        {
+            // P3/P4 use session storage populated at match handoff.
+            if (player >= 2) return;
+            uint row = 0x8006B9E8u + (uint)player * 180 + (uint)type * 10;
+            m.WriteU8(row + 2, (byte)color);
+            m.WriteU8(row + 3, (byte)(color >> 16));
+            m.WriteU8(row + 4, (byte)(color >> 8));
+        }
+    }
+
+    public static LocalMenuPreview CreateLocalMenuPreview(CpuContext c, IMemory m, int type, uint color)
+    {
+        var saved = c.Snapshot();
+        bool imported = TryEntryForType((uint)type, out VehicleEntry? entry) && entry != null;
+        uint Call(uint function, uint a0, uint a1 = 0, uint a2 = 0)
+        {
+            c.A0 = a0; c.A1 = a1; c.A2 = a2; c.RA = CustomDispatchAddress;
+            Dispatcher.Call(c, m, function); return c.V0;
+        }
+        try
+        {
+            c.SP -= 0x100;
+            uint bank, stats, variant = 0;
+            if (imported)
+            {
+                EnsureSelectorRuntime(entry!, c, m);
+                bank = entry!.SelectorPreviewRuntime; stats = entry.StatsRuntime;
+                variant = (uint)entry.SelectorPreviewBodyKind;
+            }
+            else
+            {
+                bank = Call(0x8001ECCC, m.ReadU32(0x800C6178u + (uint)type * 4));
+                stats = 0x80063A80u + (uint)type * 48;
+            }
+            Call(0x8001EF34, bank, color);
+            if (imported)
+            {
+                _constructingSelectorPreview = true; _constructingEntry = entry;
+                V82Compat.BeginGuestVramClaim(reusable: true, selectorOwner: type);
+            }
+            uint vehicle = Call(SelectorVehicleCreateAddress, bank, variant, stats);
+            Call(0x8001EF34, bank, color);
+            m.WriteU32(vehicle + 4, m.ReadU32(vehicle + 4) | 8);
+            uint ground = Call(0x8002CB74, m.ReadU32(0x800C61C0), 0x38);
+            Call(0x8004C7E0, vehicle, ground);
+            for (uint i = 0; i < 12; i += 4) m.WriteU32(vehicle + 0x4C + i, m.ReadU32(0x801008A4 + i));
+            Call(0x8002CF74, vehicle); Call(0x8002D1DC, vehicle);
+            Call(0x8003C9C4, vehicle, 0);
+            return new(type, vehicle, bank, imported);
+        }
+        catch
+        {
+            V82Compat.AbortGuestVramClaim();
+            _constructingSelectorPreview = false; _constructingEntry = null;
+            throw;
+        }
+        finally { c.Restore(saved); }
+    }
+
+    public static void ReleaseLocalMenuPreview(CpuContext c, IMemory m, LocalMenuPreview preview)
+    {
+        if (preview.Vehicle == 0) return;
+        var saved = c.Snapshot();
+        try
+        {
+            c.SP -= 0x100;
+            c.A0 = preview.Vehicle; c.RA = CustomDispatchAddress;
+            Dispatcher.Call(c, m, 0x8002CC08);
+            if (preview.Imported && TryEntryForType((uint)preview.Type, out VehicleEntry? entry) && entry != null)
+            {
+                V82Compat.ReleaseSelectorVramReservation(c, m, preview.Type);
+                ReleaseSelectorRuntime(entry, c, m, "local-panel-change");
+            }
+            if (!preview.Imported)
+            {
+                c.A0 = preview.Bank; c.RA = CustomDispatchAddress;
+                Dispatcher.Call(c, m, 0x8001EC18);
+            }
+        }
+        finally { c.Restore(saved); }
+    }
+
     public static void BeginNativeSelector(CpuContext c, IMemory m)
     {
+        _selectorQuest = V82QuestRegistry.IsQuest(c, m);
+        if (_selectorQuest)
+        {
+            for (int type = 0; type < RetailVehicleCount; type++)
+                if (!V82QuestRegistry.HasCampaign(type)) c.A0 |= 1u << type;
+        }
+        NativeSelectorAudioActive = true;
         V82Compat.ReleaseSelectorVramReservation(c, m);
         ReleaseAllSelectorRuntimes(c, Dispatcher.UnwrapMemory(m), "selector-begin");
         _selectorGuestIndex = -1;
@@ -466,13 +591,18 @@ public static class V82VehicleRegistry
         _selectorProxySlot = 0;
         _selectorDirectionLatch = 0;
         _selectorSuppressedHoldSteps = 0;
-        // Native selector context 1 is player one and context 2 is player
-        // two. Context 0 is the AI/enemy pass and must not displace player
-        // one's accepted guest.
-        _selectorContext = c.A1;
+        // Quest passes zero to omit enemy setup, but still selects player one.
+        // Normalize only our host context; keep the native argument unchanged
+        // so Quest does not acquire the Arcade enemy-selection step.
+        _selectorContext = _selectorQuest && c.A1 == 0u ? 1u : c.A1;
         _selectorPlayer = c.A1 == 0u
             ? 0
             : Math.Clamp((int)c.A1 - 1, 0, PlayerSelectionCount - 1);
+        if (LocalInputSession.SelectorPlayer >= 0)
+        {
+            _selectorPlayer = LocalInputSession.SelectorPlayer;
+            _selectorContext = 1; // Human selector; native A1 remains enemy-setup flag 0.
+        }
         _selectorStableFrames = 0;
         _selectorStableGuest = -1;
         _selectorEnemyPhase = _selectorContext == 0u;
@@ -483,12 +613,14 @@ public static class V82VehicleRegistry
         _selectorPreviewObject = 0u;
         ClearNpcSelections();
         SelectorProofCaptured.Clear();
-        InputManager.SignalScriptStage(
-            _selectorContext == 0u ? "choose_enemies" : "choose_player");
+        InputManager.SignalScriptStage(LocalInputSession.SelectorPlayer >= 0
+            ? $"multiplayer_character_{_selectorPlayer + 1}"
+            : _selectorContext == 0u ? "choose_enemies" : "choose_player");
     }
 
     public static void EndNativeSelector(CpuContext c, IMemory m)
     {
+        NativeSelectorAudioActive = false;
         int guest = _selectorEnemyPhase
             ? _selectorAcceptedGuest
             : NativeSelectorGuestIndex;
@@ -501,6 +633,10 @@ public static class V82VehicleRegistry
             VehicleEntry entry = Entries[guest];
             c.V0 = checked((uint)entry.Type);
             SelectTypeForPlayer(_selectorPlayer, entry.Type);
+            // Quest reads the selected identity immediately after this menu,
+            // before the ordinary match-loader override runs.
+            if (_selectorQuest)
+                m.WriteU8(c.GP + 0x1104u + (uint)_selectorPlayer, (byte)entry.Type);
         }
         else if (!_selectorEnemyPhase)
         {
@@ -529,6 +665,7 @@ public static class V82VehicleRegistry
     /// </summary>
     public static void ResetSelectionsAtMainMenu()
     {
+        _questParticipantTypes = [];
         ClearSelections();
         // Command-line diagnostic selection is an explicit per-process test
         // contract, not state leaked by a completed setup. Reapply it after
@@ -587,11 +724,6 @@ public static class V82VehicleRegistry
 
         current = _selectorProxySlot;
         _selectorPreviousSlot = current;
-        // Circle is the native Hot Rod/custom modifier. Guest entries own one
-        // canonical bank, so consume it before the selector can enter the
-        // retail variant editor.
-        uint input = m.ReadU32(SelectorInputAddress);
-        m.WriteU32(SelectorInputAddress, input & ~0x00200000u);
         return checked((uint)current);
     }
 
@@ -649,21 +781,22 @@ public static class V82VehicleRegistry
                 ? previous
                 : nativeTarget;
             _selectorProxySlot = _selectorFirstRetailSlot;
-            guest = wrappedRight ? 0 : Entries.Count - 1;
+            guest = NextQuestEligibleGuest(wrappedRight ? 0 : Entries.Count - 1, direction);
+            if (guest < 0)
+            {
+                _selectorPreviousSlot = nativeTarget;
+                return;
+            }
             from = $"retail.{previous}";
             to = $"guest.{guest}";
         }
         else
         {
             from = $"guest.{guest}";
-            if (right && guest + 1 < Entries.Count)
+            int nextGuest = NextQuestEligibleGuest(guest + direction, direction);
+            if (nextGuest >= 0)
             {
-                guest++;
-                to = $"guest.{guest}";
-            }
-            else if (left && guest > 0)
-            {
-                guest--;
+                guest = nextGuest;
                 to = $"guest.{guest}";
             }
             else
@@ -700,6 +833,14 @@ public static class V82VehicleRegistry
             $"{(right ? "right" : "left")} from={from} to={to} " +
             $"stable={Entries[guest].StableId} proxy={_selectorProxySlot} " +
             $"native-target={nativeTarget} input=0x{input:X8}");
+    }
+
+    static int NextQuestEligibleGuest(int index, int direction)
+    {
+        for (; index >= 0 && index < Entries.Count; index += direction)
+            if (LocalInputSession.IsTypeAvailable(Entries[index].Type) &&
+                (!_selectorQuest || V82QuestRegistry.HasCampaign(Entries[index].Type))) return index;
+        return -1;
     }
 
     /// <summary>
@@ -944,7 +1085,7 @@ public static class V82VehicleRegistry
         }
 
         uint selectorInput = m.ReadU32(SelectorInputAddress);
-        ushort physicalPad = _selectorPlayer == 1
+        ushort physicalPad = _selectorPlayer == 1 && LocalInputSession.SelectorPlayer < 0
             ? RecompOne.Runtime.Hardware.Controller.State2
             : RecompOne.Runtime.Hardware.Controller.State;
         bool physicalLeft =
@@ -1034,8 +1175,6 @@ public static class V82VehicleRegistry
             ? guest
             : -1;
         _selectorAcceptedProxySlot = _selectorProxySlot;
-        if (_selectorAcceptedGuest >= 0)
-            PlayOriginalV8SelectionVoice(c, m, _selectorAcceptedGuest);
         _selectorEnemyPhase = true;
         _selectorEnemyFrames = 0;
         _selectorGuestIndex = -1;
@@ -1051,11 +1190,24 @@ public static class V82VehicleRegistry
     /// <summary>
     /// Plays the original V8 driver-accept line through V8:2's native shell
     /// SND bank, voice allocator, SPU transfer, mixer, and lifetime handling.
-    /// The loose shell bank appends the thirteen byte-exact V8 samples at
-    /// indices 14..26 in original roster order.
+    /// The loose shell bank reserves two resident slots. The thirteen
+    /// original samples stay outside SPU RAM until a player accepts one.
     /// </summary>
+    public static bool PlayNativeSelectorAcceptance(CpuContext c, IMemory m)
+    {
+        // Replace the proxy at native player confirmation, never at the
+        // later header draw. Enemy setup has separate native player-dialogue
+        // events; those are not announcements of the highlighted AI driver.
+        int guest = NativeSelectorGuestIndex;
+        bool playerAccept = c.RA == 0x8010798Cu && !_selectorEnemyPhase;
+        if (!playerAccept || guest < 0)
+            return true;
+        PlayOriginalV8SelectionVoice(c, m, guest, c.A0);
+        return false;
+    }
+
     static void PlayOriginalV8SelectionVoice(
-        CpuContext c, IMemory m, int guest)
+        CpuContext c, IMemory m, int guest, uint nativeVoice)
     {
         if ((uint)guest >= OriginalV8SelectionVoiceCount)
             throw new InvalidOperationException(
@@ -1080,25 +1232,50 @@ public static class V82VehicleRegistry
             throw new InvalidOperationException(
                 $"V8:2 selector SND bank is not loaded " +
                 $"(global=0x{soundBankGlobal:X8})");
-        int sample = OriginalV8SelectionVoiceBase + guest;
+        if (nativeVoice is < 1u or > 2u)
+            throw new InvalidOperationException("unexpected native selector speech channel");
+        // The native selector reuses channels 1/2 for its two controllers.
+        // Slot ownership follows the channel, including the player-to-AI
+        // handoff, so uploading one channel never alters another's speech.
+        int sample = OriginalV8SelectionVoiceBase + (int)nativeVoice - 1;
         int count = m.ReadU16(bank);
-        if (count <= sample)
+        if (count != OriginalV8SelectionVoiceBase + 2)
             throw new InvalidDataException(
                 $"V8:2 selector SND bank has {count} entries; " +
-                $"original V8 voice {sample} is unavailable " +
+                $"expected 14 retail sounds and two reusable voice slots " +
                 $"(global=0x{soundBankGlobal:X8} bank=0x{bank:X8})");
+
+        _selectionVoiceSource ??= new SelectionVoiceBank(File.ReadAllBytes(
+            Path.Combine(Runtime.ResolveLoosePath() ?? Runtime.ExecutableDirectory,
+                "SHELL", "V8VOICES.SND")));
+        if (_selectionVoiceSource.Count != OriginalV8SelectionVoiceCount)
+            throw new InvalidDataException("incomplete original selector voice source bank");
+        uint entry = bank + 4u + (uint)sample * 4u;
+        uint address = (uint)m.ReadU16(entry) << 3;
+        int slotBytes = (m.ReadU16(bank + 64u) - m.ReadU16(bank + 60u)) * 8;
+        if (slotBytes != _selectionVoiceSource.MaximumSampleBytes ||
+            address > Spu.RamSize - slotBytes)
+            throw new InvalidDataException("selector voice slot does not fit source samples");
+        byte[] voiceData = _selectionVoiceSource.Sample(guest);
+        ushort voicePitch = _selectionVoiceSource.Pitch(guest);
 
         var state = c.Snapshot();
         try
         {
-            // Retail V8 reserves voices 3/4 for the two selector players.
-            // Preserve that native ownership convention instead of borrowing
-            // a host mixer channel.
-            c.A0 = checked((uint)(3 + _selectorPlayer));
+            // Native callees use outgoing stack words as well as registers.
+            c.SP -= 0x100u;
+            // Preserve V8:2's acceptance channel, exact pitch and volume.
+            // The randomized impact-sound helper is not a speech player.
+            c.A0 = nativeVoice;
             c.A1 = bank;
             c.A2 = checked((uint)sample);
             c.RA = CustomDispatchAddress;
-            Dispatcher.Call(c, m, NativeSoundPlayerAddress);
+            var spu = Runtime.Spu ?? throw new InvalidOperationException("SPU unavailable");
+            spu.LoadRamAndStart(address, voiceData, () =>
+            {
+                m.WriteU16(entry + 2u, voicePitch);
+                Dispatcher.Call(c, m, NativeSoundPlayerAddress);
+            });
         }
         finally
         {
@@ -1107,9 +1284,10 @@ public static class V82VehicleRegistry
         Console.Error.WriteLine(
             $"[V82SelectionVoice] guest={guest} " +
             $"stable={Entries[guest].StableId} sample={sample} " +
-            $"native_voice={3 + _selectorPlayer} " +
+            $"native_voice={nativeVoice} " +
             $"global=0x{soundBankGlobal:X8} bank=0x{bank:X8} entries={count} " +
-            $"audio_frame={Audio.MixedFrames}");
+            $"bytes={voiceData.Length} source_pitch={voicePitch} " +
+            $"spu=0x{address:X5} audio_frame={Audio.MixedFrames}");
     }
 
     static void ResumePlayerSelectorAfterEnemyBack(
@@ -1164,6 +1342,13 @@ public static class V82VehicleRegistry
     public static bool OverrideNativeSelectorText(CpuContext c, IMemory m)
     {
         V82Compat.TraceNativeSelectorCall(c, m);
+        if (LocalInputSession.SelectorPlayer >= 0 && c.RA == 0x8010689Cu)
+        {
+            byte[] heading = Encoding.ASCII.GetBytes($"PLAYER {LocalInputSession.SelectorPlayer + 1}\0");
+            for (uint i = 0; i < heading.Length; i++) m.WriteU8(SelectorTextAddress + i, heading[i]);
+            c.A1 = SelectorTextAddress;
+            return true;
+        }
         if (!TrySelectorEntry(out VehicleEntry? entry) || entry == null)
             return true;
 
@@ -1235,15 +1420,50 @@ public static class V82VehicleRegistry
     }
 
     /// <summary>
-    /// The selector surrounds its constructor with two relocation calls for
-    /// raw retail disc records. Packaged preview banks have already passed
-    /// through V8:2's native bank builder, so replaying raw relocation would
-    /// treat relocated pointers as byte counts. Skip only those two calls;
-    /// the unchanged constructor consumes the prepared native bank below.
+    /// Imported color edits own a selector-local record instead of writing
+    /// into the stock vehicle row used as their menu proxy. Accepted values
+    /// persist by registered vehicle identity; cancellation leaves them intact.
+    /// </summary>
+    public static uint NativeSelectorColorRecord(CpuContext c, IMemory m, uint retail)
+    {
+        if (!TrySelectorEntry(out VehicleEntry? entry) || entry == null) return retail;
+        EnsureSelectorRuntime(entry, c, m);
+        if (entry.SelectorColorRuntime == 0)
+        {
+            var state = c.Snapshot();
+            try
+            {
+                byte[] record = new byte[10];
+                uint color = ConfigManager.Game.V82VehicleColors.GetValueOrDefault(entry.StableId);
+                record[2] = (byte)color;
+                record[3] = (byte)(color >> 16);
+                record[4] = (byte)(color >> 8);
+                entry.SelectorColorRuntime = AllocateBytes(c, m, record);
+            }
+            finally { c.Restore(state); }
+        }
+        return entry.SelectorColorRuntime;
+    }
+
+    /// <summary>
+    /// Route both native color applications to the owned imported bank. The
+    /// pre-construction call creates the editable mesh block; the subsequent
+    /// call and live editor updates must continue using that same block.
     /// </summary>
     public static bool PrepareNativeSelectorBank(CpuContext c, IMemory m)
     {
         V82Compat.TraceNativeSelectorCall(c, m);
+        if (c.RA == 0x801075E8u && TrySelectorEntry(out VehicleEntry? colorEntry) && colorEntry != null)
+        {
+            c.A0 = colorEntry.SelectorPreviewRuntime;
+            if (ConfigManager.Game.V82VehicleColors.GetValueOrDefault(colorEntry.StableId) != c.A1)
+            {
+                ConfigManager.Game.V82VehicleColors[colorEntry.StableId] = c.A1;
+                ConfigManager.SaveGame();
+            }
+            Console.Error.WriteLine($"[V82SelectorColor] accepted={colorEntry.StableId} value=0x{c.A1:X6} bank=0x{c.A0:X8}");
+            return true;
+        }
         if ((c.RA != SelectorBankPrepareReturn &&
              c.RA != SelectorBankFinalizeReturn) ||
             !TrySelectorEntry(out VehicleEntry? entry) || entry == null)
@@ -1251,12 +1471,13 @@ public static class V82VehicleRegistry
 
         m = Dispatcher.UnwrapMemory(m);
         EnsureSelectorRuntime(entry, c, m);
-        if (TraceNativeSelectorInput)
-            Console.Error.WriteLine(
-                $"[V82SelectorBank] guest={NativeSelectorGuestIndex} " +
-                $"caller=0x{c.RA:X8} prepared-runtime=" +
-                $"0x{entry.SelectorPreviewRuntime:X8}");
-        return false;
+        // Both native calls are required, including color zero. The first
+        // creates the editable group block BEFORE the constructor binds its
+        // meshes. Skipping it leaves the preview pointing at stock polygons
+        // while subsequent palette changes still recolor its textures.
+        c.A0 = entry.SelectorPreviewRuntime;
+        c.A1 = ConfigManager.Game.V82VehicleColors.GetValueOrDefault(entry.StableId);
+        return true;
     }
 
     /// <summary>
@@ -1451,7 +1672,7 @@ public static class V82VehicleRegistry
                 (uint)local < (uint)Entries.Count)
                 selectorEntry = Entries[local];
             _selectorPreviewObject = 0u;
-            V82Compat.ReleaseSelectorVramReservation(c, m);
+            if (!_localMenuScene) V82Compat.ReleaseSelectorVramReservation(c, m);
             if (selectorEntry != null)
                 ReleaseSelectorRuntime(
                     selectorEntry,
@@ -1460,7 +1681,18 @@ public static class V82VehicleRegistry
                     "preview-object-free");
         }
         ObjectEntries.Remove(pointer);
-        ObjectUpgradeStatus.Remove(pointer);
+        if (ObjectUpgradeStatus.Remove(pointer, out uint upgradeStatus))
+        {
+            // This allocation belongs to the vehicle, not to its model bank.
+            // Keep it through result callbacks, then release it with the owner.
+            var state = c.Snapshot();
+            try
+            {
+                c.A0 = upgradeStatus;
+                V82Compat.PcFree(c, m);
+            }
+            finally { c.Restore(state); }
+        }
     }
 
     internal static void RegisterObjectMappingForProbe(uint pointer)
@@ -1597,6 +1829,7 @@ public static class V82VehicleRegistry
         {
             Dispatcher.RegisterHostFunction(
                 CustomDispatchAddress, DispatchCustomVehicle);
+            V8OriginalSpecials.Register();
             _dispatchRegistered = true;
         }
 
@@ -1898,7 +2131,15 @@ public static class V82VehicleRegistry
                     Banks[entry.TransformArchiveIndex].ReadVramAllocations(
                         palettesFirst: true));
         }
-        return result;
+        // Pack across the whole roster, not one bank at a time. Small CLUTs
+        // and short images otherwise split the free strips needed by later
+        // wide palettes and tall, page-constrained images.
+        var unique = result.Distinct().ToArray();
+        Console.Error.WriteLine($"[V82TextureSharing] source_rectangles={result.Count} unique_rectangles={unique.Length} " +
+            $"source_words={result.Sum(r => (long)r.Width * r.Height)} unique_words={unique.Sum(r => (long)r.Width * r.Height)}");
+        return unique.OrderBy(request => request.AlignHeight == 1u ? 0 : 1)
+            .ThenByDescending(request => request.Width)
+            .ThenByDescending(request => request.Height).ToArray();
     }
 
     internal static bool OwnsCurrentTextureLoad(
@@ -1944,6 +2185,9 @@ public static class V82VehicleRegistry
     {
         var active = new List<VehicleEntry>(
             PlayerSelectionCount + NpcSelectionCount + 1);
+        foreach (int type in _questParticipantTypes)
+            if (TryEntryForType((uint)type, out var questEntry) && questEntry != null && !active.Contains(questEntry))
+                active.Add(questEntry);
         for (int player = 0; player < PlayerSelectionCount; player++)
         {
             int selected = SelectedTypeForPlayer(player);
@@ -1965,11 +2209,9 @@ public static class V82VehicleRegistry
         if (_defaultReplacementEntry != null &&
             !active.Contains(_defaultReplacementEntry))
             active.Add(_defaultReplacementEntry);
-        if (_constructingSelectorPreview &&
-            TrySelectorEntry(out VehicleEntry? selectorEntry) &&
-            selectorEntry != null &&
-            !active.Contains(selectorEntry))
-            active.Add(selectorEntry);
+        if (_constructingSelectorPreview && _constructingEntry != null &&
+            !active.Contains(_constructingEntry))
+            active.Add(_constructingEntry);
         return active.ToArray();
     }
 
@@ -2031,8 +2273,60 @@ public static class V82VehicleRegistry
         return null;
     }
 
-    public static void ResetRuntimeForMatch()
+    public static void ReleaseMatchRuntimes(CpuContext c, IMemory m)
     {
+        // Called after retail destroys every match object and bank. Imported
+        // banks are independent of its fixed 64-slot table, but must use the
+        // same destructor (textures, SND/SPU, BIN, ANM and runtime allocation).
+        m = Dispatcher.UnwrapMemory(m);
+        var state = c.Snapshot();
+        int banks = 0;
+        try
+        {
+            foreach (VehicleEntry entry in Entries)
+            {
+                foreach (uint runtime in new[] { entry.BodyRuntime, entry.TransformRuntime })
+                {
+                    if (runtime == 0u) continue;
+                    c.A0 = runtime;
+                    c.RA = CustomDispatchAddress;
+                    Dispatcher.Call(c, m, 0x8001EC18u);
+                    banks++;
+                }
+                foreach (uint pointer in new[] { entry.StatsRuntime,
+                    entry.TransformTableRuntime, entry.PowerupTableRuntime })
+                {
+                    if (pointer == 0u || !V82Compat.IsPcAllocationLive(pointer)) continue;
+                    c.A0 = pointer;
+                    V82Compat.PcFree(c, m);
+                }
+                entry.BodyRuntime = entry.TransformRuntime = 0u;
+                entry.StatsRuntime = entry.TransformTableRuntime = entry.PowerupTableRuntime = 0u;
+            }
+            V82Compat.ReleaseGuestVramReservation(c, m);
+            ObjectEntries.Clear();
+            foreach (uint pointer in ObjectUpgradeStatus.Values.ToArray())
+            {
+                c.A0 = pointer;
+                V82Compat.PcFree(c, m);
+            }
+            ObjectUpgradeStatus.Clear();
+            RejectedTransformationPickups.Clear();
+            WheelLessConstructionLogged.Clear();
+            SpecialBehaviorLogged.Clear();
+            ControllerPhysicsTicks.Clear();
+            _questParticipantTypes = [];
+            V82Compat.CompleteMatchTeardown();
+            Console.Error.WriteLine($"[V82MatchResources] released banks={banks} pc_allocations={V82Compat.PcAllocationCount}");
+        }
+        finally { c.Restore(state); }
+    }
+
+    public static void ResetRuntimeForMatch(IMemory m)
+    {
+        // Authored Quest enemies (including deferred bosses) bypass the enemy
+        // editor. Reserve their banks and load their declared behavior DLLs too.
+        _questParticipantTypes = V82QuestRegistry.MissionVehicleTypes(m).Distinct().ToArray();
         ObjectEntries.Clear();
         ObjectUpgradeStatus.Clear();
         RejectedTransformationPickups.Clear();
@@ -2145,6 +2439,22 @@ public static class V82VehicleRegistry
         }
         if (vehicle == 0u)
             return false;
+
+        // The pre-construction pass creates editable polygon descriptors.
+        // Texture CLUTs are only resident after CreateObject and VRAM placement;
+        // apply the same native color operation again once those handles exist.
+        if (!selectorPreview)
+        {
+            var colorState = c.Snapshot();
+            try
+            {
+                ApplySavedBodyColor(entry, c, m);
+            }
+            finally
+            {
+                c.Restore(colorState);
+            }
+        }
 
         if (entry.ControllerClass == VehicleControllerClass.Ground)
             ApplyAuthoredSuspension(m, vehicle, entry);
@@ -2276,24 +2586,23 @@ public static class V82VehicleRegistry
     }
 
     /// <summary>
-    /// Apply capability-selected movement at the start of V8:2's native
-    /// vehicle action handler. The handler itself must always continue: it
-    /// owns weapon firing, weapon selection, transformations, sound and other
-    /// input actions independently of the vehicle's movement controller.
-    /// Controller selection remains registry-driven and ground vehicles keep
-    /// the unchanged retail movement path.
+    /// Compatibility for older generated action hooks. Movement is applied
+    /// once at the physics dispatch, after the native input action handler.
     /// </summary>
     public static bool BeginControllerPhysics(CpuContext c, IMemory m)
+        => true; // Older generated action hooks: physics now runs at the physics dispatch.
+
+    public static bool ApplyOriginalControllerPhysics(CpuContext c, IMemory m, uint vehicle)
     {
         m = Dispatcher.UnwrapMemory(m);
-        uint vehicle = c.A0;
         if (vehicle != 0u &&
             TryEntryForObject(m, vehicle, out VehicleEntry? entry) &&
             entry?.ControllerClass == VehicleControllerClass.Flying)
         {
             ApplyOriginalV8FlyingPhysics(c, m, vehicle, entry);
+            return true;
         }
-        return true;
+        return false;
     }
 
     /// <summary>
@@ -2319,34 +2628,15 @@ public static class V82VehicleRegistry
         int posX = I32(m, vehicle + 0x34u);
         int posY = I32(m, vehicle + 0x38u);
         int posZ = I32(m, vehicle + 0x3Cu);
-        int terrainY = CallGuestI32(
-            c, m, TerrainHeightAddress,
-            unchecked((uint)posX), unchecked((uint)posZ));
-        int surfaceY = terrainY;
-        int waterPlane = unchecked((int)m.ReadU32(c.GP + 0xDB0u));
-        ushort waterTpage = m.ReadU16(c.GP + 0xDC8u);
-        ushort waterSize = m.ReadU16(c.GP + 0xDCAu);
-        bool nativeWaterActive =
-            waterPlane >= 0x10000 && waterPlane < 0x10000000 &&
-            waterTpage != 0 && waterSize != 0;
-        // Native water is a global horizontal surface clipped by the terrain.
-        // Y grows downward, so when the terrain lies below the active water
-        // plane the plane is the first surface a flying controller encounters.
-        // This preserves the source hover equation over both dry terrain and
-        // water without consulting a level or vehicle identity.
-        if (nativeWaterActive && terrainY > waterPlane)
-            surfaceY = waterPlane;
+        // src/physics/object_general_tick.c: probe obstacles as well as terrain.
+        int surfaceY = unchecked((int)V8OriginalSpecials.Call(c,m,0x8002CFBC,vehicle,vehicle+0x34));
         int depth = Rtz(Sub32(surfaceY, posY), 8);
-
         int vx = I32(m, vehicle + 0x80u);
         int vy = I32(m, vehicle + 0x84u);
         int vz = I32(m, vehicle + 0x88u);
-        ulong speedSquared =
-            (ulong)((long)vx * vx) +
-            (ulong)((long)vy * vy) +
-            (ulong)((long)vz * vz);
-        WriteI32(m, vehicle + 0x8Cu,
-            unchecked((int)(IntegerSquareRoot(speedSquared) >> 7)));
+        // Same original 64-bit dot-product + PSYQ sqrt sequence as FUN_80016A20.
+        int speed = unchecked((int)V8OriginalSpecials.Call(c,m,0x80029E84,vehicle+0x80));
+        WriteI32(m, vehicle + 0x8Cu, Rtz(speed,7));
 
         int pitchRate = I32(m, vehicle + 0x90u);
         int yawRate = unchecked((short)m.ReadU16(vehicle + 0xA8u) << 6);
@@ -2387,7 +2677,7 @@ public static class V82VehicleRegistry
         WriteI32(m, vehicle + 0x98u, rollRate);
 
         ApplySmallAngleRotation(
-            m, vehicle + 0x20u,
+            c, m, vehicle + 0x20u,
             Rtz(pitchRate, 7),
             Rtz(yawRate, 7),
             Rtz(rollRate, 7));
@@ -2407,16 +2697,7 @@ public static class V82VehicleRegistry
         WriteI32(m, vehicle + 0x84u, Sub32(vy, Rtz(vy, 6)));
         WriteI32(m, vehicle + 0x88u, Sub32(vz, Rtz(vz, 6)));
 
-        if ((m.ReadU32(vehicle) & 0x00800000u) == 0u)
-        {
-            // V8:2 moved the object's current position from +0x24 to +0x34,
-            // but its physics-follow target is +0x4C rather than following
-            // that same +0x10 shift. In particular, +0x5C is the native XOBF
-            // bank pointer and must never receive positional state.
-            WriteI32(m, vehicle + 0x4Cu, posX);
-            WriteI32(m, vehicle + 0x50u, posY);
-            WriteI32(m, vehicle + 0x54u, posZ);
-        }
+        // Native 80041E08 owns the same weapon timers and original follow step.
 
         ulong tick = ControllerPhysicsTicks.TryGetValue(vehicle, out ulong old)
             ? old + 1u
@@ -2427,42 +2708,23 @@ public static class V82VehicleRegistry
                 $"[V82VehicleController] tick={tick} id={entry.StableId} " +
                 $"object=0x{vehicle:X8} controller=flying " +
                 $"pos=({posX},{posY},{posZ}) " +
-                $"vel=({vx},{vy},{vz}) terrain-y={terrainY} " +
-                $"water-plane={waterPlane} water-active={(nativeWaterActive ? 1 : 0)} " +
+                $"vel=({vx},{vy},{vz}) " +
                 $"surface-y={surfaceY} depth={depth} " +
                 $"controls=({(short)m.ReadU16(vehicle + 0xA8u)}," +
                 $"{thrust}) speed={I32(m, vehicle + 0x8Cu)}");
     }
 
     static void ApplySmallAngleRotation(
-        IMemory m, uint matrix, int pitch, int yaw, int roll)
+        CpuContext c, IMemory m, uint matrix, int pitch, int yaw, int roll)
     {
-        int[,] old = new int[3, 3];
-        for (int row = 0; row < 3; row++)
-            for (int column = 0; column < 3; column++)
-                old[row, column] = (short)m.ReadU16(
-                    matrix + (uint)((row * 3 + column) * 2));
-
-        int[,] small =
+        var state=c.Snapshot();
+        try
         {
-            { 0x1000, -roll, yaw },
-            { roll, 0x1000, -pitch },
-            { -yaw, pitch, 0x1000 },
-        };
-        for (int row = 0; row < 3; row++)
-        {
-            for (int column = 0; column < 3; column++)
-            {
-                long value = 0;
-                for (int inner = 0; inner < 3; inner++)
-                    value += (long)old[row, inner] * small[inner, column];
-                int scaled = unchecked((int)(value >> 12));
-                scaled = Math.Clamp(scaled, short.MinValue, short.MaxValue);
-                m.WriteU16(
-                    matrix + (uint)((row * 3 + column) * 2),
-                    unchecked((ushort)(short)scaled));
-            }
+            c.A0=matrix; c.A1=unchecked((uint)pitch);
+            c.A2=unchecked((uint)yaw); c.A3=unchecked((uint)roll);
+            V8VehicleMath.ApplyAngularVelocity(c,m);
         }
+        finally { c.Restore(state); }
     }
 
     static void NormalizeMatrix(CpuContext c, IMemory m, uint matrix)
@@ -2633,8 +2895,14 @@ public static class V82VehicleRegistry
     public static uint UpgradeStatusForObject(
         CpuContext c, IMemory m, uint vehicle, uint retailPointer)
     {
-        if (!TryEntryForObject(m, vehicle, out _))
+        if (!TryEntryForObject(m, vehicle, out var questEntry))
             return retailPointer;
+        int playerId = (short)m.ReadU16(vehicle + 0xAu);
+        if (V82QuestRegistry.IsQuest(c, m) && playerId is -1 or -2)
+        {
+            uint progress = V82QuestRegistry.ProgressAddress(questEntry.Type, -playerId - 1, retailPointer);
+            if (progress != retailPointer) return progress;
+        }
         if (ObjectUpgradeStatus.TryGetValue(vehicle, out uint pointer))
             return pointer;
 
@@ -2653,11 +2921,38 @@ public static class V82VehicleRegistry
     }
 
     /// <summary>
-    /// Selects a retail V8:2 special-weapon behavior through package metadata.
-    /// The imported model remains independently owned; only a proven native
-    /// behavior class is reused. Custom vehicles without one use the retail
-    /// generic fallback instead of indexing beyond the fixed 18-entry table.
+    /// Includes selected packages' behavior DLL dependencies in the native
+    /// match-load mask. Models and roster identities remain independently owned.
     /// </summary>
+    public static uint SpecialResourceMask(IMemory m, uint retailMask)
+    {
+        // The native loader visits only the 18 retail bits. Imported roster
+        // identities therefore cannot request their behavior DLL by shifting
+        // their own type; include the dependencies declared by their package.
+        foreach (VehicleEntry entry in ActiveEntries())
+            if (entry.SpecialBehaviorType >= 0)
+                retailMask |= 1u << entry.SpecialBehaviorType;
+        for (uint participant = 0; participant < 6; participant++)
+            if (TryEntryForType(m.ReadU8(0x8006B8F4u + participant), out var entry) &&
+                entry is { SpecialBehaviorType: >= 0 })
+                retailMask |= 1u << entry.SpecialBehaviorType;
+        return retailMask;
+    }
+
+    /// <summary>
+    /// Source effect metadata follows the asset bank's lifetime. It remains
+    /// available when an in-flight beam outlives its firing vehicle.
+    /// </summary>
+    public static int OriginalImpactKindForBank(uint bank) =>
+        Entries.FirstOrDefault(entry => entry.OriginalSpecialType >= 0 &&
+            entry.BodyRuntime != 0 && entry.BodyRuntime == bank)?.OriginalImpactKind ?? -1;
+
+    public static uint SpecialCallbackForObject(IMemory m, uint vehicle, uint nativeCallback)
+    {
+        if (!TryEntryForObject(m, vehicle, out var entry) || entry == null) return nativeCallback;
+        return entry.OriginalSpecialType switch { 7 => V8OriginalSpecials.HoustonCallback, 12 => V8OriginalSpecials.AlienCallback, _ => nativeCallback };
+    }
+
     public static uint SpecialBehaviorForObject(
         IMemory m, uint vehicle, uint retailPointer)
     {
@@ -2751,6 +3046,7 @@ public static class V82VehicleRegistry
                     AllocatePowerupTable(c, m, entry.Powerups);
             entry.BodyRuntime =
                 BuildNativeBank(c, m, Banks[entry.BodyArchiveIndex]);
+            ApplySavedBodyColor(entry, c, m);
             if (entry.TransformArchiveIndex != NoArchiveIndex &&
                 entry.TransformRuntime == 0u)
                 entry.TransformRuntime =
@@ -2768,6 +3064,17 @@ public static class V82VehicleRegistry
         {
             c.Restore(state);
         }
+    }
+
+    static void ApplySavedBodyColor(VehicleEntry entry, CpuContext c, IMemory m)
+    {
+        uint color = ConfigManager.Game.V82VehicleColors.GetValueOrDefault(entry.StableId);
+        if (color == 0) return;
+        c.A0 = entry.BodyRuntime;
+        c.A1 = color;
+        c.RA = CustomDispatchAddress;
+        Dispatcher.Call(c, m, 0x8001EF34u);
+        Console.Error.WriteLine($"[V82VehicleColor] applied={entry.StableId} value=0x{color:X6}");
     }
 
     static void EnsureSelectorRuntime(
@@ -3425,6 +3732,12 @@ public static class V82VehicleRegistry
         var state = c.Snapshot();
         try
         {
+            if (entry.SelectorColorRuntime != 0)
+            {
+                c.A0 = entry.SelectorColorRuntime;
+                V82Compat.PcFree(c, m);
+                entry.SelectorColorRuntime = 0;
+            }
             ReleaseOwnedNativeBank(preview, c, m);
             ReleaseOwnedNativeBank(wheels, c, m);
             if (releaseSelectorStats &&
@@ -3482,6 +3795,16 @@ public static class V82VehicleRegistry
     {
         if (allocation == null)
             return;
+        if (V82Compat.IsPcAllocationLive(allocation.Runtime))
+        {
+            uint groups = m.ReadU32(allocation.Runtime + 0x10u);
+            uint original = m.ReadU32(allocation.Bin + 4u);
+            if (groups != original && V82Compat.IsPcAllocationLive(groups))
+            {
+                c.A0 = groups;
+                V82Compat.PcFree(c, m);
+            }
+        }
         foreach (uint pointer in new[]
                  {
                      allocation.Runtime,
@@ -3671,13 +3994,16 @@ public static class V82VehicleRegistry
                 ? checked((int)(
                     (flags & SpecialBehaviorMask) >> SpecialBehaviorShift))
                 : -1;
+            int originalSpecialType = (flags & FlagOriginalSpecial) != 0 ? (int)((flags & SpecialBehaviorMask) >> SpecialBehaviorShift) : -1;
+            if (originalSpecialType != -1 && (originalSpecialType is not (7 or 12) || specialBehaviorType != -1))
+                throw new InvalidDataException("invalid original V8 special capability");
             bool supportsTransformations =
                 (flags & FlagNonTransformable) == 0u;
             if ((flags & ~SupportedCapabilityFlags) != 0u ||
                 controllerId > (uint)VehicleControllerClass.Flying ||
                 specialBehaviorType >= RetailVehicleCount ||
                 statSize != StatsSize ||
-                entryReserved != 0 || extensionReserved != 0)
+                entryReserved != 0 || (extensionReserved != 0 && originalSpecialType == -1))
                 throw new InvalidDataException(
                     $"custom vehicle entry {index} has unsupported flags or sizes");
             if ((supportsTransformations &&
@@ -3749,6 +4075,7 @@ public static class V82VehicleRegistry
                 (VehicleControllerClass)controllerId,
                 supportsTransformations,
                 specialBehaviorType,
+                extensionReserved,
                 rearSuspensionDamping,
                 stats,
                 transformModes,
@@ -3959,6 +4286,7 @@ public static class V82VehicleRegistry
         VehicleControllerClass controllerClass,
         bool supportsTransformations,
         int specialBehaviorType,
+        ushort originalImpactKind,
         ushort rearSuspensionDamping,
         byte[] stats,
         ushort[,] transformModes,
@@ -3981,6 +4309,8 @@ public static class V82VehicleRegistry
         public bool SupportsTransformations { get; } =
             supportsTransformations;
         public int SpecialBehaviorType { get; } = specialBehaviorType;
+        public ushort OriginalImpactKind { get; } = originalImpactKind;
+        public int OriginalSpecialType => (Flags & FlagOriginalSpecial) != 0 ? (int)((Flags & SpecialBehaviorMask) >> SpecialBehaviorShift) : -1;
         public ushort RearSuspensionDamping { get; } = rearSuspensionDamping;
         public byte[] Stats { get; } = stats;
         public ushort[,] TransformModes { get; } = transformModes;
@@ -3988,6 +4318,7 @@ public static class V82VehicleRegistry
         public uint BodyRuntime { get; set; }
         public uint TransformRuntime { get; set; }
         public uint SelectorPreviewRuntime { get; set; }
+        public uint SelectorColorRuntime { get; set; }
         public uint SelectorTransformRuntime { get; set; }
         public int SelectorGeneration { get; set; }
         public NativeBankAllocation? SelectorPreviewAllocation { get; set; }

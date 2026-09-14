@@ -576,6 +576,8 @@ class VehicleProject:
     controller_class: str = "ground"
     supports_transformations: bool = True
     special_behavior_type: int | None = None
+    original_special_type: int | None = None
+    original_impact_kind: int = 0
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "VehicleProject":
@@ -604,6 +606,8 @@ class VehicleProject:
                 "controller_class",
                 "supports_transformations",
                 "special_behavior_type",
+                "original_special_type",
+                "original_impact_kind",
             },
             "vehicle project",
         )
@@ -666,6 +670,8 @@ class VehicleProject:
             supports_transformations=bool(
                 value.get("supports_transformations", True)
             ),
+            original_impact_kind=int(value.get("original_impact_kind",0)),
+            original_special_type=(None if value.get("original_special_type") is None else int(value["original_special_type"])),
             special_behavior_type=(
                 None
                 if value.get("special_behavior_type") is None
@@ -695,6 +701,13 @@ class VehicleProject:
                 "special_behavior_type must select a retail V8:2 behavior "
                 "class in the range 0..17"
             )
+        if self.original_special_type is not None:
+            if self.original_special_type not in (7, 12) or self.special_behavior_type is not None:
+                raise ValueError("original_special_type requires an implemented original callback and no retail substitution")
+        if self.original_special_type is not None and not (0 <= self.original_impact_kind < len(self.slots) and self.slots[self.original_impact_kind].parent is None):
+            raise ValueError("original impact must select an authored root")
+        if self.original_special_type is None and self.original_impact_kind != 0:
+            raise ValueError("impact metadata requires an original special")
         if not self.stable_id or any(
             character not in "abcdefghijklmnopqrstuvwxyz0123456789_.-"
             for character in self.stable_id
@@ -1452,6 +1465,8 @@ def to_dict(vehicle: VehicleProject) -> dict[str, Any]:
         "controller_class": vehicle.controller_class,
         "supports_transformations": vehicle.supports_transformations,
         "special_behavior_type": vehicle.special_behavior_type,
+        "original_special_type": vehicle.original_special_type,
+        "original_impact_kind": vehicle.original_impact_kind,
     }
     result["transformation_bank"] = (
         None

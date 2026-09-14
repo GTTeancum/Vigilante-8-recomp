@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import struct
 import sys
+import argparse
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -210,6 +211,10 @@ def validate_native_texture_boundaries(forms: tuple[iff.IffChunk, ...]) -> int:
 
 
 def main() -> None:
+    global FINAL
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--package", type=Path, default=FINAL)
+    FINAL = parser.parse_args().package.resolve()
     archive_path = FINAL / "CUSTOM.EXP"
     registry_path = FINAL / "VEHICLES.V8R"
     archive = archive_path.read_bytes()
@@ -292,7 +297,7 @@ def main() -> None:
             f"{vehicle.stable_id} has no owned selector bank",
         )
         require(
-            vehicle.transformation_bank is not None,
+            (vehicle.transformation_bank is None) == (vehicle.controller_class == 'flying'),
             f"{vehicle.stable_id} has no authored wheel/contact bank",
         )
 
@@ -301,7 +306,7 @@ def main() -> None:
             for slot in vehicle.slots
             if slot.parent == vehicle.body_kind and slot.key is not None
         }
-        expected_wheels = {0x8000, 0x8001, 0x8002, 0x8003}
+        expected_wheels = set() if vehicle.controller_class == 'flying' else {0x8000, 0x8001, 0x8002, 0x8003}
         require(
             direct_keys & set(range(0x8000, 0x8006))
             == expected_wheels,
@@ -321,32 +326,6 @@ def main() -> None:
             else vehicle.transform_modes == (),
             f"{vehicle.stable_id} transform table contradicts capability",
         )
-        if not vehicle.supports_transformations:
-            contact_bank = vehicle.transformation_bank
-            require(
-                len(contact_bank.groups) == 1
-                and contact_bank.groups[0].faces == ()
-                and contact_bank.groups[0].controls == ()
-                and contact_bank.textures == ()
-                and contact_bank.animations == (),
-                f"{vehicle.stable_id} non-transformable contact bank renders geometry",
-            )
-            contact_roots = {
-                index
-                for index, slot in enumerate(contact_bank.slots)
-                if slot.parent is None
-            }
-            require(
-                vehicle.stats["wheel_kind_front"] in contact_roots
-                and vehicle.stats["wheel_kind_rear"] in contact_roots
-                and all(
-                    contact_bank.slots[root].render_group == 0
-                    and contact_bank.slots[root].collision is not None
-                    for root in contact_roots
-                ),
-                f"{vehicle.stable_id} contact roots are not native collision-only objects",
-            )
-
         source_index = VEHICLES[index][0]
         source_body = decode_bank(V8_COMMON, "V8", source_index)
         source_selector = decode_bank(
