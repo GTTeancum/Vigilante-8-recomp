@@ -69,3 +69,20 @@ Check(V82ArenaRegistry.LoadingOverlayName==null, "arena presentation identity en
 Check(!GpuHle.GameplayActive && GpuHle.DebugGameplayTick == 0 && !GpuHle.IsNativeModalPanel(0x80123450),
     "end-of-level boundary removes scene ownership and gameplay state");
 Check(GpuHle.WideAspect == 16f / 9f, "persistent display configuration survives scene cleanup");
+
+var nativeImages = new NativeImageSharing();
+Check(!nativeImages.TryAcquire("image-a", out _), "unknown native image requires an allocation");
+nativeImages.Record("image-a", 0x80190000, 400, 300, 1200);
+Check(nativeImages.TryAcquire("image-a", out uint sharedImage) && sharedImage == 0x80190000,
+    "identical native image shares its occupied backing descriptor");
+nativeImages.Record("image-a", sharedImage, 400, 300, 1200);
+Check(!nativeImages.Release(400,300), "first native image owner cannot free a surviving owner's pixels");
+Check(nativeImages.Release(400,300), "last native image owner releases the backing rectangle");
+Check(!nativeImages.TryAcquire("image-a", out _), "freed native image cannot return a stale descriptor");
+nativeImages.Record("image-b", 0x80190040, 400, 300, 800);
+Check(nativeImages.TryAcquire("image-b", out sharedImage) && sharedImage == 0x80190040,
+    "freed coordinates can be reused by unrelated image content");
+Check(nativeImages.Hits == 2 && nativeImages.SavedWords == 2000, "native sharing accounts for reused payload words");
+nativeImages.Clear();
+Check(nativeImages.Release(400,300) && !nativeImages.TryAcquire("image-b", out _) && nativeImages.Hits == 0,
+    "whole-tree retirement invalidates all native image ownership before another match");

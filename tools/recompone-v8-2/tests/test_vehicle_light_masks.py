@@ -28,11 +28,28 @@ class LightMaskTests(unittest.TestCase):
 
     def test_full_four_bit_palette_promotes_without_color_loss(self):
         pal=tuple(range(16))
-        t=project.Texture('full',16,1,0,pal,bytes(range(16)))
+        t=project.Texture('full',32,1,0,pal,bytes(range(16))*2)
         new,protected=isolate(t,[[8,0,16,1]])
         self.assertEqual(new.depth,1)
         self.assertEqual([pal[i] for i in t.indices],[new.palette_bgr555[i] for i in new.indices])
         self.assertTrue(all(i>=16 for i in protected))
+
+    def test_duplicate_colors_do_not_force_eight_bit_images(self):
+        pal=tuple(range(14))+(12,13)
+        t=project.Texture('duplicates',32,1,0,pal,bytes(range(16))*2)
+        new,protected=isolate(t,[],full_rects=[[12,0,14,1]])
+        self.assertEqual(new.depth,0)
+        self.assertEqual([pal[i] for i in t.indices],
+                         [new.palette_bgr555[i] for i in new.indices])
+        self.assertEqual([i in protected for i in new.indices],
+                         [n in (12,13) for n in range(32)])
+
+    def test_light_only_colors_can_reuse_their_original_palette_capacity(self):
+        t=project.Texture('exclusive',16,1,0,tuple(range(16)),bytes(range(16)))
+        new,protected=isolate(t,[],full_rects=[[8,0,16,1]])
+        self.assertEqual(new.depth,0)
+        self.assertEqual([new.palette_bgr555[i] for i in new.indices],list(range(16)))
+        self.assertEqual([i in protected for i in new.indices],[n>=8 for n in range(16)])
 
     def test_generated_native_assets_preserve_every_stock_texel(self):
         output=Path(os.environ.get('V82_LIGHT_MASK_OUTPUT',str(ROOT/'artifacts/vehicle-light-masks')))

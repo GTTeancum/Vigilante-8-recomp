@@ -43,6 +43,19 @@ def isolate(t,rects,red_ratio=2.2,full_rects=()):
         pal.extend([0]*max(0,index+1-len(pal)));pal[index]=color
     indices=bytes(assigned[t.palette_bgr555[index]] if n in mask else index for n,index in enumerate(t.indices))
     depth=0 if max(indices)<16 else 1
+    # A palette slot is not necessarily a distinct color. Retail palettes can
+    # contain duplicate BGR555 entries; retaining all their indices needlessly
+    # promotes small light masks to 8bpp and doubles their image VRAM footprint.
+    # Preserve the light/body distinction even when both use the same color.
+    if depth == 1:
+        protected=set(assigned.values())
+        classes=sorted({(pal[i],i in protected) for i in indices})
+        if len(classes)<=16:
+            lookup={value:i for i,value in enumerate(classes)}
+            indices=bytes(lookup[(pal[i],i in protected)] for i in indices)
+            pal=[color for color,_ in classes]+[0]*(16-len(classes))
+            assigned={color:i for i,(color,is_light) in enumerate(classes) if is_light}
+            depth=0
     result=replace(t,depth=depth,palette_bgr555=tuple(pal),indices=indices)
     assert [t.palette_bgr555[i] for i in t.indices]==[result.palette_bgr555[i] for i in result.indices]
     return result,sorted(assigned.values())

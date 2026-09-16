@@ -1652,6 +1652,8 @@ public static partial class V82Compat
             Environment.GetEnvironmentVariable(
                 "RECOMPONE_V82_PLAYER_TYPE_SEQUENCE"));
     static int _soakPlayerTypeSequenceIndex;
+    static readonly int[] _testNativeNpcTypes = ParsePlayerTypeSequence(
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_TEST_NATIVE_NPC_TYPES"));
     static readonly bool _soakPowerUpsEnabled =
         Environment.GetEnvironmentVariable("RECOMPONE_V82_SOAK_POWERUPS") != "0";
     static readonly bool _soakWeaponsEnabled =
@@ -6132,6 +6134,17 @@ public static partial class V82Compat
         int primaryParticipants = (sbyte)m.ReadU8(c.GP + 0x31u) < 9 ? 2 : 4;
         V82VehicleRegistry.ApplySelectedNpcTypes(
             m, c.GP + 0x1104u, primaryParticipants);
+        // Process-local reproduction of a specific retail opponent roster.
+        // Establish it before resource masks and texture reservations are built.
+        if (_testNativeNpcTypes.Length != 0)
+        {
+            if (primaryParticipants != 2 || _testNativeNpcTypes.Length != 4 ||
+                _testNativeNpcTypes.Any(type => type >= V82VehicleRegistry.RetailVehicleCount) ||
+                Enumerable.Range(0, 4).Any(slot => V82VehicleRegistry.SelectedNpcTypeForSlot(slot) >= 0))
+                throw new InvalidOperationException("Native NPC fixture requires four retail opponents and no guest NPC selections");
+            for (int slot = 0; slot < 4; slot++)
+                m.WriteU8(c.GP + 0x1106u + (uint)slot, (byte)_testNativeNpcTypes[slot]);
+        }
         // func_800132CC builds the two resource masks in S3/S2 after several
         // split callbacks. Those callbacks can leak their callee-saved scratch
         // registers into the generated caller. Rebuild the masks from the same
@@ -8344,11 +8357,31 @@ public static partial class V82Compat
         _activeGuestVramReservations = null;
     }
 
+    static readonly Stack<string?> NativeImageRequests = new();
+    static readonly NativeImageSharing MatchNativeImages = new();
+
     public static bool TrackVramAllocationPre(CpuContext c, IMemory m)
     {
         var request = (
             c.A0, c.A1, c.A2, c.A3,
             m.ReadU32(c.SP + 0x10u), m.ReadU32(c.SP + 0x14u));
+        // The bank loader uploads immutable index images separately from each
+        // texture's mutable paint CLUT. Share only identical encoded images;
+        // palette allocation and recoloring retain their original ownership.
+        string? nativeImageKey = null;
+        if (_matchVramActive && c.RA == 0x8001F5C8u)
+        {
+            uint rect = m.ReadU32(c.SP + 0x24u), data = m.ReadU32(c.SP + 0x28u);
+            uint bytes = m.ReadU32(rect - 4u) - 12u;
+            if (bytes > NativeVehicleBankSource.MaximumSourceBytes)
+                throw new InvalidDataException("Native bank image exceeds its source bounds");
+            byte[] payload = new byte[bytes];
+            for (uint i = 0; i < bytes; i++) payload[i] = m.ReadU8(data + i);
+            nativeImageKey = NativeVehicleBankSource.TextureContentKey(new NativeVramAllocation(
+                c.A0,c.A1,c.A2,c.A3,request.Item5,request.Item6),
+                (m.ReadU32(c.SP + 0x18u) & 16u) != 0, payload);
+        }
+        NativeImageRequests.Push(nativeImageKey);
         VramRequests.Push(request);
         if (_traceVramPacking && _matchVramActive && m.ReadU32(c.GP + 0xE80u) != 0u)
             Console.Error.WriteLine($"[V82PackingRequest] {request.Item1},{request.Item2},{request.Item3},{request.Item4},{request.Item5},{request.Item6}");
@@ -8365,6 +8398,11 @@ public static partial class V82Compat
                 $"align={request.Item3}x{request.Item4} " +
                 $"limit={request.Item5}x{request.Item6} " +
                 $"caller=0x{c.RA:X8}");
+        if (nativeImageKey != null && MatchNativeImages.TryAcquire(nativeImageKey, out uint imageDescriptor))
+        {
+            c.V0 = imageDescriptor;
+            return false;
+        }
         if (_guestVramClaimActive)
         {
             List<GuestVramReservation> reservations =
@@ -8466,9 +8504,16 @@ public static partial class V82Compat
         return true;
     }
 
-    public static uint SelectMatchVramFreeLeaf(CpuContext c, IMemory m, uint root) =>
-        _matchVramActive && SharedGuestTextures.Count != 0
+    public static uint SelectMatchVramFreeLeaf(CpuContext c, IMemory m, uint root)
+    {
+        // This seam runs only for new backing allocations, after cache hits
+        // and guest reservation claims have returned. Fixtures must not count
+        // those shared claims as additional demand.
+        if (_traceVramPacking && _matchVramActive)
+            Console.Error.WriteLine($"[V82BackingRequest] {c.A0},{c.A1},{c.A2},{c.A3},{m.ReadU32(c.SP + 0x48u)},{m.ReadU32(c.SP + 0x4Cu)}");
+        return _matchVramActive && SharedGuestTextures.Count != 0
             ? NativeVramPlacement.FindFreeLeaf(c, m, root) : root;
+    }
 
     public static void RetireVramBackingTree(CpuContext c, IMemory m)
     {
@@ -8477,12 +8522,20 @@ public static partial class V82Compat
         // retain only our CPU descriptors until their own owners retire them.
         if (SyntheticVramBackingLive.Count != 0)
             Console.Error.WriteLine($"[V82TextureOwnership] native tree retiring backing={SyntheticVramBackingLive.Count} shared={SharedGuestCoordinates.Count}");
+        if (MatchNativeImages.Hits != 0)
+            Console.Error.WriteLine($"[V82ImageSharing] reused={MatchNativeImages.Hits} saved-words={MatchNativeImages.SavedWords}");
+        MatchNativeImages.Clear();
         SyntheticVramBackingLive.Clear();
         SharedGuestCoordinates.Clear();
     }
 
     public static bool RetainSharedGuestTexture(CpuContext c, IMemory m)
     {
+        if (!MatchNativeImages.Release(c.A0, c.A1))
+        {
+            c.V0 = 1u;
+            return false;
+        }
         if (_releasingGuestTextures || !SharedGuestCoordinates.Contains((c.A0, c.A1))) return true;
         c.V0 = 1u;
         return false;
@@ -8532,6 +8585,9 @@ public static partial class V82Compat
     {
         if (VramRequests.Count == 0) return;
         var request = VramRequests.Pop();
+        string? nativeImageKey = NativeImageRequests.Pop();
+        if (nativeImageKey != null && c.V0 != 0)
+            MatchNativeImages.Record(nativeImageKey, c.V0, m.ReadU16(c.V0), m.ReadU16(c.V0 + 2u), request.Width * request.Height);
         if (_traceVram)
             Console.Error.WriteLine(
                 $"[VRAM] allocate finish {request.Width}x{request.Height} " +
