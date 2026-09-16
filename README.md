@@ -23,13 +23,28 @@ comfortable to play, test, and extend on current hardware.
 
 ![Vigilante 8: 2nd Offense main menu](docs/screenshots/v82_main_menu.png)
 
-![Vigilante 8: 2nd Offense location select](docs/screenshots/v82_location_select.png)
-
-![Enhanced Route 66 gameplay in Vigilante 8: 2nd Offense](docs/screenshots/v82_route66_enhanced.png)
-
-![Houston's original Vigilante 8 Palomino with custom blue paint](docs/screenshots/v82_houston_custom_color.png)
-
-![Dallas's Palomino XIII with custom purple paint](docs/screenshots/v82_dallas_custom_color.png)
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/v82_location_select.png" alt="Vigilante 8: 2nd Offense location select">
+      <br>Location selection
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/v82_route66_enhanced.png" alt="Enhanced Route 66 gameplay in Vigilante 8: 2nd Offense">
+      <br>Route 66 with enhanced textures
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/v82_houston_custom_color.png" alt="Houston's original Vigilante 8 Palomino with custom blue paint">
+      <br>Original V8 Houston — custom blue paint
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/v82_dallas_custom_color.png" alt="Dallas's Palomino XIII with custom purple paint">
+      <br>Dallas — custom purple paint
+    </td>
+  </tr>
+</table>
 
 ## Current Status
 
