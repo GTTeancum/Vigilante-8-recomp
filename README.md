@@ -13,6 +13,12 @@ comfortable to play, test, and extend on current hardware.
 > current release-candidate focus; the original Vigilante 8 build remains
 > active development work. No copyrighted game data is included.
 
+## Gameplay Preview
+
+[![Watch the Vigilante 8 Classic gameplay reel](https://img.youtube.com/vi/3hc6it7qC9M/hqdefault.jpg)](https://www.youtube.com/watch?v=3hc6it7qC9M)
+
+**[Watch on YouTube](https://www.youtube.com/watch?v=3hc6it7qC9M)** — Work in progress — test footage.
+
 ## Screenshots
 
 ![Vigilante 8: 2nd Offense main menu](docs/screenshots/v82_main_menu.png)
