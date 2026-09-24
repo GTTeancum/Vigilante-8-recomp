@@ -1,0 +1,104 @@
+[
+  {
+    "package": "ImGui.NET/1.90.8.1",
+    "projectUrl": "https://github.com/mellinoe/imgui.net"
+  },
+  {
+    "package": "Microsoft.DotNet.PlatformAbstractions/3.1.6",
+    "license": "LICENSE.TXT",
+    "projectUrl": "https://dot.net/"
+  },
+  {
+    "package": "Microsoft.Extensions.DependencyModel/9.0.9",
+    "license": "MIT",
+    "projectUrl": "https://dot.net/"
+  },
+  {
+    "package": "NVorbis/0.10.5",
+    "license": "LICENSE",
+    "projectUrl": "https://github.com/NVorbis/NVorbis"
+  },
+  {
+    "package": "OggVorbisEncoder/1.2.2",
+    "license": "MIT",
+    "projectUrl": "https://github.com/SteveLillis/.NET-Ogg-Vorbis-Encoder"
+  },
+  {
+    "package": "Silk.NET/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.Core/2.23.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.GLFW/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.Input/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.Input.Common/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.Input.Extensions/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.Input.Glfw/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.Maths/2.23.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.OpenAL/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.OpenGL/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.OpenGL.Extensions.ImGui/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.SDL/2.23.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.Vulkan/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.Vulkan.Extensions.KHR/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.Windowing/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.Windowing.Common/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Silk.NET.Windowing.Glfw/2.22.0",
+    "license": "MIT"
+  },
+  {
+    "package": "Ultz.Native.GLFW/3.4.0",
+    "license": "Zlib",
+    "projectUrl": "https://github.com/dotnet/Silk.NET"
+  },
+  {
+    "package": "Ultz.Native.SDL/2.32.10",
+    "license": "Zlib",
+    "projectUrl": "https://github.com/dotnet/Silk.NET"
+  }
+]

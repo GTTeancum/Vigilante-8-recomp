@@ -1,0 +1,15 @@
+Vigilante 8 Classic — third-party component notices
+
+This unofficial project is not affiliated with or endorsed by the original games' publishers or developers. Game names, original content and mod assets retain their respective ownership. The included component licenses do not grant rights to game or mod assets.
+
+RecompOne: copyright (c) 2026 flaffy, MIT; see licenses/RecompOne.txt.
+.NET runtime and Microsoft managed libraries: see the Microsoft and dotnet-runtime license/notice files in licenses/.
+Silk.NET: MIT; see licenses/Silk.NET.txt.
+ImGui.NET, Dear ImGui and cimgui: MIT; see their files in licenses/.
+NVorbis: see licenses/NVorbis-0.10.5-LICENSE.
+OggVorbisEncoder: MIT; see licenses/OggVorbisEncoder.txt.
+GLFW and SDL2: zlib licenses; see licenses/GLFW.txt and licenses/SDL2.txt.
+OpenBIOS font attribution: see licenses/OpenBIOS-fonts.md.
+Microsoft Visual C++ runtime (vcruntime140.dll): Microsoft component bundled app-locally with the Windows host; not covered by the project's MIT component notices.
+
+The exact managed dependency versions and package-declared licensing metadata are listed in dependencies.json. Original license text files are retained where provided. No new blanket license is assigned here to the complete game/mod collection.

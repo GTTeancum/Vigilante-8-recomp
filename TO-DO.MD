@@ -1,5 +1,5 @@
 # Vigilante 8 PC - Open Work Only
-Last updated: 2026-09-16 EDT
+Last updated: 2026-09-24 EDT
 Status: PENDING REVIEW
 This tracker contains only open or explicitly deferred work. Remove an entry when the user accepts or closes it; completed work, evidence history, and superseded attempts do not belong here.
 
@@ -28,7 +28,7 @@ Test and deployment target: `V8_2_LOOSE` only.
 
 - **PENDING REVIEW**: Fresh-install extraction, automatic game launch, installed relaunch,
       guest selection/audio, and negative-source checks passed. Evidence and limits:
-      `notes/first_run_setup_validation.md`. Native Windows file-picker interaction
+      `notes/release_smoke_20260924.md` (actual release ZIP tested). Native Windows file-picker interaction
       and physical audio output remain unverified.
 - The user launches `Vigilante8PC.exe` normally. No terminal, command-line
       arguments, developer harness setup, or manual extraction is required.

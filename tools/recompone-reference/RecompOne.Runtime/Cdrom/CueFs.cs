@@ -685,7 +685,11 @@ public sealed class CueFs : IDisposable
             path.StartsWith(
                 "MOVIES/V8", StringComparison.OrdinalIgnoreCase) &&
             path.EndsWith(".STR", StringComparison.OrdinalIgnoreCase);
-        return arena || legacyVoice || originalV8EndingAlias;
+        bool soundBank =
+            (path.StartsWith("SHELL/", StringComparison.OrdinalIgnoreCase) ||
+             path.StartsWith("SHARED/", StringComparison.OrdinalIgnoreCase)) &&
+            path.EndsWith(".SND", StringComparison.OrdinalIgnoreCase);
+        return arena || legacyVoice || originalV8EndingAlias || soundBank;
     }
 
     private bool TryGetLoose(int startLba, out LooseEntry entry) =>

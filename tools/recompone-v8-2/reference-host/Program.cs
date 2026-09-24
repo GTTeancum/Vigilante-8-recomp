@@ -1,4 +1,5 @@
 using RecompOne.Runtime.Cdrom;
+using RecompOne.Runtime.Host;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Diagnostics;
@@ -509,19 +510,15 @@ string importedLooseRoot = V82LooseImporter.DefaultRoot;
 if (loosePath == null && explicitSource == null &&
     V82LooseImporter.IsComplete(importedLooseRoot))
     loosePath = importedLooseRoot;
-string? cuePath = loosePath == null
-    ? ResolveCue(explicitSource ?? executableDirectory)
-    : null;
+string? cuePath = null;
 if (loosePath == null)
 {
-    Console.WriteLine(
-        $"[Import] preparing standalone game data from {cuePath}");
-    V82LooseImporter.Import(cuePath!, importedLooseRoot, ReportLooseImport);
+    // A clean installation always asks through setup. Never silently discover
+    // a developer disc in the executable directory or its parents.
+    if (!FirstRunSetup.Run(importedLooseRoot, explicitSource)) return 0;
     loosePath = V82LooseImporter.IsComplete(importedLooseRoot)
         ? importedLooseRoot
-        : throw new InvalidDataException(
-            $"Disc import did not complete: {importedLooseRoot}");
-    cuePath = null;
+        : throw new InvalidDataException("Installation did not complete.");
 }
 if (loosePath != null)
 {
@@ -640,55 +637,6 @@ static string? ResolveLooseSource(string source)
         !File.Exists(Path.Combine(source, "SYSTEM.CNF")))
         return null;
     return Path.GetFullPath(source);
-}
-
-static string ResolveCue(string source)
-{
-    if (File.Exists(source))
-    {
-        if (!Path.GetExtension(source).Equals(".cue", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException($"Expected a CUE file: {source}");
-        return Path.GetFullPath(source);
-    }
-
-    if (!Directory.Exists(source))
-        throw new FileNotFoundException($"Game source was not found: {source}");
-
-    string[] cues = Directory
-        .EnumerateFiles(source, "*.cue", SearchOption.TopDirectoryOnly)
-        .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-        .ToArray();
-    if (cues.Length == 0)
-    {
-        string? nearbyCue = FindNearbySequelCue(source);
-        if (nearbyCue != null)
-            return nearbyCue;
-        throw new FileNotFoundException(
-            $"No Vigilante 8: 2nd Offense CUE file was found in or near: {source}");
-    }
-    return Path.GetFullPath(
-        cues.FirstOrDefault(path => Path.GetFileName(path).Contains(
-            "2nd Offensive", StringComparison.OrdinalIgnoreCase)) ?? cues[0]);
-}
-
-static string? FindNearbySequelCue(string source)
-{
-    DirectoryInfo? cursor = new(Path.GetFullPath(source));
-    for (int depth = 0; depth < 8 && cursor != null; depth++, cursor = cursor.Parent)
-    {
-        string candidateDirectory = Path.Combine(cursor.FullName, "V8_2_BINCUE");
-        if (!Directory.Exists(candidateDirectory))
-            continue;
-
-        string? cue = Directory
-            .EnumerateFiles(candidateDirectory, "*.cue", SearchOption.TopDirectoryOnly)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault(path => Path.GetFileName(path).Contains(
-                "2nd Offensive", StringComparison.OrdinalIgnoreCase));
-        if (cue != null)
-            return Path.GetFullPath(cue);
-    }
-    return null;
 }
 
 static void PreloadBundledNative(string fileName)

@@ -9,9 +9,9 @@ access layers. The goal is to preserve the games' behavior while making them
 comfortable to play, test, and extend on current hardware.
 
 > [!IMPORTANT]
-> This project is in pre-release testing. Vigilante 8: 2nd Offense is the
-> current release-candidate focus; the original Vigilante 8 build remains
-> active development work. No copyrighted game data is included.
+> Vigilante 8: 2nd Offense is the current Windows release; the original
+> Vigilante 8 build remains
+> active development work. Users supply the Second Offense base-game disc image; the release includes runtime mods and their assets.
 
 ## Gameplay Preview
 
@@ -50,7 +50,7 @@ comfortable to play, test, and extend on current hardware.
 
 | Game | State | Current scope |
 | --- | --- | --- |
-| Vigilante 8: 2nd Offense | Windows x64 release candidate | USA `SLUS-00868`, one- and two-player play, first-run disc import, enhanced presentation, and mods |
+| Vigilante 8: 2nd Offense | Windows x64 release | USA `SLUS-00868`, one- through four-player local play, GUI first-run disc import, enhanced presentation, and mods |
 | Vigilante 8 | Playable development/reference build | All retail arenas, direct disc or complete loose-file play, one- and two-player testing, and long-form stability coverage |
 
 The V8:2 candidate has passed fresh-directory first-run installation, repeat
@@ -76,64 +76,15 @@ release regression work is still in progress.
 
 ## V8:2 Quick Start
 
-### Requirements
+1. Extract the entire release ZIP to a writable folder. Keep `mods` beside `Vigilante8PC.exe`.
+2. Keep your USA **Vigilante 8: 2nd Offense** CUE and all referenced BIN files together.
+3. Run **Vigilante8PC.exe**, click **Choose BIN / CUE...**, and select the CUE.
+4. Wait for extraction and music preparation. The game starts automatically when setup completes.
+5. On later launches, run the same executable; it uses `game_data` without asking for the disc again.
 
-- 64-bit Windows.
-- An OpenGL 4.5-capable graphics driver.
-- A legally obtained USA Vigilante 8: 2nd Offense disc image matching
-  `SLUS-00868`, or a complete loose extraction from that disc.
+Requires Windows x64 and an OpenGL 4.5-capable driver. Runtime dependencies are bundled; no terminal or separate extractor is needed. Supported title ID: **SLUS-00868**. The importer checks this title ID and reads the selected disc's files and tracks, without requiring an exact disc/file hash.
 
-### Install from BIN/CUE
-
-1. Extract the release archive to a new folder.
-2. Place the `.cue` file and every `.bin` file it references beside
-   `Vigilante82PC.exe`.
-3. Keep the included `mods` directory beside the executable.
-4. Run `Vigilante82PC.exe`.
-
-On first run, the game automatically finds an adjacent CUE, validates the
-supported disc layout and critical files, extracts all 128 game-data files to
-`game_data`, and converts CD-audio tracks 2-17 to 44.1 kHz stereo OGG files.
-Later launches use the imported files and no longer read the disc image.
-
-There is no graphical disc browser in the current candidate. To import a CUE
-stored elsewhere, pass its path on the command line:
-
-```powershell
-Vigilante82PC.exe "D:\Games\Vigilante 8 2nd Offense\game.cue"
-```
-
-An interrupted import is left in `game_data.partial` and is never accepted as
-a playable installation. Launch the game again to retry the import.
-
-### Install from Loose Files
-
-A complete loose extraction is also supported. Its root must contain
-`SYSTEM.CNF`, `SLUS_008.68`, and every original game folder and file. Place
-`Vigilante82PC.exe` and the included `mods` directory in that root, then run
-the executable. Partial copies of selected stock data folders are not valid
-installations.
-
-### Runtime Dependencies
-
-The release executable is self-contained. It bundles the .NET runtime, SDL2,
-GLFW, cimgui, the Microsoft Visual C++ runtime, and the OGG encoder used by the
-first-run importer. Players do not need to install .NET, Visual C++
-redistributables, Python, or ffmpeg, and no app-local DLL files are required.
-
-The game creates local settings, save, and diagnostic files as needed. These
-are not part of the release archive.
-
-## Disc Compatibility
-
-The importer currently accepts the USA `SLUS-00868` release used for the
-recompilation. It checks the 17-track layout and SHA-256 identities of the
-original executable and critical shell data before writing `game_data`.
-Different regions, revisions, incomplete dumps, and modified critical files
-are rejected early instead of producing a subtly broken installation.
-
-The release archive contains the executable, its README, and distributable
-mods only. It does not contain stock game data.
+[Full user instructions](notes/release/SETUP.md) cover controls, local multiplayer, troubleshooting and saves. The archive includes all five runtime mods, but no disc images or complete extracted base-game installation.
 
 ## Mods
 
@@ -141,24 +92,19 @@ Mods are isolated under `mods/<mod-name>/` and can supply manifests, textures,
 vehicles, arenas, and other replacement content without overwriting imported
 stock data. Keep the directory structure intact when moving an installation.
 
-The bundled original-V8 guest roster is part of the current V8:2 candidate.
-**Super Dreamland 64**, the experimental N64 arena port, remains a work in
-progress rather than a finished release feature. Vehicle glass can disappear
-at some view angles, and terrain/distance lighting bands remain visible. Those
-issues are open and the level should be treated accordingly.
+The release includes **all five runtime mods**: enhanced textures, Classic menus,
+font replacement, the original-V8 guest roster (including its voice and quest
+media), and **Super Dreamland 64**. Keep their folders intact. The enhanced texture
+pack is part of the release configuration.
 
 ## Known Limitations
 
-- Full release-candidate regression signoff is not complete.
-- Super Dreamland 64 still has unresolved vehicle-glass and distant-terrain
-  rendering defects.
-- Four-player local play is deferred until after the initial release; current
-  release scope is one or two players.
-- Default music balance still needs final tuning.
-- The first-run importer has no graphical file picker.
-- Only the exact supported USA V8:2 disc revision is accepted automatically.
+- This is the initial public release, not an exhaustive all-gameplay signoff.
+- Automated setup tests use the application's own selection callback and framebuffer. Native Windows file-picker interaction and physical speaker output remain human checks.
+- The supported first-run source is USA Second Offense, title ID `SLUS-00868`, with its complete CUE/BIN tracks.
+- The optional original Vigilante 8 soundtrack is not on the Second Offense source; Second Offense music is used when it is unavailable.
 
-The canonical, detailed backlog is maintained in [TO-DO.MD](TO-DO.MD).
+The canonical backlog is [TO-DO.MD](TO-DO.MD).
 
 ## Project Structure
 
@@ -212,9 +158,10 @@ the log itself when possible.
 
 ## Legal
 
-This repository does not distribute Vigilante 8 or Vigilante 8: 2nd Offense
-disc images, executables, music, movies, or other copyrighted retail assets.
-You must supply game data from a copy you legally own.
+The release omits disc images and the complete base-game installation. Supply
+the base-game data from your own copy. Included runtime mods and their media
+dependencies are described in the release manifest; ownership of game and mod
+content remains with the respective rights holders.
 
 Vigilante 8 and Vigilante 8: 2nd Offense are properties of their respective
 rights holders. This fan project is not affiliated with or endorsed by

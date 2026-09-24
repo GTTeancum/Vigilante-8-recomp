@@ -1,0 +1,8 @@
+{
+  "Silk.NET.txt": "https://raw.githubusercontent.com/dotnet/Silk.NET/v2.22.0/LICENSE.md",
+  "ImGui.NET.txt": "https://raw.githubusercontent.com/ImGuiNET/ImGui.NET/v1.90.8.1/LICENSE",
+  "Dear-ImGui.txt": "https://raw.githubusercontent.com/ocornut/imgui/v1.90.8/LICENSE.txt",
+  "cimgui.txt": "https://raw.githubusercontent.com/cimgui/cimgui/master/LICENSE",
+  "OggVorbisEncoder.txt": "https://raw.githubusercontent.com/SteveLillis/.NET-Ogg-Vorbis-Encoder/master/LICENSE",
+  "GLFW.txt": "https://raw.githubusercontent.com/glfw/glfw/3.4/LICENSE.md"
+}

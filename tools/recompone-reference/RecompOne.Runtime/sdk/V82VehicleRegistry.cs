@@ -1245,9 +1245,9 @@ public static class V82VehicleRegistry
                 $"expected 14 retail sounds and two reusable voice slots " +
                 $"(global=0x{soundBankGlobal:X8} bank=0x{bank:X8})");
 
-        _selectionVoiceSource ??= new SelectionVoiceBank(File.ReadAllBytes(
-            Path.Combine(Runtime.ResolveLoosePath() ?? Runtime.ExecutableDirectory,
-                "SHELL", "V8VOICES.SND")));
+        _selectionVoiceSource ??= new SelectionVoiceBank(
+            (Runtime.Cd ?? throw new InvalidOperationException("Disc filesystem unavailable"))
+                .Fs.ReadFile("SHELL/V8VOICES.SND"));
         if (_selectionVoiceSource.Count != OriginalV8SelectionVoiceCount)
             throw new InvalidDataException("incomplete original selector voice source bank");
         uint entry = bank + 4u + (uint)sample * 4u;

@@ -1,5 +1,5 @@
 using System.Buffers.Binary;
-using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using OggVorbisEncoder;
 using TextEncoding = System.Text.Encoding;
 
@@ -20,19 +20,6 @@ public static class V82LooseImporter
     const int VorbisLookaheadFrames = 1024;
     const float VorbisQuality = 0.6f;
     const string CompletionMarker = ".recompone-import-complete";
-    static readonly IReadOnlyDictionary<string, string> SupportedFileHashes =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["SLUS_008.68"] =
-                "9ECFD0A7986CEE816EF79284A6635EAADBA435183362F8B796F667B8FB5A3EB6",
-            ["SHELL/SHELL.DLL"] =
-                "FAD8848CADEE00C519AE043A344B74AD9253F6272795B822334AEEC9A360C995",
-            ["SHELL/POSES.TBL"] =
-                "976148F86AEF4880F3C884DE15EB1A5CC11C532CE766001EF2A848D69696FFF2",
-            ["QUEST.BIN"] =
-                "4414144FA777111308C499E62B13BC37575D33B7365ABD598080BEC5EB56E898",
-        };
-
     public static string DefaultRoot =>
         Path.Combine(global::RecompOne.Runtime.Runtime.ExecutableDirectory,
             "game_data");
@@ -45,7 +32,7 @@ public static class V82LooseImporter
     public static void Import(
         string cuePath,
         string outputRoot,
-        Action<LooseImportProgress>? report = null)
+        Action<LooseImportProgress>? report = null, CancellationToken cancellation = default)
     {
         cuePath = Path.GetFullPath(cuePath);
         outputRoot = Path.GetFullPath(outputRoot);
@@ -58,7 +45,27 @@ public static class V82LooseImporter
 
         var manifest = V8LooseManifest.LoadEmbedded("V82LooseManifest.json");
         using var disc = CueBin.Open(cuePath);
-        ValidateDisc(disc, manifest);
+        report?.Invoke(new("validating", 0, 1, "Checking Second Offense title ID"));
+        using (var files = CueFs.Open(cuePath))
+        {
+            string system = TextEncoding.ASCII.GetString(files.ReadFile("SYSTEM.CNF"));
+            if (!Regex.IsMatch(system, @"(?im)^\s*BOOT\s*=\s*cdrom:[\\/]*SLUS_008\.68;1\s*$"))
+                throw new InvalidDataException("Please select Vigilante 8: 2nd Offense (USA), title ID SLUS-00868.");
+            // Locate the selected disc's files, not a particular dump's LBAs or hashes.
+            foreach (var file in manifest.Files)
+            {
+                if (!files.Locate(file.Path, out int lba, out uint size))
+                    throw new InvalidDataException($"The disc is missing required file {file.Path}.");
+                file.Lba = lba; file.Size = size;
+            }
+        }
+        foreach (var track in manifest.Tracks.Where(t => t.Number > 1))
+        {
+            if (!disc.TryGetTrackStartLba(track.Number, out int start) ||
+                !disc.TryReadAudioSector(start, out _, out _, out int end))
+                throw new InvalidDataException($"The CUE is missing audio track {track.Number:00}. Keep all BIN files beside the CUE.");
+            track.StartLba = start; track.EndLba = end;
+        }
         EnsureFreeSpace(outputRoot, manifest);
         Directory.CreateDirectory(partialRoot);
 
@@ -67,9 +74,10 @@ public static class V82LooseImporter
         int current = 0;
         foreach (var file in manifest.Files)
         {
-            report?.Invoke(new(
-                "files", ++current, total, file.Path));
-            ExtractFile(disc, file, partialRoot);
+            cancellation.ThrowIfCancellationRequested();
+            report?.Invoke(new("files", current, total, file.Path));
+            ExtractFile(disc, file, partialRoot, cancellation);
+            current++;
         }
 
         foreach (var track in manifest.Tracks.Where(track => track.Number > 1))
@@ -77,9 +85,10 @@ public static class V82LooseImporter
             if (string.IsNullOrWhiteSpace(track.Source))
                 throw new InvalidDataException(
                     $"Track {track.Number:00} has no loose audio target");
-            report?.Invoke(new(
-                "music", ++current, total, track.Source));
-            EncodeTrack(disc, track, partialRoot);
+            cancellation.ThrowIfCancellationRequested();
+            report?.Invoke(new("music", current, total, track.Source));
+            EncodeTrack(disc, track, partialRoot, cancellation);
+            current++;
         }
 
         File.WriteAllText(
@@ -120,42 +129,6 @@ public static class V82LooseImporter
             $"{partialRoot}", lastError);
     }
 
-    static void ValidateDisc(CueBin disc, V8LooseManifest manifest)
-    {
-        if (disc.FirstTrackNumber != 1 ||
-            disc.LastTrackNumber != manifest.Tracks.Max(track => track.Number))
-            throw new InvalidDataException(
-                "The selected CUE does not contain the expected V8:2 track layout");
-
-        foreach (var track in manifest.Tracks)
-        {
-            if (!disc.TryGetTrackStartLba(track.Number, out int start) ||
-                start != track.StartLba)
-                throw new InvalidDataException(
-                    $"Track {track.Number:00} starts at LBA {start}; " +
-                    $"expected {track.StartLba}");
-        }
-
-        var system = manifest.Files.Single(file =>
-            file.Path.Equals("SYSTEM.CNF", StringComparison.OrdinalIgnoreCase));
-        string text = TextEncoding.ASCII.GetString(ReadLogicalFile(disc, system));
-        if (!text.Contains("SLUS_008.68", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException(
-                "The selected disc is not Vigilante 8: 2nd Offense (USA)");
-
-        foreach (var (path, expected) in SupportedFileHashes)
-        {
-            var file = manifest.Files.Single(candidate =>
-                candidate.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
-            string actual = Convert.ToHexString(
-                SHA256.HashData(ReadLogicalFile(disc, file)));
-            if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException(
-                    "Unsupported or modified Vigilante 8: 2nd Offense disc: " +
-                    $"{path} SHA-256 is {actual}, expected {expected}");
-        }
-    }
-
     static void EnsureFreeSpace(string outputRoot, V8LooseManifest manifest)
     {
         long fileBytes = manifest.Files.Sum(file =>
@@ -177,7 +150,7 @@ public static class V82LooseImporter
                 $"only {FormatBytes(available)} is available on {volume}");
     }
 
-    static void ExtractFile(CueBin disc, V8LooseFile file, string root)
+    static void ExtractFile(CueBin disc, V8LooseFile file, string root, CancellationToken cancellation)
     {
         string target = ResolveTarget(root, file.Path);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
@@ -190,8 +163,10 @@ public static class V82LooseImporter
                 int sectors = checked((int)(
                     (file.Size + CookedSectorSize - 1) / CookedSectorSize));
                 for (int index = 0; index < sectors; index++)
-                    output.Write(disc.ReadSectorData(
-                        file.Lba + index, StreamSectorSize));
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    output.Write(disc.ReadSectorData(file.Lba + index, StreamSectorSize));
+                }
             }
             else
             {
@@ -199,6 +174,7 @@ public static class V82LooseImporter
                 int lba = file.Lba;
                 while (remaining > 0)
                 {
+                    cancellation.ThrowIfCancellationRequested();
                     byte[] sector = disc.ReadSector(lba++);
                     int count = checked((int)Math.Min(
                         remaining, (uint)sector.Length));
@@ -225,7 +201,7 @@ public static class V82LooseImporter
         return output.ToArray();
     }
 
-    static void EncodeTrack(CueBin disc, V8LooseTrack track, string root)
+    static void EncodeTrack(CueBin disc, V8LooseTrack track, string root, CancellationToken cancellation)
     {
         string target = ResolveTarget(root, track.Source);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
@@ -250,6 +226,7 @@ public static class V82LooseImporter
             float[][] samples = [new float[capacity], new float[capacity]];
             for (int lba = track.StartLba; lba < track.EndLba;)
             {
+                cancellation.ThrowIfCancellationRequested();
                 int sectors = Math.Min(
                     AudioSectorsPerChunk, track.EndLba - lba);
                 int frame = 0;
