@@ -1,17 +1,7 @@
-# Vigilante 8 PC Recompilation
+# Vigilante 8/2nd Offense PC Recompilation - Vigilante 8 Classic
 
 An unofficial PC recompilation project for the PlayStation versions of
-**Vigilante 8** and **Vigilante 8: 2nd Offense**.
-
-The project runs recompiled original game code inside a modern Windows host
-while replacing the PlayStation-facing renderer, input, audio, media, and file
-access layers. The goal is to preserve the games' behavior while making them
-comfortable to play, test, and extend on current hardware.
-
-> [!IMPORTANT]
-> Vigilante 8: 2nd Offense is the current Windows release; the original
-> Vigilante 8 build remains
-> active development work. Users supply the Second Offense base-game disc image; the release includes runtime mods and their assets.
+**Vigilante 8** and **Vigilante 8: 2nd Offense**. It's a two-in-one game!
 
 ## Gameplay Preview
 
