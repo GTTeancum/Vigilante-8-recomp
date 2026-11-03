@@ -5218,10 +5218,10 @@ public static partial class V82Compat
         {
             if ((uint)px >= 2048 || (uint)pz >= 2048) return 0;
             uint pointer = m.ReadU32(0x800B9470u + (uint)((px >> 6)*32 + (pz >> 6))*4);
-            // A chunk is 0x3000 bytes (64x64 heights, then 64x64 texture ids);
-            // the loader's PcMalloc block ends there, and the bytes after it
-            // belong to another allocation whose writes must not invalidate it.
-            return IsShapeAddress(pointer, 0x4042) ? TerrainRegionVersion(memory, pointer, 0x3000) : 0;
+            // Compare the full 0x4042 bytes. The V8:2 loader allocates 0x3000,
+            // but the 4x4 tile reads of edge cells run past it, and comparing
+            // only 0x3000 failed RECOMPONE_VERIFY_SHARED_TERRAIN in Casino City.
+            return IsShapeAddress(pointer, 0x4042) ? TerrainRegionVersion(memory, pointer, 0x4042) : 0;
         }
         tableVersion = TerrainRegionVersion(memory, TerrainTextureTable, 256 * 0x20);
         // Distance colors read the live table only until the authored averages
