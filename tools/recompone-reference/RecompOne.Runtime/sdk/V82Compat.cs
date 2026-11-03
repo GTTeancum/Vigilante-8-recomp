@@ -5074,14 +5074,41 @@ public static partial class V82Compat
         IMemory m)
     {
         const uint terrainPageTable = 0x800B93F0u;
+        // The cache compares raw RAM, so every read here must use the same
+        // unrelocated memory.
+        m = Dispatcher.UnwrapMemory(m);
         uint x = c.A0;
         uint z = c.A1;
         if (x >= 2048u || z >= 2048u)
             return default;
-        TerrainSourceKey sourceKey = _sharedTerrainFrame ? TerrainSourceVersion(c, m, x, z) : default;
-        if (_sharedTerrainFrame && _sharedTerrain.TryGetValue((x, z), out var cached) &&
+        uint block = terrainPageTable +
+            ((((x >> 6) << 5) + (z >> 6)) << 2);
+        uint page = m.ReadU32(block + 0x80u);
+        if (!IsShapeAddress(page, 0x4042u))
+            return default;
+
+        uint local = ((x & 0x3Fu) << 6) + (z & 0x3Fu);
+        uint textureGrid = page + 0x2000u + local;
+        ushort clut = m.ReadU16(c.GP + 0xDA8u);
+        // Distance colors exist only with HighResolution3D and Maximum LOD. A
+        // setting changed mid-match must not reuse a cached patch, and without
+        // them nothing is stored, so the key is not worth computing.
+        bool useCache = _sharedTerrainFrame &&
+            ConfigManager.View.HighResolution3D && IsMaximumLevelOfDetail();
+        long tableVersion = 0;
+        TerrainSourceKey sourceKey = useCache
+            ? TerrainSourceVersion(c, m, x, z, out tableVersion)
+            : default;
+        if (useCache && _sharedTerrain.TryGetValue((x, z), out var cached) &&
             cached.Key == sourceKey && cached.Textures.DistanceColors.Patch is { } sourcePatch)
         {
+            // Arena overlays may animate the texture descriptors, which only
+            // the tiles read. Re-read the tiles when the table changed and keep
+            // reusing the distance colors (authored averages, heights, ramp).
+            if (cached.TableVersion != tableVersion)
+                cached = cached with { TableVersion = tableVersion,
+                    Textures = ReadTerrainTextureGrid(m, textureGrid, clut, 4, cached.Textures.DistanceColors) };
+            _sharedTerrain[(x, z)] = cached with { LastUsed = _terrainSourceFrame };
             var shared = cached.Textures;
             var samples = new DreamcastTerrainGeometry.Sample[25];
             Span<float> rotation = stackalloc float[9];
@@ -5131,21 +5158,12 @@ public static partial class V82Compat
             return reused;
         }
 
-        uint block = terrainPageTable +
-            ((((x >> 6) << 5) + (z >> 6)) << 2);
-        uint page = m.ReadU32(block + 0x80u);
-        if (!IsShapeAddress(page, 0x4042u))
-            return default;
-
-        uint local = ((x & 0x3Fu) << 6) + (z & 0x3Fu);
-        uint textureGrid = page + 0x2000u + local;
-        ushort clut = m.ReadU16(c.GP + 0xDA8u);
         GpuHle.TerrainQuadDistanceColors distanceColors =
             ReadDreamcastTerrainDistanceColors(c, m, x, z);
         var result = ReadTerrainTextureGrid(
             m, textureGrid, clut, 4, distanceColors);
-        if (_sharedTerrainFrame && result.DistanceColors.Patch is { } retained)
-            _sharedTerrain[(x, z)] = new(sourceKey, result with {
+        if (useCache && result.DistanceColors.Patch is { } retained)
+            _sharedTerrain[(x, z)] = new(sourceKey, tableVersion, _terrainSourceFrame, result with {
                 DistanceColors = result.DistanceColors with { Patch = retained with { CulledCells = null } } });
         return result;
     }
@@ -5155,7 +5173,8 @@ public static partial class V82Compat
     static long _sharedTerrainVerified;
     readonly record struct TerrainSourceKey(long A, long B, long C, long D, long Materials,
         uint Low, uint High, ushort Clut, byte Mode, int AverageVersion);
-    readonly record struct CachedTerrainInput(TerrainSourceKey Key, GpuHle.TerrainCellTextures Textures);
+    readonly record struct CachedTerrainInput(TerrainSourceKey Key, long TableVersion,
+        long LastUsed, GpuHle.TerrainCellTextures Textures);
     static readonly Dictionary<(uint X, uint Z), CachedTerrainInput> _sharedTerrain = [];
     sealed class TerrainRegionSnapshot
     {
@@ -5186,28 +5205,48 @@ public static partial class V82Compat
         return snapshot.Version;
     }
 
-    static TerrainSourceKey TerrainSourceVersion(CpuContext c, IMemory m, uint x, uint z)
+    static TerrainSourceKey TerrainSourceVersion(CpuContext c, IMemory m, uint x, uint z, out long tableVersion)
     {
-        if (m is not PSMemory memory || RamLogger.TrackReads)
-            return new(++_terrainSourceVersion, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        if (Dispatcher.UnwrapMemory(m) is not PSMemory memory || RamLogger.TrackReads)
+        {
+            tableVersion = ++_terrainSourceVersion;
+            return new(tableVersion, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
         if (!ReferenceEquals(memory, _terrainSourceMemory))
         { _sharedTerrain.Clear(); _terrainRegions.Clear(); _terrainSourceMemory = memory; }
         long Page(int px, int pz)
         {
             if ((uint)px >= 2048 || (uint)pz >= 2048) return 0;
             uint pointer = m.ReadU32(0x800B9470u + (uint)((px >> 6)*32 + (pz >> 6))*4);
-            return IsShapeAddress(pointer, 0x4042) ? TerrainRegionVersion(memory, pointer, 0x4042) : 0;
+            // A chunk is 0x3000 bytes (64x64 heights, then 64x64 texture ids);
+            // the loader's PcMalloc block ends there, and the bytes after it
+            // belong to another allocation whose writes must not invalidate it.
+            return IsShapeAddress(pointer, 0x4042) ? TerrainRegionVersion(memory, pointer, 0x3000) : 0;
         }
+        tableVersion = TerrainRegionVersion(memory, TerrainTextureTable, 256 * 0x20);
+        // Distance colors read the live table only until the authored averages
+        // are captured; after that the table matters to the tiles alone.
         return new(Page((int)x-1,(int)z-1), Page((int)x+4,(int)z-1),
             Page((int)x-1,(int)z+4), Page((int)x+4,(int)z+4),
-            TerrainRegionVersion(memory,TerrainTextureTable,256*0x20),
+            _authoredTerrainMaterialAveragesValid ? 0 : tableVersion,
             m.ReadU32(c.GP+0xE04),m.ReadU32(c.GP+0xDAC),m.ReadU16(c.GP+0xDA8),
             m.ReadU8(c.GP+0x31),_authoredTerrainAverageVersion);
     }
     public static void BeginSharedTerrainFrame(bool enableDirect = true)
     {
-        if (_sharedTerrain.Count > 2048 || _terrainRegions.Count > 128)
+        if (_terrainRegions.Count > 128)
         { _sharedTerrain.Clear(); _terrainRegions.Clear(); }
+        else if (_sharedTerrain.Count > 2048)
+        {
+            // Drop only the cells not drawn in the last few frames. Clearing
+            // everything cost a full re-read frame every ~1500 new cells.
+            long recent = _terrainSourceFrame - 4;
+            var stale = new List<(uint X, uint Z)>();
+            foreach (var (cell, entry) in _sharedTerrain)
+                if (entry.LastUsed < recent) stale.Add(cell);
+            foreach (var cell in stale) _sharedTerrain.Remove(cell);
+            if (_sharedTerrain.Count > 2048) _sharedTerrain.Clear();
+        }
         _terrainSourceFrame++;
         _sharedTerrainFrame = !DirectTerrainDisabled && (enableDirect || DirectTerrainRequested);
     }
@@ -5216,6 +5255,37 @@ public static partial class V82Compat
         if (VerifySharedTerrain && GpuHle.DebugGameplayTick % 120 == 0)
             Console.Error.WriteLine($"[SharedTerrainVerified] patches={_sharedTerrainVerified}");
         _sharedTerrainFrame = false;
+    }
+
+    // Only the 3/4-player harness opened a shared-terrain frame, so single
+    // player re-read every terrain cell's distance colors on every frame (about
+    // a third of the main thread on the Steam Deck). The world render
+    // func_80031678 is bracketed the same way; it stays off without
+    // RECOMPONE_DIRECT_TERRAIN=1, and RECOMPONE_V82_SINGLE_PLAYER_TERRAIN_CACHE=0
+    // turns it off for A/B runs.
+    static readonly bool SinglePlayerTerrainCache =
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_SINGLE_PLAYER_TERRAIN_CACHE") != "0";
+    static bool _worldRenderTerrainFrame;
+
+    public static void BeginWorldRenderTerrainCache(CpuContext c, IMemory m)
+    {
+        // A missed post hook must not leave the frame open: a stale frame
+        // number would skip the per-frame source comparison.
+        if (_worldRenderTerrainFrame) EndWorldRenderTerrainCache(c, m);
+        // The 3/4-player harness already brackets the whole frame. 2-player
+        // split screen (gp+0x2C set) has not been verified with the cache, so
+        // it keeps the previous path.
+        if (!SinglePlayerTerrainCache || _sharedTerrainFrame) return;
+        if (Dispatcher.UnwrapMemory(m).ReadU32(c.GP + 0x2Cu) != 0) return;
+        BeginSharedTerrainFrame(enableDirect: false);
+        _worldRenderTerrainFrame = _sharedTerrainFrame;
+    }
+
+    public static void EndWorldRenderTerrainCache(CpuContext c, IMemory m)
+    {
+        if (!_worldRenderTerrainFrame) return;
+        _worldRenderTerrainFrame = false;
+        EndSharedTerrainFrame();
     }
 
     public static void BeginTerrainDetailPacketWrites(

@@ -586,7 +586,12 @@ internal static class GlShaders
                 min(tableIndex + 1.0, 128.0));
             return mix(opacity0, opacity1, fraction);
         }
-        vec3 distanceFog(vec3 rgb) {
+        // A fragment that adds its colour to the scene (an additive effect)
+        // must fade toward nothing with distance. Mixing it toward the fog
+        // colour would add fog-coloured cards and discs instead. Whether a
+        // fragment adds light is decided per texel by the caller, because
+        // STP=0 texels inside an additive packet replace the pixel.
+        vec3 distanceFog(vec3 rgb, bool additiveLight) {
             if (uEnhancedFog == 0 ||
                 vUiTexture != 0 ||
                 vShadow != 0 ||
@@ -594,8 +599,11 @@ internal static class GlShaders
                 return rgb;
             }
             if (uDreamcastFogActive != 0 && uFogColorValid != 0) {
+                float dreamcastAmount = dreamcastFogAmount(vDepth);
+                if (additiveLight)
+                    return clamp(rgb, 0.0, 1.0) * (1.0 - dreamcastAmount);
                 return clamp(
-                    mix(rgb, uFogColor, dreamcastFogAmount(vDepth)),
+                    mix(rgb, uFogColor, dreamcastAmount),
                     0.0, 1.0);
             }
             if (vMaterial == MaterialTerrainRoute)
@@ -631,6 +639,8 @@ internal static class GlShaders
                 // or the A/B control disabled the harvest. Reproduce the
                 // previous synthesized haze exactly.
                 float amount = smoothstep(2600.0, 8500.0, fogDepth) * 0.76;
+                if (additiveLight)
+                    return clamp(rgb, 0.0, 1.0) * (1.0 - amount);
                 float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
                 float atmosphericLum = clamp(mix(lum, 0.58, 0.70), 0.48, 0.68);
                 float warmth = clamp((rgb.r - rgb.b) * 0.25 + 0.10, 0.0, 0.22);
@@ -653,7 +663,12 @@ internal static class GlShaders
             float amount =
                 pow(smoothstep(2200.0, 20500.0, fogDepth), 0.62) *
                 maximumAmount;
+            if (additiveLight)
+                return clamp(rgb, 0.0, 1.0) * (1.0 - amount);
             return clamp(mix(rgb, uFogColor, amount), 0.0, 1.0);
+        }
+        vec3 distanceFog(vec3 rgb) {
+            return distanceFog(rgb, false);
         }
         vec3 stockPaintCorrection8(ivec3 c8) {
             return stockPaintCorrection(vec3(c8) / 255.0);
@@ -949,7 +964,28 @@ internal static class GlShaders
             ivec3 c8 = vN64RouteColor != 0
                 ? (t8 * modulation + 127) / 255
                 : (t8 * modulation) >> 7;
-            if (enhancedEffectContour) {
+            bool worldAdditiveEffect = enhancedEffectContour &&
+                vMaterial == MaterialAdditive && vVehicle == 0;
+            // STP=0 texels of a world additive effect are opaque on the PS1;
+            // they replace the pixel (see the blend choice below).
+            bool opaqueEffectTexel = worldAdditiveEffect && contourStp < 0.5;
+            if (worldAdditiveEffect) {
+                // The coverage gate below measures each triangle's own UV
+                // box, so a sprite split into a fan (the mortar shell) lost
+                // about 90% of its light and its white core. A world additive
+                // card keeps its light instead. Every kept fragment writes
+                // depth and stencil, which the deferred roads, water and
+                // weather passes then skip, so the faint rim (under 24/255,
+                // a few percent of the light) is dropped to keep that
+                // footprint near the old one, and faded in rather than cut.
+                float addedLight = float(max(c8.r, max(c8.g, c8.b))) *
+                    contourCoverage;
+                if (!opaqueEffectTexel) {
+                    if (addedLight < 24.0) discard;
+                    contourCoverage *= smoothstep(16.0, 56.0, addedLight);
+                }
+            } else if (enhancedEffectContour) {
+                // Vehicle-scope additive parts keep the original gate.
                 bool exactBlendEffect = exactBlendMaterial;
                 float effectEnergy = max(
                     float(c8.r),
@@ -987,7 +1023,11 @@ internal static class GlShaders
                 contourCoverage *= effectCoverage * effectCoverage;
                 if (contourCoverage <= 0.001) discard;
             }
-            vec3 corrected = distanceFog(stockPaintCorrection8(c8));
+            bool addsLight = vMaterial == MaterialAdditive &&
+                (enhancedEffectContour
+                    ? !opaqueEffectTexel
+                    : nearestTexel.a >= 0.5);
+            vec3 corrected = distanceFog(stockPaintCorrection8(c8), addsLight);
             float materialAlpha = vMaterial == MaterialWaterSurface
                 ? 0.5019607843
                 : max(texel.a, uSetMask);
@@ -1015,6 +1055,10 @@ internal static class GlShaders
                         vec3(contourCoverage),
                         1.0 - contourCoverage);
                 }
+            } else if (opaqueEffectTexel) {
+                BlendColor = vec4(
+                    vec3(contourCoverage),
+                    1.0 - contourCoverage);
             } else if (enhancedEffectContour) {
                 BlendColor = vec4(
                     primitiveBlend().rgb * contourCoverage,
