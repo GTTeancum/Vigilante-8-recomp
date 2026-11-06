@@ -1,0 +1,19 @@
+name: Windows build
+
+# Compiles the RecompOne runtime and recompiler on Windows. The game host
+# itself needs sources generated from a retail disc, so it is not built here.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build RecompOne
+        run: dotnet build tools/recompone-reference/RecompOne.sln -c Release
