@@ -24,6 +24,20 @@ try
         Check(V8SoundtrackImporter.IsFirstGameTitle(id), $"title spelling accepted: {id}");
     Check(!V8SoundtrackImporter.IsFirstGameTitle("SLUS_008.68"), "Second Offense title rejected");
 
+    // Song-list titles: the files keep the disc's spellings, the list shows
+    // the characters' names; Second Offense tracks keep the game's own table.
+    var titles = new Dictionary<string, string>
+    {
+        ["BEEZEWAX"] = "V8: Beezwax", ["BOOGIE"] = "V8: Boogie", ["CHASSEY"] = "V8: Chassey Blue",
+        ["CONVOY"] = "V8: Convoy", ["DAVE"] = "V8: Dave", ["HOUSTON3"] = "V8: Houston 3",
+        ["JOHNT"] = "V8: John Torque", ["LOKI"] = "V8: Loki", ["MOLO"] = "V8: Molo",
+        ["SHELIA"] = "V8: Sheila", ["SID"] = "V8: Sid Burn", ["SLICK"] = "V8: Slick Clyde",
+    };
+    foreach (var (stem, title) in titles)
+        Check(SoundtrackTitles.For($"music/{stem}.ogg") == title, $"title for {stem}");
+    Check(SoundtrackTitles.For(@"music\SHELIA.ogg") == "V8: Sheila", "Windows-style path accepted");
+    Check(SoundtrackTitles.For("music/track02.ogg") == null, "Second Offense tracks keep the game's titles");
+
     // Not installed yet: the album is staged, game_data is not created (the
     // Second Offense import refuses an existing half-filled one).
     string fresh = Path.Combine(scratch, "fresh", "game_data");
