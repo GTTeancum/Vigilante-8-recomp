@@ -87,10 +87,11 @@ public static class V82LooseImporter
                     $"Track {track.Number:00} has no loose audio target");
             cancellation.ThrowIfCancellationRequested();
             report?.Invoke(new("music", current, total, track.Source));
-            EncodeTrack(disc, track, partialRoot, cancellation);
+            EncodeTrack(disc, track, partialRoot, $"V8:2 Track {track.Number:00}", cancellation);
             current++;
         }
 
+        V8SoundtrackImporter.AdoptStaged(outputRoot, partialRoot);
         File.WriteAllText(
             Path.Combine(partialRoot, CompletionMarker),
             $"Vigilante 8: 2nd Offense\nsource={Path.GetFileName(cuePath)}\n" +
@@ -253,7 +254,8 @@ public static class V82LooseImporter
         return output.ToArray();
     }
 
-    static void EncodeTrack(CueBin disc, V8LooseTrack track, string root, CancellationToken cancellation)
+    internal static void EncodeTrack(
+        CueBin disc, V8LooseTrack track, string root, string title, CancellationToken cancellation)
     {
         string target = ResolveTarget(root, track.Source);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
@@ -266,7 +268,7 @@ public static class V82LooseImporter
                 AudioChannels, AudioSampleRate, VorbisQuality);
             var ogg = new OggStream(unchecked(0x56383200 + track.Number));
             var comments = new Comments();
-            comments.AddTag("TITLE", $"V8:2 Track {track.Number:00}");
+            comments.AddTag("TITLE", title);
             comments.AddTag("ENCODER", "Vigilante82PC loose-disc importer");
             ogg.PacketIn(HeaderPacketBuilder.BuildInfoPacket(info));
             ogg.PacketIn(HeaderPacketBuilder.BuildCommentsPacket(comments));
@@ -344,7 +346,7 @@ public static class V82LooseImporter
                extension.Equals(".XA", StringComparison.OrdinalIgnoreCase);
     }
 
-    static string ResolveTarget(string root, string relative)
+    internal static string ResolveTarget(string root, string relative)
     {
         root = Path.GetFullPath(root).TrimEnd(
             Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

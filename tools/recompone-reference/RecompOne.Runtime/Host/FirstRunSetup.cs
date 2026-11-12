@@ -33,7 +33,7 @@ public static class FirstRunSetup
         Task<string?>? choosing = null;
         var gate = new object();
         var progress = new LooseImportProgress("welcome", 0, 1, "");
-        string error = "", selected = initialSource ?? "";
+        string error = "", notice = "", selected = initialSource ?? "";
         bool success = false;
         int frames = 0, completionFrames = 0;
         string? fixture = Environment.GetEnvironmentVariable("RECOMPONE_SETUP_TEST_SOURCE");
@@ -42,18 +42,38 @@ public static class FirstRunSetup
 
         void Start(string source)
         {
-            selected = source; error = "";
-            lock (gate) progress = new("validating", 0, 1, "Checking disc title ID");
+            selected = source;
+            lock (gate) { error = ""; notice = ""; progress = new("validating", 0, 1, "Checking disc title ID"); }
             import = Task.Run(() =>
             {
                 try
                 {
                     string cue = ResolveCue(source);
-                    V82LooseImporter.Import(cue, destination, p =>
+                    void Report(LooseImportProgress p)
                     {
                         lock (gate) progress = p;
                         Console.Error.WriteLine($"[Setup] {p.Phase} {p.Current}/{p.Total} {p.Item}");
-                    }, cancel.Token);
+                    }
+                    // The first game's disc only supplies its soundtrack. With
+                    // Second Offense already installed the game then starts;
+                    // otherwise setup waits for the Second Offense disc, whose
+                    // import adopts the staged album.
+                    if (V8SoundtrackImporter.IsFirstGameDisc(cue))
+                    {
+                        if (!V8SoundtrackImporter.Import(cue, destination, Report, cancel.Token))
+                        {
+                            lock (gate)
+                            {
+                                notice = "Vigilante 8 soundtrack added. Now choose your Vigilante 8: 2nd Offense CUE to install the game.";
+                                progress = new("soundtrack-staged", 1, 1, "");
+                            }
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        V82LooseImporter.Import(cue, destination, Report, cancel.Token);
+                    }
                     lock (gate) { success = true; progress = new("complete", 1, 1, "Starting your game..."); }
                 }
                 catch (OperationCanceledException) { }
@@ -93,8 +113,8 @@ public static class FirstRunSetup
                 }
                 choosing = null;
             }
-            LooseImportProgress p; string message; bool done;
-            lock (gate) { p = progress; message = error; done = success; }
+            LooseImportProgress p; string message, info; bool done;
+            lock (gate) { p = progress; message = error; info = notice; done = success; }
             bool busy = import != null && !import.IsCompleted && p.Phase != "error";
             ImGui.SetNextWindowPos(Vector2.Zero);
             ImGui.SetNextWindowSize(new Vector2(window.Size.X, window.Size.Y));
@@ -104,6 +124,9 @@ public static class FirstRunSetup
             ImGui.Separator(); ImGui.Spacing();
             ImGui.TextWrapped("Choose your Vigilante 8: 2nd Offense (USA) CUE or BIN file to install the game.");
             ImGui.TextWrapped("Keep the CUE and all its BIN files together. Required title ID: SLUS-00868.");
+            ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
+            ImGui.TextWrapped("Optional: choose the original Vigilante 8 (USA) CUE (SLUS-00510) to add its soundtrack.");
+            ImGui.PopStyleColor();
             ImGui.Spacing();
             if (selected.Length != 0) ImGui.TextWrapped("Selected: " + Path.GetFileName(selected));
             if (!busy && !done)
@@ -115,7 +138,7 @@ public static class FirstRunSetup
                     // This thread keeps pumping messages while the dialog is
                     // open, so the setup window can own it and stay modal.
                     choosing = NativeFileDialog.OpenAsync(
-                        "Select Vigilante 8: 2nd Offense",
+                        "Select Vigilante 8: 2nd Offense (or Vigilante 8 for its soundtrack)",
                         "PlayStation disc (BIN/CUE)\0*.cue;*.bin\0\0",
                         owner: NativeFileDialog.ActiveWindow());
                 }
@@ -124,10 +147,22 @@ public static class FirstRunSetup
                     ImGui.Spacing(); ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0.5f, 0.4f, 1));
                     ImGui.TextWrapped(message); ImGui.PopStyleColor();
                 }
+                else if (info.Length != 0)
+                {
+                    ImGui.Spacing(); ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.55f, 0.9f, 0.45f, 1));
+                    ImGui.TextWrapped(info); ImGui.PopStyleColor();
+                }
             }
             if (busy || done)
             {
-                ImGui.Text(p.Phase == "complete" ? "Installation complete" : p.Phase == "music" ? "Preparing music..." : p.Phase == "validating" ? "Checking disc..." : "Extracting game files...");
+                ImGui.Text(p.Phase switch
+                {
+                    "complete" => "Installation complete",
+                    "music" => "Preparing music...",
+                    "soundtrack" => "Preparing Vigilante 8 music...",
+                    "validating" => "Checking disc...",
+                    _ => "Extracting game files...",
+                });
                 ImGui.ProgressBar((float)p.Current / Math.Max(1, p.Total), new Vector2(-1, 30));
                 ImGui.TextWrapped(p.Item);
             }
@@ -135,7 +170,8 @@ public static class FirstRunSetup
             if (!done && choosing == null &&
                 ImGui.Button(busy ? "Cancel installation" : "Exit", new Vector2(220, 36))) window.Close();
             ImGui.End(); ui.Render();
-            string phase = p.Phase is "files" or "music" ? p.Phase + "-" + (p.Current * 4 / Math.Max(1, p.Total)) : p.Phase;
+            string phase = p.Phase is "files" or "music" or "soundtrack"
+                ? p.Phase + "-" + (p.Current * 4 / Math.Max(1, p.Total)) : p.Phase;
             if (captures != null && frames > 1 && captured.Add(phase)) Capture(gl, window, captures, phase);
             // A process-local fixture calls the same selection/import action as
             // the button. It never sends input to Windows or another process.
