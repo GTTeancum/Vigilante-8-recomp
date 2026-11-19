@@ -28,7 +28,7 @@ For local multiplayer, join with gamepad **A** or its equivalent. Player one con
 
 All five runtime mods are supplied: enhanced textures, Classic menus, the font replacement, the original Vigilante 8 crew, and Super Dreamland 64. Keep the enhanced texture pack active. Guest voices and quest-ending media are included with the roster mod.
 
-The saved soundtrack preference defaults to **Vigilante 8**. This release does not bundle its soundtrack; a Second Offense-only installation plays Second Offense music as a fallback. You can explicitly choose **Second Offense** in the soundtrack option.
+The saved soundtrack preference defaults to **Vigilante 8**. This release does not bundle its soundtrack, but you can add it from your own **Vigilante 8 (USA)** disc (SLUS-00510): drag its CUE onto `Vigilante8PC.exe`, or choose it with **Choose BIN / CUE...** during setup. Only its 12 music tracks are imported, beside the Second Offense music; nothing else is taken from that disc. When chosen before Second Offense is installed, setup then asks for the Second Offense CUE as usual. Until the soundtrack is added, a Second Offense-only installation plays Second Offense music as a fallback. The soundtrack option also offers **Second Offense** and **Both**.
 
 ## If setup does not finish
 

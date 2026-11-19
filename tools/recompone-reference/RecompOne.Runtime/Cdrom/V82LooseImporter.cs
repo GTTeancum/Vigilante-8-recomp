@@ -87,10 +87,11 @@ public static class V82LooseImporter
                     $"Track {track.Number:00} has no loose audio target");
             cancellation.ThrowIfCancellationRequested();
             report?.Invoke(new("music", current, total, track.Source));
-            EncodeTrack(disc, track, partialRoot, cancellation);
+            EncodeTrack(disc, track, partialRoot, $"V8:2 Track {track.Number:00}", cancellation);
             current++;
         }
 
+        V8SoundtrackImporter.AdoptStaged(outputRoot, partialRoot);
         File.WriteAllText(
             Path.Combine(partialRoot, CompletionMarker),
             $"Vigilante 8: 2nd Offense\nsource={Path.GetFileName(cuePath)}\n" +
@@ -102,9 +103,13 @@ public static class V82LooseImporter
 
     static void CommitImport(string partialRoot, string outputRoot)
     {
-        const int attempts = 30;
-        Exception? lastError = null;
-        for (int attempt = 1; attempt <= attempts; attempt++)
+        // Renaming the folder is atomic, but Windows refuses it while any
+        // program holds a folder inside it open: an Explorer window showing
+        // game_data.partial\music is enough, and the import then failed after
+        // 30 seconds of "access denied". Retry briefly, then move the files
+        // instead, which an open Explorer window does not block.
+        const int renameAttempts = 5;
+        for (int attempt = 1; attempt <= renameAttempts; attempt++)
         {
             try
             {
@@ -118,15 +123,63 @@ public static class V82LooseImporter
                     throw new IOException(
                         $"Import destination appeared during finalization: " +
                         outputRoot, exception);
-                lastError = exception;
-                if (attempt < attempts)
+                Console.Error.WriteLine(
+                    $"[Import] rename attempt {attempt} failed: {exception.Message}");
+                if (attempt < renameAttempts)
                     Thread.Sleep(1000);
             }
         }
 
-        throw new IOException(
-            $"Could not finalize disc import after {attempts} seconds: " +
-            $"{partialRoot}", lastError);
+        Console.Error.WriteLine(
+            $"[Import] {partialRoot} is held open by another program; " +
+            "moving its files individually");
+        MoveContents(partialRoot, outputRoot);
+    }
+
+    // The completion marker moves last, so a game_data interrupted half way
+    // is never mistaken for a finished installation.
+    static void MoveContents(string partialRoot, string outputRoot)
+    {
+        string marker = Path.Combine(partialRoot, CompletionMarker);
+        var files = Directory.EnumerateFiles(partialRoot, "*", SearchOption.AllDirectories)
+            .Where(file => !file.Equals(marker, StringComparison.OrdinalIgnoreCase))
+            .Append(marker)
+            .ToList();
+        foreach (string file in files)
+        {
+            string target = Path.Combine(outputRoot, Path.GetRelativePath(partialRoot, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            MoveFileWithRetry(file, target);
+        }
+        // Leftover empty folders cannot be removed while a window shows them;
+        // they are harmless and the next import reuses or replaces them.
+        try { Directory.Delete(partialRoot, true); }
+        catch (Exception exception)
+            when (exception is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine(
+                $"[Import] left empty folder {partialRoot}: {exception.Message}");
+        }
+    }
+
+    static void MoveFileWithRetry(string source, string target)
+    {
+        const int attempts = 30;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(source, target, true);
+                return;
+            }
+            catch (Exception exception)
+                when ((exception is IOException or UnauthorizedAccessException) &&
+                      attempt < attempts)
+            {
+                // A virus scanner can hold a new file for a moment.
+                Thread.Sleep(1000);
+            }
+        }
     }
 
     static void EnsureFreeSpace(string outputRoot, V8LooseManifest manifest)
@@ -201,7 +254,8 @@ public static class V82LooseImporter
         return output.ToArray();
     }
 
-    static void EncodeTrack(CueBin disc, V8LooseTrack track, string root, CancellationToken cancellation)
+    internal static void EncodeTrack(
+        CueBin disc, V8LooseTrack track, string root, string title, CancellationToken cancellation)
     {
         string target = ResolveTarget(root, track.Source);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
@@ -214,7 +268,7 @@ public static class V82LooseImporter
                 AudioChannels, AudioSampleRate, VorbisQuality);
             var ogg = new OggStream(unchecked(0x56383200 + track.Number));
             var comments = new Comments();
-            comments.AddTag("TITLE", $"V8:2 Track {track.Number:00}");
+            comments.AddTag("TITLE", title);
             comments.AddTag("ENCODER", "Vigilante82PC loose-disc importer");
             ogg.PacketIn(HeaderPacketBuilder.BuildInfoPacket(info));
             ogg.PacketIn(HeaderPacketBuilder.BuildCommentsPacket(comments));
@@ -292,7 +346,7 @@ public static class V82LooseImporter
                extension.Equals(".XA", StringComparison.OrdinalIgnoreCase);
     }
 
-    static string ResolveTarget(string root, string relative)
+    internal static string ResolveTarget(string root, string relative)
     {
         root = Path.GetFullPath(root).TrimEnd(
             Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

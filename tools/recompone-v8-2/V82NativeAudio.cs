@@ -1,5 +1,6 @@
 using System.Text;
 using RecompOne.Runtime;
+using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Memory;
@@ -72,8 +73,9 @@ public static partial class Vigilante82PC
                 c.A1 = m.ReadU32(0x800639B0u + (uint)(number - 2) * 4u);
                 return true;
             }
-            string title = stem.Equals("track17", StringComparison.OrdinalIgnoreCase)
-                ? "Second Offense 16" : "V8: " + stem;
+            string title = SoundtrackTitles.For(source) ??
+                (stem.Equals("track17", StringComparison.OrdinalIgnoreCase)
+                    ? "Second Offense 16" : "V8: " + stem);
             byte[] bytes = Encoding.ASCII.GetBytes(title);
             uint address = c.SP + 0x28u; // The retail Track-number text buffer.
             int length = Math.Min(bytes.Length, 31);

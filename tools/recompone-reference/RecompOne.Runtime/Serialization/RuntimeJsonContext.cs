@@ -14,6 +14,7 @@ namespace RecompOne.Runtime.Serialization;
 [JsonSerializable(typeof(GameConfig))]
 [JsonSerializable(typeof(V8LooseManifest))]
 [JsonSerializable(typeof(ModInfo))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
 internal partial class RuntimeJsonContext : JsonSerializerContext
 {
 }
