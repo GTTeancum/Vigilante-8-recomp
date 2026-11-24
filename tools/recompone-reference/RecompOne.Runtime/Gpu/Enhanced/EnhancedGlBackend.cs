@@ -998,7 +998,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     long _traceClipBreaks;
     long _traceSmoothingBreaks;
     long _traceCapacityBreaks;
-    readonly Dictionary<string, long> _traceStateTransitions = [];
+    readonly BatchTransitionTrace _traceStateTransitions = new();
     long _traceFrameIntervalTicks;
     long _traceFrameIntervalMaxTicks;
     long _traceLastPresentStarted;
@@ -1951,24 +1951,20 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 int twOrX = (_env.TwOffX & _env.TwMaskX) * 8;
                 int twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
                 _traceBeginFlushes++;
-                string transition =
-                    $"{(_kTransparent ? 'T' : 'O')}:{_kMaterial}:" +
-                    $"{(_kDepthTest ? 1 : 0)}{(_kDepthWrite ? 1 : 0)}" +
-                    $"->{(transparent ? 'T' : 'O')}:{material}:" +
-                    $"{(depthTest ? 1 : 0)}{(depthWrite ? 1 : 0)}";
-                _traceStateTransitions[transition] =
-                    _traceStateTransitions.GetValueOrDefault(transition) + 1;
+                _traceStateTransitions.Record(
+                    new(_kTransparent, _kMaterial, _kDepthTest, _kDepthWrite),
+                    new(transparent, material, depthTest, depthWrite));
                 if (target != _kTarget) _traceTargetBreaks++;
-                if (BlendStateOf(_kTransparent, _kBlend, _kMaterial) !=
-                    BlendStateOf(transparent, blend, material))
-                    _traceBlendBreaks++;
+                bool blendChanged =
+                    BlendStateOf(_kTransparent, _kBlend, _kMaterial) !=
+                    BlendStateOf(transparent, blend, material);
+                if (blendChanged) _traceBlendBreaks++;
                 if (_kDepthTest != depthTest ||
                     _kDepthWrite != depthWrite ||
                     _kSourceDepthCompareWrite != sourceDepthCompareWrite ||
                     _kDreamcastTerrainDepth != dreamcastTerrainDepth)
                     _traceDepthBreaks++;
-                if (BlendStateOf(_kTransparent, _kBlend, _kMaterial) !=
-                    BlendStateOf(transparent, blend, material) &&
+                if (blendChanged &&
                     (material == HleMaterialKind.Glass ||
                      _kMaterial == HleMaterialKind.Glass))
                     _traceMaterialBreaks++;
@@ -7235,13 +7231,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 double effectiveFps = frameMeanMs <= 0.0
                     ? 0.0
                     : 1000.0 / frameMeanMs;
-                string topTransitions = string.Join(
-                    '|',
-                    _traceStateTransitions
-                        .OrderByDescending(pair => pair.Value)
-                        .ThenBy(pair => pair.Key, StringComparer.Ordinal)
-                        .Take(6)
-                        .Select(pair => $"{pair.Key}={pair.Value}"));
+                string topTransitions =
+                    _traceStateTransitions.FormatTopTransitions();
                 long allocatedBytes = GC.GetAllocatedBytesForCurrentThread();
                 long allocatedDelta = Math.Max(
                     0,

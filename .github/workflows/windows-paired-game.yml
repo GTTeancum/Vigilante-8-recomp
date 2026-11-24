@@ -1,0 +1,68 @@
+name: Windows paired game host
+run-name: Windows platform for ${{ inputs.pair_id || github.ref_name }}
+# Trigger once for EVERY Linux game build, including repeats of one revision.
+# This public runner receives only checked-in sources, a tree hash and build ID.
+on:
+  push:
+    branches: ['ci/v8-paired/**']
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact published source commit (full Git SHA)
+        required: true
+        type: string
+      source_tree:
+        description: Exact Git tree stamped into the paired private game module
+        required: true
+        type: string
+      pair_id:
+        description: Unique ID of this Linux game build
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  windows-game-platform:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Verify request, publish and exercise the Windows game host
+        id: build
+        shell: python
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          SOURCE_TREE: ${{ inputs.source_tree }}
+          PAIR_ID: ${{ inputs.pair_id }}
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+        run: |
+          import os, re, subprocess, sys
+          def git(arg):
+              return subprocess.check_output(["git", "rev-parse", arg], text=True).strip()
+          if os.environ["GITHUB_EVENT_NAME"] == "push":
+              branch = re.fullmatch(r"ci/v8-paired/([A-Za-z0-9][A-Za-z0-9_.-]{0,79})", os.environ["GITHUB_REF_NAME"])
+              if not branch: raise SystemExit("Invalid CI build branch")
+              pair, commit, tree = branch[1], os.environ["GITHUB_SHA"], git("HEAD^{tree}")
+          else:
+              pair, commit, tree = (os.environ[k] for k in ("PAIR_ID", "SOURCE_COMMIT", "SOURCE_TREE"))
+          if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", pair): raise SystemExit("Invalid build ID")
+          if not all(re.fullmatch("[0-9a-f]{40}", x) for x in (commit, tree)): raise SystemExit("Invalid source ID")
+          if (commit, tree) != (git("HEAD"), git("HEAD^{tree}")): raise SystemExit("Wrong source checkout")
+          subprocess.run([sys.executable, "tools/recompone-v8-2/paired-windows/build_host.py", "--pair", pair, "--tree", tree], check=True)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out: print("pair_id=" + pair, file=out)
+      - name: Upload only the public host layer, never a private game payload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: windows-platform-${{ steps.build.outputs.pair_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          path: |
+            artifacts/windows-platform-only/Vigilante8PC.exe
+            artifacts/windows-platform-only/windows-host.json

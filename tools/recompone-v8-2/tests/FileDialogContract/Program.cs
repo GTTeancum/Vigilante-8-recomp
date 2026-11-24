@@ -20,6 +20,30 @@ Check(legacyThrew, "legacy StringBuilder declaration is rejected by the marshall
 // OPENFILENAMEW is 152 bytes on x64; comdlg32 validates lStructSize.
 Check(NativeFileDialog.StructSize == 152, $"OPENFILENAMEW size {NativeFileDialog.StructSize} != 152");
 
+// A Linux install gets uppercase CUE extensions and case-sensitive paths.
+var fixture = Path.Combine(Path.GetTempPath(), "v8-disc-dialog-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(fixture);
+try
+{
+    var bin = Path.Combine(fixture, "Vigilante 8 Track 01.BIN");
+    var cue = Path.Combine(fixture, "Vigilante 8.CUE");
+    File.WriteAllText(bin, "");
+    File.WriteAllText(cue, "FILE \"Vigilante 8 Track 01.BIN\" BINARY\n");
+    if (!OperatingSystem.IsWindows())
+        File.WriteAllText(Path.Combine(fixture, "wrong-case.cue"),
+            "FILE \"vigilante 8 Track 01.BIN\" BINARY\n");
+    Check(FirstRunSetup.ResolveCue(cue) == cue, "direct uppercase CUE is accepted");
+    Check(FirstRunSetup.ResolveCue(bin) == cue, "BIN resolves its own uppercase CUE");
+
+    File.WriteAllText(Path.Combine(fixture, "duplicate.cue"),
+        "FILE \"Vigilante 8 Track 01.BIN\" BINARY\n");
+    bool ambiguousRejected = false;
+    try { _ = FirstRunSetup.ResolveCue(bin); }
+    catch (InvalidDataException) { ambiguousRejected = true; }
+    Check(ambiguousRejected, "ambiguous CUE requires direct selection");
+}
+finally { Directory.Delete(fixture, recursive: true); }
+
 Console.WriteLine($"[FileDialogContract] PASS checks={checks}");
 return 0;
 

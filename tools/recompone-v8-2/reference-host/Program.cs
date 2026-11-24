@@ -21,6 +21,22 @@ string executableDirectory = Runtime.ExecutableDirectory;
 Runtime.ConfigureGameTitle("Vigilante 8: 2nd Offense PC");
 ConsoleMirror.Install();
 
+#if V8_PAIRED_WINDOWS
+// Fail before asking someone to import their disc if the attached test build
+// is incomplete or its private module came from another source revision.
+try { PairedModule.Check(); }
+catch (Exception e)
+{
+    Console.Error.WriteLine($"[PairedGame] {e.GetBaseException().Message}");
+    return 2;
+}
+if (args is ["--verify-paired-game"])
+{
+    Console.WriteLine("[PairedGame] guest and host match");
+    return 0;
+}
+#endif
+
 string? guestVehicle = null;
 string? explicitLoose = null;
 var launchArguments = args.ToList();

@@ -90,7 +90,10 @@ internal sealed class TextureReplacementAtlas : IDisposable
 
     readonly GL _gl;
     readonly ushort[] _native = new ushort[VramShadow.Width * VramShadow.Height];
-    readonly ulong[] _blockRevision = new ulong[16 * 8];
+    const int BlockShift = 6;
+    const int BlockColumns = VramShadow.Width >> BlockShift;
+    const int BlockRows = VramShadow.Height >> BlockShift;
+    readonly ulong[] _blockRevision = new ulong[BlockColumns * BlockRows];
     readonly Dictionary<Signature, Cached> _cache = [];
     readonly Dictionary<ulong, Rect> _entries = [];
     readonly Dictionary<ulong, EntryInfo> _entryInfo = [];
@@ -1307,18 +1310,32 @@ internal sealed class TextureReplacementAtlas : IDisposable
         int pageX = (s.TPage & 0xF) * 64;
         int pageY = ((s.TPage >> 4) & 1) * 256;
         int depth = (s.TPage >> 7) & 3;
-        int perWord = depth == 0 ? 4 : depth == 1 ? 2 : 1;
-        int x0 = pageX + s.MinU / perWord;
-        int x1 = pageX + s.MaxU / perWord;
-        ulong revision = BlocksRevision(x0, pageY + s.MinV, x1, pageY + s.MaxV);
+        // Decode applies the texture window before reading packed texels.
+        // The low (in-block) bits of the mask/offset cannot change block
+        // ownership. Project each block, not just the two UV endpoints:
+        // a window can fold at an interior coordinate.
+        int xShift = BlockShift + 2 - depth; // 256/128/64 texels per block
+        int ax = (s.TwAndX & 255) >> xShift, ox = (s.TwOrX & 255) >> xShift;
+        int ay = (s.TwAndY & 255) >> BlockShift, oy = (s.TwOrY & 255) >> BlockShift;
+        ulong revision = 0;
+        for (int v = s.MinV >> BlockShift; v <= s.MaxV >> BlockShift; v++)
+        {
+            int by = (pageY >> BlockShift) + ((v & ay) | oy);
+            for (int u = s.MinU >> xShift; u <= s.MaxU >> xShift; u++)
+            {
+                int bx = (pageX >> BlockShift) + ((u & ax) | ox);
+                revision = Math.Max(revision, _blockRevision[BlockIndex(bx, by)]);
+            }
+        }
         if (depth < 2)
         {
             int clutX = (s.Clut & 0x3F) * 16;
             int clutY = (s.Clut >> 6) & 0x1FF;
             int colors = depth == 0 ? 16 : 256;
-            revision = Math.Max(
-                revision,
-                BlocksRevision(clutX, clutY, clutX + colors - 1, clutY));
+            int last = (clutX + colors - 1) >> BlockShift;
+            for (int bx = clutX >> BlockShift; bx <= last; bx++)
+                revision = Math.Max(revision,
+                    _blockRevision[BlockIndex(bx, clutY >> BlockShift)]);
         }
         return revision;
     }
@@ -1335,16 +1352,8 @@ internal sealed class TextureReplacementAtlas : IDisposable
             $"miss={_terrainAtlasMisses}");
     }
 
-    ulong BlocksRevision(int x0, int y0, int x1, int y1)
-    {
-        ulong revision = 0;
-        for (int by = y0 >> 6; by <= y1 >> 6; by++)
-        for (int bx = x0 >> 6; bx <= x1 >> 6; bx++)
-            revision = Math.Max(
-                revision,
-                _blockRevision[((by & 7) * 16) + (bx & 15)]);
-        return revision;
-    }
+    static int BlockIndex(int bx, int by) =>
+        (by & (BlockRows - 1)) * BlockColumns + (bx & (BlockColumns - 1));
 
     public void Reset(ReadOnlySpan<ushort> pixels)
     {
@@ -1400,16 +1409,13 @@ internal sealed class TextureReplacementAtlas : IDisposable
             _performanceMarkedPixels += (long)width * height;
         }
         ulong revision = ++_revision;
-        for (int row = 0; row < height; row += 64)
-        for (int column = 0; column < width; column += 64)
-        {
-            int bx = ((x + column) & 1023) >> 6;
-            int by = ((y + row) & 511) >> 6;
-            _blockRevision[by * 16 + bx] = revision;
-        }
-        int endBx = ((x + width - 1) & 1023) >> 6;
-        int endBy = ((y + height - 1) & 511) >> 6;
-        _blockRevision[endBy * 16 + endBx] = revision;
+        // Step across absolute boundaries, not 64 words from an unaligned
+        // origin. A 2x2 write at (63,63) touches four blocks.
+        int lastX = (x + width - 1) >> BlockShift;
+        int lastY = (y + height - 1) >> BlockShift;
+        for (int by = y >> BlockShift; by <= lastY; by++)
+        for (int bx = x >> BlockShift; bx <= lastX; bx++)
+            _blockRevision[BlockIndex(bx, by)] = revision;
     }
 
     void Dump(ulong hash, int width, int height, byte[] rgba)

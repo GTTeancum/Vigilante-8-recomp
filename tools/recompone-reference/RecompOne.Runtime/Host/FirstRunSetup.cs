@@ -34,6 +34,7 @@ public static class FirstRunSetup
         var gate = new object();
         var progress = new LooseImportProgress("welcome", 0, 1, "");
         string error = "", notice = "", selected = initialSource ?? "";
+        string enteredPath = "";
         bool success = false;
         int frames = 0, completionFrames = 0;
         string? fixture = Environment.GetEnvironmentVariable("RECOMPONE_SETUP_TEST_SOURCE");
@@ -133,14 +134,28 @@ public static class FirstRunSetup
             {
                 if (choosing != null)
                     ImGui.TextWrapped("Waiting for file selection...");
-                else if (ImGui.Button("Choose BIN / CUE...", new Vector2(250, 42)))
+                else if (OperatingSystem.IsWindows())
                 {
-                    // This thread keeps pumping messages while the dialog is
-                    // open, so the setup window can own it and stay modal.
-                    choosing = NativeFileDialog.OpenAsync(
-                        "Select Vigilante 8: 2nd Offense (or Vigilante 8 for its soundtrack)",
-                        "PlayStation disc (BIN/CUE)\0*.cue;*.bin\0\0",
-                        owner: NativeFileDialog.ActiveWindow());
+                    if (ImGui.Button("Choose BIN / CUE...", new Vector2(250, 42)))
+                    {
+                        // Pump the UI while the native Windows dialog owns it.
+                        choosing = NativeFileDialog.OpenAsync(
+                            "Select Vigilante 8: 2nd Offense (or Vigilante 8 for its soundtrack)",
+                            "PlayStation disc (BIN/CUE)\0*.cue;*.bin\0\0",
+                            owner: NativeFileDialog.ActiveWindow());
+                    }
+                }
+                else
+                {
+                    // The Win32 dialog is not available on Linux. Accept a
+                    // path without requiring a particular desktop or helper.
+                    ImGui.TextUnformatted("Enter or paste the full path to your disc.");
+                    ImGui.SetNextItemWidth(-1);
+                    bool submitted = ImGui.InputText("##setup-disc-path", ref enteredPath, 4096,
+                        ImGuiInputTextFlags.EnterReturnsTrue);
+                    if ((ImGui.Button("Use BIN / CUE path", new Vector2(250, 42)) || submitted) &&
+                        !string.IsNullOrWhiteSpace(enteredPath))
+                        Start(enteredPath);
                 }
                 if (message.Length != 0)
                 {
@@ -203,13 +218,16 @@ public static class FirstRunSetup
         if (Path.GetExtension(source).Equals(".cue", StringComparison.OrdinalIgnoreCase)) return source;
         if (!Path.GetExtension(source).Equals(".bin", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Select a CUE file or one of its BIN files.");
-        var matches = Directory.EnumerateFiles(Path.GetDirectoryName(source)!, "*.cue")
+        var pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var matches = Directory.EnumerateFiles(Path.GetDirectoryName(source)!)
+            .Where(cue => Path.GetExtension(cue).Equals(".cue", StringComparison.OrdinalIgnoreCase))
             .Where(cue => File.ReadLines(cue).Any(line =>
             {
                 var text = line.Trim();
                 int first = text.IndexOf('"'), last = text.LastIndexOf('"');
                 return text.StartsWith("FILE ", StringComparison.OrdinalIgnoreCase) && first >= 0 && last > first &&
-                    Path.GetFullPath(Path.Combine(Path.GetDirectoryName(cue)!, text[(first + 1)..last])).Equals(source, StringComparison.OrdinalIgnoreCase);
+                    Path.GetFullPath(Path.Combine(Path.GetDirectoryName(cue)!, text[(first + 1)..last])).Equals(source, pathComparison);
             })).ToArray();
         if (matches.Length != 1) throw new InvalidDataException("Select the matching CUE file. A BIN alone does not describe all game and audio tracks.");
         return matches[0];
