@@ -1121,6 +1121,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     bool _presentNearest;
 
     static readonly bool StreamBatches = Environment.GetEnvironmentVariable("RECOMPONE_STREAM_BATCHES") != "0";
+    static readonly bool StreamGameplayBatches =
+        Environment.GetEnvironmentVariable("RECOMPONE_V82_STREAM_GAMEPLAY_BATCHES") == "1";
     int _streamVertex;
     readonly GlVertex[] _verts = new GlVertex[MaxVerts];
     int _count;
@@ -5815,7 +5817,14 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
         // Append without overwriting vertices still consumed by previous draws.
         // Orphan only when the bounded stream fills; preserve every draw's order.
-        bool stream = StreamBatches && Sdk.V82Compat.DirectSceneRendering;
+        // Allow an isolated V8:2 gameplay trial without enabling direct
+        // terrain or its state-cache/feedback changes. Menus and native
+        // VRAM targets keep the previous upload path.
+        bool stream = StreamBatches &&
+            (Sdk.V82Compat.DirectSceneRendering ||
+             (StreamGameplayBatches && rt != null &&
+              GpuHle.Active && GpuHle.GameplayActive &&
+              Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal)));
         if (stream && _streamVertex + _count > MaxVerts)
         {
             _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(MaxVerts * sizeof(GlVertex)), null, BufferUsageARB.StreamDraw);
