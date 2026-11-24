@@ -34,11 +34,21 @@ try
             "FILE \"vigilante 8 Track 01.BIN\" BINARY\n");
     Check(FirstRunSetup.ResolveCue(cue) == cue, "direct uppercase CUE is accepted");
     Check(FirstRunSetup.ResolveCue(bin) == cue, "BIN resolves its own uppercase CUE");
+    string ResolveTypedPath(string path) =>
+        FirstRunSetup.ResolveCue(FirstRunSetup.NormalizeTypedDiscPath(path));
+    Check(ResolveTypedPath($" \"{cue}\" ") == cue, "pasted Copy as path selects a CUE");
+    Check(ResolveTypedPath($"\"{bin}\"") == cue, "pasted Copy as path resolves a BIN to its CUE");
+    Check(string.IsNullOrWhiteSpace(FirstRunSetup.NormalizeTypedDiscPath(" \"\" ")),
+        "empty quoted path is treated as empty");
+    bool missingRejected = false;
+    try { _ = ResolveTypedPath($"\"{Path.Combine(fixture, "missing disc.cue")}\""); }
+    catch (FileNotFoundException) { missingRejected = true; }
+    Check(missingRejected, "pasting a nonexistent path does not bypass validation");
 
     File.WriteAllText(Path.Combine(fixture, "duplicate.cue"),
         "FILE \"Vigilante 8 Track 01.BIN\" BINARY\n");
     bool ambiguousRejected = false;
-    try { _ = FirstRunSetup.ResolveCue(bin); }
+    try { _ = ResolveTypedPath($"\"{bin}\""); }
     catch (InvalidDataException) { ambiguousRejected = true; }
     Check(ambiguousRejected, "ambiguous CUE requires direct selection");
 }

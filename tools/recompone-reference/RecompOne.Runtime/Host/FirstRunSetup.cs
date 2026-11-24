@@ -91,9 +91,8 @@ public static class FirstRunSetup
             gl = GL.GetApi(window); input = window.CreateInput();
             ui = new ImGuiController(gl, window, input, () =>
             {
-                if (!OperatingSystem.IsLinux()) return;
-
-                // Use the desktop clipboard, not ImGui's process-local buffer.
+                // Use the desktop clipboard, not ImGui's process-local buffer,
+                // on both Windows and Linux.
                 // GLFW's UTF-8 get/set APIs match ImGui's callback signatures.
                 var io = ImGui.GetIO();
                 var glfw = Silk.NET.GLFW.GlfwProvider.GLFW.Value.Context;
@@ -104,9 +103,12 @@ public static class FirstRunSetup
                 // Silk 2.22 sends physical modifier keys, but ImGui 1.90's
                 // shortcuts also need ModCtrl/ModShift events. Queue them in
                 // input order so a complete chord between frames is not lost.
-                var keyboard = input.Keyboards[0];
-                keyboard.KeyDown += ForwardSetupModifiers;
-                keyboard.KeyUp += ForwardSetupModifiers;
+                if (input.Keyboards.Count > 0)
+                {
+                    var keyboard = input.Keyboards[0];
+                    keyboard.KeyDown += ForwardSetupModifiers;
+                    keyboard.KeyUp += ForwardSetupModifiers;
+                }
             });
             ImGui.GetIO().NativePtr->IniFilename = null;
             ImGui.StyleColorsDark();
@@ -152,28 +154,30 @@ public static class FirstRunSetup
             {
                 if (choosing != null)
                     ImGui.TextWrapped("Waiting for file selection...");
-                else if (OperatingSystem.IsWindows())
-                {
-                    if (ImGui.Button("Choose BIN / CUE...", new Vector2(250, 42)))
-                    {
-                        // Pump the UI while the native Windows dialog owns it.
-                        choosing = NativeFileDialog.OpenAsync(
-                            "Select Vigilante 8: 2nd Offense (or Vigilante 8 for its soundtrack)",
-                            "PlayStation disc (BIN/CUE)\0*.cue;*.bin\0\0",
-                            owner: NativeFileDialog.ActiveWindow());
-                    }
-                }
                 else
                 {
-                    // The Win32 dialog is not available on Linux. Accept a
-                    // path without requiring a particular desktop or helper.
                     ImGui.TextUnformatted("Enter or paste the full path to your disc.");
                     ImGui.SetNextItemWidth(-1);
                     bool submitted = ImGui.InputText("##setup-disc-path", ref enteredPath, 4096,
                         ImGuiInputTextFlags.EnterReturnsTrue);
+                    if (OperatingSystem.IsWindows())
+                    {
+                        if (ImGui.Button("Choose BIN / CUE...", new Vector2(250, 42)))
+                        {
+                            // Pump the UI while the native Windows dialog owns it.
+                            choosing = NativeFileDialog.OpenAsync(
+                                "Select Vigilante 8: 2nd Offense (or Vigilante 8 for its soundtrack)",
+                                "PlayStation disc (BIN/CUE)\0*.cue;*.bin\0\0",
+                                owner: NativeFileDialog.ActiveWindow());
+                        }
+                        ImGui.SameLine();
+                    }
                     if ((ImGui.Button("Use BIN / CUE path", new Vector2(250, 42)) || submitted) &&
-                        !string.IsNullOrWhiteSpace(enteredPath))
-                        Start(enteredPath);
+                        choosing == null)
+                    {
+                        string path = NormalizeTypedDiscPath(enteredPath);
+                        if (!string.IsNullOrWhiteSpace(path)) Start(path);
+                    }
                 }
                 if (message.Length != 0)
                 {
@@ -258,6 +262,14 @@ public static class FirstRunSetup
             })).ToArray();
         if (matches.Length != 1) throw new InvalidDataException("Select the matching CUE file. A BIN alone does not describe all game and audio tracks.");
         return matches[0];
+    }
+
+    public static string NormalizeTypedDiscPath(string source)
+    {
+        // Explorer's "Copy as path" surrounds the whole path with quotes.
+        // Do not apply this to paths from the picker or command line.
+        string path = source.Trim();
+        return path.Length >= 2 && path[0] == '"' && path[^1] == '"' ? path[1..^1] : path;
     }
 
     static unsafe void Capture(GL gl, IWindow window, string directory, string phase)
