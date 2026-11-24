@@ -86,15 +86,6 @@ REPLACEMENTS = (
 """,
     ),
     (
-        """        Vigilante82PC.func_800333D0(c, m);
-        c.RA = 0x800147D0u;
-""",
-        """        Vigilante82PC.func_800333D0(c, m);
-        RecompOne.Runtime.Sdk.V82VehicleRegistry.ReleaseMatchRuntimes(c, m);
-        c.RA = 0x800147D0u;
-""",
-    ),
-    (
         """        L80041D5C: ;
         c.V1 = m.ReadU16((c.S4 + 0xB4u));
 """,
@@ -357,6 +348,30 @@ REPLACEMENTS = (
 )
 
 
+# apply_split_screen_patches appends its own release after the vehicle
+# release. Validate both effects in their actual order on incremental builds.
+TEARDOWN_CALL = (
+    "        c.RA = 0x800147C8u;\n"
+    "        Vigilante82PC.func_800333D0(c, m);\n"
+)
+TEARDOWN_END = "        c.RA = 0x800147D0u;\n"
+VEHICLE_RELEASE = "        RecompOne.Runtime.Sdk.V82VehicleRegistry.ReleaseMatchRuntimes(c, m);\n"
+SPLIT_RELEASE = "        SplitRelease(c, m);\n"
+
+
+def patch_match_teardown(text: str) -> str:
+    if text.count(TEARDOWN_CALL) != 1 or text.count(TEARDOWN_END) != 1:
+        raise RuntimeError("missing or duplicate native match teardown boundary")
+    start = text.index(TEARDOWN_CALL) + len(TEARDOWN_CALL)
+    end = text.index(TEARDOWN_END)
+    body = text[start:end]
+    if end < start or body not in ("", VEHICLE_RELEASE, SPLIT_RELEASE, VEHICLE_RELEASE + SPLIT_RELEASE):
+        raise RuntimeError("unknown or duplicated hooks in native match teardown")
+    if body.startswith(VEHICLE_RELEASE):
+        return text
+    return text[:start] + VEHICLE_RELEASE + text[start:]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
@@ -364,7 +379,9 @@ def main() -> int:
 
     source = args.source.resolve()
     text = source.read_text(encoding="utf-8")
-    changed = 0
+    patched = patch_match_teardown(text)
+    changed = int(patched != text)
+    text = patched
     for old, new in MIGRATIONS:
         if new and new in text:
             continue

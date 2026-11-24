@@ -37,7 +37,7 @@ try
         key = Key(color).ToString("x16"), image = "colors.dds", x, y = 0, width = 1, height = 1
     });
     File.WriteAllText(Path.Combine(fixture.FullName, "manifest.json"),
-        JsonSerializer.Serialize(new { format = 2, entries }));
+        JsonSerializer.Serialize(new { format = 3, entries, terrainAtlases = new[] { TerrainWindowCases.Definition(fixture) } }));
     Environment.SetEnvironmentVariable("RECOMPONE_TEXTURE_PACK_DIR", fixture.FullName);
     Environment.SetEnvironmentVariable("RECOMPONE_USER_DATA_DIR", fixture.FullName);
     Environment.SetEnvironmentVariable("RECOMPONE_TRACE_ENHANCED_PERFORMANCE", "1");
@@ -51,7 +51,7 @@ try
     using var gl = GL.GetApi(window);
     Console.WriteLine($"driver={gl.GetStringS(StringName.Renderer)} | {gl.GetStringS(StringName.Version)}");
     using var atlas = new TextureReplacementAtlas(gl);
-    if (atlas.Count != 2 || gl.GetError() != GLEnum.NoError)
+    if (atlas.Count != 3 || gl.GetError() != GLEnum.NoError)
         throw new Exception("Synthetic replacement pack failed to upload");
 
     int failures = 0, checks = 0;
@@ -60,6 +60,12 @@ try
         checks++;
         if (!ok) { failures++; Console.Error.WriteLine("FAIL " + what); }
     }
+    // Capture each fixture's placement rather than assuming a packer order.
+    atlas.Write(256, 0, 2, 1, [red, green]);
+    TextureReplacementAtlas.Rect R(int x) => atlas.Resolve(0x104,0,x,0,x,0,255,255,0,0,
+        HleMaterialKind.Glass, out _);
+    var redRect = R(0); var greenRect = R(1);
+    Check(redRect.Valid && greenRect.Valid && redRect != greenRect, "distinct replacement crops uploaded");
     int Page(int x, int y) => 0x100 | ((x & 1023) >> 6) | (((y & 511) >> 8) << 4);
     void Expect(ushort expected, string label, int tpage, int u, int v, int clut = 0,
         int ax = 255, int ay = 255, int ox = 0, int oy = 0)
@@ -68,7 +74,7 @@ try
             HleMaterialKind.Glass, out ulong key);
         bool replaced = expected is red or green;
         Check(key == Key(expected) && rect.Valid == replaced &&
-            (!replaced || rect.X == (expected == red ? 2 : 3)),
+            (!replaced || rect == (expected == red ? redRect : greenRect)),
             $"{label}: expected {Key(expected):x16}/replacement={replaced}, got {key:x16}/x={rect.X}");
     }
     void Direct(ushort expected, string label, int x, int y) =>
@@ -129,6 +135,7 @@ try
     atlas.Fill(100,192,1,1,green);
     Check(SpanKey() != before, "folded window ignored interior block");
 
+    TerrainWindowCases.Run(atlas, Check);
     Console.WriteLine($"TextureRevisionContract: {checks-failures}/{checks} passed");
     return failures == 0 ? 0 : 1;
 }

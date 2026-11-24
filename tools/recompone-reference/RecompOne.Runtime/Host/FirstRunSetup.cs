@@ -89,7 +89,25 @@ public static class FirstRunSetup
         window.Load += () =>
         {
             gl = GL.GetApi(window); input = window.CreateInput();
-            ui = new ImGuiController(gl, window, input);
+            ui = new ImGuiController(gl, window, input, () =>
+            {
+                if (!OperatingSystem.IsLinux()) return;
+
+                // Use the desktop clipboard, not ImGui's process-local buffer.
+                // GLFW's UTF-8 get/set APIs match ImGui's callback signatures.
+                var io = ImGui.GetIO();
+                var glfw = Silk.NET.GLFW.GlfwProvider.GLFW.Value.Context;
+                io.GetClipboardTextFn = glfw.GetProcAddress("glfwGetClipboardString");
+                io.SetClipboardTextFn = glfw.GetProcAddress("glfwSetClipboardString");
+                io.ClipboardUserData = window.Handle;
+
+                // Silk 2.22 sends physical modifier keys, but ImGui 1.90's
+                // shortcuts also need ModCtrl/ModShift events. Queue them in
+                // input order so a complete chord between frames is not lost.
+                var keyboard = input.Keyboards[0];
+                keyboard.KeyDown += ForwardSetupModifiers;
+                keyboard.KeyUp += ForwardSetupModifiers;
+            });
             ImGui.GetIO().NativePtr->IniFilename = null;
             ImGui.StyleColorsDark();
         };
@@ -209,6 +227,15 @@ public static class FirstRunSetup
             ui?.Dispose(); input?.Dispose(); gl?.Dispose();
         }
         return success;
+    }
+
+    static void ForwardSetupModifiers(IKeyboard keyboard, Key key, int scancode)
+    {
+        var io = ImGui.GetIO();
+        io.AddKeyEvent(ImGuiKey.ModCtrl,
+            keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight));
+        io.AddKeyEvent(ImGuiKey.ModShift,
+            keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight));
     }
 
     public static string ResolveCue(string source)

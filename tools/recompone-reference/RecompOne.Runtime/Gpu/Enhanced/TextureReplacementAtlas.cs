@@ -979,26 +979,33 @@ internal sealed class TextureReplacementAtlas : IDisposable
         return result;
     }
 
+    static bool IsContiguousWindow(int first, int last, int and, int or)
+    {
+        // A single atlas crop can only represent a constant translation of
+        // these UVs. If an overridden bit varies anywhere inside the range,
+        // texels repeat or jump, even when the endpoints look contiguous.
+        int forced = (~and | or) & 255;
+        return forced == 0 || (first ^ last) < (forced & -forced);
+    }
+
     bool TryResolveTerrain(Signature s, out Rect rect, out ulong key)
     {
         rect = default;
         key = 0;
         int depth = (s.TPage >> 7) & 3;
         if (depth > 2) return false;
+        if (!IsContiguousWindow(s.MinU, s.MaxU, s.TwAndX, s.TwOrX) ||
+            !IsContiguousWindow(s.MinV, s.MaxV, s.TwAndY, s.TwOrY))
+            return false;
         int u0 = ((s.MinU & s.TwAndX) | s.TwOrX) & 0xFF;
         int v0 = ((s.MinV & s.TwAndY) | s.TwOrY) & 0xFF;
-        int u1 = ((s.MaxU & s.TwAndX) | s.TwOrX) & 0xFF;
-        int v1 = ((s.MaxV & s.TwAndY) | s.TwOrY) & 0xFF;
-        if (u1 - u0 != s.MaxU - s.MinU ||
-            v1 - v0 != s.MaxV - s.MinV)
-            return false;
         int pixelsPerWord = depth == 0 ? 4 : depth == 1 ? 2 : 1;
         int pageX = (s.TPage & 0xF) * 64;
         int pageY = ((s.TPage >> 4) & 1) * 256;
         int globalX = pageX * pixelsPerWord + u0;
         int globalY = pageY + v0;
-        int sourceWidth = u1 - u0 + 1;
-        int sourceHeight = v1 - v0 + 1;
+        int sourceWidth = s.MaxU - s.MinU + 1;
+        int sourceHeight = s.MaxV - s.MinV + 1;
         ulong liveHash = HashNativeIndices(
             depth, globalX, globalY, sourceWidth, sourceHeight);
         var tileKey = new TerrainTileKey(
