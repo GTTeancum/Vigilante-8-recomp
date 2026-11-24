@@ -1468,15 +1468,11 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _vram.Init();
 
         _uniformState.Clear(); _depthEnabled = _depthWrite = null; _depthFunction = null;
-        // Shader link failures are driver-specific (NVIDIA's attribute and
-        // varying limits differ from other vendors); name the driver beside them.
-        Console.WriteLine(
-            $"[GlBackend] driver={_gl.GetStringS(StringName.Vendor)} | " +
-            $"{_gl.GetStringS(StringName.Renderer)} | {_gl.GetStringS(StringName.Version)}");
         _progPrim = GlShaders.Build(_gl, GlShaders.PrimVs, GlShaders.PrimFs, "prim");
         _progPresent = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.PresentFs, "present");
         _progPresent24 = GlShaders.Build(_gl, GlShaders.FullscreenVs, GlShaders.Present24Fs, "present24");
         if (_progPrim == 0 || _progPresent == 0 || _progPresent24 == 0) return;
+        Console.WriteLine("[GlStartup] enhanced draw resources");
         _hudSvg = new HudSvgAtlas(_gl);
         _textureReplacements = new TextureReplacementAtlas(_gl);
 

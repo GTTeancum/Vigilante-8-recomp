@@ -259,6 +259,7 @@ internal sealed class PresentationRenderer : IDisposable
         (_upscaleTexture, _upscaleFbo) = CreateTarget();
         (_fxaaTexture, _fxaaFbo) = CreateTarget();
         LoadLoadingCardOverlays();
+        Console.WriteLine("[GlStartup] sizing presentation targets");
         EnsureSize(1, 1);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         Ready = true;

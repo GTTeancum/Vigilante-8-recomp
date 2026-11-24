@@ -1080,6 +1080,7 @@ internal static class GlShaders
         uint prog = gl.CreateProgram();
         gl.AttachShader(prog, vs);
         gl.AttachShader(prog, fs);
+        Console.WriteLine($"[GlStartup] {name} link");
         gl.LinkProgram(prog);
         gl.GetProgram(prog, ProgramPropertyARB.LinkStatus, out int ok);
         if (ok == 0)
@@ -1102,6 +1103,7 @@ internal static class GlShaders
 
     static uint CompileStage(GL gl, ShaderType type, string src, string name)
     {
+        Console.WriteLine($"[GlStartup] {name} {type}");
         uint sh = gl.CreateShader(type);
         gl.ShaderSource(sh, Ascii(src));
         gl.CompileShader(sh);
