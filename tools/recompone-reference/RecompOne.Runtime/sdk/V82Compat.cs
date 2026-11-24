@@ -5535,50 +5535,35 @@ public static partial class V82Compat
         // tuple; do not infer the mode later from a derived projection value.
         bool alternate = unchecked((sbyte)m.ReadU8(c.GP + 0x31u)) >= 6;
 
-        GpuHle.TerrainDistanceColor ReadCorner(int cornerX, int cornerZ)
+        const int sampleStride = 5;
+        const int materialStride = sampleStride + 1;
+        int cellX = checked((int)x), cellZ = checked((int)z);
+        // The four materials meeting each vertex form one 6x6 footprint.
+        // Resolve each tile once for this patch, including material 0 at
+        // invalid neighbors. The same records supply the 5x5 packed heights.
+        Span<(uint Record, byte R, byte G, byte B)> materials =
+            stackalloc (uint, byte, byte, byte)[materialStride * materialStride];
+        for (int mx = 0; mx < materialStride; mx++)
+        for (int mz = 0; mz < materialStride; mz++)
         {
-            ushort height = ReadTerrainHeight(
-                m, checked((int)x + cornerX), checked((int)z + cornerZ));
-            int shade = (height >> 11) & 31;
-            int rampR = InterpolateTerrainRamp(lowR, highR, shade);
-            int rampG = InterpolateTerrainRamp(lowG, highG, shade);
-            int rampB = InterpolateTerrainRamp(lowB, highB, shade);
-            int worldX = checked((int)x + cornerX);
-            int worldZ = checked((int)z + cornerZ);
-            int averageR = 0;
-            int averageG = 0;
-            int averageB = 0;
-            AddTerrainMaterialAverage(
-                m, worldX - 1, worldZ - 1,
-                ref averageR, ref averageG, ref averageB);
-            AddTerrainMaterialAverage(
-                m, worldX - 1, worldZ,
-                ref averageR, ref averageG, ref averageB);
-            AddTerrainMaterialAverage(
-                m, worldX, worldZ - 1,
-                ref averageR, ref averageG, ref averageB);
-            AddTerrainMaterialAverage(
-                m, worldX, worldZ,
-                ref averageR, ref averageG, ref averageB);
-
-            // Dreamcast 0x8C084540 multiplies the ramp component by the sum
-            // of the four XTIN averages meeting this vertex, then scales by
-            // the literal 1/1024 before 0x8C0844E0 truncates and packs it.
-            static byte Far(int ramp, int average) =>
-                (byte)Math.Clamp((int)(ramp * average / 1024.0f), 0, 255);
-            return new GpuHle.TerrainDistanceColor(
-                (byte)rampR,
-                (byte)rampG,
-                (byte)rampB,
-                Far(rampR, averageR),
-                Far(rampG, averageG),
-                Far(rampB, averageB));
+            byte textureId = TryResolveTerrainRecord(
+                m, cellX + mx - 1, cellZ + mz - 1, out uint record)
+                ? m.ReadU8(record + 0x2000u)
+                : (byte)0;
+            ReadTerrainMaterialAverage(m, textureId, out byte r, out byte g, out byte b);
+            materials[mx * materialStride + mz] = (record, r, g, b);
         }
+
+        // Dreamcast 0x8C084540 multiplies the ramp component by the sum
+        // of the four XTIN averages meeting this vertex, then scales by
+        // the literal 1/1024 before 0x8C0844E0 truncates and packs it.
+        static byte Far(int ramp, int sum) =>
+            (byte)Math.Clamp((int)(ramp * sum / 1024.0f), 0, 255);
 
         // Snapshot the complete authored 5x5 patch while the native terrain
         // camera is installed. Later OT playback must not read mutable GTE
         // state or replace authored intermediate heights with bilinear ones.
-        var samples = new RecompOne.Runtime.Hle.DreamcastTerrainGeometry.Sample[25];
+        var samples = new DreamcastTerrainGeometry.Sample[sampleStride * sampleStride];
         Span<float> rotation = stackalloc float[9];
         for (int rowIndex = 0; rowIndex < 9; rowIndex++)
         {
@@ -5589,32 +5574,51 @@ public static partial class V82Compat
         int originX = unchecked((int)m.ReadU32(0x1F800084u));
         int originY = unchecked((int)m.ReadU32(0x1F800088u));
         int originZ = unchecked((int)m.ReadU32(0x1F80008Cu));
-        for (int sx = 0; sx <= 4; sx++)
-        for (int sz = 0; sz <= 4; sz++)
+        int tx = unchecked((int)Gte.ReadControl(5));
+        int ty = unchecked((int)Gte.ReadControl(6));
+        int tz = unchecked((int)Gte.ReadControl(7));
+        for (int sx = 0; sx < sampleStride; sx++)
+        for (int sz = 0; sz < sampleStride; sz++)
         {
-            float height = (ReadTerrainHeight(m, (int)x + sx, (int)z + sz) & 0x7FF) * 8;
-            float vx = unchecked((short)(((int)x + sx) * 256 + originX));
+            int tile = sx * materialStride + sz;
+            var nw = materials[tile];
+            var sw = materials[tile + 1];
+            var ne = materials[tile + materialStride];
+            var se = materials[tile + materialStride + 1];
+            ushort packedHeight = se.Record == 0 ? (ushort)0 : m.ReadU16(se.Record);
+            int shade = packedHeight >> 11;
+            int rampR = InterpolateTerrainRamp(lowR, highR, shade);
+            int rampG = InterpolateTerrainRamp(lowG, highG, shade);
+            int rampB = InterpolateTerrainRamp(lowB, highB, shade);
+            float height = (packedHeight & 0x7FF) * 8;
+            float vx = unchecked((short)((cellX + sx) * 256 + originX));
             float vy = unchecked((short)((int)height + originY));
-            float vz = unchecked((short)(((int)z + sz) * 256 + originZ));
+            float vz = unchecked((short)((cellZ + sz) * 256 + originZ));
             var view = new System.Numerics.Vector3(
-                unchecked((int)Gte.ReadControl(5)) + rotation[0]*vx + rotation[1]*vy + rotation[2]*vz,
-                unchecked((int)Gte.ReadControl(6)) + rotation[3]*vx + rotation[4]*vy + rotation[5]*vz,
-                unchecked((int)Gte.ReadControl(7)) + rotation[6]*vx + rotation[7]*vy + rotation[8]*vz);
-            GpuHle.TerrainDistanceColor color = ReadCorner(sx, sz);
-            samples[sx * 5 + sz] = new RecompOne.Runtime.Hle.DreamcastTerrainGeometry.Sample(
+                tx + rotation[0]*vx + rotation[1]*vy + rotation[2]*vz,
+                ty + rotation[3]*vx + rotation[4]*vy + rotation[5]*vz,
+                tz + rotation[6]*vx + rotation[7]*vy + rotation[8]*vz);
+            samples[sx * sampleStride + sz] = new(
                 view, height,
-                new System.Numerics.Vector3(color.BaseR, color.BaseG, color.BaseB),
-                new System.Numerics.Vector3(color.FarR, color.FarG, color.FarB));
+                new(rampR, rampG, rampB),
+                new(Far(rampR, nw.R + sw.R + ne.R + se.R),
+                    Far(rampG, nw.G + sw.G + ne.G + se.G),
+                    Far(rampB, nw.B + sw.B + ne.B + se.B)));
         }
         var patch = new GpuHle.TerrainPatchGeometry(samples, heightAxis,
             unchecked((int)Gte.ReadControl(24)) / 65536f,
             unchecked((int)Gte.ReadControl(25)) / 65536f,
             Gte.ReadControl(26) & 0xFFFFu) { CulledCells = _culledTerrainCells };
+        // All stored ramp/flat components are integral bytes, exact in float.
+        static GpuHle.TerrainDistanceColor Corner(in DreamcastTerrainGeometry.Sample sample) =>
+            new((byte)sample.Ramp.X, (byte)sample.Ramp.Y, (byte)sample.Ramp.Z,
+                (byte)sample.Flat.X, (byte)sample.Flat.Y, (byte)sample.Flat.Z);
+        const int last = sampleStride - 1;
         return new GpuHle.TerrainQuadDistanceColors(
-            ReadCorner(0, 0),
-            ReadCorner(4, 0),
-            ReadCorner(0, 4),
-            ReadCorner(4, 4),
+            Corner(samples[0]),
+            Corner(samples[last * sampleStride]),
+            Corner(samples[last]),
+            Corner(samples[^1]),
             alternate,
             true,
             patch);
@@ -5628,27 +5632,6 @@ public static partial class V82Compat
         if (!TryResolveTerrainRecord(m, x, z, out uint record))
             return 0;
         return m.ReadU16(record);
-    }
-
-    static void AddTerrainMaterialAverage(
-        IMemory m,
-        int x,
-        int z,
-        ref int r,
-        ref int g,
-        ref int b)
-    {
-        byte textureId = 0;
-        if (TryResolveTerrainRecord(m, x, z, out uint record))
-            textureId = m.ReadU8(record + 0x2000u);
-        ReadTerrainMaterialAverage(
-            m, textureId,
-            out byte averageR,
-            out byte averageG,
-            out byte averageB);
-        r += averageR;
-        g += averageG;
-        b += averageB;
     }
 
     static bool TryResolveTerrainRecord(
