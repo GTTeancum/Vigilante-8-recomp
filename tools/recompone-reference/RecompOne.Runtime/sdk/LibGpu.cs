@@ -48,30 +48,33 @@ public static class LibGpu
             uint header = m.ReadU32(addr);
             uint count = header >> 24;
             if (count == 0)
-                gpu.SetOrderingTableDepth(bucketDepth--);
-            gpu.SetOrderingTablePacket(addr, count);
-            if (!GpuHle.GameplayActive ||
-                IsSafeGameplayOrderingTablePacket(
-                    m, addr, count, out string reason))
+                gpu.AdvanceOrderingTableBucket(addr, bucketDepth--);
+            else
             {
-                if (!gpu.TryDrawDirectTerrainPacket(count))
-                    for (uint i = 0; i < count; i++)
-                    {
-                        uint source = addr + 4u + i * 4u;
-                        gpu.WriteGp0(m.ReadU32(source), source);
-                    }
-            }
-            else if (_rejectedGameplayOtPackets++ < 32)
-            {
-                uint command = count > 0 ? m.ReadU32(addr + 4u) : 0u;
-                string words = string.Join(
-                    ',',
-                    Enumerable.Range(0, (int)Math.Min(count, 16u))
-                        .Select(i => $"{m.ReadU32(addr + 4u + (uint)i * 4u):X8}"));
-                Console.Error.WriteLine(
-                    $"[V82GpuPacket] rejected malformed gameplay OT packet " +
-                    $"address=0x{addr:X6} words={count} " +
-                    $"command=0x{command:X8} reason={reason} data={words}");
+                gpu.SetOrderingTablePacket(addr, count);
+                if (!GpuHle.GameplayActive ||
+                    IsSafeGameplayOrderingTablePacket(
+                        m, addr, count, out string reason))
+                {
+                    if (!gpu.TryDrawDirectTerrainPacket(count))
+                        for (uint i = 0; i < count; i++)
+                        {
+                            uint source = addr + 4u + i * 4u;
+                            gpu.WriteGp0(m.ReadU32(source), source);
+                        }
+                }
+                else if (_rejectedGameplayOtPackets++ < 32)
+                {
+                    uint command = m.ReadU32(addr + 4u);
+                    string words = string.Join(
+                        ',',
+                        Enumerable.Range(0, (int)Math.Min(count, 16u))
+                            .Select(i => $"{m.ReadU32(addr + 4u + (uint)i * 4u):X8}"));
+                    Console.Error.WriteLine(
+                        $"[V82GpuPacket] rejected malformed gameplay OT packet " +
+                        $"address=0x{addr:X6} words={count} " +
+                        $"command=0x{command:X8} reason={reason} data={words}");
+                }
             }
             uint next = header & 0xFFFFFFu;
             if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;

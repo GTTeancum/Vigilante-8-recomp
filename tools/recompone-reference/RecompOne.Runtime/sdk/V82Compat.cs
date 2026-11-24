@@ -536,6 +536,9 @@ public static partial class V82Compat
     static int _traceObjectCount;
     static readonly HashSet<uint> TracedRenderObjects = [];
     static int _objectSchedulerPass;
+    // One ordinary-pass scratch set per thread; don't retain huge or corrupt lists.
+    const int MaxRetainedSchedulerNodes = 1024;
+    [ThreadStatic] static HashSet<uint>? _spareSchedulerNodes;
     static int _gameplayFrameCount;
     static int _lastTracedOrderingTableFrame;
     static bool _matchGateRepairLogged;
@@ -6481,7 +6484,10 @@ public static partial class V82Compat
 
         uint head = m.ReadU32(c.GP + 0x1088u);
         uint node = m.ReadU32(head);
-        var visited = new HashSet<uint>();
+        // A guest callback can run a nested pass. Take the spare out of
+        // circulation until traversal ends; a throwing pass simply discards it.
+        var visited = _spareSchedulerNodes ?? new HashSet<uint>();
+        _spareSchedulerNodes = null;
         int callbacks = 0;
         while (node != 0u)
         {
@@ -6660,6 +6666,11 @@ public static partial class V82Compat
                 }
             }
             node = m.ReadU32(node);
+        }
+        if (visited.Count <= MaxRetainedSchedulerNodes)
+        {
+            visited.Clear();
+            _spareSchedulerNodes = visited;
         }
         c.RA = savedRa;
         c.S1 = savedS1;
