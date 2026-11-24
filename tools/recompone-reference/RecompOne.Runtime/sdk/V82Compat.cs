@@ -3107,22 +3107,29 @@ public static partial class V82Compat
         static float Fsca(int phase) =>
             MathF.Sin((ushort)phase * (2f * MathF.PI / 65536f));
 
-        for (int zOffset = -1; zOffset <= rows + 1; zOffset++)
-        for (int xOffset = -1; xOffset <= columns + 1; xOffset++)
+        (float Primary, float Secondary) WavesAt(int coordinate) =>
+            (Fsca(unchecked(primaryPhase + (int)(coordinate * primaryWaveStep))),
+             Fsca(unchecked(secondaryPhase + (int)(coordinate * secondaryWaveStep))));
+
+        // Each sine depends on just one axis. Keep the padded border used by
+        // the UV derivatives and the original multiply/add order at each point.
+        Span<(float Primary, float Secondary)> xWaves = paddedWidth <= 128
+            ? stackalloc (float, float)[paddedWidth]  // at most 1 KiB on the stack
+            : new (float, float)[paddedWidth];
+        for (int x = 0; x < paddedWidth; x++)
+            xWaves[x] = WavesAt(minimumX + (x - 1));
+
+        for (int z = 0; z < paddedHeight; z++)
         {
-            int worldX = minimumX + xOffset;
-            int worldZ = minimumZ + zOffset;
-            int primaryX = unchecked(primaryPhase +
-                (int)(worldX * primaryWaveStep));
-            int primaryZ = unchecked(primaryPhase +
-                (int)(worldZ * primaryWaveStep));
-            int secondaryX = unchecked(secondaryPhase +
-                (int)(worldX * secondaryWaveStep));
-            int secondaryZ = unchecked(secondaryPhase +
-                (int)(worldZ * secondaryWaveStep));
-            displacement[(zOffset + 1) * paddedWidth + xOffset + 1] =
-                Fsca(primaryX) * Fsca(primaryZ) * primaryWaveAmplitude +
-                Fsca(secondaryX) * Fsca(secondaryZ) * secondaryWaveAmplitude;
+            var zWave = WavesAt(minimumZ + (z - 1));
+            int rowStart = z * paddedWidth;
+            for (int x = 0; x < paddedWidth; x++)
+            {
+                var xWave = xWaves[x];
+                displacement[rowStart + x] =
+                    xWave.Primary * zWave.Primary * primaryWaveAmplitude +
+                    xWave.Secondary * zWave.Secondary * secondaryWaveAmplitude;
+            }
         }
 
         float Displacement(int x, int z) =>

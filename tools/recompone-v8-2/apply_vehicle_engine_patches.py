@@ -10,6 +10,7 @@ transformation bank, and wheel bank only for registered custom vehicle objects.
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 
@@ -372,6 +373,37 @@ def patch_match_teardown(text: str) -> str:
     return text[:start] + VEHICLE_RELEASE + text[start:]
 
 
+def patch_ground_engine(source: str) -> str:
+    """Change the sample argument only at the native engine key-on call.
+
+    The original a0 is the vehicle. By the time 8001E098 is called the
+    register contains the SPU voice instead. Capture the object on entry,
+    not from a register that happens to survive a particular call path.
+    """
+    header = "    public static void func_80038408(CpuContext c, IMemory m)\n    {\n"
+    if source.count(header) != 1:
+        raise RuntimeError("native vehicle engine startup routine changed")
+    start = source.index(header)
+    end = source.index("\n    }", start)
+    body = source[start:end]
+    capture = "        uint groundEngineVehicle = c.A0;\n"
+    seam = "c.A2 = RecompOne.Runtime.Sdk.V82VehicleRegistry.GroundEngineSample(m, groundEngineVehicle, c.A2);"
+    # RecompOne uses a qualified direct call when crossing a generated unit.
+    target = r"^( +)((?:Vigilante82PC\.)?func_8001E098\(c, m\);)$"
+    calls = list(re.finditer(target, body, re.MULTILINE))
+    if len(calls) != 1:
+        raise RuntimeError("native ground/transform engine key-on changed")
+    if capture in body or seam in body:
+        call = calls[0]
+        if (not body.startswith(header + capture) or body.count(capture) != 1
+                or body.count(seam) != 1 or not body[:call.start()].endswith(call[1] + seam + "\n")):
+            raise RuntimeError("incomplete or misplaced vehicle engine mapping")
+        return source
+    body = body.replace(header, header + capture, 1)
+    body = re.sub(target, lambda m: m[1] + seam + "\n" + m[0], body, flags=re.MULTILINE)
+    return source[:start] + body + source[end:]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
@@ -418,6 +450,11 @@ def main() -> int:
             raise RuntimeError("model face traversal boundary changed")
         body = body.replace(marker, seam + marker, 1)
         text = text[:start] + body + text[end:]
+        changed += 1
+
+    mapped = patch_ground_engine(text)
+    if mapped != text:
+        text = mapped
         changed += 1
 
     if changed:

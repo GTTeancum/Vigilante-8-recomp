@@ -208,6 +208,7 @@ def main() -> None:
         rebuilt = replace(
             rebuilt,
             sounds=original.sounds,
+            ground_engine_sample=original.ground_engine_sample,
         )
         original_dict = project.to_dict(original)
         rebuilt_dict = project.to_dict(rebuilt)

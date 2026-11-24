@@ -578,6 +578,7 @@ class VehicleProject:
     special_behavior_type: int | None = None
     original_special_type: int | None = None
     original_impact_kind: int = 0
+    ground_engine_sample: int = 0  # Native V8:2 uses sample zero by default.
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "VehicleProject":
@@ -608,6 +609,7 @@ class VehicleProject:
                 "special_behavior_type",
                 "original_special_type",
                 "original_impact_kind",
+                "ground_engine_sample",
             },
             "vehicle project",
         )
@@ -671,6 +673,7 @@ class VehicleProject:
                 value.get("supports_transformations", True)
             ),
             original_impact_kind=int(value.get("original_impact_kind",0)),
+            ground_engine_sample=int(value.get("ground_engine_sample", 0)),
             original_special_type=(None if value.get("original_special_type") is None else int(value["original_special_type"])),
             special_behavior_type=(
                 None
@@ -901,6 +904,11 @@ class VehicleProject:
             raise ValueError(
                 "unlock authoring schema is not decoded yet; opaque unlock data is forbidden"
             )
+        if self.ground_engine_sample != 0 and (
+            self.game != "V8_2" or not 0 < self.ground_engine_sample <= 255
+            or self.ground_engine_sample >= len(self.sounds)
+        ):
+            raise ValueError("ground_engine_sample must name an existing V8:2 body sound")
         for index, sound in enumerate(self.sounds):
             _strict(sound, {"pitch", "adpcm_base64"}, f"sound {index}")
             if set(sound) != {"pitch", "adpcm_base64"}:
@@ -1467,6 +1475,7 @@ def to_dict(vehicle: VehicleProject) -> dict[str, Any]:
         "special_behavior_type": vehicle.special_behavior_type,
         "original_special_type": vehicle.original_special_type,
         "original_impact_kind": vehicle.original_impact_kind,
+        "ground_engine_sample": vehicle.ground_engine_sample,
     }
     result["transformation_bank"] = (
         None

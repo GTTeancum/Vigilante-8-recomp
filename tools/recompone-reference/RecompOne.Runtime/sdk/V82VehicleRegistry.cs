@@ -45,11 +45,13 @@ public static class V82VehicleRegistry
     const uint ControllerClassMask = 0xFu << ControllerClassShift;
     const uint FlagSpecialBehavior = 1u << 16;
     const uint FlagOriginalSpecial = 1u << 23;
+    const int GroundEngineShift = 24;
+    const uint GroundEngineMask = 0xFFu << GroundEngineShift;
     const int SpecialBehaviorShift = 17;
     const uint SpecialBehaviorMask = 0x1Fu << SpecialBehaviorShift;
     const uint SupportedCapabilityFlags =
         FlagNonTransformable | ControllerClassMask |
-        FlagSpecialBehavior | SpecialBehaviorMask | FlagOriginalSpecial;
+        FlagSpecialBehavior | SpecialBehaviorMask | FlagOriginalSpecial | GroundEngineMask;
     const uint SpecialBehaviorTableAddress = 0x800C6130u;
     const uint SelectorInputAddress = 0x8006B508u;
     // Gameplay and SHELL share six participant bytes at 0x8006B8F4. The
@@ -2530,6 +2532,17 @@ public static class V82VehicleRegistry
             $"active-wheels={appliedWheels} (spring/damping)");
     }
 
+    // Only called at the native vehicle-engine key-on in 80038408, never
+    // when a weapon or animation asks for body sample zero. Transformed
+    // engines request nonzero entries in the shared SND instead.
+    public static uint GroundEngineSample(IMemory m, uint vehicle, uint nativeSample)
+    {
+        if (nativeSample != 0 || vehicle == 0 ||
+            !TryEntryForObject(m, vehicle, out VehicleEntry? entry) || entry == null)
+            return nativeSample;
+        return entry.Flags >> GroundEngineShift;
+    }
+
     public static uint StatsPointerForObject(
         IMemory m, uint vehicle, uint retailPointer)
     {
@@ -4111,7 +4124,17 @@ public static class V82VehicleRegistry
                 throw new InvalidDataException(
                     $"vehicle {entry.StableId} has invalid or shared selector preview ownership");
 
-            byte[] body = Banks[entry.BodyArchiveIndex].ReadBin();
+            var bodyBank = Banks[entry.BodyArchiveIndex];
+            uint engineSample = entry.Flags >> GroundEngineShift;
+            if (engineSample != 0)
+            {
+                byte[]? snd = bodyBank.ReadSound();
+                if (snd == null || snd.Length < 4 ||
+                    engineSample >= BinaryPrimitives.ReadUInt16LittleEndian(snd))
+                    throw new InvalidDataException(
+                        $"vehicle {entry.StableId} ground engine sample is outside its body SND");
+            }
+            byte[] body = bodyBank.ReadBin();
             int bodySlotCount = BinSlotCount(body);
             if (entry.BodyKind >= bodySlotCount ||
                 !BinSlotIsTopLevel(body, entry.BodyKind))
