@@ -561,6 +561,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cue", default="reference/assets/disc/Vigilante8.cue")
     parser.add_argument("--output", default="reference/generated")
+    parser.add_argument(
+        "--skip-dreamland",
+        action="store_true",
+        help="omit the translated N64 DREAMLND overlay for PS1-only reference work",
+    )
     args = parser.parse_args()
 
     repo = Path(__file__).resolve().parents[2]
@@ -624,29 +629,30 @@ def main() -> int:
             }
         )
 
-    dreamland_map = (
-        repo / "artifacts" / "n64_arena_port" /
-        "DREAMLND_PS1_CODE.functions.json"
-    )
-    dreamland_image = (
-        repo / "artifacts" / "n64_arena_port" /
-        "DREAMLND_PS1_CODE.DLL"
-    )
-    if not dreamland_map.exists() or not dreamland_image.exists():
-        raise FileNotFoundError(
-            "run tools/translate_v8_n64_overlay_code.py before preparing "
-            "the V8 reference build"
+    if not args.skip_dreamland:
+        dreamland_map = (
+            repo / "artifacts" / "n64_arena_port" /
+            "DREAMLND_PS1_CODE.functions.json"
         )
-    counts["DREAMLND"] = len(read_json(dreamland_map)["functions"])
-    overlays.append(
-        {
-            "name": "DREAMLND",
-            "funcMap": relative_posix(dreamland_map, config_dir),
-            "base": OVERLAY_BASE,
-            "hostFile": relative_posix(dreamland_image, config_dir),
-            "v8Relocate": True,
-        }
-    )
+        dreamland_image = (
+            repo / "artifacts" / "n64_arena_port" /
+            "DREAMLND_PS1_CODE.DLL"
+        )
+        if not dreamland_map.exists() or not dreamland_image.exists():
+            raise FileNotFoundError(
+                "run tools/translate_v8_n64_overlay_code.py before preparing "
+                "the V8 reference build"
+            )
+        counts["DREAMLND"] = len(read_json(dreamland_map)["functions"])
+        overlays.append(
+            {
+                "name": "DREAMLND",
+                "funcMap": relative_posix(dreamland_map, config_dir),
+                "base": OVERLAY_BASE,
+                "hostFile": relative_posix(dreamland_image, config_dir),
+                "v8Relocate": True,
+            }
+        )
 
     cue = (repo / args.cue).resolve()
     config = {
