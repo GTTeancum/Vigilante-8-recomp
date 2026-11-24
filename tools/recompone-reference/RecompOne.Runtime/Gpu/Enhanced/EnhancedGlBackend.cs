@@ -451,6 +451,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     bool _viewVectorIcons;
     bool _viewVectorFonts;
     bool _viewHudAnchoring;
+    int[] _supportedMsaaSamples = [];
+    int _requestedMsaaSamples = -1;
     int _viewMsaaSamples;
     int _backdropTriangles;
     float _backdropMinX = float.PositiveInfinity;
@@ -1238,7 +1240,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     {
         _gl = gl;
         _vram = new GlVram(gl);
-        RefreshViewSettings();
     }
 
     void RefreshViewSettings()
@@ -1258,8 +1259,13 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _viewVectorIcons = ConfigManager.View.VectorIcons;
         _viewVectorFonts = ConfigManager.View.VectorFonts;
         _viewHudAnchoring = ConfigManager.View.HudAnchoring;
-        int samples = Math.Clamp(ConfigManager.View.MsaaSamples, 0, 8);
-        if (samples == 1) samples = 0;
+        int requested = Math.Clamp(ConfigManager.View.MsaaSamples, 0, 8);
+        if (_requestedMsaaSamples == requested) return;
+        _requestedMsaaSamples = requested;
+        int samples = GlDisplayRt.ResolveSampleCount(requested, _supportedMsaaSamples);
+        if (requested > 1 && samples != requested)
+            Console.WriteLine($"[GlBackend] MSAA requested={requested}x effective={samples}x " +
+                $"(shared colour/depth modes: {string.Join(",", _supportedMsaaSamples)})");
         if (_viewMsaaSamples != samples)
         {
             _viewMsaaSamples = samples;
@@ -1457,6 +1463,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
 
     public unsafe void InitGl()
     {
+        _supportedMsaaSamples = GlDisplayRt.SupportedSampleCounts(_gl);
+        RefreshViewSettings();
         _vram.Init();
 
         _uniformState.Clear(); _depthEnabled = _depthWrite = null; _depthFunction = null;
@@ -1669,7 +1677,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         }
 
         var fresh = new GlDisplayRt { X = fbX, Y = fbY, W = fbW, H = fbH, Margin = GpuHle.WideMargin(fbW), Stamp = ++_rtStamp, LastDrawFrame = _frame };
-        fresh.Create(_gl);
+        fresh.Create(_gl, _viewMsaaSamples);
         _rts[slot] = fresh;
         SyncRtFromVram(fresh, fbX, fbY, fbW, fbH);
         if (TraceTerrainVram)

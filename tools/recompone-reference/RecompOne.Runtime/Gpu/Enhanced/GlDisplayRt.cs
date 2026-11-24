@@ -26,10 +26,38 @@ public sealed class GlDisplayRt
     public bool Intersects(int rx, int ry, int rw, int rh)
         => rx < X + W && X < rx + rw && ry < Y + H && Y < ry + rh;
 
-    public void Create(GL gl)
+    // A multisample framebuffer needs the SAME supported count on its
+    // colour and depth/stencil renderbuffers. The global GL_MAX_SAMPLES
+    // alone is not a guarantee for either internal format.
+    internal static int[] SupportedSampleCounts(GL gl)
     {
-        Samples = Math.Clamp(Config.ConfigManager.View.MsaaSamples, 0, 8);
-        if (Samples == 1) Samples = 0;
+        int[] Counts(GLEnum format)
+        {
+            gl.GetInternalformat(GLEnum.Renderbuffer, format, GLEnum.NumSampleCounts, 1, out int count);
+            if (count <= 0) return [];
+            int[] counts = new int[count];
+            gl.GetInternalformat(GLEnum.Renderbuffer, format, GLEnum.Samples, (uint)count, counts.AsSpan());
+            return counts;
+        }
+        return Counts(GLEnum.Rgba8).Intersect(Counts(GLEnum.Depth24Stencil8))
+            .Where(n => n is >= 2 and <= 8).Order().ToArray();
+    }
+
+    internal static int ResolveSampleCount(int requested, ReadOnlySpan<int> supported)
+    {
+        if (requested <= 1 || supported.IsEmpty) return 0;
+        for (int i = supported.Length - 1; i >= 0; i--)
+            if (supported[i] <= requested) return supported[i];
+        // Some drivers expose only 4x and round a 2x request up to 4x.
+        return supported[0];
+    }
+
+    public void Create(GL gl) => Create(gl,
+        ResolveSampleCount(Config.ConfigManager.View.MsaaSamples, SupportedSampleCounts(gl)));
+
+    internal void Create(GL gl, int samples)
+    {
+        Samples = samples;
         Tex = gl.GenTexture();
         gl.BindTexture(TextureTarget.Texture2D, Tex);
         gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Nearest);

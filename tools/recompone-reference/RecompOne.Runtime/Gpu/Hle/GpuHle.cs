@@ -882,6 +882,15 @@ public static class GpuHle
         Backend?.SetDreamcastFogColor(red, green, blue);
     }
 
+    static void RemoveArenaKeys<T>(Dictionary<uint, T> packets, uint start, uint end)
+    {
+        // On .NET 10, Dictionary.Remove does not invalidate its key enumerator.
+        // Retire this buffer in place without copying the keys of every matching packet.
+        foreach (uint address in packets.Keys)
+            if (address >= start && address < end)
+                packets.Remove(address);
+    }
+
     public static void BeginPacketArena(uint start, uint end)
     {
         start = NormalizePacketAddress(start);
@@ -924,24 +933,12 @@ public static class GpuHle
             address >= start && address < end);
         TerrainRoutePackets.RemoveWhere(address =>
             address >= start && address < end);
-        foreach (uint address in CoarseTerrainPackets.Keys
-                     .Where(address => address >= start && address < end)
-                     .ToArray())
-            CoarseTerrainPackets.Remove(address);
-        foreach (uint address in TerrainTransitionPackets.Keys
-                     .Where(address => address >= start && address < end)
-                     .ToArray())
-            TerrainTransitionPackets.Remove(address);
-        foreach (uint address in TriangleNclipPackets.Keys
-                     .Where(address => address >= start && address < end)
-                     .ToArray())
-            TriangleNclipPackets.Remove(address);
+        RemoveArenaKeys(CoarseTerrainPackets, start, end);
+        RemoveArenaKeys(TerrainTransitionPackets, start, end);
+        RemoveArenaKeys(TriangleNclipPackets, start, end);
         TriangleNclipHeaderPending.RemoveWhere(address =>
             address >= start && address < end);
-        foreach (uint address in PacketOwners.Keys
-                     .Where(address => address >= start && address < end)
-                     .ToArray())
-            PacketOwners.Remove(address);
+        RemoveArenaKeys(PacketOwners, start, end);
         if (TracePacketArenas)
             Console.Error.WriteLine(
                 $"[PacketArenaRetire] gameplay={(GameplayActive ? 1 : 0)} " +
