@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.CompilerServices;
 
 namespace RecompOne.Runtime;
@@ -128,11 +129,30 @@ public sealed class Spu
         public short CurVolL, CurVolR;
         public int VolCycL, VolCycR;
 
+        // A privately imported ground-engine source for this key-on only.
+        public EngineAdpcm? EngineSource;
+        public uint EngineStart;
         public readonly short[] Buf = new short[31];
+    }
+
+    internal sealed class EngineAdpcm
+    {
+        readonly byte[] _blocks;
+        internal ReadOnlySpan<byte> Blocks => _blocks;
+
+        internal EngineAdpcm(ReadOnlySpan<byte> blocks)
+        {
+            if (blocks.Length is < 32 or > 128 * 1024 || (blocks.Length & 15) != 0)
+                throw new ArgumentException("Original engine must contain bounded ADPCM blocks.", nameof(blocks));
+            _blocks = blocks.ToArray();
+        }
     }
 
     readonly Voice[] _v = new Voice[24];
     readonly object _sync = new();
+    uint _activeVoices; // Non-Off voices, maintained under _sync.
+    int _engineKeyOnVoice = -1;
+    EngineAdpcm? _engineKeyOnSource;
 
     ushort _mainVolL, _mainVolR;
     short _mainCurL, _mainCurR;
@@ -243,6 +263,32 @@ public sealed class Spu
         lock (_sync) WriteReg(phys, val);
     }
 
+    // The existing game routine still programs the voice, ADSR, pitch and
+    // stereo volume. Only its next key-on for this slot gets the private
+    // decode source. The mixer cannot see a half-programmed voice.
+    internal bool StartWithEngineAdpcm(int voice, EngineAdpcm source, Action start)
+    {
+        if ((uint)voice >= _v.Length)
+            throw new ArgumentOutOfRangeException(nameof(voice));
+        lock (_sync)
+        {
+            if (_engineKeyOnVoice >= 0)
+                throw new InvalidOperationException("Nested original engine voice setup.");
+            _engineKeyOnVoice = voice;
+            _engineKeyOnSource = source;
+            try
+            {
+                start();
+                return _engineKeyOnSource == null;
+            }
+            finally
+            {
+                _engineKeyOnVoice = -1;
+                _engineKeyOnSource = null;
+            }
+        }
+    }
+
     void WriteReg(uint phys, ushort val)
     {
         uint off = phys - Base;
@@ -301,9 +347,17 @@ public sealed class Spu
             if ((mask & (1 << i)) == 0) continue;
             var v = _v[b + i];
             v.Phase = AdsrPhase.Attack;
+            _activeVoices |= 1u << (b + i);
             v.AdsrVol = 0;
             v.AdsrCycleCount = 0;
             v.CurAddr = (uint)v.StartAddr << 3;
+            int voice = b + i;
+            v.EngineSource = voice == _engineKeyOnVoice ? _engineKeyOnSource : null;
+            if (v.EngineSource != null)
+            {
+                v.EngineStart = v.CurAddr;
+                _engineKeyOnSource = null;
+            }
             v.IgnoreLoop = false;
             v.PitchCounter = 0;
             v.Old = v.Older = 0;
@@ -430,10 +484,12 @@ public sealed class Spu
         uint pmonMask = (uint)(_pmon | (_pmonHi << 16));
         int prevOutx = 0;
 
-        for (int i = 0; i < 24; i++)
+        uint active = _activeVoices;
+        for (uint pending = active; pending != 0; pending &= pending - 1)
         {
+            int i = BitOperations.TrailingZeroCount(pending);
+            uint bit = 1u << i;
             var v = _v[i];
-            if (v.Phase == AdsrPhase.Off) { prevOutx = 0; continue; }
 
             TickAdsr(v);
             SweepTick(v.VolL, ref v.CurVolL, ref v.VolCycL);
@@ -447,7 +503,7 @@ public sealed class Spu
             }
 
             int sample;
-            if ((nonMask & (1u << i)) != 0)
+            if ((nonMask & bit) != 0)
             {
                 sample = (short)_noiseLevel;
             }
@@ -464,9 +520,12 @@ public sealed class Spu
             int amp = (sample * v.AdsrVol) >> 15;
 
             int step = v.Pitch;
-            if (i > 0 && (pmonMask & (1u << i)) != 0)
+            if (i > 0 && (pmonMask & bit) != 0)
             {
-                int factor = Math.Clamp(prevOutx, -0x8000, 0x7FFF) + 0x8000;
+                // Pitch mod uses the previous physical slot, not the previous
+                // active voice. An inactive predecessor contributes zero.
+                int modulator = (active & (bit >> 1)) != 0 ? prevOutx : 0;
+                int factor = Math.Clamp(modulator, -0x8000, 0x7FFF) + 0x8000;
                 step = ((short)(ushort)step * factor >> 15) & 0xFFFF;
             }
             if (step > 0x3FFF) step = 0x4000;
@@ -482,6 +541,14 @@ public sealed class Spu
 
             sumL += (amp * v.CurVolL) >> 15;
             sumR += (amp * v.CurVolR) >> 15;
+
+            // A voice can finish its envelope and still decode a block on
+            // this tick, which can in turn change its phase back to Release.
+            if (v.Phase == AdsrPhase.Off)
+            {
+                v.EngineSource = null;
+                _activeVoices &= ~bit;
+            }
         }
 
         sumL = Math.Clamp(sumL, -32768, 32767);
@@ -529,8 +596,26 @@ public sealed class Spu
         v.Buf[2] = v.Buf[30];
 
         uint addr = v.CurAddr & (uint)(RamSize - 1);
-        byte hdr = Ram[addr];
-        byte flags = Ram[(addr + 1) & (RamSize - 1)];
+        ReadOnlySpan<byte> privateBlock = default;
+        if (v.EngineSource is { } engine)
+        {
+            // The hardware-visible cursor/repeat registers keep their usual
+            // address arithmetic. This voice alone interprets that cursor
+            // relative to its latched start; no data is placed in SPU RAM.
+            uint offset = unchecked(addr - v.EngineStart) & (RamSize - 1);
+            if ((offset & 15) != 0 || offset > (uint)(engine.Blocks.Length - 16))
+            {
+                // An explicit later repeat write can point outside the clip.
+                // Never begin decoding unrelated RAM through an engine voice.
+                v.AdsrVol = 0;
+                v.Phase = AdsrPhase.Off;
+                v.EngineSource = null;
+                return;
+            }
+            privateBlock = engine.Blocks.Slice((int)offset, 16);
+        }
+        byte hdr = privateBlock.IsEmpty ? Ram[addr] : privateBlock[0];
+        byte flags = privateBlock.IsEmpty ? Ram[(addr + 1) & (RamSize - 1)] : privateBlock[1];
 
         int shift = hdr & 0xF;
         if (shift > 12) shift = 9;
@@ -541,11 +626,22 @@ public sealed class Spu
         int k1 = K1[filter];
 
         int pos = 3;
-        for (int i = 0; i < 14; i++)
+        if (privateBlock.IsEmpty)
         {
-            byte b = Ram[(addr + 2 + (uint)i) & (RamSize - 1)];
-            v.Buf[pos++] = DecodeSample(v, b & 0xF, shift, k0, k1);
-            v.Buf[pos++] = DecodeSample(v, b >> 4,  shift, k0, k1);
+            for (int i = 0; i < 14; i++)
+            {
+                byte b = Ram[(addr + 2 + (uint)i) & (RamSize - 1)];
+                v.Buf[pos++] = DecodeSample(v, b & 0xF, shift, k0, k1);
+                v.Buf[pos++] = DecodeSample(v, b >> 4,  shift, k0, k1);
+            }
+        }
+        else
+        {
+            foreach (byte b in privateBlock[2..])
+            {
+                v.Buf[pos++] = DecodeSample(v, b & 0xF, shift, k0, k1);
+                v.Buf[pos++] = DecodeSample(v, b >> 4,  shift, k0, k1);
+            }
         }
 
         if ((flags & 4) != 0 && !v.IgnoreLoop)

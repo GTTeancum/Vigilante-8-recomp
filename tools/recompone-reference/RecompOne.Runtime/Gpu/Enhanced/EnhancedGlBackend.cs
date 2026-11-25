@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Globalization;
@@ -40,6 +41,20 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         public int BlendCode;
         public uint TerrainOffset;
         public float TerrainMipX, TerrainMipY, TerrainMipW, TerrainMipH;
+    }
+
+    readonly struct TriangleUvBounds
+    {
+        public readonly float MinU, MinV, MaxU, MaxV;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public TriangleUvBounds(in HleVertex a, in HleVertex b, in HleVertex c)
+        {
+            MinU = MathF.Min(a.U, MathF.Min(b.U, c.U));
+            MinV = MathF.Min(a.V, MathF.Min(b.V, c.V));
+            MaxU = MathF.Max(a.U, MathF.Max(b.U, c.U));
+            MaxV = MathF.Max(a.V, MathF.Max(b.V, c.V));
+        }
     }
 
     // Pair only complementary rectangular-UV triangles from exact world meshes.
@@ -1937,8 +1952,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             ReplayDeferredBatches(_deferredScreenEffects);
         }
         var target = Classify();
+        // E6 mask testing reads the previous primitive's framebuffer bit.
+        // Two overlapping writes cannot share one pre-batch mask snapshot.
         if (_count > 0 &&
-            (target != _kTarget ||
+            (_env.CheckMask || target != _kTarget ||
              !DesiredMatches(
                  transparent,
                  blend,
@@ -1992,13 +2009,17 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             if (TracePerformance) _traceCapacityBreaks++;
             Flush();
         }
+        // BlendStateOf can group different raw modes/materials. Retain the
+        // last primitive's raw values even when it joins the current batch.
+        _kTransparent = transparent; _kBlend = blend; _kMaterial = material;
+        // A different target, incompatible state or full stream was flushed
+        // above. A surviving batch already owns all of the following state.
+        if (_count != 0) return;
         _kTarget = target;
-        _kTransparent = transparent; _kBlend = blend;
         _kDepthTest = depthTest;
         _kDepthWrite = depthWrite;
         _kSourceDepthCompareWrite = sourceDepthCompareWrite;
         _kDreamcastTerrainDepth = dreamcastTerrainDepth;
-        _kMaterial = material;
         _kSetMask = _env.SetMask ? 1 : 0; _kCheckMask = _env.CheckMask ? 1 : 0;
         _kTwAndX = ~(_env.TwMaskX * 8) & 0xFF; _kTwAndY = ~(_env.TwMaskY * 8) & 0xFF;
         _kTwOrX = (_env.TwOffX & _env.TwMaskX) * 8; _kTwOrY = (_env.TwOffY & _env.TwMaskY) * 8;
@@ -2322,7 +2343,8 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
     /// visible remainder. Returns true when it handled the primitive.
     /// </summary>
     bool ClipAgainstNearPlane(
-        in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
+        in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f,
+        in TriangleUvBounds authoredUv)
     {
         if (!NearPlaneClipping || _clippingNearPlane ||
             !a.HasViewSpace || !b.HasViewSpace || !c.HasViewSpace)
@@ -2381,10 +2403,12 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         _clippingNearPlane = true;
         try
         {
+            // The atlas footprint remains that of the original primitive.
+            // Texture feedback still uses the clipped vertices in DrawTriCore.
             if (count >= 3)
-                DrawTriCore(kept[0], kept[1], kept[2], f);
+                DrawTriCore(kept[0], kept[1], kept[2], f, authoredUv);
             if (count == 4)
-                DrawTriCore(kept[0], kept[2], kept[3], f);
+                DrawTriCore(kept[0], kept[2], kept[3], f, authoredUv);
         }
         finally
         {
@@ -2798,34 +2822,19 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             return;
         }
 
-        HleVertex authoredA = a, authoredB = b, authoredC = c;
-        float authoredMinU = MathF.Min(a.U, MathF.Min(b.U, c.U));
-        float authoredMinV = MathF.Min(a.V, MathF.Min(b.V, c.V));
-        float authoredMaxU = MathF.Max(a.U, MathF.Max(b.U, c.U));
-        float authoredMaxV = MathF.Max(a.V, MathF.Max(b.V, c.V));
-        authoredA.HasAuthoredUvBounds =
-            authoredB.HasAuthoredUvBounds =
-            authoredC.HasAuthoredUvBounds = true;
-        authoredA.AuthoredMinU = authoredB.AuthoredMinU =
-            authoredC.AuthoredMinU = authoredMinU;
-        authoredA.AuthoredMinV = authoredB.AuthoredMinV =
-            authoredC.AuthoredMinV = authoredMinV;
-        authoredA.AuthoredMaxU = authoredB.AuthoredMaxU =
-            authoredC.AuthoredMaxU = authoredMaxU;
-        authoredA.AuthoredMaxV = authoredB.AuthoredMaxV =
-            authoredC.AuthoredMaxV = authoredMaxV;
+        var authoredUv = new TriangleUvBounds(a, b, c);
         if (GpuHle.NativeModalActive && _kTarget is { Margin: > 0 } modalTri &&
             !a.HasViewSpace && !b.HasViewSpace && !c.HasViewSpace &&
             !a.HasGteZ && !b.HasGteZ && !c.HasGteZ)
         {
-            HleVertex sa = authoredA, sb = authoredB, sc = authoredC;
+            HleVertex sa = a, sb = b, sc = c;
             sa.X -= modalTri.Margin;
             sb.X -= modalTri.Margin;
             sc.X -= modalTri.Margin;
-            DrawTriCore(sa, sb, sc, f);
+            DrawTriCore(sa, sb, sc, f, authoredUv);
             return;
         }
-        DrawTriCore(authoredA, authoredB, authoredC, f);
+        DrawTriCore(a, b, c, f, authoredUv);
     }
 
     void DrawDreamcastTerrainPatch(
@@ -3361,27 +3370,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         // per-call performance timer inside the parent terrain packet timer.
         // Preserve the authored UV footprint required by the replacement
         // atlas, then enter the common raster path directly.
-        float minU = MathF.Min(a.U, MathF.Min(b.U, c.U));
-        float minV = MathF.Min(a.V, MathF.Min(b.V, c.V));
-        float maxU = MathF.Max(a.U, MathF.Max(b.U, c.U));
-        float maxV = MathF.Max(a.V, MathF.Max(b.V, c.V));
-        HleVertex authoredA = a;
-        HleVertex authoredB = b;
-        HleVertex authoredC = c;
-        authoredA.HasAuthoredUvBounds =
-            authoredB.HasAuthoredUvBounds =
-            authoredC.HasAuthoredUvBounds = true;
-        authoredA.AuthoredMinU = authoredB.AuthoredMinU =
-            authoredC.AuthoredMinU = minU;
-        authoredA.AuthoredMinV = authoredB.AuthoredMinV =
-            authoredC.AuthoredMinV = minV;
-        authoredA.AuthoredMaxU = authoredB.AuthoredMaxU =
-            authoredC.AuthoredMaxU = maxU;
-        authoredA.AuthoredMaxV = authoredB.AuthoredMaxV =
-            authoredC.AuthoredMaxV = maxV;
+        var authoredUv = new TriangleUvBounds(a, b, c);
         if (TracePerformance)
             _traceGeneratedTerrainTriangles++;
-        DrawTriCore(authoredA, authoredB, authoredC, flags);
+        DrawTriCore(a, b, c, flags, authoredUv);
     }
 
     static HleVertex ApplyDreamcastTerrainDistanceColor(
@@ -3472,9 +3464,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         return result;
     }
 
-    void DrawTriCore(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
+    void DrawTriCore(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f,
+        in TriangleUvBounds authoredUv)
     {
-        if (ClipAgainstNearPlane(a, b, c, f)) return;
+        if (ClipAgainstNearPlane(a, b, c, f, authoredUv)) return;
         if (CullByPs1WorldObjectWinding(a, b, c, f)) return;
         if (CullByPacketNclip(a, b, c, f)) return;
         if (TraceModalRects && GpuHle.NativeModalActive && _modalTriLines++ < 300)
@@ -4366,18 +4359,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             else if (vertex.X >= target.X + target.W)
                 vertex.X += target.Margin;
         }
-        float uvMinX = a.HasAuthoredUvBounds
-            ? a.AuthoredMinU
-            : MathF.Min(a.U, MathF.Min(b.U, c.U));
-        float uvMinY = a.HasAuthoredUvBounds
-            ? a.AuthoredMinV
-            : MathF.Min(a.V, MathF.Min(b.V, c.V));
-        float uvMaxX = a.HasAuthoredUvBounds
-            ? a.AuthoredMaxU
-            : MathF.Max(a.U, MathF.Max(b.U, c.U));
-        float uvMaxY = a.HasAuthoredUvBounds
-            ? a.AuthoredMaxV
-            : MathF.Max(a.V, MathF.Max(b.V, c.V));
+        float uvMinX = authoredUv.MinU;
+        float uvMinY = authoredUv.MinV;
+        float uvMaxX = authoredUv.MaxU;
+        float uvMaxY = authoredUv.MaxV;
         va.UvMinX = vb.UvMinX = vc.UvMinX = uvMinX;
         va.UvMinY = vb.UvMinY = vc.UvMinY = uvMinY;
         va.UvMaxX = vb.UvMaxX = vc.UvMaxX = uvMaxX;
@@ -5654,7 +5639,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         }
         else
         {
-            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, rt.DrawFbo);
             _gl.Viewport(0, 0, (uint)rt.TexW, (uint)rt.TexH);
             destTex = rt.Tex;
             // uDest is read only for the native check-mask operation. Keep
@@ -5664,6 +5648,9 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             // levels GPU-bound.
             if (_kCheckMask != 0)
                 ResolveCheckMaskRegion(rt);
+            // A resolve binds the single-sample texture's FBO for drawing.
+            // Sample that texture for the mask, but draw into the live target.
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, rt.DrawFbo);
         }
         if (!CacheStateActive || rt == null || _kCheckMask != 0) _vram.Barrier();
 
@@ -5947,11 +5934,17 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _gl.BlendFuncSeparate(BlendingFactor.Src1Color, BlendingFactor.Src1Alpha, BlendingFactor.One, BlendingFactor.Zero);
             if (_kBlend == 2)
             {
+                // Both passes implement one PS1 command. A check-mask on
+                // pass two must read the original bit, not one pass one wrote.
+                if (_kCheckMask != 0)
+                    _gl.BlendFuncSeparate(BlendingFactor.Src1Color, BlendingFactor.Src1Alpha, BlendingFactor.Zero, BlendingFactor.One);
                 _gl.BlendEquation(BlendEquationModeEXT.FuncAdd);
                 SetBlend(0f, 1f);
                 DrawBatch();
 
                 _vram.Barrier();
+                if (_kCheckMask != 0)
+                    _gl.BlendFuncSeparate(BlendingFactor.Src1Color, BlendingFactor.Src1Alpha, BlendingFactor.One, BlendingFactor.Zero);
                 _gl.BlendEquationSeparate(BlendEquationModeEXT.FuncReverseSubtract, BlendEquationModeEXT.FuncAdd);
                 SetBlend(1f, 1f);
                 _gl.Uniform4(_uBlendOpaque, 0f, 0f, 0f, 1f);
@@ -6107,7 +6100,10 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         BufferedDeferredBatch? batch = batches.Count != 0
             ? batches[^1]
             : null;
+        // Untagged triangles are separate source draws. A nonzero native
+        // water group describes a single reconstructed quad or surface mesh.
         if (batch == null ||
+            (state.CheckMask != 0 && state.PrimitiveGroup == 0u) ||
             !SameDeferredState(batch.State, state) ||
             batch.Vertices.Count > MaxVerts - 3)
         {
@@ -6392,51 +6388,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                 groups.Add(batch.State.PrimitiveGroup, batch);
         }
 
-        bool MatchesCurrent(in DeferredBatch batch) =>
-            batch.Target == _kTarget &&
-            BlendStateOf(batch.Transparent, batch.Blend, batch.Material) ==
-                BlendStateOf(_kTransparent, _kBlend, _kMaterial) &&
-            batch.DepthTest == _kDepthTest &&
-            batch.DepthWrite == _kDepthWrite &&
-            batch.SourceDepthCompareWrite == _kSourceDepthCompareWrite &&
-            batch.DreamcastTerrainDepth == _kDreamcastTerrainDepth &&
-            batch.NativeRoadPrioritySz == _kNativeRoadPrioritySz &&
-            batch.SetMask == _kSetMask &&
-            batch.CheckMask == _kCheckMask &&
-            batch.TwAndX == _kTwAndX &&
-            batch.TwAndY == _kTwAndY &&
-            batch.TwOrX == _kTwOrX &&
-            batch.TwOrY == _kTwOrY &&
-            batch.ClipX0 == _kClipX0 &&
-            batch.ClipY0 == _kClipY0 &&
-            batch.ClipX1 == _kClipX1 &&
-            batch.ClipY1 == _kClipY1 &&
-            batch.TextureSmoothing == _kTextureSmoothing;
-
-        void Adopt(in DeferredBatch batch)
-        {
-            _kTarget = batch.Target;
-            _kTransparent = batch.Transparent;
-            _kDepthTest = batch.DepthTest;
-            _kDepthWrite = batch.DepthWrite;
-            _kSourceDepthCompareWrite = batch.SourceDepthCompareWrite;
-            _kDreamcastTerrainDepth = batch.DreamcastTerrainDepth;
-            _kNativeRoadPrioritySz = batch.NativeRoadPrioritySz;
-            _kMaterial = batch.Material;
-            _kBlend = batch.Blend;
-            _kSetMask = batch.SetMask;
-            _kCheckMask = batch.CheckMask;
-            _kTwAndX = batch.TwAndX;
-            _kTwAndY = batch.TwAndY;
-            _kTwOrX = batch.TwOrX;
-            _kTwOrY = batch.TwOrY;
-            _kClipX0 = batch.ClipX0;
-            _kClipY0 = batch.ClipY0;
-            _kClipX1 = batch.ClipX1;
-            _kClipY1 = batch.ClipY1;
-            _kTextureSmoothing = batch.TextureSmoothing;
-        }
-
         bool pairedSurfaceAvailable = waterBaseGroups.Values.Any(batch =>
             batch.State.WaterSurfaceMesh?.Texture != null);
 
@@ -6458,12 +6409,7 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
                     ? surface : null;
             int vertexCount = mesh?.Vertices.Length ?? batch.Vertices.Count;
             Debug.Assert(vertexCount <= MaxVerts);
-            if (_count > 0 &&
-                (!MatchesCurrent(batch.State) ||
-                 _count + vertexCount > MaxVerts))
-                Flush();
-            if (_count == 0)
-                Adopt(batch.State);
+            PrepareDeferredBatch(batch.State, vertexCount);
             if (mesh != null)
                 AppendDreamcastWaterSurfaceMesh(batch, mesh);
             else
@@ -6584,6 +6530,26 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
         if (batches.Count == 0)
             return;
 
+        foreach (var batch in batches)
+        {
+            Debug.Assert(batch.Vertices.Length <= MaxVerts);
+            PrepareDeferredBatch(batch, batch.Vertices.Length);
+            batch.Vertices.CopyTo(_verts, _count);
+            _count += batch.Vertices.Length;
+        }
+        Flush();
+        batches.Clear();
+    }
+
+    void PrepareDeferredBatch(in DeferredBatch batch, int vertexCount)
+    {
+        if (_count > 0 &&
+            (batch.CheckMask != 0 || !MatchesCurrent(batch) ||
+             _count + vertexCount > MaxVerts))
+            Flush();
+        if (_count == 0)
+            Adopt(batch);
+
         bool MatchesCurrent(in DeferredBatch batch) =>
             batch.Target == _kTarget &&
             BlendStateOf(batch.Transparent, batch.Blend, batch.Material) ==
@@ -6628,21 +6594,6 @@ public sealed class EnhancedGlBackend : Hle.IGpuBackend
             _kClipY1 = batch.ClipY1;
             _kTextureSmoothing = batch.TextureSmoothing;
         }
-
-        foreach (var batch in batches)
-        {
-            Debug.Assert(batch.Vertices.Length <= MaxVerts);
-            if (_count > 0 &&
-                (!MatchesCurrent(batch) ||
-                 _count + batch.Vertices.Length > MaxVerts))
-                Flush();
-            if (_count == 0)
-                Adopt(batch);
-            batch.Vertices.CopyTo(_verts, _count);
-            _count += batch.Vertices.Length;
-        }
-        Flush();
-        batches.Clear();
     }
 
     void SetBlend(float src, float dst) => _gl.Uniform4(_uBlend, src, src, src, dst);

@@ -374,7 +374,7 @@ def patch_match_teardown(text: str) -> str:
 
 
 def patch_ground_engine(source: str) -> str:
-    """Change the sample argument only at the native engine key-on call.
+    """Route only the native vehicle-engine key-on through the guest helpers.
 
     The original a0 is the vehicle. By the time 8001E098 is called the
     register contains the SPU voice instead. Capture the object on entry,
@@ -389,18 +389,31 @@ def patch_ground_engine(source: str) -> str:
     capture = "        uint groundEngineVehicle = c.A0;\n"
     seam = "c.A2 = RecompOne.Runtime.Sdk.V82VehicleRegistry.GroundEngineSample(m, groundEngineVehicle, c.A2);"
     # RecompOne uses a qualified direct call when crossing a generated unit.
-    target = r"^( +)((?:Vigilante82PC\.)?func_8001E098\(c, m\);)$"
+    target = r"^( +)((?:Vigilante82PC\.)?func_8001E098)\(c, m\);$"
     calls = list(re.finditer(target, body, re.MULTILINE))
     if len(calls) != 1:
         raise RuntimeError("native ground/transform engine key-on changed")
-    if capture in body or seam in body:
-        call = calls[0]
+    call = calls[0]
+    indent, native = call.groups()
+    hook = "RecompOne.Runtime.Sdk.V82VehicleRegistry.TryPlayLocalOriginalEngine"
+    route = f"if (!{hook}(c, m, groundEngineVehicle, {native}))"
+    if hook in body:
         if (not body.startswith(header + capture) or body.count(capture) != 1
-                or body.count(seam) != 1 or not body[:call.start()].endswith(call[1] + seam + "\n")):
-            raise RuntimeError("incomplete or misplaced vehicle engine mapping")
+                or body.count(seam) != 1 or body.count(hook) != 1
+                or not body[:call.start()].endswith(indent[:-4] + seam + "\n" + indent[:-4] + route + "\n")):
+            raise RuntimeError("incomplete or misplaced local engine key-on")
         return source
-    body = body.replace(header, header + capture, 1)
-    body = re.sub(target, lambda m: m[1] + seam + "\n" + m[0], body, flags=re.MULTILINE)
+    if capture in body or seam in body:
+        if (not body.startswith(header + capture) or body.count(capture) != 1
+                or body.count(seam) != 1 or not body[:call.start()].endswith(indent + seam + "\n")):
+            raise RuntimeError("incomplete or misplaced vehicle engine mapping")
+        prefix = ""
+    else:
+        prefix = indent + seam + "\n"
+    body = (body[:call.start()] + prefix + indent + route + "\n" +
+            indent + "    " + native + "(c, m);" + body[call.end():])
+    if capture not in body:
+        body = body.replace(header, header + capture, 1)
     return source[:start] + body + source[end:]
 
 

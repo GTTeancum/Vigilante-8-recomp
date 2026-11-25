@@ -70,9 +70,20 @@ layout details are in `reference-v8-2/LOOSE_FILES.md`.
 
 ## Original V8 guest-engine audio
 
-A new host alone does not change an installed original-roster mod. To use the
-original engines, **keep a copy of the complete old package**, including its
-selector portraits. Generate two updated files in a separate, *new* directory:
+With the shipped original-roster mod, choose your original Vigilante 8 USA
+Rev 1 CUE in setup to add the original engines alongside that disc's music.
+You can do this before importing 2nd Offense or by running the program with
+your original CUE after installation. Setup verifies the original disc and
+saves a small local cache beside `game_data`; it never overwrites mod files.
+Only the matching shipped roster uses the cache. Its original ground engines
+use the native sound player's voice, gain, pitch and loop settings without
+using room in the PS1 sound RAM. Stock cars, weapons, transformations, other
+rosters and installations with no recognized original disc keep existing
+behavior. A missing or damaged cache does not stop the game.
+
+The older manual updater remains available for separately managed local
+copies. **Keep a copy of the complete old package**, including its selector
+portraits. Generate two updated files in a separate, *new* directory:
 
 ```powershell
 py -3 tools/recompone-v8-2/upgrade_guest_engine_audio.py --package "C:\V8\original-roster" --disc-bin "D:\V8\Vigilante 8 (USA) (Rev 1) (Track 01).bin" --output "C:\V8\engine-pair"

@@ -55,27 +55,34 @@ public static class FirstRunSetup
                         lock (gate) progress = p;
                         Console.Error.WriteLine($"[Setup] {p.Phase} {p.Current}/{p.Total} {p.Item}");
                     }
-                    // The first game's disc only supplies its soundtrack. With
-                    // Second Offense already installed the game then starts;
-                    // otherwise setup waits for the Second Offense disc, whose
-                    // import adopts the staged album.
+                    string completion = "Starting your game...";
+                    // The optional first disc supplies its soundtrack and,
+                    // for an authenticated revision, the original guest loops.
                     if (V8SoundtrackImporter.IsFirstGameDisc(cue))
                     {
-                        if (!V8SoundtrackImporter.Import(cue, destination, Report, cancel.Token))
+                        bool installed = V8SoundtrackImporter.Import(cue, destination, Report, cancel.Token);
+                        Report(new("original-engines", 0, 1, "Checking original engine samples"));
+                        bool engines = OriginalV8EngineInstallation.TryImport(cue, destination, cancel.Token,
+                            text => Console.Error.WriteLine($"[OriginalV8Engines] {text}"));
+                        string added = engines
+                            ? "Vigilante 8 soundtrack and original engines added."
+                            : "Vigilante 8 soundtrack added. Original engines were not added (see setup log).";
+                        if (!installed)
                         {
                             lock (gate)
                             {
-                                notice = "Vigilante 8 soundtrack added. Now choose your Vigilante 8: 2nd Offense CUE to install the game.";
+                                notice = added + " Now choose your Vigilante 8: 2nd Offense CUE to install the game.";
                                 progress = new("soundtrack-staged", 1, 1, "");
                             }
                             return;
                         }
+                        completion = added + " Starting your game...";
                     }
                     else
                     {
                         V82LooseImporter.Import(cue, destination, Report, cancel.Token);
                     }
-                    lock (gate) { success = true; progress = new("complete", 1, 1, "Starting your game..."); }
+                    lock (gate) { success = true; progress = new("complete", 1, 1, completion); }
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex)
@@ -146,7 +153,7 @@ public static class FirstRunSetup
             ImGui.TextWrapped("Choose your Vigilante 8: 2nd Offense (USA) CUE or BIN file to install the game.");
             ImGui.TextWrapped("Keep the CUE and all its BIN files together. Required title ID: SLUS-00868.");
             ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
-            ImGui.TextWrapped("Optional: choose the original Vigilante 8 (USA) CUE (SLUS-00510) to add its soundtrack.");
+            ImGui.TextWrapped("Optional: choose an original Vigilante 8 (USA) CUE to add its soundtrack and verified Rev 1 engine sounds.");
             ImGui.PopStyleColor();
             ImGui.Spacing();
             if (selected.Length != 0) ImGui.TextWrapped("Selected: " + Path.GetFileName(selected));
@@ -166,7 +173,7 @@ public static class FirstRunSetup
                         {
                             // Pump the UI while the native Windows dialog owns it.
                             choosing = NativeFileDialog.OpenAsync(
-                                "Select Vigilante 8: 2nd Offense (or Vigilante 8 for its soundtrack)",
+                                "Select 2nd Offense, or the original Vigilante 8 bonus disc",
                                 "PlayStation disc (BIN/CUE)\0*.cue;*.bin\0\0",
                                 owner: NativeFileDialog.ActiveWindow());
                         }
@@ -197,6 +204,7 @@ public static class FirstRunSetup
                     "complete" => "Installation complete",
                     "music" => "Preparing music...",
                     "soundtrack" => "Preparing Vigilante 8 music...",
+                    "original-engines" => "Checking original engines...",
                     "validating" => "Checking disc...",
                     _ => "Extracting game files...",
                 });

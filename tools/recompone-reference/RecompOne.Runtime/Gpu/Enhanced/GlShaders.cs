@@ -816,6 +816,11 @@ internal static class GlShaders
                     : (uTextureSmoothing != 0 && vSmooth != 0
                         ? filteredTexture(sampleUV, nearestTexel)
                         : nearestTexel);
+            // DDS alpha is artwork, not PS1 VRAM bit 15. World replacements
+            // change the displayed color, never which later mask-checked
+            // draws can overwrite it. UI/font replacements retain coverage.
+            if (hasReplacement && vUiTexture == 0)
+                texel.a = nearestTexel.a;
             bool vehicleReflection =
                 vMaterial == MaterialVehicleReflection;
             bool fontPrimitive =
@@ -931,7 +936,10 @@ internal static class GlShaders
                 // opaque kind-12 packets replace the surface, while kind-12
                 // packets carrying the native semitransparency bit use their
                 // authored STP/blend mode as the coplanar gloss pass.
-                FragColor = vec4(distanceFog(texel.rgb), 1.0);
+                // Output alpha is the native framebuffer write-mask bit, not
+                // visual opacity. An opaque pane must not protect an unmasked
+                // texel from a later GP0(E6) check-mask draw.
+                FragColor = vec4(distanceFog(texel.rgb), max(nearestTexel.a, uSetMask));
                 BlendColor = nearestTexel.a >= 0.5
                     ? primitiveBlend()
                     : uBlendOpaque;

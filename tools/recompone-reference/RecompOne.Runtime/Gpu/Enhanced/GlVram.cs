@@ -1,5 +1,6 @@
 using Silk.NET.OpenGL;
 using RecompOne.Runtime.Hle;
+using TransferSegment = (int X, int Y, int BufferX, int BufferY, int Width, int Height);
 
 namespace RecompOne.Runtime.Enhanced;
 
@@ -151,26 +152,39 @@ public sealed class GlVram
 
     public void Barrier() => _gl.TextureBarrier();
 
-    public void WriteRect(int x, int y, int w, int h, ReadOnlySpan<ushort> px)
+    // VRAM coordinates and offsets in the linear transfer, in TL/TR/BL/BR order.
+    static ReadOnlySpan<TransferSegment> WrappedSegments(
+        int x, int y, int w, int h, Span<TransferSegment> segments)
     {
-        if (w <= 0 || h <= 0) return;
+        if (w <= 0 || h <= 0) return [];
         x &= VramShadow.Width - 1;
         y &= VramShadow.Height - 1;
+        int firstW = Math.Min(w, VramShadow.Width - x);
+        int firstH = Math.Min(h, VramShadow.Height - y);
+        int wrappedW = w - firstW, wrappedH = h - firstH;
+        int count = 0;
+        segments[count++] = (x, y, 0, 0, firstW, firstH);
+        if (wrappedW != 0)
+            segments[count++] = (0, y, firstW, 0, wrappedW, firstH);
+        if (wrappedH != 0)
+            segments[count++] = (x, 0, 0, firstH, firstW, wrappedH);
+        if (wrappedW != 0 && wrappedH != 0)
+            segments[count++] = (0, 0, firstW, firstH, wrappedW, wrappedH);
+        return segments[..count];
+    }
+
+    public void WriteRect(int x, int y, int w, int h, ReadOnlySpan<ushort> px)
+    {
+        var segments = WrappedSegments(x, y, w, h, stackalloc TransferSegment[4]);
+        if (segments.IsEmpty) return;
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         _gl.BindTexture(TextureTarget.Texture2D, _stageTex);
         _gl.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
         _gl.Disable(EnableCap.ScissorTest);
 
-        int firstW = Math.Min(w, VramShadow.Width - x);
-        int wrappedW = w - firstW;
-        int firstH = Math.Min(h, VramShadow.Height - y);
-        int wrappedH = h - firstH;
-
-        WriteSegment(px, w, 0, 0, x, y, firstW, firstH);
-        WriteSegment(px, w, firstW, 0, 0, y, wrappedW, firstH);
-        WriteSegment(px, w, 0, firstH, x, 0, firstW, wrappedH);
-        WriteSegment(px, w, firstW, firstH, 0, 0, wrappedW, wrappedH);
+        foreach (var s in segments)
+            WriteSegment(px, w, s.BufferX, s.BufferY, s.X, s.Y, s.Width, s.Height);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
     }
 
@@ -184,7 +198,6 @@ public sealed class GlVram
         int width,
         int height)
     {
-        if (width <= 0 || height <= 0) return;
         int count = width * height;
         if (_uploadRgba.Length < count * 4)
             _uploadRgba = new byte[count * 4];
@@ -220,28 +233,20 @@ public sealed class GlVram
 
     public void Fill(int x, int y, int w, int h, ushort color15)
     {
-        if (w <= 0 || h <= 0) return;
-        x &= VramShadow.Width - 1;
-        y &= VramShadow.Height - 1;
+        var segments = WrappedSegments(x, y, w, h, stackalloc TransferSegment[4]);
+        if (segments.IsEmpty) return;
         float r = (color15 & 0x1F) / 31f, g = ((color15 >> 5) & 0x1F) / 31f, b = ((color15 >> 10) & 0x1F) / 31f;
         float a = (color15 & 0x8000) != 0 ? 1f : 0f;
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
         _gl.Enable(EnableCap.ScissorTest);
         _gl.ClearColor(r, g, b, a);
-        int firstW = Math.Min(w, VramShadow.Width - x);
-        int wrappedW = w - firstW;
-        int firstH = Math.Min(h, VramShadow.Height - y);
-        int wrappedH = h - firstH;
-        FillSegment(x, y, firstW, firstH);
-        FillSegment(0, y, wrappedW, firstH);
-        FillSegment(x, 0, firstW, wrappedH);
-        FillSegment(0, 0, wrappedW, wrappedH);
+        foreach (var s in segments)
+            FillSegment(s.X, s.Y, s.Width, s.Height);
         _gl.Disable(EnableCap.ScissorTest);
     }
 
     void FillSegment(int x, int y, int w, int h)
     {
-        if (w <= 0 || h <= 0) return;
         _gl.Scissor(
             x * Scale, y * Scale,
             (uint)(w * Scale), (uint)(h * Scale));
@@ -328,20 +333,13 @@ public sealed class GlVram
 
     public void ReadRect(int x, int y, int w, int h, Span<ushort> dst)
     {
-        if (w <= 0 || h <= 0) return;
-        x &= VramShadow.Width - 1;
-        y &= VramShadow.Height - 1;
+        var segments = WrappedSegments(x, y, w, h, stackalloc TransferSegment[4]);
+        if (segments.IsEmpty) return;
         _gl.Disable(EnableCap.ScissorTest);
         _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _fbo);
         _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, _stageFbo);
-        int firstW = Math.Min(w, VramShadow.Width - x);
-        int wrappedW = w - firstW;
-        int firstH = Math.Min(h, VramShadow.Height - y);
-        int wrappedH = h - firstH;
-        ReadSegment(x, y, 0, 0, firstW, firstH);
-        ReadSegment(0, y, firstW, 0, wrappedW, firstH);
-        ReadSegment(x, 0, 0, firstH, firstW, wrappedH);
-        ReadSegment(0, 0, firstW, firstH, wrappedW, wrappedH);
+        foreach (var s in segments)
+            ReadSegment(s.X, s.Y, s.BufferX, s.BufferY, s.Width, s.Height);
 
         _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _stageFbo);
         int count = w * h;
@@ -369,7 +367,6 @@ public sealed class GlVram
         int width,
         int height)
     {
-        if (width <= 0 || height <= 0) return;
         _gl.BlitFramebuffer(
             sourceX * Scale, sourceY * Scale,
             (sourceX + width) * Scale, (sourceY + height) * Scale,
