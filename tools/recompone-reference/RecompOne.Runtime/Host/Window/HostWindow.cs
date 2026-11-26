@@ -136,6 +136,10 @@ internal static class HostWindow
     static bool _closed;
     // F1 in fullscreen is session-only and does not change the windowed menu.
     static bool _topBarInFullscreen;
+    // Classic uses its native menus only. Neither old ini files nor F1 may
+    // make the developer toolbar visible in this game.
+    static bool HasDeveloperToolbar =>
+        !Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal);
     static (Vector2D<int> Position, Vector2D<int> Size, WindowState State)?
         _windowedPlacement;
     static volatile bool _quitRequested;
@@ -289,7 +293,7 @@ internal static class HostWindow
         }
         if (_window.IsClosing || _quitRequested) Quit();
         InputManager.Poll();
-        if (InputManager.ConsumeTopBarToggle())
+        if (InputManager.ConsumeTopBarToggle() && HasDeveloperToolbar)
         {
             if (ConfigManager.View.Fullscreen)
                 _topBarInFullscreen = !_topBarInFullscreen;
@@ -361,7 +365,7 @@ internal static class HostWindow
     /// </summary>
     public static void RequestQuit() => _quitRequested = true;
 
-    static void Quit()
+    internal static void Quit()
     {
         // The close button saves through the Closing event; a requested quit
         // has no such event, so save here. OnClosing runs only once.
@@ -816,9 +820,9 @@ internal static class HostWindow
             if (_ramReady) FlushRamTexture(gl);
         }
 
-        if (ConfigManager.View.Fullscreen
+        if (HasDeveloperToolbar && (ConfigManager.View.Fullscreen
                 ? _topBarInFullscreen
-                : !ConfigManager.View.HideTopBar)
+                : !ConfigManager.View.HideTopBar))
             MainMenuBar.Draw();
 
         DrawDockspace();

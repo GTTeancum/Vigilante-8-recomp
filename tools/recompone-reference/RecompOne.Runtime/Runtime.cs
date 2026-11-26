@@ -108,6 +108,9 @@ public static class Runtime
 
     public static bool ProbeWindowsDesktopWindow() => HostWindow.ProbeWindowsDesktopWindow();
 
+    // Called after the native title menu has finished its normal cleanup.
+    public static void ExitFromGameMenu() => HostWindow.Quit();
+
     public static void Initialize(string title)
     {
         ConfigureGameTitle(title);

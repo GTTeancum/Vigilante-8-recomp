@@ -12,6 +12,8 @@ public static partial class Vigilante82PC
 {
     static partial class V82LocalMenu
     {
+        public const uint ExitGameRow = 3;
+        const uint ExitTextOffset = 32;
         static uint _scratch;
         public static int[] Devices { get; private set; } = [];
 
@@ -19,6 +21,7 @@ public static partial class Vigilante82PC
         {
             public void Dispose()
             {
+                if (_scratch == 0) return;
                 var saved = cpu.Snapshot();
                 cpu.A0 = address;
                 V82Compat.PcFree(cpu, memory);
@@ -39,6 +42,7 @@ public static partial class Vigilante82PC
             c.Restore(saved);
             if (_scratch == 0) throw new OutOfMemoryException("local menu text");
             Write(m, _scratch, "MULTIPLAYER");
+            Write(m, _scratch + ExitTextOffset, "EXIT GAME");
             return new MenuScope(c, m, _scratch);
         }
 
@@ -48,6 +52,7 @@ public static partial class Vigilante82PC
             {
                 if (LocalInputSession.PlayerCount != 0) { LocalInputSession.Reset(); Devices = []; }
                 if (c.S0 == 1) c.A1 = _scratch;
+                else if (c.S0 == ExitGameRow) c.A1 = _scratch + ExitTextOffset;
             }
         }
 

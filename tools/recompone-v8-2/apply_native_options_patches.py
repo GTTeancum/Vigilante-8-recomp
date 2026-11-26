@@ -77,6 +77,10 @@ SHELL_MAIN_MENU_EXIT_OLD = """        c.LoadWord(16, m, (c.SP + 0x50u));
 SHELL_MAIN_MENU_EXIT_NEW = """        c.LoadWord(16, m, (c.SP + 0x50u));
         c.SP = c.SP + 0x68u;
         RecompOne.Runtime.Sdk.V82Compat.TraceNativeMainMenuExit(c, m);
+        if (exitGame) {
+            localMenuScope.Dispose();
+            RecompOne.Runtime.Runtime.ExitFromGameMenu();
+        }
         return;
     }
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -158,16 +162,6 @@ def main() -> int:
     new = "    public static void func_80107AD4(CpuContext c, IMemory m)\n    {\n        if (V82LocalMenu.SelectPlayers(c, m)) return;\n        func_80107AD4_Impl(c, m);"
     patch_once(args.shell_source.resolve(), old, new, "joined player selection")
 
-    # Keep both the native backing rectangle and cursor aligned with the
-    # shifted menu text; changing only the text leaves stale pixels on return.
-    shell_path = args.shell_source.resolve()
-    shell_text = shell_path.read_text(encoding="utf-8")
-    start = shell_text.index("    public static void func_80103FA0(")
-    end = shell_text.index("    public static void func_8010458C(", start)
-    section = shell_text[start:end]
-    shifted = section.replace("0x0000005Au", "0x0000003Au").replace("0x0000002Au", "0x0000000Au")
-    if shifted != section:
-        shell_path.write_text(shell_text[:start] + shifted + shell_text[end:], encoding="utf-8")
 
     changed = patch_once(
         args.main_source.resolve(), MAIN_OLD, MAIN_NEW,
@@ -191,6 +185,42 @@ def main() -> int:
         SHELL_MAIN_MENU_EXIT_NEW,
         "native main-menu exit trace",
     )
+    # Keep both the native backing rectangle and cursor aligned with the
+    # shifted menu text; changing only the text leaves stale pixels on return.
+    shell_path = args.shell_source.resolve()
+    shell_text = shell_path.read_text(encoding="utf-8")
+    start = shell_text.index("    public static void func_80103FA0(")
+    end = shell_text.index("    public static void func_8010458C(", start)
+    section = shell_text[start:end]
+    shifted = section.replace("0x0000005Au", "0x0000003Au").replace("0x0000002Au", "0x0000000Au")
+    # The root gets a fourth native row; child pages retain stock bounds.
+    # Keep the existing text renderer, selection color, cursor and input.
+    edits = (
+        (
+            "        c.CopyRegister(18, 0);\n"
+            "        L80104168: ;\n        c.CopyRegister(19, 18);\n        c.S7 = 0x00000002u;",
+            "        c.CopyRegister(18, 0);\n        bool exitGame = false;\n"
+            "        L80104168: ;\n        c.CopyRegister(19, 18);\n"
+            "        c.S7 = V82LocalMenu.ExitGameRow;",
+        ),
+        (
+            "        c.V0 = c.S2 < 0x00000009u ? 1u : 0u;",
+            "        if (c.S3 == 0u && c.S2 == V82LocalMenu.ExitGameRow) {\n"
+            "            exitGame = true;\n"
+            "            goto L80104520;\n"
+            "        }\n"
+            "        c.V0 = c.S2 < 0x00000009u ? 1u : 0u;",
+        ),
+    )
+    for original, replacement in edits:
+        if replacement in shifted:
+            continue
+        if shifted.count(original) != 1:
+            raise RuntimeError(f"unexpected native main-menu exit seam: {original}")
+        shifted = shifted.replace(original, replacement, 1)
+    if shifted != section:
+        shell_path.write_text(shell_text[:start] + shifted + shell_text[end:], encoding="utf-8")
+
     print(f"V8:2 native options seams ready ({changed} applied)")
     return 0
 

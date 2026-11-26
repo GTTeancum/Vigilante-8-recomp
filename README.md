@@ -50,8 +50,8 @@ The discs do not need to remain attached once setup is complete.
 
 The game starts in a maximized desktop window on a fresh Windows install.
 **F11** toggles borderless fullscreen, which does not change the monitor's
-mode. Use **Game > Exit Game** in the top bar to close the game cleanly;
-if you hid the bar, **F1** brings it back.
+mode. Select **Exit Game** below **Options** on the title screen to close
+the game cleanly. The debug toolbar is not shown in Vigilante 8 Classic.
 
 ## Building
 

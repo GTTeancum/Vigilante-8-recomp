@@ -8,22 +8,11 @@ internal static class MainMenuBar
     public static void Draw()
     {
         if (!ImGui.BeginMainMenuBar()) return;
-        GameMenu();
         ModsMenu();
         DebugMenu();
         HelpMenu();
         MenuRegistry.DrawMenus();
         ImGui.EndMainMenuBar();
-    }
-
-    static void GameMenu()
-    {
-        if (!ImGui.BeginMenu("Game")) return;
-
-        if (ImGui.MenuItem("Exit Game", "Alt+F4"))
-            HostWindow.RequestQuit();
-
-        ImGui.EndMenu();
     }
 
     static void ModsMenu()
