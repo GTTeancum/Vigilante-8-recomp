@@ -1,12 +1,26 @@
 # Windows validation handoff
 
+## Current candidate and release hold (November 26, 2026)
+
+**Do not deploy publicly until there is a real screenshot from the running game.** The owner asked for visual proof before deployment. The earlier screenshot showing a desktop dropdown is superseded and is not proof of the new placement. The source is on `main` at [`5e9be24`](https://github.com/GTTeancum/Vigilante-8-recomp/commit/5e9be24930ef80a0fc4143ca9ff7db2e2f9f91eb). The corresponding Windows x64 candidate was delivered privately to the maintainer (private tag `windows-test-45870561425`, ZIP SHA-256 `9df316ac033a8547359b8d7bf02a36bf3eacb0a7ff6787ddc255d3ebcc1365e2`). It is not a new public release.
+
+- **Title menu:** `EXIT GAME` is the fourth native row, directly below `OPTIONS`. It uses the game's font, color, cursor, and normal keyboard/controller navigation. It exits after native menu cleanup. The developer toolbar must **never** appear in Classic: suppress it in all display modes, ignore F1 and saved toolbar visibility, and do not restore the desktop dropdown as a user-facing workaround.
+- **Windows desktop:** Fresh installs start maximized with normal Windows controls. F11 switches to borderless fullscreen, not exclusive fullscreen. Windows CI checked that a real test window enters and leaves borderless mode and restores its position and size. It did **not** exercise Alt+Tab against a running game or activate the live title-menu Exit Game entry.
+- **Setup:** The branded native installer requires both USA PlayStation discs: **Vigilante 8: 2nd Offense** (SLUS-00868) and **Vigilante 8 USA Rev 1** (SLUS-00510). Keep all BINs with each CUE. A verified older sequel import can be reused, but the original soundtrack and guest engine cache must also verify before launch. Windows CI checked the fresh and sequel-only setup gates and the input probe, not a full two-disc import. [The current README](../README.md#installing-the-two-disc-build) describes this candidate; the old release setup notes are not the candidate's instructions.
+
+### Resume validation here
+
+1. Start with the exact private candidate on a Windows PC with a verified two-disc install, or import the two discs from locally owned copies. The prior original-disc share was unavailable in the test workspace, and no replacement was available before handoff. The code-only build inputs are not a playable install. Do not disable the two-disc gate to get a screenshot or upload retail data.
+2. At the running title menu, press Down three times from `1 PLAYER`. Capture the **whole game window** with the cursor on `EXIT GAME`, still below `OPTIONS`, its text and bottom prompts fully visible, and no debug toolbar. Use a real frame, not a composite. Press F1 in maximized and F11 borderless modes and confirm no toolbar appears, including with a migrated profile that previously showed it. If a Linux capture is used for visual proof, label it Linux; Windows playback is still a separate check.
+3. In one Windows run, exercise Alt+Tab away and back in both modes. Confirm keyboard/controller focus returns. Fold this into the [Chassey Blue on Arizona #8 retest](https://github.com/GTTeancum/Vigilante-8-recomp/issues/8#issuecomment-7178403669) when practical. Return to the title menu, choose `EXIT GAME` using the normal accept input, and confirm the process closes cleanly. Save the screenshot, exact build ID, and `v8_latest.log` with the results before considering deployment.
+
 The source batch originally staged at [391dd2f](https://github.com/GTTeancum/Vigilante-8-recomp/commit/391dd2f85b791477876c17a66b7e032313b2c127) is now incorporated on main. It is not in the released Windows v1.0 ZIP. Linux exercised all 31 vehicles and 19 maps across two runs, not one uninterrupted soak. That coverage does not establish Windows driver compatibility or every conditional sound effect.
 
 - [#4: rendering](https://github.com/GTTeancum/Vigilante-8-recomp/issues/4). The shader-interface fix on main addresses a reproducible link failure; that is not confirmation of every texture or terrain symptom. Compare the affected RTX 5080 setup against an unmodified launch and check the Steam Deck report separately.
 - [#6: AMD launch crash](https://github.com/GTTeancum/Vigilante-8-recomp/issues/6). Event Viewer reports a native access violation in `atio6axx.dll` (32.0.32015.7029). The attached game log belongs to a different process from the crash, so its last line cannot identify the failing OpenGL call. The tagged v1.0 primitive shader fails to link on a 16-attribute Mesa context; current main and the source candidate link it. This does not establish the cause of the AMD exception. Keep enhanced gameplay rendering enabled; a software/original-renderer fallback is not a resolution. Validate any startup change with the enhanced path still active and compare the rendered output before calling it a fix. If it still crashes, match the game log and fault event by PID and timestamp.
 - [#8: installer, audio, and rendering](https://github.com/GTTeancum/Vigilante-8-recomp/issues/8#issuecomment-7178403669). The issue has the step-by-step Windows retest. Keep the engine pitch change and the tire skid as separate checks.
 
-Nothing here is a Windows test result. Do not close the driver reports based on Linux coverage.
+The Linux coverage above is not a Windows gameplay or driver result. Do not close the driver reports based on it.
 
 ## Enhanced startup candidate
 
