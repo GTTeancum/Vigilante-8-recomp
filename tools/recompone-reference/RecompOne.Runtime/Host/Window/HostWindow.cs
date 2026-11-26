@@ -136,9 +136,9 @@ internal static class HostWindow
     static bool _closed;
     // F1 in fullscreen is session-only and does not change the windowed menu.
     static bool _topBarInFullscreen;
-    // Classic uses its native menus only. Neither old ini files nor F1 may
-    // make the developer toolbar visible in this game.
-    static bool HasDeveloperToolbar =>
+    // Classic uses its native menus only. Do not restore developer panels
+    // or the dock layout from older developer builds.
+    static bool HasDeveloperUi =>
         !Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal);
     static (Vector2D<int> Position, Vector2D<int> Size, WindowState State)?
         _windowedPlacement;
@@ -293,7 +293,7 @@ internal static class HostWindow
         }
         if (_window.IsClosing || _quitRequested) Quit();
         InputManager.Poll();
-        if (InputManager.ConsumeTopBarToggle() && HasDeveloperToolbar)
+        if (InputManager.ConsumeTopBarToggle() && HasDeveloperUi)
         {
             if (ConfigManager.View.Fullscreen)
                 _topBarInFullscreen = !_topBarInFullscreen;
@@ -696,33 +696,35 @@ internal static class HostWindow
         _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
 
         PanelManager.Register(new OutputPanel());
-        PanelManager.Register(new VramViewerPanel());
-        PanelManager.Register(new CpuStatePanel());
-        PanelManager.Register(new RamMapPanel());
-        PanelManager.Register(new MemoryEditorPanel());
-        PanelManager.Register(new SpuViewerPanel());
-        PanelManager.Register(new CdDebugPanel());
-        PanelManager.Register(new ConsolePanel());
-        PanelManager.Register(new OverlayEventsPanel());
-        PanelManager.Register(new Modding.ModsPopup());
-        PanelManager.Register(new AboutPopup());
-        PanelManager.Register(GuestVehicleMenu.PackagePanel);
+        if (HasDeveloperUi)
+        {
+            PanelManager.Register(new VramViewerPanel());
+            PanelManager.Register(new CpuStatePanel());
+            PanelManager.Register(new RamMapPanel());
+            PanelManager.Register(new MemoryEditorPanel());
+            PanelManager.Register(new SpuViewerPanel());
+            PanelManager.Register(new CdDebugPanel());
+            PanelManager.Register(new ConsolePanel());
+            PanelManager.Register(new OverlayEventsPanel());
+            PanelManager.Register(new Modding.ModsPopup());
+            PanelManager.Register(new AboutPopup());
+            PanelManager.Register(GuestVehicleMenu.PackagePanel);
 
-        SettingsRegistry.Register(new InputSettingsSection());
-        SettingsRegistry.Register(new DisplaySettingsSection());
-        SettingsRegistry.Register(new AudioSettingsSection());
-        if (Runtime.GameTitle.Contains("2nd Offense", StringComparison.Ordinal))
-            MenuRegistry.Register("Cheats", V82CheatMenu.Draw);
-        MenuRegistry.Register("Guest Vehicles", GuestVehicleMenu.Draw);
-        _discPicker = new DiscPickerPopup();
-        PanelManager.Register(_discPicker);
+            SettingsRegistry.Register(new InputSettingsSection());
+            SettingsRegistry.Register(new DisplaySettingsSection());
+            SettingsRegistry.Register(new AudioSettingsSection());
+            MenuRegistry.Register("Guest Vehicles", GuestVehicleMenu.Draw);
+            _discPicker = new DiscPickerPopup();
+            PanelManager.Register(_discPicker);
 
-        ConfigManager.ApplyViewToPanels(PanelManager.Panels);
+            ConfigManager.ApplyViewToPanels(PanelManager.Panels);
 
-        var cdPath = ConfigManager.Game.CdPath;
-        if (Runtime.ResolveLoosePath() == null &&
-            (string.IsNullOrWhiteSpace(cdPath) || !File.Exists(cdPath)))
-            _discPicker.Show();
+            var cdPath = ConfigManager.Game.CdPath;
+            if (Runtime.ResolveLoosePath() == null &&
+                (string.IsNullOrWhiteSpace(cdPath) || !File.Exists(cdPath)))
+                _discPicker.Show();
+        }
+
     }
 
     static void ConfigureImGui()
@@ -732,7 +734,7 @@ internal static class HostWindow
         io.ConfigWindowsMoveFromTitleBarOnly = true;
         unsafe { io.NativePtr->IniFilename = null; }
 
-        if (Config.ConfigManager.ApplyImGuiLayout())
+        if (HasDeveloperUi && Config.ConfigManager.ApplyImGuiLayout())
             _layoutPending = false;
     }
 
@@ -820,14 +822,15 @@ internal static class HostWindow
             if (_ramReady) FlushRamTexture(gl);
         }
 
-        if (HasDeveloperToolbar && (ConfigManager.View.Fullscreen
+        if (HasDeveloperUi && (ConfigManager.View.Fullscreen
                 ? _topBarInFullscreen
                 : !ConfigManager.View.HideTopBar))
             MainMenuBar.Draw();
 
         DrawDockspace();
         PanelManager.DrawPanels();
-        MenuRegistry.DrawWindows();
+        if (HasDeveloperUi)
+            MenuRegistry.DrawWindows();
         Modding.ModLoadingPopup.Draw();
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         gl.Viewport(0, 0, (uint)fbDef.X, (uint)fbDef.Y);
