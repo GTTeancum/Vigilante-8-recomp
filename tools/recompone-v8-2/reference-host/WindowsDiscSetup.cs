@@ -258,13 +258,24 @@ internal sealed class WindowsDiscSetup : Form
         bool Check(string name, string sequel, string original)
         {
             using var form = new WindowsDiscSetup(root, null);
-            _ = form.Handle;
+            form.ShowInTaskbar = false;
+            form.Show();
+            Application.DoEvents();
+            form.Refresh();
             bool valid = form.emblem != null && !form.launch.Enabled && form.browse.Enabled &&
                 form.sequelStatus.Text == sequel && form.originalStatus.Text == original;
             if (!valid) return false;
             using var screenshot = new Bitmap(form.Width, form.Height);
             form.DrawToBitmap(screenshot, new Rectangle(0, 0, form.Width, form.Height));
+            // The first banner stripe starts at the client origin. Reject
+            // blank captures rather than mistaking file existence for paint.
+            var stripe = form.PointToScreen(new Point(150, 2));
+            var origin = form.Bounds.Location;
+            var pixel = screenshot.GetPixel(stripe.X - origin.X, stripe.Y - origin.Y);
+            if (pixel.R < 200 || pixel.G < 145 || pixel.B > 150)
+                throw new InvalidOperationException("The native installer banner did not render.");
             screenshot.Save(Path.Combine(output, name + ".png"));
+            form.Close();
             return true;
         }
         if (!Check("setup-fresh", "REQUIRED", "REQUIRED")) return false;
