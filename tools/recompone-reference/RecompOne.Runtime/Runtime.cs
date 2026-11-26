@@ -106,6 +106,8 @@ public static class Runtime
     public static readonly Memory.RamLogger RamLog = new();
     public static readonly Dispatch.OverlayEventLog OverlayLog = new();
 
+    public static bool ProbeWindowsDesktopWindow() => HostWindow.ProbeWindowsDesktopWindow();
+
     public static void Initialize(string title)
     {
         ConfigureGameTitle(title);

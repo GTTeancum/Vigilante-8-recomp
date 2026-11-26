@@ -50,13 +50,13 @@ public class ViewConfig
 
     public bool Fullscreen
     {
-        get => GetBool("Fullscreen", true);
+        get => GetBool("Fullscreen", !OperatingSystem.IsWindows());
         set => SetBool("Fullscreen", value);
     }
 
     /// <summary>
     /// Start with the window maximized. Distinct from <see cref="Fullscreen"/>,
-    /// which is borderless and hides the menu bar; maximized keeps the window
+    /// which is borderless on Windows; maximized keeps the window
     /// chrome and simply fills the screen.
     /// </summary>
     public bool StartMaximized

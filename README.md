@@ -46,6 +46,13 @@ its music and guest-car engine audio. A previous Second Offense install
 is kept, but the game will not launch until the original import is verified.
 The discs do not need to remain attached once setup is complete.
 
+## Windows desktop controls
+
+The game starts in a maximized desktop window on a fresh Windows install.
+**F11** toggles borderless fullscreen, which does not change the monitor's
+mode. Use **Game > Exit Game** in the top bar to close the game cleanly;
+if you hid the bar, **F1** brings it back.
+
 ## Building
 
 Development requires the .NET 10 SDK, Python 3, and legally obtained game

@@ -134,10 +134,10 @@ internal static class HostWindow
 
     static bool _layoutPending = true;
     static bool _closed;
-    // Fullscreen hides the developer menu bar. F1 there reveals it for the
-    // rest of that fullscreen stretch only, leaving the saved windowed
-    // HideTopBar choice alone.
+    // F1 in fullscreen is session-only and does not change the windowed menu.
     static bool _topBarInFullscreen;
+    static (Vector2D<int> Position, Vector2D<int> Size, WindowState State)?
+        _windowedPlacement;
     static volatile bool _quitRequested;
     static DiscPickerPopup? _discPicker;
 
@@ -175,9 +175,9 @@ internal static class HostWindow
                 VSync = false,
                 UpdatesPerSecond = 0,
                 FramesPerSecond = 0,
-                WindowState = ConfigManager.View.Fullscreen
+                WindowState = ConfigManager.View.Fullscreen && !OperatingSystem.IsWindows()
                     ? WindowState.Fullscreen
-                    : ConfigManager.View.StartMaximized
+                    : !ConfigManager.View.Fullscreen && ConfigManager.View.StartMaximized
                         ? WindowState.Maximized
                         : WindowState.Normal,
                 API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default, new APIVersion(4, 5)),
@@ -193,15 +193,10 @@ internal static class HostWindow
             try { _window.DoRender(); } catch { }
             if (_windowVisible)
             {
-                // Silk's GLFW backend ignores WindowState.Fullscreen in the
-                // creation options: the window comes up Normal with its frame,
-                // so a saved Fullscreen=True never took effect and the first
-                // F11 only flipped the setting off. Setting the state on the
-                // created window works, and doing it while still hidden avoids
-                // flashing the framed window first.
-                if (ConfigManager.View.Fullscreen &&
-                    _window.WindowState != WindowState.Fullscreen)
-                    _window.WindowState = WindowState.Fullscreen;
+                // Apply fullscreen after creation. On Windows this is an ordinary
+                // borderless window, not a GLFW exclusive monitor/window mode.
+                if (ConfigManager.View.Fullscreen)
+                    SetFullscreen(true);
                 _window.IsVisible = true;
                 // The window is created hidden so the first frame can be
                 // cleared before it appears, and a maximized state set at
@@ -385,12 +380,100 @@ internal static class HostWindow
     public static void SetFullscreen(bool on)
     {
         if (_window == null) return;
-        _topBarInFullscreen = false;
+        _topBarInFullscreen = on && OperatingSystem.IsWindows() &&
+            !ConfigManager.View.HideTopBar;
+        if (OperatingSystem.IsWindows())
+        {
+            SetWindowsBorderlessFullscreen(on);
+            return;
+        }
+
         _window.WindowState = on ? WindowState.Fullscreen : WindowState.Normal;
         if (!on)
         {
             var size = ParseOutputResolution(ConfigManager.View.OutputResolution);
             _window.Size = new Vector2D<int>(size.width, size.height);
+        }
+    }
+
+    static void SetWindowsBorderlessFullscreen(bool on)
+    {
+        if (_window is not { } window) return;
+        if (on)
+        {
+            if (_windowedPlacement.HasValue) return;
+
+            var monitor = window.Monitor ??
+                Silk.NET.Windowing.Monitor.GetMainMonitor(window);
+            if (monitor is null) return;
+            var bounds = monitor.Bounds;
+            if (bounds.Size.X <= 0 || bounds.Size.Y <= 0) return;
+
+            var state = window.WindowState;
+            if (state == WindowState.Maximized || state == WindowState.Minimized)
+                window.WindowState = WindowState.Normal;
+            _windowedPlacement = (window.Position, window.Size,
+                state == WindowState.Maximized || (!window.IsVisible && ConfigManager.View.StartMaximized)
+                    ? WindowState.Maximized : WindowState.Normal);
+            window.TopMost = false;
+            window.WindowBorder = WindowBorder.Hidden;
+            window.Position = bounds.Max - bounds.Size;
+            window.Size = bounds.Size;
+            return;
+        }
+
+        if (_windowedPlacement is not { } saved) return;
+        _windowedPlacement = null;
+        // F11 restores the previous placement without reacquiring focus or
+        // changing the display's mode/refresh rate.
+        window.WindowBorder = WindowBorder.Resizable;
+        window.Position = saved.Position;
+        window.Size = saved.Size;
+        window.WindowState = saved.State;
+    }
+
+    internal static bool ProbeWindowsDesktopWindow()
+    {
+        if (!OperatingSystem.IsWindows() || _window is not null)
+            return false;
+
+        GlfwWindowing.Use();
+        using var window = Silk.NET.Windowing.Window.Create(WindowOptions.Default with
+        {
+            Title = "Vigilante 8 desktop window check",
+            API = GraphicsAPI.None,
+            IsVisible = true,
+            Position = new Vector2D<int>(80, 80),
+            Size = new Vector2D<int>(640, 360),
+            WindowState = WindowState.Normal,
+        });
+        try
+        {
+            window.Initialize();
+            window.DoEvents();
+            _window = window;
+            var previousPosition = window.Position;
+            var previousSize = window.Size;
+            SetFullscreen(true);
+            window.DoEvents();
+            var monitor = window.Monitor ?? Silk.NET.Windowing.Monitor.GetMainMonitor(window);
+            bool borderless = monitor is not null &&
+                window.WindowState == WindowState.Normal &&
+                window.WindowBorder == WindowBorder.Hidden && !window.TopMost &&
+                window.Size == monitor.Bounds.Size &&
+                window.Position == monitor.Bounds.Max - monitor.Bounds.Size;
+            SetFullscreen(false);
+            window.DoEvents();
+            bool restored = window.WindowState == WindowState.Normal &&
+                window.WindowBorder == WindowBorder.Resizable &&
+                window.Position == previousPosition && window.Size == previousSize;
+            Console.Error.WriteLine($"[WindowsDesktopProbe] borderless={borderless}; restored={restored}");
+            return borderless && restored;
+        }
+        finally
+        {
+            _window = null;
+            _windowedPlacement = null;
         }
     }
 

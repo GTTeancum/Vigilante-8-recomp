@@ -116,12 +116,12 @@ public static class ConfigManager
         }
         else
         {
-            // A new install starts fullscreen with the texture pack shown.
-            // Setting them (not only defaulting them) writes both into the
-            // interface.ini created at the first save, so the player can see
+            // Windows starts maximized with a title bar and normal desktop
+            // controls. Keep the existing fullscreen default elsewhere.
+            // Write both settings into interface.ini on the first save so players can see
             // and edit them. The file is not written here: it also carries the
             // ImGui layout, and an empty one would suppress the default docking.
-            View.Fullscreen = true;
+            View.Fullscreen = !OperatingSystem.IsWindows();
             View.HighResolutionTextures = true;
         }
 

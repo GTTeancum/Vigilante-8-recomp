@@ -86,6 +86,8 @@ if (args.Length == 3 &&
 #if V8_WINDOWS_SETUP
 if (args.Length == 2 && args[0] == "--probe-two-disc-setup")
     return WindowsDiscSetup.Probe(Path.GetFullPath(args[1], launchDirectory)) ? 0 : 1;
+if (args is ["--probe-windows-desktop-window"])
+    return Runtime.ProbeWindowsDesktopWindow() ? 0 : 1;
 #endif
 
 if (args.Length == 1 &&
