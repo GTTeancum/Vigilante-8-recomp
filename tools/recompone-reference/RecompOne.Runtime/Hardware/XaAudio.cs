@@ -11,6 +11,9 @@ public static class XaAudio
     const int Mask = Capacity - 1;
     const int PrimeFrames = 1024;
     const int MaxHold = 8192;
+    // Largest sector: 18 groups of 8 mono blocks, 28 frames per block.
+    // Both CD workers call DecodeSector outside the ring lock; don't share its scratch.
+    [ThreadStatic] static int[]? _sectorFrames;
 
     static readonly int[] _ring = new int[Capacity];
     static int _writeIdx, _readIdx, _count;
@@ -133,7 +136,7 @@ public static class XaAudio
 
     static int Clamp(int v) => v < -32768 ? -32768 : v > 32767 ? 32767 : v;
 
-    static void DecodeBlock(byte[] sec, int b, int blk, ref int old, ref int older, int[] dst)
+    static void DecodeBlock(byte[] sec, int b, int blk, ref int old, ref int older, Span<int> dst)
     {
         byte hdr = sec[b + 4 + blk];
         int sv = hdr & 0xF; if (sv > 12) sv = 9;
@@ -161,8 +164,8 @@ public static class XaAudio
     {
         bool stereo = (coding & 0x01) != 0;
         int rate = (coding & 0x04) != 0 ? 18900 : 37800;
-        int[] l = new int[28], r = new int[28];
-        int[] frames = new int[stereo ? 2016 : 4032];
+        Span<int> l = stackalloc int[28], r = stackalloc int[28];
+        int[] frames = _sectorFrames ??= new int[18 * 8 * 28];
         int n = 0;
 
         for (int p = 0; p < 18; p++)
@@ -190,7 +193,6 @@ public static class XaAudio
         lock (_gate)
         {
             _srcRate = rate;
-            int peak = 0;
             if (_diagnosticCapture != null)
             {
                 byte[] capture = new byte[n * 4];
@@ -200,20 +202,27 @@ public static class XaAudio
                 _diagnosticCapture.Write(capture);
                 _diagnosticCaptureBytes += capture.Length;
             }
-            for (int i = 0; i < n; i++)
+            // One sector fits in the ring, so a write has at most two contiguous runs.
+            int first = Math.Min(n, Capacity - _writeIdx);
+            frames.AsSpan(0, first).CopyTo(_ring.AsSpan(_writeIdx));
+            frames.AsSpan(first, n - first).CopyTo(_ring);
+            _writeIdx = (_writeIdx + n) & Mask;
+            _count += n;
+            if (_count > Capacity)
             {
-                int packed = frames[i];
-                peak = Math.Max(peak, Math.Abs((int)(short)(packed & 0xFFFF)));
-                peak = Math.Max(peak, Math.Abs((int)(short)(packed >> 16)));
-                _ring[_writeIdx] = packed;
-                _writeIdx = (_writeIdx + 1) & Mask;
-                if (_count < Capacity) _count++;
-                else _readIdx = (_readIdx + 1) & Mask;
+                _count = Capacity;
+                _readIdx = _writeIdx; // the oldest surviving frame in a full ring
             }
             if (!_playing && _count >= PrimeFrames) _playing = true;
             long decoded = ++_sectorsDecoded;
             if (_trace && (decoded == 1 || decoded % 19 == 0))
             {
+                int peak = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    peak = Math.Max(peak, Math.Abs((int)(short)frames[i]));
+                    peak = Math.Max(peak, Math.Abs((int)(short)(frames[i] >> 16)));
+                }
                 Console.Error.WriteLine(
                     $"[XA] file={file} channel={channel} lba={lba} sectors={decoded} " +
                     $"rate={rate} frames={n} buffered={_count} peak={peak}");

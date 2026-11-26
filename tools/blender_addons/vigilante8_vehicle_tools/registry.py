@@ -29,6 +29,8 @@ CONTROLLER_CLASS_SHIFT = 8
 CONTROLLER_CLASS_MASK = 0xF << CONTROLLER_CLASS_SHIFT
 FLAG_SPECIAL_BEHAVIOR = 1 << 16
 FLAG_ORIGINAL_SPECIAL = 1 << 23
+GROUND_ENGINE_SHIFT = 24  # Optional body SND index; legacy packages use zero.
+GROUND_ENGINE_MASK = 0xFF << GROUND_ENGINE_SHIFT
 SPECIAL_BEHAVIOR_SHIFT = 17
 SPECIAL_BEHAVIOR_MASK = 0x1F << SPECIAL_BEHAVIOR_SHIFT
 CONTROLLER_CLASS_IDS = {"ground": 0, "flying": 1}
@@ -38,6 +40,7 @@ SUPPORTED_FLAGS = (
     | FLAG_SPECIAL_BEHAVIOR
     | SPECIAL_BEHAVIOR_MASK
     | FLAG_ORIGINAL_SPECIAL
+    | GROUND_ENGINE_MASK
 )
 
 
@@ -52,7 +55,7 @@ def vehicle_flags(vehicle: project.VehicleProject) -> int:
         flags |= vehicle.special_behavior_type << SPECIAL_BEHAVIOR_SHIFT
     if vehicle.original_special_type is not None:
         flags |= FLAG_ORIGINAL_SPECIAL | (vehicle.original_special_type << SPECIAL_BEHAVIOR_SHIFT)
-    return flags
+    return flags | (vehicle.ground_engine_sample << GROUND_ENGINE_SHIFT)
 
 
 def decode_vehicle_flags(flags: int) -> tuple[str, bool]:
@@ -85,6 +88,7 @@ class RegistryEntry:
     special_behavior_type: int | None
     original_special_type: int | None
     original_impact_kind: int
+    ground_engine_sample: int
 
 
 @dataclass(frozen=True)
@@ -326,6 +330,9 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
         if stat_offset + stat_size > len(data):
             raise ValueError("vehicle registry entry is invalid")
         game = games[game_id]
+        ground_engine_sample = (flags & GROUND_ENGINE_MASK) >> GROUND_ENGINE_SHIFT
+        if game != "V8_2" and ground_engine_sample:
+            raise ValueError("ground engine sample mapping is V8:2-only")
         controller_class, supports_transformations = decode_vehicle_flags(flags)
         special_behavior_type = (
             (flags & SPECIAL_BEHAVIOR_MASK) >> SPECIAL_BEHAVIOR_SHIFT
@@ -417,6 +424,7 @@ def parse_registry(data: bytes) -> tuple[str, tuple[RegistryEntry, ...]]:
                 special_behavior_type=special_behavior_type,
                 original_special_type=original_special_type,
                 original_impact_kind=extension_reserved,
+                ground_engine_sample=ground_engine_sample,
             )
         )
     return games[game_id], tuple(entries)
@@ -878,6 +886,7 @@ def decompile_package(
             special_behavior_type=entry.special_behavior_type,
             original_special_type=entry.original_special_type,
             original_impact_kind=entry.original_impact_kind,
+            ground_engine_sample=entry.ground_engine_sample,
         )
         vehicle.validate()
         vehicles.append(vehicle)

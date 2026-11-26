@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
+using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Dispatch;
@@ -45,11 +46,13 @@ public static class V82VehicleRegistry
     const uint ControllerClassMask = 0xFu << ControllerClassShift;
     const uint FlagSpecialBehavior = 1u << 16;
     const uint FlagOriginalSpecial = 1u << 23;
+    const int GroundEngineShift = 24;
+    const uint GroundEngineMask = 0xFFu << GroundEngineShift;
     const int SpecialBehaviorShift = 17;
     const uint SpecialBehaviorMask = 0x1Fu << SpecialBehaviorShift;
     const uint SupportedCapabilityFlags =
         FlagNonTransformable | ControllerClassMask |
-        FlagSpecialBehavior | SpecialBehaviorMask | FlagOriginalSpecial;
+        FlagSpecialBehavior | SpecialBehaviorMask | FlagOriginalSpecial | GroundEngineMask;
     const uint SpecialBehaviorTableAddress = 0x800C6130u;
     const uint SelectorInputAddress = 0x8006B508u;
     // Gameplay and SHELL share six participant bytes at 0x8006B8F4. The
@@ -111,6 +114,10 @@ public static class V82VehicleRegistry
     static bool _selectorQuest;
     static int[] _questParticipantTypes = [];
     static string? _loadedPackageRoot;
+    static bool _curatedLegacyEngineRoster;
+    static (ushort Pitch, Spu.EngineAdpcm Source, string Sha256)[]? _localOriginalEngines;
+    static readonly HashSet<int> OriginalEngineKeysLogged = [];
+    static bool _originalEngineMissLogged;
     static VehicleEntry? _constructingEntry;
     static bool _constructingSelectorPreview;
     static uint _initializingGuestCamera;
@@ -1825,6 +1832,20 @@ public static class V82VehicleRegistry
         LoadAndValidate(registryPath, archivePath);
         _loadedPackageRoot = Path.GetDirectoryName(registryPath);
         ValidateSelectorPortraits(_loadedPackageRoot);
+        if (_curatedLegacyEngineRoster)
+        {
+            string? diagnostic = null;
+            if (OriginalV8EngineInstallation.TryRead(Runtime.ResolveLoosePath(),
+                    text => diagnostic = text) is { } originals)
+            {
+                _localOriginalEngines = originals.Loops.Select(loop =>
+                    (loop.Pitch, new Spu.EngineAdpcm(loop.Adpcm.Span),
+                        Convert.ToHexString(SHA256.HashData(loop.Adpcm.Span)))).ToArray();
+                Console.Error.WriteLine($"[OriginalV8Engines] matching curated roster; {originals.Loops.Count} verified local engine loops available");
+            }
+            else
+                Console.Error.WriteLine($"[OriginalV8Engines] {diagnostic ?? "No verified local donor."} Installed roster audio unchanged.");
+        }
         if (!_dispatchRegistered)
         {
             Dispatcher.RegisterHostFunction(
@@ -1883,6 +1904,10 @@ public static class V82VehicleRegistry
         SpecialBehaviorLogged.Clear();
         ControllerPhysicsTicks.Clear();
         SelectorPortraitPixels.Clear();
+        _curatedLegacyEngineRoster = false;
+        _localOriginalEngines = null;
+        _originalEngineMissLogged = false;
+        OriginalEngineKeysLogged.Clear();
         _defaultReplacementEntry = null;
         ClearSelections();
         string archiveHash = Convert.ToHexString(
@@ -1896,6 +1921,7 @@ public static class V82VehicleRegistry
         ParseArchive(archivePath);
         ParseRegistry(registry);
         ValidateCrossReferences();
+        _curatedLegacyEngineRoster = OriginalV8EngineRouting.IsCuratedPair(archiveHash, registry);
         ResolveDefaultReplacement();
         if (_requestedStableId != null)
             ApplyRequestedSelection();
@@ -2528,6 +2554,62 @@ public static class V82VehicleRegistry
             $"axle2={middleSpring}/{middleDamping} " +
             $"axle3={rearSpring}/{rearDamping} " +
             $"active-wheels={appliedWheels} (spring/damping)");
+    }
+
+    // Only called at the native vehicle-engine key-on in 80038408, never
+    // when a weapon or animation asks for body sample zero. Transformed
+    // engines request nonzero entries in the shared SND instead.
+    public static uint GroundEngineSample(IMemory m, uint vehicle, uint nativeSample)
+    {
+        if (nativeSample != 0 || vehicle == 0 ||
+            !TryEntryForObject(m, vehicle, out VehicleEntry? entry) || entry == null)
+            return nativeSample;
+        return entry.Flags >> GroundEngineShift;
+    }
+
+    // Called only at the native ground/transform engine key-on. Never change a
+    // body table or an effect that independently requests body sample zero.
+    public static bool TryPlayLocalOriginalEngine(CpuContext c, IMemory m, uint vehicle,
+        Action<CpuContext, IMemory> nativeStart)
+    {
+        if (_localOriginalEngines == null || vehicle == 0 || c.A2 != 0 || c.A1 == 0 ||
+            c.A0 is < 1 or > 24 || Runtime.Spu is not { } spu ||
+            !TryEntryForObject(m, vehicle, out VehicleEntry? entry) || entry == null)
+            return false;
+        int ordinal = entry.Type - FirstCustomType;
+        if ((uint)ordinal >= _localOriginalEngines.Length ||
+            !OriginalV8EngineRouting.MatchesLegacyEntry(ordinal, entry.StableId,
+                m.ReadU8(vehicle + 0xACu), entry.Flags >> GroundEngineShift))
+            return false;
+
+        var (pitch, source, digest) = _localOriginalEngines[ordinal];
+        int voice = (int)c.A0 - 1;
+        ushort start = m.ReadU16(c.A1 + 4u);
+        uint savedSp = c.SP;
+        // The temporary one-sample table lives above the callee's argument
+        // home area. Native 8001E098 reads it synchronously and retains only
+        // pitch (for later RPM modulation) and the usual start register.
+        uint temporaryTable = savedSp - 0x20u;
+        c.SP = savedSp - 0x40u;
+        try
+        {
+            m.WriteU16(temporaryTable, 1);
+            m.WriteU16(temporaryTable + 2u, start);
+            m.WriteU16(temporaryTable + 4u, start);
+            m.WriteU16(temporaryTable + 6u, pitch);
+            c.A1 = temporaryTable;
+            bool keyed = spu.StartWithEngineAdpcm(voice, source, () => nativeStart(c, m));
+            if (keyed && OriginalEngineKeysLogged.Add(ordinal))
+                Console.Error.WriteLine($"[OriginalV8Engines] native engine key {entry.StableId} voice={voice} pitch={pitch} private-source=1 sha256={digest}");
+            else if (!keyed && !_originalEngineMissLogged)
+            {
+                _originalEngineMissLogged = true;
+                Console.Error.WriteLine("[OriginalV8Engines] native engine start did not key the expected voice; no sample source was retained");
+            }
+        }
+        finally { c.SP = savedSp; }
+        // The native routine was already invoked, even if it did not key on.
+        return true;
     }
 
     public static uint StatsPointerForObject(
@@ -4111,7 +4193,17 @@ public static class V82VehicleRegistry
                 throw new InvalidDataException(
                     $"vehicle {entry.StableId} has invalid or shared selector preview ownership");
 
-            byte[] body = Banks[entry.BodyArchiveIndex].ReadBin();
+            var bodyBank = Banks[entry.BodyArchiveIndex];
+            uint engineSample = entry.Flags >> GroundEngineShift;
+            if (engineSample != 0)
+            {
+                byte[]? snd = bodyBank.ReadSound();
+                if (snd == null || snd.Length < 4 ||
+                    engineSample >= BinaryPrimitives.ReadUInt16LittleEndian(snd))
+                    throw new InvalidDataException(
+                        $"vehicle {entry.StableId} ground engine sample is outside its body SND");
+            }
+            byte[] body = bodyBank.ReadBin();
             int bodySlotCount = BinSlotCount(body);
             if (entry.BodyKind >= bodySlotCount ||
                 !BinSlotIsTopLevel(body, entry.BodyKind))

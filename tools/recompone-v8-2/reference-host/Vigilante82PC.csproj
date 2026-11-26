@@ -107,6 +107,10 @@
     <Exec Condition="!Exists('$(MSBuildProjectDirectory)\main.cs')" Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_quest_patches.py&quot;" />
     <Exec Condition="Exists('$(MSBuildProjectDirectory)\main.cs')" Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_quest_patches.py&quot; --source-root &quot;$(MSBuildProjectDirectory)&quot;" />
   </Target>
+  <Target Name="EnsureNativeMapLifetimeSeams" BeforeTargets="CoreCompile">
+    <Exec Condition="!Exists('$(MSBuildProjectDirectory)\main.cs')" Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_map_lifetime_patches.py&quot;" />
+    <Exec Condition="Exists('$(MSBuildProjectDirectory)\main.cs')" Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_native_map_lifetime_patches.py&quot; --source-root &quot;$(MSBuildProjectDirectory)&quot;" />
+  </Target>
   <Target Name="EnsureLocalMultiplayerSeams" BeforeTargets="CoreCompile" AfterTargets="EnsureNativeQuestSeams">
     <Exec Command="&quot;$(PythonExe)&quot; &quot;$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\apply_split_screen_patches.py&quot; --source &quot;$(MSBuildThisFileDirectory)..\..\..\reference-v8-2\generated\recompiled\main.cs&quot;" />
   </Target>

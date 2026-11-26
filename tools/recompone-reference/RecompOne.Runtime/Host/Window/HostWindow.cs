@@ -214,6 +214,13 @@ internal static class HostWindow
                 try { _window.DoRender(); } catch { }
             }
         }
+        catch (Enhanced.GlResourceSetupException e)
+        {
+            // A failed enhanced allocation is not an unavailable window.
+            // Do not silently continue as a headless/software game.
+            Console.Error.WriteLine($"[GlStartup] enhanced resource setup failed: {e.Message}");
+            throw;
+        }
         catch (Exception e)
         {
             Console.Error.WriteLine($"[Host] window unavailable {e.Message}");
@@ -520,6 +527,12 @@ internal static class HostWindow
         InputManager.Initialize(input);
 
         _gl = GL.GetApi(_window);
+        // Record the device before any renderer allocates or compiles. A
+        // native driver termination cannot be reported by the managed catch.
+        Console.WriteLine("[GlStartup] querying OpenGL driver");
+        Console.WriteLine(
+            $"[GlBackend] driver={_gl.GetStringS(StringName.Vendor)} | " +
+            $"{_gl.GetStringS(StringName.Renderer)} | {_gl.GetStringS(StringName.Version)}");
         _gl.ClearColor(0f, 0f, 0f, 1f);
 
         var fb = _window!.FramebufferSize;
@@ -528,8 +541,6 @@ internal static class HostWindow
         _displayTex = CreateTexture(_gl);
         _vramTex= CreateTexture(_gl);
         _ramTex = CreateTexture(_gl);
-        _presentationRenderer = new PresentationRenderer(_gl);
-        _presentationRenderer.Initialize();
 
         string? graphicsPresetOverride =
             Environment.GetEnvironmentVariable("RECOMPONE_GRAPHICS_PRESET");
@@ -560,12 +571,22 @@ internal static class HostWindow
         Enhanced.GlVram.Scale = ConfigManager.View.HighResolution3D
             ? ConfigManager.View.InternalResolutionScale
             : 1;
+        Console.WriteLine($"[GlStartup] enhanced VRAM {Enhanced.GlVram.Width}x{Enhanced.GlVram.Height}");
         _enhancedRenderer = new Enhanced.EnhancedGlBackend(_gl);
         _enhancedRenderer.InitGl();
-        Hle.GpuHle.Active = hleActive;
+        // GPU packet dispatch already requires Ready. Keep the native game
+        // hooks and host status in step with the renderer that actually draws.
+        Hle.GpuHle.Active = hleActive && _enhancedRenderer.Ready;
+        if (hleActive && !_enhancedRenderer.Ready)
+            Console.Error.WriteLine("[GlBackend] enhanced renderer unavailable; " +
+                "using the existing software path. See the shader error above.");
         Hle.GpuHle.Backend = _enhancedRenderer;
         Hle.GpuHle.NativeResolution =
             !ConfigManager.View.HighResolution3D;
+        // Finish the core enhanced path before spending GPU memory on
+        // the optional presentation art. The overlay selection is unchanged.
+        _presentationRenderer = new PresentationRenderer(_gl);
+        _presentationRenderer.Initialize();
         ApplyGraphicsView();
         Console.WriteLine(
             $"[Host] PS1 color dithering={(ConfigManager.View.Ps1Dithering ? "On (fidelity)" : "Off (enhanced default)")}");

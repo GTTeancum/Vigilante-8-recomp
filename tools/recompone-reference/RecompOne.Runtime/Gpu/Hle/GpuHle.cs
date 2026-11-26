@@ -27,7 +27,7 @@ public static class GpuHle
     public static void SignalNativeModal() => NativeModalHold = 4;
     static readonly HashSet<uint> NativeModalPanels = [];
     public static void RegisterNativeModalPanel(uint address) =>
-        NativeModalPanels.Add(NormalizePacketAddress(address));
+        NativeModalPanels.Add(MarkPacketWritePage(NormalizePacketAddress(address)));
     public static bool IsNativeModalPanel(uint address) =>
         NativeModalPanels.Contains(NormalizePacketAddress(address));
     public static float TargetAspect { get; set; } = 4f / 3f;
@@ -233,6 +233,20 @@ public static class GpuHle
         long RangeTests,
         long Registrations,
         long DuplicateRegistrations);
+
+    // Each guest word store retires old packet tags before replacing its bytes.
+    // This conservative negative index lets unrelated RAM stores avoid all seven
+    // collection probes. Never clear an individual marker on removal/arena flip:
+    // other addresses on that page can still own metadata on the queued list.
+    const int PacketWritePageShift = 12;
+    static readonly bool[] PacketWritePages =
+        new bool[Memory.MemoryMap.RamWindow >> PacketWritePageShift];
+
+    static uint MarkPacketWritePage(uint normalizedAddress)
+    {
+        PacketWritePages[normalizedAddress >> PacketWritePageShift] = true;
+        return normalizedAddress;
+    }
 
     static uint NormalizePacketAddress(uint address)
     {
@@ -620,7 +634,7 @@ public static class GpuHle
         uint address,
         in TriangleNclipPacket packet)
     {
-        address = NormalizePacketAddress(address);
+        address = MarkPacketWritePage(NormalizePacketAddress(address));
         TriangleNclipPackets[address] = packet;
         // The shared emitter registers after writing the payload but just
         // before linking the packet into the ordering table.  That final link
@@ -666,7 +680,15 @@ public static class GpuHle
             return;
 
         uint address = NormalizePacketAddress(physicalAddress);
-        if (NativeRoadWritePriorities.Count > 0) NativeRoadPackets[address] = NativeRoadWritePriorities.Peek();
+        bool roadScope = NativeRoadWritePriorities.Count > 0;
+        bool routeScope = _terrainRouteWriteScopeDepth > 0;
+        if (!PacketWritePages[address >> PacketWritePageShift])
+        {
+            if (!roadScope && !routeScope)
+                return;
+            MarkPacketWritePage(address); // a scoped store below creates metadata
+        }
+        if (roadScope) NativeRoadPackets[address] = NativeRoadWritePriorities.Peek();
         else NativeRoadPackets.Remove(address);
         // Coarse reconstruction metadata is attached after a complete packet
         // is emitted. Any later write to that packet address starts new
@@ -676,7 +698,7 @@ public static class GpuHle
         TerrainTransitionPackets.Remove(address);
         if (!TriangleNclipHeaderPending.Remove(address))
             TriangleNclipPackets.Remove(address);
-        if (_terrainRouteWriteScopeDepth > 0)
+        if (routeScope)
         {
             TerrainRoutePackets.Add(address);
             return;
@@ -703,7 +725,7 @@ public static class GpuHle
     {
         if (!textures.Valid)
             return;
-        CoarseTerrainPackets[NormalizePacketAddress(address)] =
+        CoarseTerrainPackets[MarkPacketWritePage(NormalizePacketAddress(address))] =
             new CoarseTerrainPacket(textures, secondHalf, source, x, z, direct);
     }
 
@@ -719,7 +741,7 @@ public static class GpuHle
     {
         if (!packet.Textures.Valid)
             return;
-        uint normalized = NormalizePacketAddress(address);
+        uint normalized = MarkPacketWritePage(NormalizePacketAddress(address));
         TerrainTransitionPackets[normalized] = packet;
     }
 
@@ -863,6 +885,7 @@ public static class GpuHle
         TerrainTransitionPackets.Clear();
         TriangleNclipPackets.Clear();
         TriangleNclipHeaderPending.Clear();
+        Array.Clear(PacketWritePages);
         PacketOwners.Clear();
         _terrainRouteWriteScopeDepth = 0;
         _terrainRouteColorRamp = null;
@@ -880,6 +903,15 @@ public static class GpuHle
         byte red, byte green, byte blue)
     {
         Backend?.SetDreamcastFogColor(red, green, blue);
+    }
+
+    static void RemoveArenaKeys<T>(Dictionary<uint, T> packets, uint start, uint end)
+    {
+        // On .NET 10, Dictionary.Remove does not invalidate its key enumerator.
+        // Retire this buffer in place without copying the keys of every matching packet.
+        foreach (uint address in packets.Keys)
+            if (address >= start && address < end)
+                packets.Remove(address);
     }
 
     public static void BeginPacketArena(uint start, uint end)
@@ -924,24 +956,12 @@ public static class GpuHle
             address >= start && address < end);
         TerrainRoutePackets.RemoveWhere(address =>
             address >= start && address < end);
-        foreach (uint address in CoarseTerrainPackets.Keys
-                     .Where(address => address >= start && address < end)
-                     .ToArray())
-            CoarseTerrainPackets.Remove(address);
-        foreach (uint address in TerrainTransitionPackets.Keys
-                     .Where(address => address >= start && address < end)
-                     .ToArray())
-            TerrainTransitionPackets.Remove(address);
-        foreach (uint address in TriangleNclipPackets.Keys
-                     .Where(address => address >= start && address < end)
-                     .ToArray())
-            TriangleNclipPackets.Remove(address);
+        RemoveArenaKeys(CoarseTerrainPackets, start, end);
+        RemoveArenaKeys(TerrainTransitionPackets, start, end);
+        RemoveArenaKeys(TriangleNclipPackets, start, end);
         TriangleNclipHeaderPending.RemoveWhere(address =>
             address >= start && address < end);
-        foreach (uint address in PacketOwners.Keys
-                     .Where(address => address >= start && address < end)
-                     .ToArray())
-            PacketOwners.Remove(address);
+        RemoveArenaKeys(PacketOwners, start, end);
         if (TracePacketArenas)
             Console.Error.WriteLine(
                 $"[PacketArenaRetire] gameplay={(GameplayActive ? 1 : 0)} " +

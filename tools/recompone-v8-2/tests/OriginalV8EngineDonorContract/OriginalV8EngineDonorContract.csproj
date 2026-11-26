@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Source-linked fixture only. No game, runtime, or packages are built. -->
+    <Compile Include="../../../recompone-reference/RecompOne.Runtime/Cdrom/OriginalV8EngineDonor.cs" Link="OriginalV8EngineDonor.cs" />
+    <Compile Include="../../../recompone-reference/RecompOne.Runtime/Cdrom/OriginalV8EngineDisc.cs" Link="OriginalV8EngineDisc.cs" />
+    <Compile Include="../../../recompone-reference/RecompOne.Runtime/Cdrom/OriginalV8EngineSidecar.cs" Link="OriginalV8EngineSidecar.cs" />
+    <Compile Include="../../../recompone-reference/RecompOne.Runtime/Cdrom/OriginalV8EngineInstallation.cs" Link="OriginalV8EngineInstallation.cs" />
+    <Compile Include="../../../recompone-reference/RecompOne.Runtime/Cdrom/OriginalV8EngineRouting.cs" Link="OriginalV8EngineRouting.cs" />
+  </ItemGroup>
+</Project>

@@ -106,6 +106,17 @@ public sealed partial class Gpu
     public void SetOrderingTableDepth(int depth) =>
         _currentOtDepth = Math.Max(1, depth);
 
+    internal void AdvanceOrderingTableBucket(uint address, int depth)
+    {
+        SetOrderingTableDepth(depth);
+        // A zero-word tag changes OT depth but cannot emit a GP0 command or
+        // direct marker. The next payload installs its own provenance, and
+        // EndOrderingTable clears it. Only the developer mesh trace observes
+        // ownership on an empty tag (including its bounded diagnostic budget).
+        if (TraceMeshes && GpuHle.GameplayActive)
+            SetOrderingTablePacket(address, 0);
+    }
+
     public void SetOrderingTablePacket(uint address, uint wordCount = 0)
     {
         _currentOtPacketAddress = address;

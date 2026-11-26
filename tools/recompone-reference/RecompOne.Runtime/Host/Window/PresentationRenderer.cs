@@ -1,6 +1,7 @@
 using Silk.NET.OpenGL;
 using RecompOne.Runtime.Config;
 using RecompOne.Runtime.Dispatch;
+using RecompOne.Runtime.Enhanced;
 
 namespace RecompOne.Runtime.Host.Window;
 
@@ -196,7 +197,7 @@ internal sealed class PresentationRenderer : IDisposable
     readonly Dictionary<string, (int Width, int Height)> _loadingCardSizes =
         new(StringComparer.OrdinalIgnoreCase);
     string? _lastLoadingCardArena;
-    int _width, _height;
+    int _width, _height, _fxaaWidth, _fxaaHeight;
     int _lastSourceWidth, _lastSourceHeight, _lastOutputWidth, _lastOutputHeight;
     bool _lastFxaa;
     int _upscaleSourceSize, _upscaleDedither, _upscaleDeditherStep;
@@ -256,40 +257,43 @@ internal sealed class PresentationRenderer : IDisposable
         _gl.EnableVertexAttribArray(0);
         _gl.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), (void*)0);
 
-        (_upscaleTexture, _upscaleFbo) = CreateTarget();
-        (_fxaaTexture, _fxaaFbo) = CreateTarget();
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
+        _gl.BindVertexArray(0);
+        _gl.UseProgram(0);
+        GlResourceSetup.RequireNoError(_gl, "presentation quad");
         LoadLoadingCardOverlays();
-        EnsureSize(1, 1);
-        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         Ready = true;
     }
 
-    (uint texture, uint fbo) CreateTarget()
+    unsafe void EnsureTarget(ref uint texture, ref uint fbo, ref int width, ref int height,
+        int requestedWidth, int requestedHeight, string target)
     {
-        uint texture = _gl.GenTexture();
+        if (requestedWidth == width && requestedHeight == height) return;
+        GlResourceSetup.RequireTextureSize(_gl, requestedWidth, requestedHeight, target);
+        bool newTexture = texture == 0;
+        if (newTexture) texture = _gl.GenTexture();
         _gl.BindTexture(TextureTarget.Texture2D, texture);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Nearest);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Nearest);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
-        uint fbo = _gl.GenFramebuffer();
-        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
-        _gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
-            TextureTarget.Texture2D, texture, 0);
-        return (texture, fbo);
-    }
-
-    unsafe void EnsureSize(int width, int height)
-    {
-        if (width == _width && height == _height) return;
-        foreach (uint texture in new[] { _upscaleTexture, _fxaaTexture })
+        if (newTexture)
         {
-            _gl.BindTexture(TextureTarget.Texture2D, texture);
-            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8, (uint)width, (uint)height, 0,
-                PixelFormat.Rgba, PixelType.UnsignedByte, null);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Nearest);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Nearest);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
         }
-        _width = width;
-        _height = height;
+        _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
+            (uint)requestedWidth, (uint)requestedHeight, 0, PixelFormat.Rgba,
+            PixelType.UnsignedByte, (void*)null);
+        GlResourceSetup.RequireNoError(_gl, $"{target} {requestedWidth}x{requestedHeight} storage");
+        if (fbo == 0)
+        {
+            fbo = _gl.GenFramebuffer();
+            GlResourceSetup.AttachColor(_gl, fbo, texture);
+        }
+        else
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
+        GlResourceSetup.RequireComplete(_gl, target);
+        width = requestedWidth;
+        height = requestedHeight;
     }
 
     public uint Render(uint sourceTexture, int sourceWidth, int sourceHeight,
@@ -300,7 +304,10 @@ internal sealed class PresentationRenderer : IDisposable
 
         outputWidth = Math.Clamp(outputWidth, 1, 8192);
         outputHeight = Math.Clamp(outputHeight, 1, 8192);
-        EnsureSize(outputWidth, outputHeight);
+        // Allocate real target storage only once its first display size is
+        // known. No dummy 1x1 images or attachment of undefined level zero.
+        EnsureTarget(ref _upscaleTexture, ref _upscaleFbo, ref _width, ref _height,
+            outputWidth, outputHeight, "presentation upscale");
         if (sourceWidth != _lastSourceWidth || sourceHeight != _lastSourceHeight ||
             outputWidth != _lastOutputWidth || outputHeight != _lastOutputHeight || fxaa != _lastFxaa)
         {
@@ -419,6 +426,8 @@ internal sealed class PresentationRenderer : IDisposable
         bool finalFxaa = fxaa && !uiPresentation;
         if (finalFxaa)
         {
+            EnsureTarget(ref _fxaaTexture, ref _fxaaFbo, ref _fxaaWidth, ref _fxaaHeight,
+                outputWidth, outputHeight, "presentation FXAA");
             PreparePass(_fxaaFbo, _fxaaProgram, _upscaleTexture);
             _gl.Uniform2(_fxaaSourceSize, (float)outputWidth, outputHeight);
             _gl.Uniform2(_fxaaInvResolution, 1f / outputWidth, 1f / outputHeight);
@@ -490,13 +499,16 @@ internal sealed class PresentationRenderer : IDisposable
 
     void LoadLoadingCardOverlay(string arena, string path)
     {
+        uint texture = 0;
         try
         {
-            (int width, int height, byte[] rgb) = ReadP6Ppm(path);
+            string fullPath = Path.GetFullPath(path);
+            (int width, int height, byte[] rgb) = ReadP6Ppm(fullPath);
             if (width != 1280 || (height != 384 && height != 448))
                 throw new InvalidDataException(
                     $"expected 1280x384 or 1280x448, found {width}x{height}");
-            uint texture = _gl.GenTexture();
+            GlResourceSetup.RequireTextureSize(_gl, width, height, "loading card");
+            texture = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, texture);
             _gl.TexParameter(
                 TextureTarget.Texture2D,
@@ -525,11 +537,12 @@ internal sealed class PresentationRenderer : IDisposable
                 PixelFormat.Rgb,
                 PixelType.UnsignedByte,
                 rgb);
+            GlResourceSetup.RequireNoError(_gl, "loading card upload");
             if (_loadingCardTextures.Remove(
                     arena, out uint replacedTexture))
                 _gl.DeleteTexture(replacedTexture);
             _loadingCardTextures[arena] = texture;
-            _loadingCardPaths[arena] = Path.GetFullPath(path);
+            _loadingCardPaths[arena] = fullPath;
             _loadingCardSizes[arena] = (width, height);
             Console.WriteLine(
                 $"[TexturePack] loaded loading card overlay arena={arena} " +
@@ -537,6 +550,7 @@ internal sealed class PresentationRenderer : IDisposable
         }
         catch (Exception ex)
         {
+            if (texture != 0) _gl.DeleteTexture(texture);
             Console.Error.WriteLine(
                 $"[TexturePack] ignored loading card overlay arena={arena} " +
                 $"{path}: {ex.Message}");

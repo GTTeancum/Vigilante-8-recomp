@@ -443,6 +443,19 @@ PROVEN_PATCHES = [
         "target": "RecompOne.Runtime.Sdk.V82Compat.EndSkyPass",
         "mode": "post",
     },
+    # The runtime checks the direct-terrain opt-in and split-screen mode.
+    {
+        "overlay": "main",
+        "address": "80031678",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.BeginWorldRenderTerrainCache",
+        "mode": "pre",
+    },
+    {
+        "overlay": "main",
+        "address": "80031678",
+        "target": "RecompOne.Runtime.Sdk.V82Compat.EndWorldRenderTerrainCache",
+        "mode": "post",
+    },
     {
         "overlay": "main",
         "address": "80050B38",

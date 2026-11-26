@@ -67,3 +67,45 @@ either game. For the sequel it extracts all 128 logical files, preserves raw
 Mode 2 sectors for `.STR`/`.XA`, creates the embedded
 `V82LooseManifest.json`, and encodes CD tracks 2-17 to OGG. Deployment and mod
 layout details are in `reference-v8-2/LOOSE_FILES.md`.
+
+## Original V8 guest-engine audio
+
+With the shipped original-roster mod, choose your original Vigilante 8 USA
+Rev 1 CUE in setup to add the original engines alongside that disc's music.
+You can do this before importing 2nd Offense or by running the program with
+your original CUE after installation. Setup verifies the original disc and
+saves a small local cache beside `game_data`; it never overwrites mod files.
+Only the matching shipped roster uses the cache. Its original ground engines
+use the native sound player's voice, gain, pitch and loop settings without
+using room in the PS1 sound RAM. Stock cars, weapons, transformations, other
+rosters and installations with no recognized original disc keep existing
+behavior. A missing or damaged cache does not stop the game.
+
+The older manual updater remains available for separately managed local
+copies. **Keep a copy of the complete old package**, including its selector
+portraits. Generate two updated files in a separate, *new* directory:
+
+```powershell
+py -3 tools/recompone-v8-2/upgrade_guest_engine_audio.py --package "C:\V8\original-roster" --disc-bin "D:\V8\Vigilante 8 (USA) (Rev 1) (Track 01).bin" --output "C:\V8\engine-pair"
+```
+
+Use Python 3.10+ and the original US V8 game's MODE2/2352 data track, **not**
+2nd Offense. Alternatively, pass `--arms "D:\V8-original\HUD\ARMS.EXP"`
+instead of `--disc-bin`. The updater reads the installed pair and writes
+only `CUSTOM.EXP` and `VEHICLES.V8R` to its output. Copy **both** into the
+copy of the complete package and point the **updated host** at that copy via
+`RECOMPONE_V82_VEHICLE_PACKAGE`. Do not run the output pair as a new empty
+mod, overwrite the media, or mix old and new files. Unknown or non-round-
+trippable packages are rejected rather than rewritten.
+
+The source-only distributable updater works without a checkout or Blender:
+build it with `python tools/recompone-v8-2/build_guest_engine_updater.py OriginalEngineAudio.pyz`;
+on the player's machine, use `py -3 OriginalEngineAudio.pyz` with the same
+arguments. The archive contains only Python source, no disc or generated data.
+
+The engine lives in each original driver's HUD/ARMS form, not sample zero of
+the COMMON/body bank used for weapons. The converter appends the loop (native
+pitch and ADPCM unchanged) and records its index in bits 24–31 of the V8:2
+entry flags. Zero retains previous behavior. Only the engine key-on in
+`80038408` consults the mapping; stock vehicles and transformed modes keep their
+native audio. This change is unrelated to tire squeal and music.

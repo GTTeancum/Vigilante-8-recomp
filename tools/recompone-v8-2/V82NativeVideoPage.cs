@@ -387,7 +387,6 @@ public static partial class Vigilante82PC
         static readonly string[] Resolutions =
             ["1280x720", "1920x1080", "2560x1440", "3840x2160"];
         static readonly string[] AntiAliasingModes = ["Off", "FXAA"];
-        static readonly string[] LevelOfDetailModes = ["Stock", "Maximum"];
         static readonly int[] MsaaModes = [0, 2, 4, 8];
         static readonly int[] AnisotropicModes = [1, 2, 4, 8, 16];
 
@@ -497,12 +496,7 @@ public static partial class Vigilante82PC
                 View.TextureMipmaps = !View.TextureMipmaps;
                 SaveCustom();
             }),
-            new("Level of detail", () => View.LevelOfDetail, direction =>
-            {
-                View.LevelOfDetail =
-                    Cycle(LevelOfDetailModes, View.LevelOfDetail, direction);
-                SaveCustom();
-            }),
+            // Geometry LOD stays a host setting for existing profiles.
             new("Draw distance",
             () => View.ExtendedDrawDistance ? "Extended" : "Stock", _ =>
             {

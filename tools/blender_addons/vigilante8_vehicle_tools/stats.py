@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import struct
 from typing import Iterator, Mapping
 
@@ -431,6 +431,11 @@ PROFILES = {
 }
 
 
+# SLUS_005.10 USA Rev 1 moved the same 13-row table. Its native
+# loader passes 8005FBC0 at 8002B478; never scan unknown data for a lookalike.
+RETAIL_LAYOUTS = (*PROFILES.values(), replace(PROFILES["V8"], table_address=0x8005FBC0))
+
+
 def authoring_values(game: str, values: Mapping[str, int]) -> dict[str, int]:
     """Return the human-facing stat names used in exported project JSON."""
 
@@ -655,12 +660,14 @@ class StatsFile:
             raise FormatError("vehicle stats input is not a PS-X EXE")
         self.load_address = u32le(data, 0x18)
         self.text_size = u32le(data, 0x1C)
-        if game is None:
-            game = self._detect_game()
-        normalized = game.upper().replace(":", "_")
-        if normalized not in PROFILES:
+        normalized = game.upper().replace(":", "_") if game is not None else None
+        if normalized is not None and normalized not in PROFILES:
             raise ValueError(f"unknown game profile {game!r}")
-        self.profile = PROFILES[normalized]
+        matches = [p for p in RETAIL_LAYOUTS if (normalized is None or p.game == normalized)
+                   and self._profile_matches(p)]
+        if len(matches) != 1:
+            raise FormatError("could not uniquely identify a supported executable stat table")
+        self.profile = matches[0]
         self.table_offset = self.address_to_offset(self.profile.table_address)
         require_range(
             self._data,
@@ -688,24 +695,12 @@ class StatsFile:
         relative = profile.table_address - self.load_address
         offset = 0x800 + relative
         total = profile.record_count * profile.record_size
-        if relative < 0 or relative + total > self.text_size:
+        if relative < 0 or relative + total > self.text_size or offset + total > len(self._data):
             return False
         return all(
             self._data[offset + index * profile.record_size + 0x0D] == index
             for index in range(profile.record_count)
         )
-
-    def _detect_game(self) -> str:
-        matches = [
-            profile.game
-            for profile in PROFILES.values()
-            if self._profile_matches(profile)
-        ]
-        if len(matches) != 1:
-            raise FormatError(
-                "could not uniquely identify a V8 or V8:2 executable stat table"
-            )
-        return matches[0]
 
     def field(self, name: str) -> FieldSpec:
         for field in self.profile.fields:

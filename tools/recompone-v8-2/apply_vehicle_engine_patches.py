@@ -10,6 +10,7 @@ transformation bank, and wheel bank only for registered custom vehicle objects.
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 
@@ -83,15 +84,6 @@ REPLACEMENTS = (
         """    public static void func_80020F5C(CpuContext c, IMemory m)
     {
         if (!RecompOne.Runtime.Context.PreHook.Run(RecompOne.Runtime.Sdk.V82Compat.RetainSharedGuestTexture, c, m)) return;
-""",
-    ),
-    (
-        """        Vigilante82PC.func_800333D0(c, m);
-        c.RA = 0x800147D0u;
-""",
-        """        Vigilante82PC.func_800333D0(c, m);
-        RecompOne.Runtime.Sdk.V82VehicleRegistry.ReleaseMatchRuntimes(c, m);
-        c.RA = 0x800147D0u;
 """,
     ),
     (
@@ -357,6 +349,74 @@ REPLACEMENTS = (
 )
 
 
+# apply_split_screen_patches appends its own release after the vehicle
+# release. Validate both effects in their actual order on incremental builds.
+TEARDOWN_CALL = (
+    "        c.RA = 0x800147C8u;\n"
+    "        Vigilante82PC.func_800333D0(c, m);\n"
+)
+TEARDOWN_END = "        c.RA = 0x800147D0u;\n"
+VEHICLE_RELEASE = "        RecompOne.Runtime.Sdk.V82VehicleRegistry.ReleaseMatchRuntimes(c, m);\n"
+SPLIT_RELEASE = "        SplitRelease(c, m);\n"
+
+
+def patch_match_teardown(text: str) -> str:
+    if text.count(TEARDOWN_CALL) != 1 or text.count(TEARDOWN_END) != 1:
+        raise RuntimeError("missing or duplicate native match teardown boundary")
+    start = text.index(TEARDOWN_CALL) + len(TEARDOWN_CALL)
+    end = text.index(TEARDOWN_END)
+    body = text[start:end]
+    if end < start or body not in ("", VEHICLE_RELEASE, SPLIT_RELEASE, VEHICLE_RELEASE + SPLIT_RELEASE):
+        raise RuntimeError("unknown or duplicated hooks in native match teardown")
+    if body.startswith(VEHICLE_RELEASE):
+        return text
+    return text[:start] + VEHICLE_RELEASE + text[start:]
+
+
+def patch_ground_engine(source: str) -> str:
+    """Route only the native vehicle-engine key-on through the guest helpers.
+
+    The original a0 is the vehicle. By the time 8001E098 is called the
+    register contains the SPU voice instead. Capture the object on entry,
+    not from a register that happens to survive a particular call path.
+    """
+    header = "    public static void func_80038408(CpuContext c, IMemory m)\n    {\n"
+    if source.count(header) != 1:
+        raise RuntimeError("native vehicle engine startup routine changed")
+    start = source.index(header)
+    end = source.index("\n    }", start)
+    body = source[start:end]
+    capture = "        uint groundEngineVehicle = c.A0;\n"
+    seam = "c.A2 = RecompOne.Runtime.Sdk.V82VehicleRegistry.GroundEngineSample(m, groundEngineVehicle, c.A2);"
+    # RecompOne uses a qualified direct call when crossing a generated unit.
+    target = r"^( +)((?:Vigilante82PC\.)?func_8001E098)\(c, m\);$"
+    calls = list(re.finditer(target, body, re.MULTILINE))
+    if len(calls) != 1:
+        raise RuntimeError("native ground/transform engine key-on changed")
+    call = calls[0]
+    indent, native = call.groups()
+    hook = "RecompOne.Runtime.Sdk.V82VehicleRegistry.TryPlayLocalOriginalEngine"
+    route = f"if (!{hook}(c, m, groundEngineVehicle, {native}))"
+    if hook in body:
+        if (not body.startswith(header + capture) or body.count(capture) != 1
+                or body.count(seam) != 1 or body.count(hook) != 1
+                or not body[:call.start()].endswith(indent[:-4] + seam + "\n" + indent[:-4] + route + "\n")):
+            raise RuntimeError("incomplete or misplaced local engine key-on")
+        return source
+    if capture in body or seam in body:
+        if (not body.startswith(header + capture) or body.count(capture) != 1
+                or body.count(seam) != 1 or not body[:call.start()].endswith(indent + seam + "\n")):
+            raise RuntimeError("incomplete or misplaced vehicle engine mapping")
+        prefix = ""
+    else:
+        prefix = indent + seam + "\n"
+    body = (body[:call.start()] + prefix + indent + route + "\n" +
+            indent + "    " + native + "(c, m);" + body[call.end():])
+    if capture not in body:
+        body = body.replace(header, header + capture, 1)
+    return source[:start] + body + source[end:]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
@@ -364,7 +424,9 @@ def main() -> int:
 
     source = args.source.resolve()
     text = source.read_text(encoding="utf-8")
-    changed = 0
+    patched = patch_match_teardown(text)
+    changed = int(patched != text)
+    text = patched
     for old, new in MIGRATIONS:
         if new and new in text:
             continue
@@ -401,6 +463,11 @@ def main() -> int:
             raise RuntimeError("model face traversal boundary changed")
         body = body.replace(marker, seam + marker, 1)
         text = text[:start] + body + text[end:]
+        changed += 1
+
+    mapped = patch_ground_engine(text)
+    if mapped != text:
+        text = mapped
         changed += 1
 
     if changed:

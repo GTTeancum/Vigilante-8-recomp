@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>
+  <TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><AssemblyName>Vigilante82PC</AssemblyName>
+</PropertyGroup><ItemGroup>
+  <AssemblyMetadata Include="V8QualificationFixture" Value="true" />
+  <ProjectReference Include="../../../recompone-reference/RecompOne.Runtime/RecompOne.Runtime.csproj" />
+</ItemGroup></Project>

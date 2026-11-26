@@ -15,9 +15,15 @@ python tools/recompone-v8/prepare_reference.py
 Options:
 
 ```text
---cue PATH      repository-relative BIN/CUE entry point
---output PATH   repository-relative generated directory
+--cue PATH        repository-relative BIN/CUE entry point
+--output PATH     repository-relative generated directory
+--skip-dreamland  omit the translated N64 arena for PS1-only reference work
 ```
+
+Use `--skip-dreamland` with a separate output directory for code reference
+work if you don't have the translated N64 arena files. The default still
+requires and includes Dreamland, and recompiling either configuration still
+needs the original Vigilante 8 disc.
 
 `overlay_paths.json` separates source-proven disc paths from layout assumptions.
 Validate its terrain paths against the actual disc before the first execution.

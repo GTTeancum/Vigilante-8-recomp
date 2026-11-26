@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType><TargetFramework>net10.0</TargetFramework><AssemblyName>Vigilante8PC</AssemblyName>
+    <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DefineConstants>$(DefineConstants);V8_PAIRED_WINDOWS</DefineConstants>
+    <ApplicationIcon>../../reference-host/assets/v8.ico</ApplicationIcon>
+    <!-- The private guest references runtime methods the shell alone does not call. -->
+    <PublishTrimmed>false</PublishTrimmed><PublishReadyToRun>false</PublishReadyToRun>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugSymbols>false</DebugSymbols><DebugType>none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../reference-host/Program.cs" Link="Program.cs" />
+    <ProjectReference Include="../../../recompone-reference/RecompOne.Runtime/RecompOne.Runtime.csproj" />
+    <EmbeddedResource Include="../../reference-host/assets/window-icon-64.rgba" LogicalName="RecompOne.WindowIcon.64.rgba" />
+    <Content Include="../../reference-host/runtime/win-x64/vcruntime140.dll" Link="vcruntime140.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="false" />
+  </ItemGroup>
+</Project>

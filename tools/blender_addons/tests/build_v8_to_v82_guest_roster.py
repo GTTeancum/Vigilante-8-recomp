@@ -22,6 +22,7 @@ from vigilante8_vehicle_tools import (  # noqa: E402
     registry,
     stats,
 )
+from vigilante8_vehicle_tools.guest_audio import VEHICLES, original_engine_sounds  # noqa: E402
 
 
 V8_COMMON = (
@@ -33,25 +34,11 @@ V8_SELECTOR_VEHICLES = (
 V82_COMMON = (
     ROOT / "V8_2_WORK" / "disc" / "SHARED" / "COMMON.EXP"
 )
+V8_ENGINE_ARMS = ROOT / "PS1 game" / "HUD" / "ARMS.EXP"
+V8_MAIN_SOUNDS = ROOT / "PS1 game" / "SOUNDS" / "MAIN.SND"
 V8_EXE = ROOT / "PS1 game" / "SLUS_005.10"
 V82_EXE = ROOT / "V8_2_LOOSE" / "SLUS_008.68"
 OUTPUT = ROOT / "artifacts" / "v8_to_v82_guest_roster"
-
-VEHICLES = (
-    (0, "guest.v8.chassey_blue", "Chassey Blue", "'67 Rattler"),
-    (1, "guest.v8.slick_clyde", "Slick Clyde", "'70 Clydesdale"),
-    (2, "guest.v8.sheila", "Sheila", "'74 Strider"),
-    (3, "guest.v8.john_torque", "John Torque", "'69 Jefferson"),
-    (4, "guest.v8.dave", "Dave", "'70 Van"),
-    (5, "guest.v8.convoy", "Convoy", "'72 Moth Truck"),
-    (6, "guest.v8.loki", "Loki", "'73 Glenn 4x4"),
-    (7, "guest.v8.houston_3", "Houston 3", "'75 Palamino"),
-    (8, "guest.v8.boogie", "Boogie", "'76 Leprechaun"),
-    (9, "guest.v8.beezwax", "Beezwax", "'70 Stag Pickup"),
-    (10, "guest.v8.molo", "Molo", "'66 School Bus"),
-    (11, "guest.v8.sid_burn", "Sid Burn", "'69 Manta"),
-    (12, "guest.v8.y_the_alien", '"Y" the Alien', "'64 Luxo Saucer"),
-)
 
 # Source callback indices in SLUS_005.10 table 8005ECB0.
 V8_ORIGINAL_SPECIAL_TYPES = {7, 12}
@@ -103,6 +90,8 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
         for kind in mode
     }
 
+    engines_by_id = original_engine_sounds(V8_ENGINE_ARMS.read_bytes())
+
     result = []
     for source_index, stable_id, display_name, _vehicle_name in VEHICLES:
         flying = source_index == 12
@@ -124,11 +113,14 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
             original_impact_kind = bases[1] + effect_map[0x16]
             # Original global sound bank is Sounds/Main.SND (800655E4).
             sound_form = iff.IffChunk(tag=b"FORM", form_type=b"XOBF", children=[
-                iff.IffChunk(tag=b"SND ", payload=(ROOT/"PS1 game/SOUNDS/MAIN.SND").read_bytes())])
+                iff.IffChunk(tag=b"SND ", payload=V8_MAIN_SOUNDS.read_bytes())])
             common_sounds = registry._decode_sounds(sound_form)
             if len(source_sounds) != 3:
                 raise ValueError("source special sound table changed")
             source_sounds += (common_sounds[0x41], common_sounds[0x2B])
+        # Do not shift the COMMON indices used by weapons and animations.
+        engine_index = len(source_sounds)
+        source_sounds += (engines_by_id[stable_id],)
         selector_preview = conversion.v8_bank_to_v82(
             decode_bank(V8_SELECTOR_VEHICLES, "V8", source_index)
         )
@@ -193,6 +185,7 @@ def build_projects() -> tuple[project.VehicleProject, ...]:
             transform_modes=mapped_modes,
             powerups=v82_stats.powerup_values(),
             sounds=source_sounds,
+            ground_engine_sample=engine_index,
             original_impact_kind=original_impact_kind,
             controller_class="flying" if flying else "ground",
             supports_transformations=not flying,
@@ -268,6 +261,8 @@ def main() -> None:
             str(V8_SELECTOR_VEHICLES.relative_to(ROOT)): digest(
                 V8_SELECTOR_VEHICLES.read_bytes()
             ),
+            str(V8_ENGINE_ARMS.relative_to(ROOT)): digest(V8_ENGINE_ARMS.read_bytes()),
+            str(V8_MAIN_SOUNDS.relative_to(ROOT)): digest(V8_MAIN_SOUNDS.read_bytes()),
             str(V8_EXE.relative_to(ROOT)): digest(V8_EXE.read_bytes()),
             str(V82_COMMON.relative_to(ROOT)): digest(V82_COMMON.read_bytes()),
             str(V82_EXE.relative_to(ROOT)): digest(V82_EXE.read_bytes()),

@@ -153,32 +153,17 @@ class V8ToV82GuestConversionTests(unittest.TestCase):
         package = registry.compile_package(self.vehicles)
         _game, entries = registry.parse_registry(package.registry)
         forms = tuple(iff.parse(package.archive).forms(b"XOBF"))
-        source_forms = tuple(iff.parse(V8_COMMON.read_bytes()).forms(b"XOBF"))
         for source_index, vehicle in enumerate(self.vehicles):
             expected = decode_sounds(V8_COMMON, source_index)
             self.assertEqual(expected, vehicle.sounds[:len(expected)], vehicle.stable_id)
             if vehicle.original_special_type is not None:
                 common=registry._decode_sounds(iff.IffChunk(tag=b"FORM",form_type=b"XOBF",children=[
                     iff.IffChunk(tag=b"SND ",payload=(ROOT/"PS1 game/SOUNDS/MAIN.SND").read_bytes())]))
-                self.assertEqual((common[0x41],common[0x2B]),vehicle.sounds[len(expected):])
-                expected=vehicle.sounds
+                expected += (common[0x41], common[0x2B])
+            engine = decode_sounds(ROOT / "PS1 game/HUD/ARMS.EXP", source_index)[0]
             body = forms[entries[source_index].archive_index]
-            self.assertEqual(expected, registry._decode_sounds(body))
-            if vehicle.original_special_type is not None:
-                continue  # Extended table is checked sample-for-sample above.
-            self.assertEqual(
-                next(
-                    child.payload
-                    for child in source_forms[source_index].children
-                    if child.tag == b"SND "
-                ),
-                next(
-                    child.payload
-                    for child in body.children
-                    if child.tag == b"SND "
-                ),
-                vehicle.stable_id,
-            )
+            self.assertEqual(len(expected), entries[source_index].ground_engine_sample)
+            self.assertEqual(expected + (engine,), registry._decode_sounds(body))
             for support_index in (
                 entries[source_index].transformation_archive_index,
                 entries[source_index].selector_preview_archive_index,

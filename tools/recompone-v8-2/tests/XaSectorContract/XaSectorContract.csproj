@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <XaSource Condition="'$(XaSource)' == ''">../../../recompone-reference/RecompOne.Runtime/Hardware/XaAudio.cs</XaSource>
+  </PropertyGroup>
+  <ItemGroup><Compile Include="$(XaSource)" Link="XaAudio.cs" /></ItemGroup>
+</Project>

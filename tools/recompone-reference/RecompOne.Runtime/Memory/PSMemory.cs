@@ -13,6 +13,9 @@ public sealed class PSMemory : IMemory
     private static int _watchedWriteCount;
 
     private readonly byte[] _ram = new byte[Runtime.Mode == RunMode.Devkit ? MemoryMap.DevkitRamSize : MemoryMap.RetailRamSize];
+    // The RAM window has a power-of-two backing store (2 MiB retail, 8 MiB devkit).
+    // Keep each instance's aliasing tied to its allocation, not Runtime.Mode.
+    private readonly uint _ramAddressMask;
     private readonly byte[] _scratchpad = new byte[MemoryMap.ScratchpadSize];
     private readonly byte[] _hwregs = new byte[MemoryMap.HwRegsSize];
     private readonly byte[] _bios = new byte[MemoryMap.BiosSize];
@@ -45,6 +48,7 @@ public sealed class PSMemory : IMemory
 
     public PSMemory()
     {
+        _ramAddressMask = (uint)_ram.Length - 1u;
         _preciseGteRamPages =
             new PreciseGtePage?[_ram.Length >> PrecisePageShift];
         _preciseGteScratchpadPages =
@@ -113,7 +117,7 @@ public sealed class PSMemory : IMemory
     {
         if (phys < MemoryMap.RamWindow)
         {
-            uint off = phys % (uint)_ram.Length;
+            uint off = phys & _ramAddressMask;
             if (RamLogger.TrackWrites)
                 Runtime.RamLog.RecordWrite(off, size);
             Dispatcher.NotifyWrite(off);
@@ -127,7 +131,7 @@ public sealed class PSMemory : IMemory
     {
         if (phys < MemoryMap.RamWindow)
         {
-            uint offset = phys % (uint)_ram.Length;
+            uint offset = phys & _ramAddressMask;
             pages = _preciseGteRamPages;
             pageIndex = (int)(offset >> PrecisePageShift);
             wordIndex = (int)((offset >> 2) &
@@ -173,7 +177,7 @@ public sealed class PSMemory : IMemory
     private void TrackRead(uint phys, int size)
     {
         if (RamLogger.TrackReads && phys < MemoryMap.RamWindow)
-            Runtime.RamLog.RecordRead(phys % (uint)_ram.Length, size);
+            Runtime.RamLog.RecordRead(phys & _ramAddressMask, size);
     }
 
     // Reads of an unmapped address terminate the process today. Hardware does
@@ -200,7 +204,7 @@ public sealed class PSMemory : IMemory
         uint phys = MemoryMap.ToPhysical(address);
 
         if (phys < MemoryMap.RamWindow)
-            return _ram.AsSpan((int)(phys % (uint)_ram.Length), size);
+            return _ram.AsSpan((int)(phys & _ramAddressMask), size);
 
         if (phys >= MemoryMap.ScratchpadBase && phys < MemoryMap.ScratchpadBase + MemoryMap.ScratchpadSize)
             return _scratchpad.AsSpan((int)(phys - MemoryMap.ScratchpadBase), size);
@@ -354,11 +358,14 @@ public sealed class PSMemory : IMemory
                 phys, out PreciseGtePage?[] pages,
                 out int pageIndex, out int wordIndex) &&
             pages[pageIndex] is PreciseGtePage page &&
-            page.Valid[wordIndex] &&
-            (vertex = page.Vertices[wordIndex]).Valid &&
-            vertex.PackedScreenPosition == packedScreenPosition &&
-            vertex.Valid)
-            return true;
+            page.Valid[wordIndex])
+        {
+            // Only WritePreciseGteVertex publishes a live slot, after validating
+            // its copied record. Ordinary writes invalidate the slot instead.
+            vertex = page.Vertices[wordIndex];
+            if (vertex.PackedScreenPosition == packedScreenPosition)
+                return true;
+        }
         vertex = default;
         return false;
     }

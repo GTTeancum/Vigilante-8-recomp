@@ -34,6 +34,7 @@ public static class FirstRunSetup
         var gate = new object();
         var progress = new LooseImportProgress("welcome", 0, 1, "");
         string error = "", notice = "", selected = initialSource ?? "";
+        string enteredPath = "";
         bool success = false;
         int frames = 0, completionFrames = 0;
         string? fixture = Environment.GetEnvironmentVariable("RECOMPONE_SETUP_TEST_SOURCE");
@@ -54,27 +55,34 @@ public static class FirstRunSetup
                         lock (gate) progress = p;
                         Console.Error.WriteLine($"[Setup] {p.Phase} {p.Current}/{p.Total} {p.Item}");
                     }
-                    // The first game's disc only supplies its soundtrack. With
-                    // Second Offense already installed the game then starts;
-                    // otherwise setup waits for the Second Offense disc, whose
-                    // import adopts the staged album.
+                    string completion = "Starting your game...";
+                    // The optional first disc supplies its soundtrack and,
+                    // for an authenticated revision, the original guest loops.
                     if (V8SoundtrackImporter.IsFirstGameDisc(cue))
                     {
-                        if (!V8SoundtrackImporter.Import(cue, destination, Report, cancel.Token))
+                        bool installed = V8SoundtrackImporter.Import(cue, destination, Report, cancel.Token);
+                        Report(new("original-engines", 0, 1, "Checking original engine samples"));
+                        bool engines = OriginalV8EngineInstallation.TryImport(cue, destination, cancel.Token,
+                            text => Console.Error.WriteLine($"[OriginalV8Engines] {text}"));
+                        string added = engines
+                            ? "Vigilante 8 soundtrack and original engines added."
+                            : "Vigilante 8 soundtrack added. Original engines were not added (see setup log).";
+                        if (!installed)
                         {
                             lock (gate)
                             {
-                                notice = "Vigilante 8 soundtrack added. Now choose your Vigilante 8: 2nd Offense CUE to install the game.";
+                                notice = added + " Now choose your Vigilante 8: 2nd Offense CUE to install the game.";
                                 progress = new("soundtrack-staged", 1, 1, "");
                             }
                             return;
                         }
+                        completion = added + " Starting your game...";
                     }
                     else
                     {
                         V82LooseImporter.Import(cue, destination, Report, cancel.Token);
                     }
-                    lock (gate) { success = true; progress = new("complete", 1, 1, "Starting your game..."); }
+                    lock (gate) { success = true; progress = new("complete", 1, 1, completion); }
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex)
@@ -88,7 +96,27 @@ public static class FirstRunSetup
         window.Load += () =>
         {
             gl = GL.GetApi(window); input = window.CreateInput();
-            ui = new ImGuiController(gl, window, input);
+            ui = new ImGuiController(gl, window, input, () =>
+            {
+                // Use the desktop clipboard, not ImGui's process-local buffer,
+                // on both Windows and Linux.
+                // GLFW's UTF-8 get/set APIs match ImGui's callback signatures.
+                var io = ImGui.GetIO();
+                var glfw = Silk.NET.GLFW.GlfwProvider.GLFW.Value.Context;
+                io.GetClipboardTextFn = glfw.GetProcAddress("glfwGetClipboardString");
+                io.SetClipboardTextFn = glfw.GetProcAddress("glfwSetClipboardString");
+                io.ClipboardUserData = window.Handle;
+
+                // Silk 2.22 sends physical modifier keys, but ImGui 1.90's
+                // shortcuts also need ModCtrl/ModShift events. Queue them in
+                // input order so a complete chord between frames is not lost.
+                if (input.Keyboards.Count > 0)
+                {
+                    var keyboard = input.Keyboards[0];
+                    keyboard.KeyDown += ForwardSetupModifiers;
+                    keyboard.KeyUp += ForwardSetupModifiers;
+                }
+            });
             ImGui.GetIO().NativePtr->IniFilename = null;
             ImGui.StyleColorsDark();
         };
@@ -125,7 +153,7 @@ public static class FirstRunSetup
             ImGui.TextWrapped("Choose your Vigilante 8: 2nd Offense (USA) CUE or BIN file to install the game.");
             ImGui.TextWrapped("Keep the CUE and all its BIN files together. Required title ID: SLUS-00868.");
             ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
-            ImGui.TextWrapped("Optional: choose the original Vigilante 8 (USA) CUE (SLUS-00510) to add its soundtrack.");
+            ImGui.TextWrapped("Optional: choose an original Vigilante 8 (USA) CUE to add its soundtrack and verified Rev 1 engine sounds.");
             ImGui.PopStyleColor();
             ImGui.Spacing();
             if (selected.Length != 0) ImGui.TextWrapped("Selected: " + Path.GetFileName(selected));
@@ -133,14 +161,30 @@ public static class FirstRunSetup
             {
                 if (choosing != null)
                     ImGui.TextWrapped("Waiting for file selection...");
-                else if (ImGui.Button("Choose BIN / CUE...", new Vector2(250, 42)))
+                else
                 {
-                    // This thread keeps pumping messages while the dialog is
-                    // open, so the setup window can own it and stay modal.
-                    choosing = NativeFileDialog.OpenAsync(
-                        "Select Vigilante 8: 2nd Offense (or Vigilante 8 for its soundtrack)",
-                        "PlayStation disc (BIN/CUE)\0*.cue;*.bin\0\0",
-                        owner: NativeFileDialog.ActiveWindow());
+                    ImGui.TextUnformatted("Enter or paste the full path to your disc.");
+                    ImGui.SetNextItemWidth(-1);
+                    bool submitted = ImGui.InputText("##setup-disc-path", ref enteredPath, 4096,
+                        ImGuiInputTextFlags.EnterReturnsTrue);
+                    if (OperatingSystem.IsWindows())
+                    {
+                        if (ImGui.Button("Choose BIN / CUE...", new Vector2(250, 42)))
+                        {
+                            // Pump the UI while the native Windows dialog owns it.
+                            choosing = NativeFileDialog.OpenAsync(
+                                "Select 2nd Offense, or the original Vigilante 8 bonus disc",
+                                "PlayStation disc (BIN/CUE)\0*.cue;*.bin\0\0",
+                                owner: NativeFileDialog.ActiveWindow());
+                        }
+                        ImGui.SameLine();
+                    }
+                    if ((ImGui.Button("Use BIN / CUE path", new Vector2(250, 42)) || submitted) &&
+                        choosing == null)
+                    {
+                        string path = NormalizeTypedDiscPath(enteredPath);
+                        if (!string.IsNullOrWhiteSpace(path)) Start(path);
+                    }
                 }
                 if (message.Length != 0)
                 {
@@ -160,6 +204,7 @@ public static class FirstRunSetup
                     "complete" => "Installation complete",
                     "music" => "Preparing music...",
                     "soundtrack" => "Preparing Vigilante 8 music...",
+                    "original-engines" => "Checking original engines...",
                     "validating" => "Checking disc...",
                     _ => "Extracting game files...",
                 });
@@ -196,6 +241,15 @@ public static class FirstRunSetup
         return success;
     }
 
+    static void ForwardSetupModifiers(IKeyboard keyboard, Key key, int scancode)
+    {
+        var io = ImGui.GetIO();
+        io.AddKeyEvent(ImGuiKey.ModCtrl,
+            keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight));
+        io.AddKeyEvent(ImGuiKey.ModShift,
+            keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight));
+    }
+
     public static string ResolveCue(string source)
     {
         source = Path.GetFullPath(source);
@@ -203,16 +257,27 @@ public static class FirstRunSetup
         if (Path.GetExtension(source).Equals(".cue", StringComparison.OrdinalIgnoreCase)) return source;
         if (!Path.GetExtension(source).Equals(".bin", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Select a CUE file or one of its BIN files.");
-        var matches = Directory.EnumerateFiles(Path.GetDirectoryName(source)!, "*.cue")
+        var pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var matches = Directory.EnumerateFiles(Path.GetDirectoryName(source)!)
+            .Where(cue => Path.GetExtension(cue).Equals(".cue", StringComparison.OrdinalIgnoreCase))
             .Where(cue => File.ReadLines(cue).Any(line =>
             {
                 var text = line.Trim();
                 int first = text.IndexOf('"'), last = text.LastIndexOf('"');
                 return text.StartsWith("FILE ", StringComparison.OrdinalIgnoreCase) && first >= 0 && last > first &&
-                    Path.GetFullPath(Path.Combine(Path.GetDirectoryName(cue)!, text[(first + 1)..last])).Equals(source, StringComparison.OrdinalIgnoreCase);
+                    Path.GetFullPath(Path.Combine(Path.GetDirectoryName(cue)!, text[(first + 1)..last])).Equals(source, pathComparison);
             })).ToArray();
         if (matches.Length != 1) throw new InvalidDataException("Select the matching CUE file. A BIN alone does not describe all game and audio tracks.");
         return matches[0];
+    }
+
+    public static string NormalizeTypedDiscPath(string source)
+    {
+        // Explorer's "Copy as path" surrounds the whole path with quotes.
+        // Do not apply this to paths from the picker or command line.
+        string path = source.Trim();
+        return path.Length >= 2 && path[0] == '"' && path[^1] == '"' ? path[1..^1] : path;
     }
 
     static unsafe void Capture(GL gl, IWindow window, string directory, string phase)

@@ -1,9 +1,13 @@
 # Windows validation handoff
 
-The source candidate at [391dd2f](https://github.com/GTTeancum/Vigilante-8-recomp/commit/391dd2f85b791477876c17a66b7e032313b2c127) contains the Linux-tested batch. It is not in the released Windows v1.0 ZIP. Linux exercised all 31 vehicles and 19 maps across two runs, not one uninterrupted soak. That coverage does not establish Windows driver compatibility or every conditional sound effect.
+The source batch originally staged at [391dd2f](https://github.com/GTTeancum/Vigilante-8-recomp/commit/391dd2f85b791477876c17a66b7e032313b2c127) is now incorporated on main. It is not in the released Windows v1.0 ZIP. Linux exercised all 31 vehicles and 19 maps across two runs, not one uninterrupted soak. That coverage does not establish Windows driver compatibility or every conditional sound effect.
 
 - [#4: rendering](https://github.com/GTTeancum/Vigilante-8-recomp/issues/4). The shader-interface fix on main addresses a reproducible link failure; that is not confirmation of every texture or terrain symptom. Compare the affected RTX 5080 setup against an unmodified launch and check the Steam Deck report separately.
 - [#6: AMD launch crash](https://github.com/GTTeancum/Vigilante-8-recomp/issues/6). Event Viewer reports a native access violation in `atio6axx.dll` (32.0.32015.7029). The attached game log belongs to a different process from the crash, so its last line cannot identify the failing OpenGL call. The tagged v1.0 primitive shader fails to link on a 16-attribute Mesa context; current main and the source candidate link it. This does not establish the cause of the AMD exception. Keep enhanced gameplay rendering enabled; a software/original-renderer fallback is not a resolution. Validate any startup change with the enhanced path still active and compare the rendered output before calling it a fix. If it still crashes, match the game log and fault event by PID and timestamp.
 - [#8: installer, audio, and rendering](https://github.com/GTTeancum/Vigilante-8-recomp/issues/8#issuecomment-7178403669). The issue has the step-by-step Windows retest. Keep the engine pitch change and the tire skid as separate checks.
 
 Nothing here is a Windows test result. Do not close the driver reports based on Linux coverage.
+
+## Enhanced startup candidate
+
+Main now initializes the enhanced shaders before committing large render resources, checks texture limits and framebuffer completeness, and allocates and clears enhanced VRAM on the GPU rather than uploading a temporary 32 MiB zero buffer. The upscaler and FXAA allocate real output targets when needed; the loading art and enhanced renderer are retained. Three complete Linux OpenGL frames were pixel-identical to the earlier source candidate for the HD loading card, enhanced gameplay with FXAA, and resized 24-bit output. The Linux tests do not identify the AMD access violation. No driver blacklist or switch to original graphics was added.
