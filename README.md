@@ -36,6 +36,16 @@ An unofficial PC recompilation project for the PlayStation versions of
   </tr>
 </table>
 
+## Installing the two-disc build
+
+Use the USA PlayStation CUE and all BIN tracks for **both** Vigilante 8:
+2nd Offense (SLUS-00868) and the original **Vigilante 8 USA Rev 1**
+(SLUS-00510). The installer accepts them in either order and shows which
+are ready. Second Offense supplies the base game; the original supplies
+its music and guest-car engine audio. A previous Second Offense install
+is kept, but the game will not launch until the original import is verified.
+The discs do not need to remain attached once setup is complete.
+
 ## Building
 
 Development requires the .NET 10 SDK, Python 3, and legally obtained game
@@ -70,7 +80,7 @@ the log itself when possible.
 ## Legal
 
 The release omits disc images and the complete base-game installation. Supply
-the base-game data from your own copy. Included runtime mods and their media
+both required discs from your own copies. Included runtime mods and their media
 dependencies are described in the release manifest; ownership of game and mod
 content remains with the respective rights holders.
 

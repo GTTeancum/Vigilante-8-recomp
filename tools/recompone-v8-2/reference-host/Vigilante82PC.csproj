@@ -5,7 +5,11 @@
          console window. Keep Debug as a console host for developer probes. -->
     <OutputType Condition="'$(Configuration)' == 'Release'">WinExe</OutputType>
     <OutputType Condition="'$(Configuration)' != 'Release'">Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <V8UseWindowsSetup Condition="'$(V8UseWindowsSetup)' == '' and $([MSBuild]::IsOSPlatform('Windows'))">true</V8UseWindowsSetup>
+    <TargetFramework Condition="'$(V8UseWindowsSetup)' != 'true'">net10.0</TargetFramework>
+    <TargetFramework Condition="'$(V8UseWindowsSetup)' == 'true'">net10.0-windows</TargetFramework>
+    <UseWindowsForms Condition="'$(V8UseWindowsSetup)' == 'true'">true</UseWindowsForms>
+    <DefineConstants Condition="'$(V8UseWindowsSetup)' == 'true'">$(DefineConstants);V8_WINDOWS_SETUP</DefineConstants>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -21,7 +25,8 @@
          configuration-conditioned value can be absent during implicit
          restore, which omits the ILLink tool pack and silently produces an
          untrimmed self-contained bundle. -->
-    <PublishTrimmed>true</PublishTrimmed>
+    <PublishTrimmed Condition="'$(V8UseWindowsSetup)' != 'true'">true</PublishTrimmed>
+    <PublishTrimmed Condition="'$(V8UseWindowsSetup)' == 'true'">false</PublishTrimmed>
     <TrimMode>partial</TrimMode>
     <InvariantGlobalization Condition="'$(Configuration)' == 'Release'">true</InvariantGlobalization>
     <JsonSerializerIsReflectionEnabledByDefault Condition="'$(Configuration)' == 'Release'">true</JsonSerializerIsReflectionEnabledByDefault>
@@ -31,6 +36,7 @@
     <PythonExe Condition="'$(PythonExe)' == ''">python</PythonExe>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Condition="'$(V8UseWindowsSetup)' == 'true'" Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\reference-host\assets\v8-icon.png" LogicalName="Vigilante8.SetupEmblem.png" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\..\tools\recompone-v8-2\reference-host\assets\window-icon-64.rgba" LogicalName="RecompOne.WindowIcon.64.rgba" />
     <ProjectReference Include="..\..\..\tools\recompone-reference\RecompOne.Runtime\RecompOne.Runtime.csproj" />
     <!-- prepare_reference.py copies this file into

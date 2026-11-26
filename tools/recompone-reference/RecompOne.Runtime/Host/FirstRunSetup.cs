@@ -15,12 +15,63 @@ namespace RecompOne.Runtime.Host;
 // window and GL/ImGui context are disposed. Import never blocks the UI thread.
 public static class FirstRunSetup
 {
+    public readonly record struct DiscStatus(bool SecondOffense, bool Original)
+    {
+        public bool Ready => SecondOffense && Original;
+    }
+
+    public static DiscStatus Inspect(string destination)
+    {
+        bool sequel = V82LooseImporter.IsComplete(destination);
+        string albumRoot = sequel ? destination : V8SoundtrackImporter.StagingRoot(destination);
+        bool album = V8LooseManifest.LoadEmbedded("V8LooseManifest.json").Tracks
+            .Where(track => track.Number > 1).All(track =>
+            {
+                try
+                {
+                    using var file = File.OpenRead(Path.Combine(albumRoot, track.Source!));
+                    Span<byte> magic = stackalloc byte[4];
+                    return file.Length > 27 && file.Read(magic) == 4 && magic.SequenceEqual("OggS"u8);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+            });
+        bool original = album && OriginalV8EngineInstallation.TryRead(destination,
+            message => Console.Error.WriteLine($"[Setup] {message}")) != null;
+        return new(sequel, original);
+    }
+
+    public static DiscStatus ImportDisc(string source, string destination,
+        Action<LooseImportProgress> Report, CancellationToken cancellation)
+    {
+        string cue = ResolveCue(source);
+        var title = V8SoundtrackImporter.BootExecutable(cue);
+        if (V8SoundtrackImporter.IsFirstGameTitle(title))
+        {
+            string why = "Unknown source error.";
+            Report(new("original-engines", 0, 1, "Verifying the Rev 1 disc and its engine samples"));
+            if (!OriginalV8EngineInstallation.TryImport(cue, destination, cancellation,
+                text => { why = text; Console.Error.WriteLine($"[OriginalV8Engines] {text}"); }))
+                throw new InvalidDataException("Use your original Vigilante 8 USA Rev 1 CUE. " + why);
+            V8SoundtrackImporter.Import(cue, destination, Report, cancellation);
+        }
+        else if (title == "SLUS_008.68")
+        {
+            V82LooseImporter.Import(cue, destination, Report, cancellation);
+        }
+        else
+        {
+            throw new InvalidDataException("That is not one of the required USA PlayStation discs.");
+        }
+        return Inspect(destination);
+    }
+
     public static unsafe bool Run(string destination, string? initialSource = null)
     {
         GlfwWindowing.Use();
         using var window = Silk.NET.Windowing.Window.Create(WindowOptions.Default with
         {
-            Title = "Vigilante 8 Classic - Setup", Size = new Vector2D<int>(800, 420),
+            Title = "Vigilante 8 Classic - Setup", Size = new Vector2D<int>(900, 570),
+            WindowBorder = WindowBorder.Fixed,
             IsVisible = Environment.GetEnvironmentVariable("RECOMPONE_WINDOW_VISIBLE") != "0",
             VSync = true,
             API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default, new APIVersion(4, 5))
@@ -36,7 +87,12 @@ public static class FirstRunSetup
         string error = "", notice = "", selected = initialSource ?? "";
         string enteredPath = "";
         bool success = false;
-        int frames = 0, completionFrames = 0;
+        int frames = 0;
+        DiscStatus status = Inspect(destination);
+        ImFontPtr body = default, heading = default, strong = default;
+        var gold = new Vector4(1f, .77f, .25f, 1);
+        var muted = new Vector4(.65f, .70f, .76f, 1);
+        var ready = new Vector4(.41f, .90f, .69f, 1);
         string? fixture = Environment.GetEnvironmentVariable("RECOMPONE_SETUP_TEST_SOURCE");
         string? captures = Environment.GetEnvironmentVariable("RECOMPONE_SETUP_CAPTURE_DIR");
         var captured = new HashSet<string>();
@@ -49,40 +105,20 @@ public static class FirstRunSetup
             {
                 try
                 {
-                    string cue = ResolveCue(source);
                     void Report(LooseImportProgress p)
                     {
                         lock (gate) progress = p;
                         Console.Error.WriteLine($"[Setup] {p.Phase} {p.Current}/{p.Total} {p.Item}");
                     }
-                    string completion = "Starting your game...";
-                    // The optional first disc supplies its soundtrack and,
-                    // for an authenticated revision, the original guest loops.
-                    if (V8SoundtrackImporter.IsFirstGameDisc(cue))
+                    DiscStatus verified = ImportDisc(source, destination, Report, cancel.Token);
+                    lock (gate)
                     {
-                        bool installed = V8SoundtrackImporter.Import(cue, destination, Report, cancel.Token);
-                        Report(new("original-engines", 0, 1, "Checking original engine samples"));
-                        bool engines = OriginalV8EngineInstallation.TryImport(cue, destination, cancel.Token,
-                            text => Console.Error.WriteLine($"[OriginalV8Engines] {text}"));
-                        string added = engines
-                            ? "Vigilante 8 soundtrack and original engines added."
-                            : "Vigilante 8 soundtrack added. Original engines were not added (see setup log).";
-                        if (!installed)
-                        {
-                            lock (gate)
-                            {
-                                notice = added + " Now choose your Vigilante 8: 2nd Offense CUE to install the game.";
-                                progress = new("soundtrack-staged", 1, 1, "");
-                            }
-                            return;
-                        }
-                        completion = added + " Starting your game...";
+                        status = verified;
+                        notice = verified.Ready ? "Both discs are ready. You can now launch the game."
+                            : verified.SecondOffense ? "Second Offense imported. Now add the original Vigilante 8 Rev 1 disc."
+                            : "Original Vigilante 8 imported. Now add your Second Offense disc.";
+                        progress = new("verified", 1, 1, "");
                     }
-                    else
-                    {
-                        V82LooseImporter.Import(cue, destination, Report, cancel.Token);
-                    }
-                    lock (gate) { success = true; progress = new("complete", 1, 1, completion); }
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex)
@@ -102,6 +138,21 @@ public static class FirstRunSetup
                 // on both Windows and Linux.
                 // GLFW's UTF-8 get/set APIs match ImGui's callback signatures.
                 var io = ImGui.GetIO();
+                string systemFonts = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
+                string regular = Path.Combine(systemFonts, "segoeui.ttf");
+                string bold = Path.Combine(systemFonts, "segoeuib.ttf");
+                if (!OperatingSystem.IsWindows())
+                {
+                    regular = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+                    bold = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+                }
+                if (File.Exists(regular) && File.Exists(bold))
+                {
+                    body = io.Fonts.AddFontFromFileTTF(regular, 17);
+                    strong = io.Fonts.AddFontFromFileTTF(bold, 18);
+                    heading = io.Fonts.AddFontFromFileTTF(bold, 34);
+                    io.NativePtr->FontDefault = body.NativePtr;
+                }
                 var glfw = Silk.NET.GLFW.GlfwProvider.GLFW.Value.Context;
                 io.GetClipboardTextFn = glfw.GetProcAddress("glfwGetClipboardString");
                 io.SetClipboardTextFn = glfw.GetProcAddress("glfwSetClipboardString");
@@ -119,6 +170,19 @@ public static class FirstRunSetup
             });
             ImGui.GetIO().NativePtr->IniFilename = null;
             ImGui.StyleColorsDark();
+            var style = ImGui.GetStyle();
+            style.WindowPadding = new(28, 21);
+            style.FramePadding = new(11, 7);
+            style.ItemSpacing = new(10, 8);
+            style.FrameRounding = 6;
+            style.ChildRounding = 9;
+            style.Colors[(int)ImGuiCol.WindowBg] = new(.055f, .070f, .095f, 1);
+            style.Colors[(int)ImGuiCol.ChildBg] = new(.094f, .120f, .156f, 1);
+            style.Colors[(int)ImGuiCol.Border] = new(.20f, .25f, .31f, 1);
+            style.Colors[(int)ImGuiCol.Button] = new(.16f, .22f, .29f, 1);
+            style.Colors[(int)ImGuiCol.ButtonHovered] = new(.22f, .30f, .39f, 1);
+            style.Colors[(int)ImGuiCol.FrameBg] = new(.11f, .15f, .20f, 1);
+            style.Colors[(int)ImGuiCol.PlotHistogram] = gold;
         };
         window.Render += dt =>
         {
@@ -141,79 +205,87 @@ public static class FirstRunSetup
                 }
                 choosing = null;
             }
-            LooseImportProgress p; string message, info; bool done;
-            lock (gate) { p = progress; message = error; info = notice; done = success; }
-            bool busy = import != null && !import.IsCompleted && p.Phase != "error";
+            LooseImportProgress p; string message, info; DiscStatus discs;
+            lock (gate) { p = progress; message = error; info = notice; discs = status; }
+            bool busy = import != null && !import.IsCompleted;
             ImGui.SetNextWindowPos(Vector2.Zero);
             ImGui.SetNextWindowSize(new Vector2(window.Size.X, window.Size.Y));
             ImGui.Begin("Setup", ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoSavedSettings);
-            ImGui.SetWindowFontScale(1.5f);
-            ImGui.TextColored(new Vector4(1, 0.8f, 0.05f, 1), "VIGILANTE 8 CLASSIC");
-            ImGui.Separator(); ImGui.Spacing();
-            ImGui.TextWrapped("Choose your Vigilante 8: 2nd Offense (USA) CUE or BIN file to install the game.");
-            ImGui.TextWrapped("Keep the CUE and all its BIN files together. Required title ID: SLUS-00868.");
-            ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
-            ImGui.TextWrapped("Optional: choose an original Vigilante 8 (USA) CUE to add its soundtrack and verified Rev 1 engine sounds.");
-            ImGui.PopStyleColor();
-            ImGui.Spacing();
-            if (selected.Length != 0) ImGui.TextWrapped("Selected: " + Path.GetFileName(selected));
-            if (!busy && !done)
+            ImGui.TextColored(gold, "PC EDITION  /  FIRST-RUN INSTALLATION");
+            if (heading.NativePtr != null) ImGui.PushFont(heading);
+            ImGui.TextUnformatted("Vigilante 8 Classic");
+            if (heading.NativePtr != null) ImGui.PopFont();
+            ImGui.TextColored(muted, "Both USA PlayStation discs are required. Add them in either order.");
+            ImGui.Dummy(new(0, 8));
+            void DiscCard(string id, string name, string detail, bool installed)
             {
-                if (choosing != null)
-                    ImGui.TextWrapped("Waiting for file selection...");
-                else
-                {
-                    ImGui.TextUnformatted("Enter or paste the full path to your disc.");
-                    ImGui.SetNextItemWidth(-1);
-                    bool submitted = ImGui.InputText("##setup-disc-path", ref enteredPath, 4096,
-                        ImGuiInputTextFlags.EnterReturnsTrue);
-                    if (OperatingSystem.IsWindows())
-                    {
-                        if (ImGui.Button("Choose BIN / CUE...", new Vector2(250, 42)))
-                        {
-                            // Pump the UI while the native Windows dialog owns it.
-                            choosing = NativeFileDialog.OpenAsync(
-                                "Select 2nd Offense, or the original Vigilante 8 bonus disc",
-                                "PlayStation disc (BIN/CUE)\0*.cue;*.bin\0\0",
-                                owner: NativeFileDialog.ActiveWindow());
-                        }
-                        ImGui.SameLine();
-                    }
-                    if ((ImGui.Button("Use BIN / CUE path", new Vector2(250, 42)) || submitted) &&
-                        choosing == null)
-                    {
-                        string path = NormalizeTypedDiscPath(enteredPath);
-                        if (!string.IsNullOrWhiteSpace(path)) Start(path);
-                    }
-                }
-                if (message.Length != 0)
-                {
-                    ImGui.Spacing(); ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0.5f, 0.4f, 1));
-                    ImGui.TextWrapped(message); ImGui.PopStyleColor();
-                }
-                else if (info.Length != 0)
-                {
-                    ImGui.Spacing(); ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.55f, 0.9f, 0.45f, 1));
-                    ImGui.TextWrapped(info); ImGui.PopStyleColor();
-                }
+                ImGui.BeginChild("disc" + id, new(0, 65), ImGuiChildFlags.Border, ImGuiWindowFlags.NoScrollbar);
+                ImGui.TextColored(installed ? ready : gold, id + (installed ? "   VERIFIED" : "   REQUIRED"));
+                ImGui.SameLine(155);
+                if (strong.NativePtr != null) ImGui.PushFont(strong);
+                ImGui.TextUnformatted(name);
+                if (strong.NativePtr != null) ImGui.PopFont();
+                ImGui.SetCursorPosX(155);
+                ImGui.TextColored(muted, detail);
+                ImGui.EndChild();
             }
-            if (busy || done)
+            DiscCard("01", "Vigilante 8: 2nd Offense", "USA / SLUS-00868  |  Base game and Second Offense music", discs.SecondOffense);
+            DiscCard("02", "Vigilante 8", "USA Rev 1 / SLUS-00510  |  Original music and guest-car engines", discs.Original);
+            ImGui.Dummy(new(0, 3));
+            if (!busy && choosing == null && !discs.Ready)
             {
-                ImGui.Text(p.Phase switch
+                ImGui.TextUnformatted("Select a disc image");
+                if (OperatingSystem.IsWindows())
                 {
-                    "complete" => "Installation complete",
-                    "music" => "Preparing music...",
-                    "soundtrack" => "Preparing Vigilante 8 music...",
-                    "original-engines" => "Checking original engines...",
-                    "validating" => "Checking disc...",
-                    _ => "Extracting game files...",
+                    if (ImGui.Button("Browse for disc...", new(154, 40)))
+                        choosing = NativeFileDialog.OpenAsync("Choose a required Vigilante 8 disc",
+                            "PlayStation disc (BIN/CUE)\0*.cue;*.bin\0\0", owner: NativeFileDialog.ActiveWindow());
+                    ImGui.SameLine();
+                }
+                ImGui.SetNextItemWidth(-125);
+                bool submitted = ImGui.InputTextWithHint("##setup-disc-path", "Or paste the full CUE path",
+                    ref enteredPath, 4096, ImGuiInputTextFlags.EnterReturnsTrue);
+                ImGui.SameLine();
+                if ((ImGui.Button("Use path", new(110, 40)) || submitted) && choosing == null)
+                {
+                    string path = NormalizeTypedDiscPath(enteredPath);
+                    if (!string.IsNullOrWhiteSpace(path)) Start(path);
+                }
+                ImGui.TextColored(muted, "Keep each CUE beside every BIN it references.");
+            }
+            else if (busy)
+            {
+                ImGui.TextUnformatted(p.Phase switch
+                {
+                    "music" => "Preparing Second Offense music",
+                    "soundtrack" => "Preparing original Vigilante 8 music",
+                    "original-engines" => "Verifying original Vigilante 8 engine audio",
+                    "validating" => "Checking disc image",
+                    _ => "Importing game data",
                 });
-                ImGui.ProgressBar((float)p.Current / Math.Max(1, p.Total), new Vector2(-1, 30));
-                ImGui.TextWrapped(p.Item);
+                ImGui.ProgressBar((float)p.Current / Math.Max(1, p.Total), new(-1, 20));
+                ImGui.TextWrapped(Path.GetFileName(selected) + "  |  " + p.Item);
             }
-            ImGui.Spacing();
-            if (!done && choosing == null &&
-                ImGui.Button(busy ? "Cancel installation" : "Exit", new Vector2(220, 36))) window.Close();
+            else if (choosing != null) ImGui.TextColored(muted, "Waiting for the file picker...");
+            if (message.Length != 0)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, .66f, .52f, 1));
+                ImGui.TextWrapped(message);
+                ImGui.PopStyleColor();
+            }
+            else if (!busy && info.Length != 0) ImGui.TextColored(ready, info);
+            ImGui.Dummy(new(0, 4));
+            if (choosing == null && ImGui.Button(busy ? "Cancel installation" : "Exit setup", new(158, 40)))
+                window.Close();
+            if (discs.Ready && !busy && choosing == null)
+            {
+                ImGui.SameLine(ImGui.GetWindowWidth() - 211);
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(.97f, .72f, .22f, 1));
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(1, .81f, .43f, 1));
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(.09f, .10f, .13f, 1));
+                if (ImGui.Button("Launch game", new(182, 40))) { success = Inspect(destination).Ready; window.Close(); }
+                ImGui.PopStyleColor(3);
+            }
             ImGui.End(); ui.Render();
             string phase = p.Phase is "files" or "music" or "soundtrack"
                 ? p.Phase + "-" + (p.Current * 4 / Math.Max(1, p.Total)) : p.Phase;
@@ -221,7 +293,8 @@ public static class FirstRunSetup
             // A process-local fixture calls the same selection/import action as
             // the button. It never sends input to Windows or another process.
             if (++frames == 5 && (fixture != null || initialSource != null)) Start(fixture ?? initialSource!);
-            if (done && ++completionFrames >= 30) window.Close();
+            if (fixture != null && p.Phase == "verified" && captures != null && captured.Contains("verified"))
+            { success = discs.Ready; window.Close(); }
             if (fixture != null && p.Phase == "error" && captured.Contains("error")) window.Close();
         };
         // Silk destroys the context before Run returns. Release GPU objects

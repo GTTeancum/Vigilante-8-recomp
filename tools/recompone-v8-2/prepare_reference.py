@@ -1704,7 +1704,7 @@ def main() -> int:
     host_source = Path(__file__).resolve().parent / "reference-host"
     generated_project = output / "recompiled"
     generated_project.mkdir(parents=True, exist_ok=True)
-    for host_file in ("Program.cs", "Vigilante82PC.csproj"):
+    for host_file in ("Program.cs", "Vigilante82PC.csproj", "WindowsDiscSetup.cs"):
         shutil.copy2(host_source / host_file, generated_project / host_file)
     print(f"Wrote {config_path}")
     print(f"Configured {len(config['overlays'])} sequel overlays")

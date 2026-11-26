@@ -83,6 +83,11 @@ if (args.Length == 3 &&
     return 0;
 }
 
+#if V8_WINDOWS_SETUP
+if (args.Length == 2 && args[0] == "--probe-two-disc-setup")
+    return WindowsDiscSetup.Probe(Path.GetFullPath(args[1], launchDirectory)) ? 0 : 1;
+#endif
+
 if (args.Length == 1 &&
     args[0].Equals("--probe-native-controls", StringComparison.OrdinalIgnoreCase))
 {
@@ -520,39 +525,28 @@ string? explicitSource = args.Length switch
 };
 
 ConfigManager.Load();
-string? loosePath =
-    explicitLoose ?? ResolveLooseSource(explicitSource ?? executableDirectory);
-string importedLooseRoot = V82LooseImporter.DefaultRoot;
-if (loosePath == null && explicitSource == null &&
-    V82LooseImporter.IsComplete(importedLooseRoot))
-    loosePath = importedLooseRoot;
-string? cuePath = null;
-if (loosePath == null)
-{
-    // A clean installation always asks through setup. Never silently discover
-    // a developer disc in the executable directory or its parents.
-    if (!FirstRunSetup.Run(importedLooseRoot, explicitSource)) return 0;
-    loosePath = V82LooseImporter.IsComplete(importedLooseRoot)
-        ? importedLooseRoot
-        : throw new InvalidDataException("Installation did not complete.");
-}
-if (loosePath != null)
-{
-    ConfigManager.Game.CdPath = "";
-    Runtime.SetLoosePath(loosePath);
-    Console.WriteLine($"[Host] standalone-loose={loosePath}");
-}
-else
-{
-    Runtime.SetLoosePath(null);
-    ConfigManager.Game.CdPath = cuePath!;
-    ConfigManager.SaveGame();
-    Console.WriteLine($"[Host] disc={cuePath}");
-}
+string importedLooseRoot = explicitLoose ?? ResolveLooseSource(explicitSource ?? executableDirectory)
+    ?? V82LooseImporter.DefaultRoot;
+// The shipped game never starts with only one disc imported. Existing verified
+// two-disc installs can still start without keeping either CUE attached.
+if (explicitSource != null && ResolveLooseSource(explicitSource) != null)
+    explicitSource = null;
+if (!FirstRunSetup.Inspect(importedLooseRoot).Ready &&
+#if V8_WINDOWS_SETUP
+    !WindowsDiscSetup.Run(importedLooseRoot, explicitSource))
+#else
+    !FirstRunSetup.Run(importedLooseRoot, explicitSource))
+#endif
+    return 0;
+if (!FirstRunSetup.Inspect(importedLooseRoot).Ready)
+    throw new InvalidDataException("Both required discs must be imported.");
+ConfigManager.Game.CdPath = "";
+Runtime.SetLoosePath(importedLooseRoot);
+Console.WriteLine($"[Host] standalone-loose={importedLooseRoot}");
 
 PreloadBundledNative("SDL2.dll");
 Runtime.SetMode(RunMode.Devkit);
-Entry.Run(new PSMemory(), cuePath, loosePath);
+Entry.Run(new PSMemory(), null, importedLooseRoot);
 Console.Error.WriteLine("[Host] emulation entry returned");
 return 0;
 
