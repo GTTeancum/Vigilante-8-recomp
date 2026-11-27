@@ -111,6 +111,19 @@ def main() -> int:
     new = old + "        using var controlFooter = RecompOne.Runtime.Sdk.V82ControlPrompts.RewriteFooter(c, m);\n"
     patch_once(args.shell_source.resolve(), old, new, "contextual menu footer")
 
+    # 480-line title canvas: leave the main menu rows in place and move both
+    # prompts to the center of the space beneath EXIT GAME. Scope the native
+    # footer compositor by its saved return address and saved caller S3
+    # (root page), not by prompt text or the reused S3 inside the compositor.
+    old = "        L80103000: ;\n        c.A1 = c.A1 | 0x7F7Fu;\n"
+    new = (
+        "        L80103000: ;\n"
+        "        if (m.ReadU32(c.SP + 0x1Cu) == 0u && m.ReadU32(c.SP + 0x2Cu) == 0x801041F4u)\n"
+        "            c.S6 += 12u; // Center root title prompts below EXIT GAME.\n"
+        "        c.A1 = c.A1 | 0x7F7Fu;\n"
+    )
+    patch_once(args.shell_source.resolve(), old, new, "root title footer vertical centering")
+
     old = "        c.RA = 0x801045CCu;\n        Vigilante82PC.func_8001A2B8(c, m);\n"
     new = "        c.RA = 0x801045CCu;\n        using (RecompOne.Runtime.Sdk.V82ControlPrompts.Rewrite(c, m, gameplayPrompt: true))\n            Vigilante82PC.func_8001A2B8(c, m);\n"
     patch_once(args.shell_source.resolve().with_name("SHELL_LOAD.cs"), old, new, "loading tip bindings")
