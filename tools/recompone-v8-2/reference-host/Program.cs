@@ -529,6 +529,7 @@ string? explicitSource = args.Length switch
 ConfigManager.Load();
 string importedLooseRoot = explicitLoose ?? ResolveLooseSource(explicitSource ?? executableDirectory)
     ?? V82LooseImporter.DefaultRoot;
+FirstRunSetup.MigrateEngineCache(importedLooseRoot);
 // The shipped game never starts with only one disc imported. Existing verified
 // two-disc installs can still start without keeping either CUE attached.
 if (explicitSource != null && ResolveLooseSource(explicitSource) != null)

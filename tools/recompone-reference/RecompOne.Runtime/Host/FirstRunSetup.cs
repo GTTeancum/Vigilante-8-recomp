@@ -20,6 +20,12 @@ public static class FirstRunSetup
         public bool Ready => SecondOffense && Original;
     }
 
+    public static void MigrateEngineCache(string destination)
+    {
+        if (V82LooseImporter.IsComplete(destination))
+            OriginalV8EngineInstallation.AdoptStaged(destination, Console.Error.WriteLine);
+    }
+
     public static DiscStatus Inspect(string destination)
     {
         bool sequel = V82LooseImporter.IsComplete(destination);
@@ -50,7 +56,8 @@ public static class FirstRunSetup
             string why = "Unknown source error.";
             Report(new("original-engines", 0, 1, "Verifying the Rev 1 disc and its engine samples"));
             if (!OriginalV8EngineInstallation.TryImport(cue, destination, cancellation,
-                text => { why = text; Console.Error.WriteLine($"[OriginalV8Engines] {text}"); }))
+                text => { why = text; Console.Error.WriteLine($"[OriginalV8Engines] {text}"); },
+                sequelInstalled: V82LooseImporter.IsComplete(destination)))
                 throw new InvalidDataException("Use your original Vigilante 8 USA Rev 1 CUE. " + why);
             V8SoundtrackImporter.Import(cue, destination, Report, cancellation);
         }

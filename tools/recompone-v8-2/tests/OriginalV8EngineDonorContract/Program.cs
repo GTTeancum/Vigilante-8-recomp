@@ -217,7 +217,7 @@ try
 
     var notices = new List<string>();
     string setupRoot = Path.Combine(temporary, "game_data");
-    string installCache = OriginalV8EngineInstallation.CacheDirectory(setupRoot);
+    string installCache = OriginalV8EngineInstallation.StagedDirectory(setupRoot);
     Check(OriginalV8EngineInstallation.TryRead(setupRoot, supported, notices.Add) == null &&
         !Directory.Exists(installCache) && notices.Count == 0, "without original input reads nothing and creates nothing");
     Check(!OriginalV8EngineInstallation.TryImport(cue, setupRoot, default, notices.Add) &&
@@ -239,9 +239,18 @@ try
     File.WriteAllBytes(sentinel, unrelated);
     Check(OriginalV8EngineInstallation.TryRead(setupRoot, supported, notices.Add)?.Revision.Id == first.Id,
         "sequel subsequently sees same cache");
-    Check(OriginalV8EngineInstallation.TryImport(cue, setupRoot, supported, default, notices.Add) &&
+    byte[] stagedBytes = File.ReadAllBytes(cacheFile);
+    OriginalV8EngineInstallation.AdoptStaged(setupRoot, supported, notices.Add);
+    cacheFile = Path.Combine(setupRoot, OriginalV8EngineSidecar.FileName);
+    Check(File.ReadAllBytes(cacheFile).SequenceEqual(stagedBytes) && !Directory.Exists(installCache),
+        "original first: verified cache adopted byte-for-byte and empty staging directory removed");
+    Check(OriginalV8EngineInstallation.TryImport(cue, setupRoot, supported, default, notices.Add, sequelInstalled: true) &&
         notices.Last().Contains("unchanged") && File.ReadAllBytes(sentinel).SequenceEqual(unrelated),
         "installed sequel: identical reimport no-op; installed data untouched");
+    string direct = Directory.CreateDirectory(Path.Combine(temporary, "direct")).FullName;
+    Check(OriginalV8EngineInstallation.TryImport(cue, direct, supported, default, notices.Add, sequelInstalled: true) &&
+        File.ReadAllBytes(Path.Combine(direct, OriginalV8EngineSidecar.FileName)).SequenceEqual(stagedBytes) &&
+        !Directory.Exists(OriginalV8EngineInstallation.StagedDirectory(direct)), "sequel first: cache written directly to game_data");
     if (OperatingSystem.IsLinux())
         Check((File.GetUnixFileMode(cacheFile) & (UnixFileMode.GroupRead | UnixFileMode.OtherRead)) == 0,
             "local cache isn't readable by other Unix accounts");
@@ -249,14 +258,28 @@ try
     notices.Clear();
     Check(OriginalV8EngineInstallation.TryRead(setupRoot, supported, notices.Add) == null && notices.Count == 1,
         "malformed cache is ignored once, not fatal");
-    Check(!OriginalV8EngineInstallation.TryImport(cue, setupRoot, supported, default, notices.Add) &&
+    Check(!OriginalV8EngineInstallation.TryImport(cue, setupRoot, supported, default, notices.Add, sequelInstalled: true) &&
         File.ReadAllBytes(cacheFile).SequenceEqual(unrelated), "setup never clobbers unowned cache data");
+    Directory.CreateDirectory(installCache);
+    string oldCache = Path.Combine(installCache, OriginalV8EngineSidecar.FileName);
+    File.WriteAllBytes(oldCache, stagedBytes);
+    string kept = Path.Combine(installCache, "keep.txt");
+    File.WriteAllBytes(kept, unrelated);
+    OriginalV8EngineInstallation.AdoptStaged(setupRoot, supported, notices.Add);
+    Check(File.ReadAllBytes(cacheFile).SequenceEqual(unrelated) &&
+        File.ReadAllBytes(oldCache).SequenceEqual(stagedBytes) &&
+        OriginalV8EngineInstallation.TryRead(setupRoot, supported, notices.Add)?.Revision.Id == first.Id,
+        "existing unrelated target survives and legacy data remains readable");
+    File.Delete(cacheFile);
+    OriginalV8EngineInstallation.AdoptStaged(setupRoot, supported, notices.Add);
+    Check(!File.Exists(oldCache) && File.ReadAllBytes(cacheFile).SequenceEqual(stagedBytes) &&
+        File.ReadAllBytes(kept).SequenceEqual(unrelated), "migration leaves unrelated staging files intact");
     if (OperatingSystem.IsLinux())
     {
         string anotherRoot = Path.Combine(temporary, "redirected_game");
-        Directory.CreateSymbolicLink(OriginalV8EngineInstallation.CacheDirectory(anotherRoot), installCache);
+        Directory.CreateSymbolicLink(OriginalV8EngineInstallation.StagedDirectory(anotherRoot), installCache);
         Check(!OriginalV8EngineInstallation.TryImport(cue, anotherRoot, supported, default, notices.Add) &&
-            File.ReadAllBytes(cacheFile).SequenceEqual(unrelated), "setup refuses a linked cache directory");
+            !File.Exists(oldCache) && File.ReadAllBytes(kept).SequenceEqual(unrelated), "setup refuses a linked cache directory");
     }
     Console.WriteLine($"[OriginalV8EngineDonorContract] PASS synthetic checks={checks}");
 }

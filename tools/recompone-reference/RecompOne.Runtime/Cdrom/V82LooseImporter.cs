@@ -98,6 +98,7 @@ public static class V82LooseImporter
             $"completed={DateTimeOffset.Now:o}\n",
             TextEncoding.UTF8);
         CommitImport(partialRoot, outputRoot);
+        OriginalV8EngineInstallation.AdoptStaged(outputRoot, Console.Error.WriteLine);
         report?.Invoke(new("complete", total, total, outputRoot));
     }
 

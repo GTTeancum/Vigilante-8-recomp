@@ -74,7 +74,9 @@ With the shipped original-roster mod, choose your original Vigilante 8 USA
 Rev 1 CUE in setup to add the original engines alongside that disc's music.
 You can do this before importing 2nd Offense or by running the program with
 your original CUE after installation. Setup verifies the original disc and
-saves a small local cache beside `game_data`; it never overwrites mod files.
+saves `game_data/original-v8-engines.v8e`; it never overwrites mod files.
+If the original disc is imported first, the file waits beside `game_data`
+until the sequel is installed. Existing verified sidecars migrate on launch.
 Only the matching shipped roster uses the cache. Its original ground engines
 use the native sound player's voice, gain, pitch and loop settings without
 using room in the PS1 sound RAM. Stock cars, weapons, transformations, other
