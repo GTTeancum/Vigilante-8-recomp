@@ -1,5 +1,10 @@
 # Vigilante 8/2nd Offense PC Recompilation - Vigilante 8 Classic
 
+> [!IMPORTANT]
+> **Support has ended.** This project is no longer maintained and there will
+> be no further updates. [v1.1](https://github.com/GTTeancum/Vigilante-8-recomp/releases/tag/v1.1)
+> is the final release. Issues and pull requests will not be answered.
+
 An unofficial PC recompilation project for the PlayStation versions of
 **Vigilante 8** and **Vigilante 8: 2nd Offense**. It's a two-in-one game!
 
